@@ -170,6 +170,7 @@ drifting away from the executable relation declarations below.
 '''
 class bool: Boolean :
     identity: PrimitiveId = BoolPrimitive().identity
+    mlir: MlirTypeBinding = BoolPrimitive().mlir
     id: TypeId = BoolPrimitive().id
     literal: LiteralSyntax | None = BoolPrimitive().literal
     literal_family: string = BoolPrimitive().literal_family

@@ -1,10 +1,5 @@
 import * from "ir/lib.sev"
-import * from "emit/mod.sev"
-import * from "verify.sev"
-
 import * from "emit/callable.sev"
 import * from "ir/text.sev"
-
-# Public module interfaces.
 import * from "emit/callable.sev" as callable
 import * from "ir/text.sev" as text

@@ -1,11 +1,18 @@
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../syntax/literal/value.sev" as model_syntax_literal_value
+import * from "../../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
+import * from "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import diagnostics
 import source
-import universal
 import * from "definitions.sev" as definitions
-from universal import tagged
+import * from "../../../../syntax/type/tagged.sev" as tagged
 
 
-def literal_pattern(expression: universal.Expression) -> bool:
+def literal_pattern(expression: model_syntax_function_function.Expression) -> bool:
     match expression.kind:
         case LiteralValue:
             return true
@@ -23,7 +30,7 @@ def literal_pattern(expression: universal.Expression) -> bool:
 
 # Desugar before type checking so ordinary equality resolution, branch scopes,
 # and return analysis apply. The unspellable local evaluates the subject once.
-def expand_match(subject: universal.Expression, arms: list[universal.MatchArm], span: source.Span) -> universal.Statement | diagnostics.Diagnostic:
+def expand_match(subject: model_syntax_function_function.Expression, arms: list[model_syntax_sentence_sentence.MatchArm], span: source.Span) -> model_syntax_sentence_sentence.Statement | diagnostics.Diagnostic:
     if len(arms) == 0:
         return error(diagnostics.Diagnostic("E000206", "match requires at least one arm", span))
     wildcard := false
@@ -39,35 +46,35 @@ def expand_match(subject: universal.Expression, arms: list[universal.MatchArm], 
         else:
             wildcard = true
     name = "$match_subject_" + string(span.start)
-    tail := universal.empty_block()
+    tail := model_syntax_block_block.empty_block()
     index := len(arms)
     while index > 0:
         index -= 1
         arm = arms[index]
-        condition := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
+        condition := model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), span)
         pattern ?= arm.pattern
         if pattern != None:
-            reference = universal.Expression(universal.Name(name), subject.span)
-            condition = universal.Expression(universal.Binary(universal.operator_syntax(universal.Equal()), reference, pattern), pattern.span)
-        tail = universal.Block([universal.If(condition, arm.body, tail, span)])
-    binding = universal.Binding(name, None, subject, false, false, subject.span)
-    body = universal.Block([universal.BindingStatement(binding)])
+            reference = model_syntax_function_function.Expression(model_syntax_function_function.Name(name), subject.span)
+            condition = model_syntax_function_function.Expression(model_syntax_function_function.Binary(model_syntax_function_syntax.operator_syntax(model_syntax_function_syntax.Equal()), reference, pattern), pattern.span)
+        tail = model_syntax_block_block.Block([model_syntax_sentence_sentence.Statement.If(condition, arm.body, tail, span)])
+    binding = model_syntax_sentence_sentence.Binding(name, None, subject, false, false, subject.span)
+    body = model_syntax_block_block.Block([model_syntax_sentence_sentence.BindingStatement(binding)])
     for statement in tail.statements:
         body.statements.append(statement)
-    taken = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
-    return universal.If(taken, body, universal.empty_block(), span)
+    taken = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), span)
+    return model_syntax_sentence_sentence.Statement.If(taken, body, model_syntax_block_block.empty_block(), span)
 
 
 class ResolvedArm:
-    condition: universal.Expression
-    body: universal.Block
+    condition: model_syntax_function_function.Expression
+    body: model_syntax_block_block.Block
 
 
 # Resolve pattern identities, payload contracts and coverage before producing
 # ordinary bindings, projections and conditions. No backend pattern protocol.
-def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[universal.RecordDeclaration], namespace: string, subject_id: universal.BindingId, subject_type: universal.TypeId, arms: list[universal.MatchArm], span: source.Span, expression_match: bool) -> list[ResolvedArm] | diagnostics.Diagnostic:
-    variants: list[universal.TypeId] := []
-    alternatives: list[universal.CallableAlternative] := []
+def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[model_syntax_function_function.RecordDeclaration], namespace: string, subject_id: model_syntax_symbol_symbol.BindingId, subject_type: model_syntax_symbol_symbol.TypeId, arms: list[model_syntax_sentence_sentence.MatchArm], span: source.Span, expression_match: bool) -> list[ResolvedArm] | diagnostics.Diagnostic:
+    variants: list[model_syntax_symbol_symbol.TypeId] := []
+    alternatives: list[model_syntax_function_function.CallableAlternative] := []
     nominal := ""
     for record in records:
         if record.type_id.index == subject_type.index:
@@ -77,9 +84,9 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[un
                 for field in record.fields[1:]:
                     variants.append(field.type_id)
             else:
-                variants = universal.union_variants(record)
+                variants = model_syntax_function_function.union_variants(record)
                 if len(variants) == 0:
-                    variants = universal.outcome_variants(record)
+                    variants = model_syntax_function_function.outcome_variants(record)
     # A captured single variant is already narrowed to its nominal payload type.
     single := false
     if len(variants) == 0:
@@ -97,8 +104,8 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[un
         if wildcard:
             return error(diagnostics.Diagnostic("E000206", "match arm after wildcard is unreachable", arm.span))
         selected: list[int] = []
-        body = universal.empty_block()
-        condition := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.bool_type_id())
+        body = model_syntax_block_block.empty_block()
+        condition := model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), span, type_id=model_syntax_primitive_declarations.bool_type_id())
         pattern ?= arm.pattern
         annotation ?= arm.annotation
         if annotation != None:
@@ -122,23 +129,23 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[un
                     capture_type = definitions.type_annotation(declarations, annotation, records, namespace)
                     captured := projection(reference(subject_id, subject_type, span), variants[selected[-1]], selected[-1], single, span)
                     if len(selected) > 1:
-                        captured = universal.Expression(universal.OutcomeValue(captured, len(selected) - 1), span, type_id=capture_type)
+                        captured = model_syntax_function_function.Expression(model_syntax_function_function.OutcomeValue(captured, len(selected) - 1), span, type_id=capture_type)
                         cursor := len(selected) - 1
                         while cursor > 0:
                             cursor -= 1
                             index = selected[cursor]
                             value = projection(reference(subject_id, subject_type, span), variants[index], index, single, span)
-                            wrapped = universal.Expression(universal.OutcomeValue(value, cursor), span, type_id=capture_type)
-                            captured = universal.Expression(universal.Conditional(tag_test(reference(subject_id, subject_type, span), index, span), wrapped, captured), span, type_id=capture_type)
-                    body.statements.append(universal.BindingStatement(universal.Binding(capture, None, captured, false, true, span, scoped=true)))
+                            wrapped = model_syntax_function_function.Expression(model_syntax_function_function.OutcomeValue(value, cursor), span, type_id=capture_type)
+                            captured = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Conditional(tag_test(reference(subject_id, subject_type, span), index, span), wrapped, captured), span, type_id=capture_type)
+                    body.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(capture, None, captured, false, true, span, scoped=true)))
         elif pattern != None:
             if len(variants) == 0:
                 if not literal_pattern(pattern):
                     return error(diagnostics.Diagnostic("E000206", "match supports only literal and wildcard patterns", pattern.span))
-                condition = universal.Expression(universal.Binary(universal.operator_syntax(universal.Equal()), reference(subject_id, subject_type, span), pattern), pattern.span)
+                condition = model_syntax_function_function.Expression(model_syntax_function_function.Binary(model_syntax_function_syntax.operator_syntax(model_syntax_function_syntax.Equal()), reference(subject_id, subject_type, span), pattern), pattern.span)
             else:
                 constructor := pattern
-                arguments: list[universal.CallArgument] := []
+                arguments: list[model_syntax_function_function.CallArgument] := []
                 destructure := false
                 match pattern.kind:
                     case Call:
@@ -170,8 +177,8 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[un
                             if binding in names:
                                 return error(diagnostics.Diagnostic("E000206", "duplicate payload binding " + binding, argument.span))
                             names.append(binding)
-                            value = universal.Expression(universal.Member(payload, alternative.fields[index].name), argument.span)
-                            body.statements.append(universal.BindingStatement(universal.Binding(binding, None, value, false, true, argument.span, scoped=true)))
+                            value = model_syntax_function_function.Expression(model_syntax_function_function.Member(payload, alternative.fields[index].name), argument.span)
+                            body.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(binding, None, value, false, true, argument.span, scoped=true)))
                         index += 1
         else:
             wildcard = true
@@ -188,7 +195,7 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[un
                 cursor := len(selected) - 1
                 while cursor > 0:
                     cursor -= 1
-                    condition = universal.Expression(universal.Conditional(tag_test(reference(subject_id, subject_type, span), selected[cursor], span), universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.bool_type_id()), condition), span, type_id=universal.bool_type_id())
+                    condition = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Conditional(tag_test(reference(subject_id, subject_type, span), selected[cursor], span), model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), span, type_id=model_syntax_primitive_declarations.bool_type_id()), condition), span, type_id=model_syntax_primitive_declarations.bool_type_id())
         for statement in arm.body.statements:
             body.statements.append(statement)
         output.append(ResolvedArm(condition, body))
@@ -203,7 +210,7 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[un
     return output
 
 
-def type_members(annotation: universal.TypeAnnotation) -> list[universal.TypeAnnotation]:
+def type_members(annotation: model_syntax_type_annotation.TypeAnnotation) -> list[model_syntax_type_annotation.TypeAnnotation]:
     match annotation.kind:
         case Union:
             return members
@@ -211,7 +218,7 @@ def type_members(annotation: universal.TypeAnnotation) -> list[universal.TypeAnn
             return [annotation]
 
 
-def pattern_arguments(pattern: universal.Expression) -> list[universal.CallArgument]:
+def pattern_arguments(pattern: model_syntax_function_function.Expression) -> list[model_syntax_function_function.CallArgument]:
     match pattern.kind:
         case Call:
             return arguments
@@ -219,15 +226,15 @@ def pattern_arguments(pattern: universal.Expression) -> list[universal.CallArgum
             return []
 
 
-def projection(subject: universal.Expression, type_id: universal.TypeId, index: int, single: bool, span: source.Span) -> universal.Expression:
+def projection(subject: model_syntax_function_function.Expression, type_id: model_syntax_symbol_symbol.TypeId, index: int, single: bool, span: source.Span) -> model_syntax_function_function.Expression:
     if single:
         return clone(subject)
-    return universal.Expression(universal.FieldReference(clone(subject), index + 1), span, type_id=type_id)
+    return model_syntax_function_function.Expression(model_syntax_function_function.FieldReference(clone(subject), index + 1), span, type_id=type_id)
 
 
-def tag_test(subject: universal.Expression, index: int, span: source.Span) -> universal.Expression:
-    return universal.Expression(universal.OutcomeTest(clone(subject), index), span, type_id=universal.bool_type_id())
+def tag_test(subject: model_syntax_function_function.Expression, index: int, span: source.Span) -> model_syntax_function_function.Expression:
+    return model_syntax_function_function.Expression(model_syntax_function_function.OutcomeTest(clone(subject), index), span, type_id=model_syntax_primitive_declarations.bool_type_id())
 
 
-def reference(binding: universal.BindingId, type_id: universal.TypeId, span: source.Span) -> universal.Expression:
-    return universal.Expression(universal.BindingReference(binding), span, type_id=type_id)
+def reference(binding: model_syntax_symbol_symbol.BindingId, type_id: model_syntax_symbol_symbol.TypeId, span: source.Span) -> model_syntax_function_function.Expression:
+    return model_syntax_function_function.Expression(model_syntax_function_function.BindingReference(binding), span, type_id=type_id)

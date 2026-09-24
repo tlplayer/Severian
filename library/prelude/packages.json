@@ -3,30 +3,30 @@
   "packages": {
     "grammar": [
       {
-        "source": "sev_compiler/universal/grammar/contracts.sev"
+        "source": "sev_compiler/syntax/grammar/contracts.sev"
       }
     ],
     "runtime": [
       {
-        "source": "sev_compiler/universal/primitive/error.sev"
+        "source": "sev_compiler/syntax/primitive/error/error.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/char/units.sev",
+        "source": "sev_compiler/syntax/primitive/char/units.sev",
         "names": [
           "char"
         ]
       },
       {
-        "source": "sev_compiler/universal/primitive/string/storage.sev"
+        "source": "sev_compiler/syntax/primitive/string/storage.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/tuple.sev"
+        "source": "sev_compiler/syntax/primitive/tuple/tuple.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/enum.sev"
+        "source": "sev_compiler/syntax/primitive/enum/enum.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/string/format.sev",
+        "source": "sev_compiler/syntax/primitive/string/format.sev",
         "names": [
           "string"
         ]
@@ -38,38 +38,38 @@
         ]
       },
       {
-        "source": "sev_compiler/universal/primitive/numeric/conversion.sev",
+        "source": "sev_compiler/syntax/primitive/numeric/conversion.sev",
         "alias": "numeric"
       },
       {
-        "source": "sev_compiler/universal/primitive/numeric/operators.sev"
+        "source": "sev_compiler/syntax/primitive/numeric/operators.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/numeric/power.sev"
+        "source": "sev_compiler/syntax/primitive/numeric/power.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/units.sev"
+        "source": "sev_compiler/syntax/primitive/units/units.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/collections.sev"
+        "source": "library/core/collections/src/lib.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/string_lists.sev"
+        "source": "sev_compiler/syntax/primitive/string/string_lists.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/pointer.sev"
+        "source": "sev_compiler/syntax/primitive/pointer/pointer.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/box.sev"
+        "source": "library/core/memory/src/box.sev"
       },
       {
         "source": "library/core/memory/src/raw_intrinsics.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/assertion.sev"
+        "source": "sev_compiler/syntax/function/lowering.sev"
       },
       {
-        "source": "sev_compiler/universal/primitive/string/methods.sev",
+        "source": "sev_compiler/syntax/primitive/string/methods.sev",
         "alias": "string_methods"
       }
     ],

@@ -1,4 +1,8 @@
-import universal
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import source
 import interfaces
 import package
@@ -6,27 +10,27 @@ import package
 
 # Version two imports typed signatures directly. Provenance is attached to the
 # interface file; producer source paths are never opened or reparsed.
-def read_module(file: source.SourceFile, prefix: string) -> universal.Module | Error:
+def read_module(file: source.SourceFile, prefix: string) -> model_hir_module_module.Module | Error:
     public = interfaces.decode(package.read_text(file.path))
     if public.version != 2:
         throw Error("typed import requires semantic interface version two")
-    module = universal.empty_module()
+    module = model_hir_module_module.empty_module()
     span = source.Span(file.id, 0, 0)
     for declaration in public.declarations:
-        parameters: list[universal.FunctionParameter] = []
+        parameters: list[model_syntax_function_function.FunctionParameter] = []
         index := 0
         for kind in declaration.parameter_types:
-            annotation = universal.named_type(kind, [], span)
-            parameters.append(universal.FunctionParameter(declaration.parameter_names[index], annotation, None, span))
+            annotation = model_syntax_type_annotation.named_type(kind, [], span)
+            parameters.append(model_syntax_function_function.FunctionParameter(declaration.parameter_names[index], annotation, None, span))
             index += 1
-        decorator = universal.Decorator("c", [universal.DecoratorArgument("symbol", universal.String(declaration.symbol_id), span)], span)
-        function = universal.FunctionDeclaration(decorators=[decorator], name=prefix + declaration.name, parameters=parameters, result=universal.named_type(declaration.result_type, [], span), span=span, lookup=prefix)
-        function.semantic_key = universal.semantic_key([public.package.name, public.package.version, "export", declaration.name])
-        function.definition = universal.definition_from_key(function.semantic_key)
+        decorator = model_syntax_function_syntax.Decorator("c", [model_syntax_function_syntax.DecoratorArgument("symbol", model_syntax_function_syntax.DecoratorValue.String(declaration.symbol_id), span)], span)
+        function = model_syntax_function_function.FunctionDeclaration(decorators=[decorator], name=prefix + declaration.name, parameters=parameters, result=model_syntax_type_annotation.named_type(declaration.result_type, [], span), span=span, lookup=prefix)
+        function.semantic_key = model_syntax_symbol_symbol.semantic_key([public.package.name, public.package.version, "export", declaration.name])
+        function.definition = model_syntax_symbol_symbol.definition_from_key(function.semantic_key)
         if declaration.symbol_id.starts_with("__sev_pkg_"):
             parts = declaration.symbol_id[len("__sev_pkg_"):].split("_")
             if len(parts) != 3:
                 throw Error("malformed persistent callable symbol")
-            function.definition = universal.DefId(u128(parts[0]), u128(parts[1]), universal.DeclarationId(u128(parts[2])))
-        module.items.append(universal.Function(function))
+            function.definition = model_syntax_symbol_symbol.DefId(u128(parts[0]), u128(parts[1]), model_syntax_symbol_symbol.DeclarationId(u128(parts[2])))
+        module.items.append(model_hir_module_module.Function(function))
     return module

@@ -1,38 +1,45 @@
+import * from "../../../../syntax/primitive/mlir.sev" as type_bindings
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import * from "../../../../syntax/type/mlir.sev" as model_syntax_type_mlir
 import diagnostics
 import source
-import universal
-from universal import scalar
-from universal import storage as storage_types
-from universal import tagged
+import * from "../../../../syntax/primitive/catalog.sev" as scalar
+import * from "../../../../syntax/type/storage.sev" as storage_types
+import * from "../../../../syntax/type/tagged.sev" as tagged
 
 
 # Shared declaration environment. AST declarations survive with resolved
 # identities; callable analysis and the package entry use the same environment.
 class RecordInstance:
-    type_id: universal.TypeId
-    template: universal.DefId
-    arguments: list[universal.TypeBinding]
-    constructors: list[universal.TypeConstructorBinding] = []
-    values: list[universal.TypeAnnotation] = []
+    type_id: model_syntax_symbol_symbol.TypeId
+    template: model_syntax_symbol_symbol.DefId
+    arguments: list[model_syntax_symbol_symbol.TypeBinding]
+    constructors: list[model_syntax_symbol_symbol.TypeConstructorBinding] = []
+    values: list[model_syntax_type_annotation.TypeAnnotation] = []
 
 
 class SemanticDefinitions:
-    aliases: list[universal.TypeDeclaration] = []
-    traits: list[universal.TraitDeclaration] = []
-    implementations: list[universal.RecordDeclaration] = []
-    symbol_descriptors: list[universal.TraitDeclaration] = []
-    record_templates: list[universal.RecordDeclaration] = []
+    aliases: list[model_syntax_function_syntax.TypeDeclaration] = []
+    traits: list[model_syntax_function_syntax.TraitDeclaration] = []
+    implementations: list[model_syntax_function_function.RecordDeclaration] = []
+    symbol_descriptors: list[model_syntax_function_syntax.TraitDeclaration] = []
+    record_templates: list[model_syntax_function_function.RecordDeclaration] = []
     record_instances: list[RecordInstance] = []
-    expression_functions: list[universal.FunctionDeclaration] = []
+    expression_functions: list[model_syntax_function_function.FunctionDeclaration] = []
 
 
-def definition_id(name: string, ordinal: int) -> universal.DefId:
+def definition_id(name: string, ordinal: int) -> model_syntax_symbol_symbol.DefId:
     # Compatibility for generated declarations without a source membership.
     # Registration order never participates in semantic identity.
-    return universal.named_definition("$generated", "declaration", name)
+    return model_syntax_symbol_symbol.named_definition("$generated", "declaration", name)
 
 
-def trait_named(definitions: SemanticDefinitions, name: string, namespace: string) -> universal.TraitDeclaration | None:
+def trait_named(definitions: SemanticDefinitions, name: string, namespace: string) -> model_syntax_function_syntax.TraitDeclaration | None:
     for declaration in definitions.traits:
         if declaration.name == namespace + name:
             return declaration
@@ -42,7 +49,7 @@ def trait_named(definitions: SemanticDefinitions, name: string, namespace: strin
     return None
 
 
-def alias_named(definitions: SemanticDefinitions, name: string, namespace: string) -> universal.TypeDeclaration | None:
+def alias_named(definitions: SemanticDefinitions, name: string, namespace: string) -> model_syntax_function_syntax.TypeDeclaration | None:
     for declaration in definitions.aliases:
         if declaration.name == namespace + name:
             return declaration
@@ -52,10 +59,10 @@ def alias_named(definitions: SemanticDefinitions, name: string, namespace: strin
     return None
 
 
-def bind_type_arguments(parameters: list[string], arguments: list[universal.TypeAnnotation], span: source.Span, pack: string = "", defaults: list[universal.TypeAnnotation] = []) -> list[universal.TypeAnnotation] | diagnostics.Diagnostic:
-    ordered: list[universal.TypeAnnotation] = []
+def bind_type_arguments(parameters: list[string], arguments: list[model_syntax_type_annotation.TypeAnnotation], span: source.Span, pack: string = "", defaults: list[model_syntax_type_annotation.TypeAnnotation] = []) -> list[model_syntax_type_annotation.TypeAnnotation] | diagnostics.Diagnostic:
+    ordered: list[model_syntax_type_annotation.TypeAnnotation] = []
     for parameter in parameters:
-        ordered.append(universal.named_type("", [], span))
+        ordered.append(model_syntax_type_annotation.named_type("", [], span))
     filled: list[int] = []
     positional := 0
     named := false
@@ -79,7 +86,7 @@ def bind_type_arguments(parameters: list[string], arguments: list[universal.Type
             positional += 1
         if index in filled:
             return error(diagnostics.diagnostic_at("E000205", "duplicate type argument", argument.span))
-        value = universal.TypeAnnotation(argument.kind, argument.span)
+        value = model_syntax_type_annotation.TypeAnnotation(argument.kind, argument.span)
         if index >= len(parameters):
             if pack == "":
                 return error(diagnostics.diagnostic_at("E000205", "type argument count mismatch", span))
@@ -95,7 +102,7 @@ def bind_type_arguments(parameters: list[string], arguments: list[universal.Type
             supplied := false
             for default in defaults:
                 if default.binding == parameter:
-                    ordered[cursor] = replace_annotation(universal.TypeAnnotation(default.kind, default.span), parameters, ordered)
+                    ordered[cursor] = replace_annotation(model_syntax_type_annotation.TypeAnnotation(default.kind, default.span), parameters, ordered)
                     supplied = true
             if not supplied:
                 return error(diagnostics.diagnostic_at("E000205", "missing type argument " + parameter, span))
@@ -109,7 +116,7 @@ def bootstrap_storage_type(definitions: SemanticDefinitions, name: string, names
     return name == "array" or (name == "list" and alias_named(definitions, name, namespace) == None and record_template(definitions, name, namespace) == None)
 
 
-def type_annotation(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, records: list[universal.RecordDeclaration], namespace: string, active: list[string] = []) -> universal.TypeId | diagnostics.Diagnostic:
+def type_annotation(definitions: SemanticDefinitions, annotation: model_syntax_type_annotation.TypeAnnotation, records: list[model_syntax_function_function.RecordDeclaration], namespace: string, active: list[string] = []) -> model_syntax_symbol_symbol.TypeId | diagnostics.Diagnostic:
     match annotation.kind:
         case Named:
             if name == "char" and len(arguments) != 0:
@@ -122,22 +129,22 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
             if bootstrap_storage_type(definitions, name, namespace) and len(arguments) == 1:
                 element = type_annotation(definitions, arguments[0], records, namespace, active)
                 if int(element.index) in [1, 8, 16, 32, 64, 108, 516, 532, 564, 132, 164]:
-                    return universal.TypeId(200 + element.index)
+                    return model_syntax_symbol_symbol.TypeId(200 + element.index)
                 if element.index == 3:
                     for record in records:
                         if record.storage_element.index == element.index:
                             return record.type_id
-                    id = universal.TypeId(u32(1000 + len(records)))
-                    fields = [universal.FunctionParameter("data", universal.named_type("string", [], annotation.span), None, annotation.span, type_id=universal.string_type_id()), universal.FunctionParameter("ends", universal.named_type("list", [universal.named_type("int", [], annotation.span)], annotation.span), None, annotation.span, type_id=universal.TypeId(264))]
-                    records.append(universal.RecordDeclaration("$buffer$string", fields, [], annotation.span, type_id=id, storage_element=element, representation="OwnedBuffer"))
+                    id = model_syntax_symbol_symbol.TypeId(u32(1000 + len(records)))
+                    fields = [model_syntax_function_function.FunctionParameter("data", model_syntax_type_annotation.named_type("string", [], annotation.span), None, annotation.span, type_id=model_syntax_primitive_declarations.string_type_id()), model_syntax_function_function.FunctionParameter("ends", model_syntax_type_annotation.named_type("list", [model_syntax_type_annotation.named_type("int", [], annotation.span)], annotation.span), None, annotation.span, type_id=model_syntax_symbol_symbol.TypeId(264))]
+                    records.append(model_syntax_function_function.RecordDeclaration("$buffer$string", fields, [], annotation.span, type_id=id, storage_element=element, representation="OwnedBuffer"))
                     return id
                 if not storage_types.copy_storage(element, records):
                     return error(diagnostics.diagnostic_at("E000205", "array elements require copyable storage; owned elements require destruction lowering", annotation.span))
                 for record in records:
                     if record.storage_element.index == element.index:
                         return record.type_id
-                id = universal.TypeId(u32(1000 + len(records)))
-                records.append(universal.RecordDeclaration("$buffer$" + type_name(element, records), [], [], annotation.span, type_id=id, storage_element=element))
+                id = model_syntax_symbol_symbol.TypeId(u32(1000 + len(records)))
+                records.append(model_syntax_function_function.RecordDeclaration("$buffer$" + type_name(element, records), [], [], annotation.span, type_id=id, storage_element=element, mlir=type_bindings.memref_mlir(), mlir_shape=[-1], mlir_element=element))
                 return id
             alias ?= alias_named(definitions, name, namespace)
             if alias != None:
@@ -151,16 +158,16 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                     # Arguments belong to the caller's scope; the alias body
                     # belongs to its declaration scope. Resolve that boundary
                     # before substituting names into the alias definition.
-                    replacements: list[universal.TypeAnnotation] = []
+                    replacements: list[model_syntax_type_annotation.TypeAnnotation] = []
                     for argument in ordered_arguments:
-                        constructor_name ?= universal.simple_type_name(argument)
+                        constructor_name ?= model_syntax_type_annotation.simple_type_name(argument)
                         if constructor_name != None:
                             constructor ?= record_template(definitions, constructor_name, namespace)
                             if constructor != None:
-                                replacements.append(universal.named_type(constructor.name, [], argument.span))
+                                replacements.append(model_syntax_type_annotation.named_type(constructor.name, [], argument.span))
                                 continue
                         actual = type_annotation(definitions, argument, records, namespace, active)
-                        replacements.append(universal.named_type(type_name(actual, records), [], argument.span))
+                        replacements.append(model_syntax_type_annotation.named_type(type_name(actual, records), [], argument.span))
                     substituted = replace_annotation(target, alias.type_parameters, replacements)
                     match substituted.kind:
                         case Union:
@@ -187,7 +194,7 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                     if len(arguments) != 0:
                         return error(diagnostics.diagnostic_at("E000205", "type argument count mismatch", annotation.span))
                     return record.type_id
-            selection = tagged.select(records, namespace, name, universal.TypeId(0), annotation.span)
+            selection = tagged.select(records, namespace, name, model_syntax_symbol_symbol.TypeId(0), annotation.span)
             if selection.record != -1:
                 return records[selection.record].fields[selection.variant + 1].type_id
             known ?= scalar.scalar_type_name(name)
@@ -195,7 +202,7 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                 return known
             return error(diagnostics.diagnostic_at("E000205", "unknown type " + name, annotation.span))
         case Union:
-            variants: list[universal.TypeId] = []
+            variants: list[model_syntax_symbol_symbol.TypeId] = []
             key := "$outcome"
             for member in members:
                 variant = type_annotation(definitions, member, records, namespace, active)
@@ -218,19 +225,19 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
             for record in records:
                 if record.name == key:
                     return record.type_id
-            fields = [universal.FunctionParameter("$tag", universal.named_type("int", [], annotation.span), None, annotation.span, type_id=universal.i64_type_id())]
+            fields = [model_syntax_function_function.FunctionParameter("$tag", model_syntax_type_annotation.named_type("int", [], annotation.span), None, annotation.span, type_id=model_syntax_primitive_declarations.i64_type_id())]
             index := 0
             for variant in variants:
-                fields.append(universal.FunctionParameter("$variant" + string(index), universal.named_type(type_name(variant, records), [], annotation.span), None, annotation.span, type_id=variant))
+                fields.append(model_syntax_function_function.FunctionParameter("$variant" + string(index), model_syntax_type_annotation.named_type(type_name(variant, records), [], annotation.span), None, annotation.span, type_id=variant))
                 index += 1
-            id = universal.TypeId(u32(1000 + len(records)))
-            records.append(universal.RecordDeclaration(key, fields, [], annotation.span, type_id=id))
+            id = model_syntax_symbol_symbol.TypeId(u32(1000 + len(records)))
+            records.append(model_syntax_function_function.RecordDeclaration(key, fields, [], annotation.span, type_id=id))
             return id
         case _:
             return error(diagnostics.diagnostic_at("E000205", "a value requires one concrete type", annotation.span))
 
 
-def type_name(type_id: universal.TypeId, records: list[universal.RecordDeclaration]) -> string:
+def type_name(type_id: model_syntax_symbol_symbol.TypeId, records: list[model_syntax_function_function.RecordDeclaration]) -> string:
     known ?= scalar.scalar_type(type_id)
     if known != None:
         return known.name
@@ -240,7 +247,7 @@ def type_name(type_id: universal.TypeId, records: list[universal.RecordDeclarati
     return "$parameter$" + string(type_id.index)
 
 
-def replace_annotation(annotation: universal.TypeAnnotation, names: list[string], replacements: list[universal.TypeAnnotation]) -> universal.TypeAnnotation:
+def replace_annotation(annotation: model_syntax_type_annotation.TypeAnnotation, names: list[string], replacements: list[model_syntax_type_annotation.TypeAnnotation]) -> model_syntax_type_annotation.TypeAnnotation:
     match annotation.kind:
         case Named:
             index := 0
@@ -250,28 +257,28 @@ def replace_annotation(annotation: universal.TypeAnnotation, names: list[string]
                     if len(arguments) == 0:
                         replacement.binding = annotation.binding
                         return replacement
-                    applied: list[universal.TypeAnnotation] = []
+                    applied: list[model_syntax_type_annotation.TypeAnnotation] = []
                     for argument in arguments:
                         applied.append(replace_annotation(argument, names, replacements))
                     match replacement.kind:
                         case Named:
-                            return universal.TypeAnnotation(universal.Named(name, applied), annotation.span, binding=annotation.binding)
+                            return model_syntax_type_annotation.TypeAnnotation(model_syntax_type_annotation.Named(name, applied), annotation.span, binding=annotation.binding)
                         case _:
                             throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/definitions.sev)")
                 index += 1
-            replaced: list[universal.TypeAnnotation] = []
+            replaced: list[model_syntax_type_annotation.TypeAnnotation] = []
             for argument in arguments:
                 replaced.append(replace_annotation(argument, names, replacements))
-            return universal.TypeAnnotation(universal.Named(name, replaced), annotation.span, binding=annotation.binding)
+            return model_syntax_type_annotation.TypeAnnotation(model_syntax_type_annotation.Named(name, replaced), annotation.span, binding=annotation.binding)
         case Union:
-            replaced: list[universal.TypeAnnotation] = []
+            replaced: list[model_syntax_type_annotation.TypeAnnotation] = []
             for member in members:
                 replaced.append(replace_annotation(member, names, replacements))
-            return universal.TypeAnnotation(universal.Union(replaced), annotation.span, binding=annotation.binding)
+            return model_syntax_type_annotation.TypeAnnotation(model_syntax_type_annotation.Union(replaced), annotation.span, binding=annotation.binding)
 
 
-def replace_function_types(function: universal.FunctionDeclaration, names: list[string], replacements: list[universal.TypeAnnotation]) -> universal.FunctionDeclaration:
-    parameters: list[universal.FunctionParameter] = []
+def replace_function_types(function: model_syntax_function_function.FunctionDeclaration, names: list[string], replacements: list[model_syntax_type_annotation.TypeAnnotation]) -> model_syntax_function_function.FunctionDeclaration:
+    parameters: list[model_syntax_function_function.FunctionParameter] = []
     for parameter in function.parameters:
         parameter.annotation = replace_annotation(parameter.annotation, names, replacements)
         parameters.append(parameter)
@@ -282,7 +289,7 @@ def replace_function_types(function: universal.FunctionDeclaration, names: list[
     return function
 
 
-def trait_application(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, namespace: string) -> universal.TraitDeclaration | diagnostics.Diagnostic:
+def trait_application(definitions: SemanticDefinitions, annotation: model_syntax_type_annotation.TypeAnnotation, namespace: string) -> model_syntax_function_syntax.TraitDeclaration | diagnostics.Diagnostic:
     match annotation.kind:
         case Named:
             declaration ?= trait_named(definitions, name, namespace)
@@ -292,25 +299,25 @@ def trait_application(definitions: SemanticDefinitions, annotation: universal.Ty
                 applied := declaration
                 replacements = bind_type_arguments(applied.type_parameters, arguments, annotation.span, defaults=scoped_defaults(definitions, applied.type_defaults, applied.lookup))
                 applied.arguments = replacements
-                methods: list[universal.FunctionDeclaration] = []
+                methods: list[model_syntax_function_function.FunctionDeclaration] = []
                 for method in applied.methods:
                     if len(method.type_parameters) != 0:
                         return error(diagnostics.Diagnostic("E000212", "generic trait methods require method argument inference", method.span))
                     methods.append(replace_function_types(method, applied.type_parameters, replacements))
-                properties: list[universal.PropertyDeclaration] = []
+                properties: list[model_syntax_function_syntax.PropertyDeclaration] = []
                 for property in applied.properties:
                     property.annotation = replace_annotation(property.annotation, applied.type_parameters, replacements)
                     properties.append(property)
-                operations: list[universal.OperatorDeclaration] = []
+                operations: list[model_syntax_function_syntax.OperatorDeclaration] = []
                 for operation in applied.operators:
-                    parameters: list[universal.OperatorParameter] = []
+                    parameters: list[model_syntax_function_syntax.OperatorParameter] = []
                     for parameter in operation.parameters:
                         parameter.annotation = replace_annotation(parameter.annotation, applied.type_parameters, replacements)
                         parameters.append(parameter)
                     operation.parameters = parameters
                     operation.result = replace_annotation(operation.result, applied.type_parameters, replacements)
                     operations.append(operation)
-                bases: list[universal.TypeAnnotation] = []
+                bases: list[model_syntax_type_annotation.TypeAnnotation] = []
                 for base in applied.bases:
                     bases.append(replace_annotation(base, applied.type_parameters, replacements))
                 applied.methods = methods
@@ -323,7 +330,7 @@ def trait_application(definitions: SemanticDefinitions, annotation: universal.Ty
     return error(diagnostics.diagnostic_at("E000212", "constraint must name a trait", annotation.span))
 
 
-def inherited_traits(definitions: SemanticDefinitions, declaration: universal.TraitDeclaration, active: list[string] = []) -> list[universal.TraitDeclaration] | diagnostics.Diagnostic:
+def inherited_traits(definitions: SemanticDefinitions, declaration: model_syntax_function_syntax.TraitDeclaration, active: list[string] = []) -> list[model_syntax_function_syntax.TraitDeclaration] | diagnostics.Diagnostic:
     if declaration.name in active:
         return error(diagnostics.diagnostic_at("E000212", "cyclic trait inheritance " + declaration.name, declaration.span))
     result = [declaration]
@@ -336,13 +343,13 @@ def inherited_traits(definitions: SemanticDefinitions, declaration: universal.Tr
     return result
 
 
-def resolve_operator_constraints(definitions: SemanticDefinitions, operation: universal.OperatorDeclaration, namespace: string) -> universal.OperatorDeclaration | diagnostics.Diagnostic:
-    constraints: list[universal.GenericConstraint] = []
+def resolve_operator_constraints(definitions: SemanticDefinitions, operation: model_syntax_function_syntax.OperatorDeclaration, namespace: string) -> model_syntax_function_syntax.OperatorDeclaration | diagnostics.Diagnostic:
+    constraints: list[model_syntax_function_syntax.GenericConstraint] = []
     for constraint in operation.constraints:
         grammar_bound := false
         match constraint:
             case Parameter:
-                bound_name ?= universal.simple_type_name(bound)
+                bound_name ?= model_syntax_type_annotation.simple_type_name(bound)
                 if bound_name != None:
                     contract_definition ?= trait_named(definitions, bound_name, namespace)
                     if contract_definition != None:
@@ -351,7 +358,7 @@ def resolve_operator_constraints(definitions: SemanticDefinitions, operation: un
                                 return error(diagnostics.diagnostic_at("E000212", "operator requires one grammar binding", span))
                             operation.grammar_parameter = parameter
                             syntax = operation.syntax
-                            syntax.domain = universal.OperatorDomain.GrammarOperator
+                            syntax.domain = model_syntax_function_syntax.OperatorDomain.GrammarOperator
                             syntax.grammar_name = bound_name
                             operation.syntax = syntax
                             grammar_bound = true
@@ -380,8 +387,8 @@ def resolve_operator_constraints(definitions: SemanticDefinitions, operation: un
     return operation
 
 
-def resolve_grammar_binding(definitions: SemanticDefinitions, syntax: universal.OperatorSyntax, namespace: string, span: source.Span) -> universal.OperatorSyntax | diagnostics.Diagnostic:
-    if syntax.domain != universal.OperatorDomain.GrammarOperator:
+def resolve_grammar_binding(definitions: SemanticDefinitions, syntax: model_syntax_function_syntax.OperatorSyntax, namespace: string, span: source.Span) -> model_syntax_function_syntax.OperatorSyntax | diagnostics.Diagnostic:
+    if syntax.domain != model_syntax_function_syntax.OperatorDomain.GrammarOperator:
         return syntax
     contract_definition ?= trait_named(definitions, syntax.grammar_name, namespace)
     if contract_definition == None:
@@ -406,17 +413,17 @@ def resolve_grammar_binding(definitions: SemanticDefinitions, syntax: universal.
     return syntax
 
 
-def extension_annotation(declaration: universal.RecordDeclaration) -> universal.TypeAnnotation:
+def extension_annotation(declaration: model_syntax_function_function.RecordDeclaration) -> model_syntax_type_annotation.TypeAnnotation:
     target ?= declaration.extension_target
     if target != None:
         return target
-    arguments: list[universal.TypeAnnotation] = []
+    arguments: list[model_syntax_type_annotation.TypeAnnotation] = []
     for parameter in declaration.type_parameters:
-        arguments.append(universal.named_type(parameter, [], declaration.span))
-    return universal.named_type(declaration.name, arguments, declaration.span)
+        arguments.append(model_syntax_type_annotation.named_type(parameter, [], declaration.span))
+    return model_syntax_type_annotation.named_type(declaration.name, arguments, declaration.span)
 
 
-def infer_extension_parameters(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, namespace: string, parameters: list[string]):
+def infer_extension_parameters(definitions: SemanticDefinitions, annotation: model_syntax_type_annotation.TypeAnnotation, namespace: string, parameters: list[string]):
     match annotation.kind:
         case Named:
             if len(arguments) != 0:
@@ -439,7 +446,7 @@ def infer_extension_parameters(definitions: SemanticDefinitions, annotation: uni
                 infer_extension_parameters(definitions, member, namespace, parameters)
 
 
-def resolve_extension_parameters(definitions: SemanticDefinitions, declaration: universal.RecordDeclaration) -> universal.RecordDeclaration:
+def resolve_extension_parameters(definitions: SemanticDefinitions, declaration: model_syntax_function_function.RecordDeclaration) -> model_syntax_function_function.RecordDeclaration:
     if not declaration.extension:
         return declaration
     target = extension_annotation(declaration)
@@ -454,7 +461,7 @@ def resolve_extension_parameters(definitions: SemanticDefinitions, declaration: 
     return declaration
 
 
-def register_declarations(module: universal.Module, environment: SemanticDefinitions = SemanticDefinitions(), incremental: bool = false) -> SemanticDefinitions | diagnostics.Diagnostic:
+def register_declarations(module: model_hir_module_module.Module, environment: SemanticDefinitions = SemanticDefinitions(), incremental: bool = false) -> SemanticDefinitions | diagnostics.Diagnostic:
     definitions = SemanticDefinitions(environment.aliases[:], environment.traits[:], environment.implementations[:] if incremental else [], environment.symbol_descriptors[:] if incremental else [], environment.record_templates[:] if incremental else [], environment.record_instances[:] if incremental else [], environment.expression_functions[:] if incremental else [])
     names: list[string] = []
     ordinal := 1000000 if incremental else 0
@@ -471,7 +478,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
             case Function:
                 result ?= declaration.result
                 if result != None:
-                    if len(declaration.type_parameters) == 0 and universal.simple_type_name(result) == "Ex":
+                    if len(declaration.type_parameters) == 0 and model_syntax_type_annotation.simple_type_name(result) == "Ex":
                         function := declaration
                         if function.definition.declaration.value == 0:
                             function.definition = definition_id(function.name, 40000 + ordinal)
@@ -496,13 +503,13 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                         trait_declaration.definition = original.definition
                 if trait_declaration.grammar:
                     if trait_declaration.definition.declaration.value == 0:
-                        trait_declaration.definition = universal.DefId(0, u128(trait_declaration.span.source.index) + 2, universal.DeclarationId(u128(trait_declaration.span.start) + 1))
+                        trait_declaration.definition = model_syntax_symbol_symbol.DefId(0, u128(trait_declaration.span.source.index) + 2, model_syntax_symbol_symbol.DeclarationId(u128(trait_declaration.span.start) + 1))
                 ordinal += 1
                 if len(trait_declaration.constraints) != 0:
                     return error(diagnostics.diagnostic_at("E000212", "trait parameter constraints require capability validation", trait_declaration.span))
-                resolved_methods: list[universal.FunctionDeclaration] = []
-                resolved_operators: list[universal.OperatorDeclaration] = []
-                resolved_properties: list[universal.PropertyDeclaration] = []
+                resolved_methods: list[model_syntax_function_function.FunctionDeclaration] = []
+                resolved_operators: list[model_syntax_function_syntax.OperatorDeclaration] = []
+                resolved_properties: list[model_syntax_function_syntax.PropertyDeclaration] = []
                 for property in trait_declaration.properties:
                     if property.definition.declaration.value == 0:
                         property.definition = definition_id(property.name, ordinal)
@@ -560,7 +567,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
     for item in module.items:
         match item:
             case Record:
-                module.items[item_index] = universal.Record(resolve_extension_parameters(definitions, declaration))
+                module.items[item_index] = model_hir_module_module.Record(resolve_extension_parameters(definitions, declaration))
             case _:
                 throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/frontend/semantic/semantic/src/definitions.sev)")
         item_index += 1
@@ -573,7 +580,7 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
                 return error(diagnostics.diagnostic_at("E000212", "duplicate trait member " + method.name, declaration.span))
             member_names.append(method.name)
         symbols: list[string] = []
-        resolved_operators: list[universal.OperatorDeclaration] = []
+        resolved_operators: list[model_syntax_function_syntax.OperatorDeclaration] = []
         for operation in declaration.operators:
             operation = resolve_operator_constraints(definitions, operation, declaration.lookup)
             resolved_operators.append(operation)
@@ -589,10 +596,10 @@ def register_declarations(module: universal.Module, environment: SemanticDefinit
     return definitions
 
 
-def family_members(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, records: list[universal.RecordDeclaration], namespace: string, active: list[string] = []) -> list[universal.TypeId] | diagnostics.Diagnostic:
+def family_members(definitions: SemanticDefinitions, annotation: model_syntax_type_annotation.TypeAnnotation, records: list[model_syntax_function_function.RecordDeclaration], namespace: string, active: list[string] = []) -> list[model_syntax_symbol_symbol.TypeId] | diagnostics.Diagnostic:
     match annotation.kind:
         case Union:
-            result: list[universal.TypeId] = []
+            result: list[model_syntax_symbol_symbol.TypeId] = []
             for member in members:
                 for concrete in family_members(definitions, member, records, namespace, active):
                     duplicate := false
@@ -613,10 +620,10 @@ def family_members(definitions: SemanticDefinitions, annotation: universal.TypeA
                 if target != None:
                     if len(alias.type_parameters) != len(arguments):
                         return error(diagnostics.diagnostic_at("E000205", "type argument count mismatch", annotation.span))
-                    replacements: list[universal.TypeAnnotation] = []
+                    replacements: list[model_syntax_type_annotation.TypeAnnotation] = []
                     for argument in arguments:
                         actual = type_annotation(definitions, argument, records, namespace, active)
-                        replacements.append(universal.named_type(type_name(actual, records), [], argument.span))
+                        replacements.append(model_syntax_type_annotation.named_type(type_name(actual, records), [], argument.span))
                     substituted = replace_annotation(target, alias.type_parameters, replacements)
                     path = active[:]
                     path.append(alias.name)
@@ -624,7 +631,7 @@ def family_members(definitions: SemanticDefinitions, annotation: universal.TypeA
     return [type_annotation(definitions, annotation, records, namespace)]
 
 
-def error_conformance(definitions: SemanticDefinitions, records: list[universal.RecordDeclaration], type_id: universal.TypeId) -> bool | diagnostics.Diagnostic:
+def error_conformance(definitions: SemanticDefinitions, records: list[model_syntax_function_function.RecordDeclaration], type_id: model_syntax_symbol_symbol.TypeId) -> bool | diagnostics.Diagnostic:
     required ?= trait_named(definitions, "Error", "")
     if required == None:
         return false
@@ -632,7 +639,7 @@ def error_conformance(definitions: SemanticDefinitions, records: list[universal.
         for record in records:
             if record.type_id.index == type_id.index:
                 for base in record.traits:
-                    name ?= universal.simple_type_name(base)
+                    name ?= model_syntax_type_annotation.simple_type_name(base)
                     if name != None:
                         declared ?= trait_named(definitions, name, record.lookup)
                         if declared != None:
@@ -645,7 +652,7 @@ def error_conformance(definitions: SemanticDefinitions, records: list[universal.
 # Generic records retain their declaration identity and canonical type bindings.
 # Allocate identity before resolving fields, so recursive applications terminate;
 # the concrete layout validator diagnoses recursive storage afterwards.
-def record_template(definitions: SemanticDefinitions, name: string, namespace: string) -> universal.RecordDeclaration | None:
+def record_template(definitions: SemanticDefinitions, name: string, namespace: string) -> model_syntax_function_function.RecordDeclaration | None:
     for template in definitions.record_templates:
         if template.name == namespace + name:
             for original in definitions.record_templates:
@@ -661,40 +668,40 @@ def record_template(definitions: SemanticDefinitions, name: string, namespace: s
     return None
 
 
-def instantiate_record(definitions: SemanticDefinitions, template: universal.RecordDeclaration, arguments: list[universal.TypeAnnotation], records: list[universal.RecordDeclaration], namespace: string, span: source.Span) -> universal.TypeId | diagnostics.Diagnostic:
+def instantiate_record(definitions: SemanticDefinitions, template: model_syntax_function_function.RecordDeclaration, arguments: list[model_syntax_type_annotation.TypeAnnotation], records: list[model_syntax_function_function.RecordDeclaration], namespace: string, span: source.Span) -> model_syntax_symbol_symbol.TypeId | diagnostics.Diagnostic:
     arguments = bind_type_arguments(template.type_parameters, arguments, span, template.type_pack, scoped_defaults(definitions, template.type_defaults, template.lookup))
-    actuals: list[universal.TypeBinding] = []
-    constructors: list[universal.TypeConstructorBinding] = []
-    replacements: list[universal.TypeAnnotation] = []
-    values: list[universal.TypeAnnotation] = []
+    actuals: list[model_syntax_symbol_symbol.TypeBinding] = []
+    constructors: list[model_syntax_symbol_symbol.TypeConstructorBinding] = []
+    replacements: list[model_syntax_type_annotation.TypeAnnotation] = []
+    values: list[model_syntax_type_annotation.TypeAnnotation] = []
     index := 0
     name := template.name + "["
     for argument in arguments:
         number = value_argument(definitions, argument, namespace)
         if number != "":
-            supplied = universal.named_type(number, [], argument.span)
+            supplied = model_syntax_type_annotation.named_type(number, [], argument.span)
             supplied.binding = template.type_parameters[index]
             values.append(supplied)
-            replacements.append(universal.named_type(number, [], argument.span))
+            replacements.append(model_syntax_type_annotation.named_type(number, [], argument.span))
             if index > 0:
                 name += ", "
             name += number
             index += 1
             continue
-        constructor_name ?= universal.simple_type_name(argument)
+        constructor_name ?= model_syntax_type_annotation.simple_type_name(argument)
         if constructor_name != None:
             constructor ?= record_template(definitions, constructor_name, namespace)
             if constructor != None:
-                constructors.append(universal.TypeConstructorBinding(universal.GenericParamId(u32(index)), constructor.definition))
-                replacements.append(universal.named_type(constructor.name, [], span))
+                constructors.append(model_syntax_symbol_symbol.TypeConstructorBinding(model_syntax_symbol_symbol.GenericParamId(u32(index)), constructor.definition))
+                replacements.append(model_syntax_type_annotation.named_type(constructor.name, [], span))
                 if index > 0:
                     name += ", "
                 name += constructor.name
                 index += 1
                 continue
         actual = type_annotation(definitions, argument, records, namespace)
-        actuals.append(universal.TypeBinding(universal.GenericParamId(u32(index)), actual))
-        replacements.append(universal.named_type(type_name(actual, records), [], span))
+        actuals.append(model_syntax_symbol_symbol.TypeBinding(model_syntax_symbol_symbol.GenericParamId(u32(index)), actual))
+        replacements.append(model_syntax_type_annotation.named_type(type_name(actual, records), [], span))
         if index > 0:
             name += ", "
         name += type_name(actual, records)
@@ -718,33 +725,39 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
             index = 0
             for supplied in instance.values:
                 if equal:
-                    equal = supplied.binding == values[index].binding and universal.simple_type_name(supplied) == universal.simple_type_name(values[index])
+                    equal = supplied.binding == values[index].binding and model_syntax_type_annotation.simple_type_name(supplied) == model_syntax_type_annotation.simple_type_name(values[index])
                 index += 1
             if equal:
                 return instance.type_id
     if len(records) >= 4096:
         return error(diagnostics.diagnostic_at("E000205", "record specialization limit exceeded", span))
-    id := universal.TypeId(u32(1000 + len(records)))
+    id := model_syntax_symbol_symbol.TypeId(u32(1000 + len(records)))
     representation := ""
     if template.name == "string" and len(actuals) == 1 and len(values) == 1:
         if int(actuals[0].type_id.index) in [108, 532]:
             representation = "String"
             if actuals[0].type_id.index == 108:
                 for default in template.type_defaults:
-                    if default.binding == values[0].binding and universal.simple_type_name(default) == universal.simple_type_name(values[0]):
-                        id = universal.string_type_id()
+                    if default.binding == values[0].binding and model_syntax_type_annotation.simple_type_name(default) == model_syntax_type_annotation.simple_type_name(values[0]):
+                        id = model_syntax_primitive_declarations.string_type_id()
     position = len(records)
-    record = universal.RecordDeclaration(name, [], [], template.span, type_id=id, lookup=template.lookup, definition=template.definition, representation=representation)
+    record = model_syntax_function_function.RecordDeclaration(name, [], [], template.span, type_id=id, lookup=template.lookup, definition=template.definition, representation=representation, decorators=template.decorators, mlir=template.mlir)
+    record.mlir = model_syntax_function_function.record_mlir_binding(template)
+    for argument_index in range(int(len(template.type_parameters))):
+        if argument_index < len(actuals):
+            record.mlir_arguments.append((template.type_parameters[argument_index], actuals[argument_index].type_id))
+    for supplied in values:
+        record.mlir_parameters.append(model_syntax_type_mlir.MlirTypeParameter(supplied.binding, model_syntax_type_annotation.simple_type_name(supplied)))
     records.append(record)
     definitions.record_instances.append(RecordInstance(id, template.definition, actuals, constructors, values))
-    fields: list[universal.FunctionParameter] = []
+    fields: list[model_syntax_function_function.FunctionParameter] = []
     names: list[string] = []
     for field in template.fields:
         if field.name in names:
             return error(diagnostics.diagnostic_at("E000205", "duplicate field " + field.name, field.span))
         names.append(field.name)
         if field.variadic:
-            if template.type_pack == "" or universal.simple_type_name(field.annotation) != template.type_pack:
+            if template.type_pack == "" or model_syntax_type_annotation.simple_type_name(field.annotation) != template.type_pack:
                 return error(diagnostics.diagnostic_at("E000205", "expanded field must use the declared type pack", field.span))
             if field.default != None:
                 return error(diagnostics.diagnostic_at("E000205", "expanded fields cannot have defaults", field.span))
@@ -753,17 +766,17 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
                 type_id = type_annotation(definitions, replacement, records, template.lookup)
                 if type_id.index == 2:
                     return error(diagnostics.diagnostic_at("E000205", "unit cannot be stored in a record field", field.span))
-                fields.append(universal.FunctionParameter(field.name + "$" + string(offset), replacement, None, field.span, type_id=type_id, pack=field.name))
+                fields.append(model_syntax_function_function.FunctionParameter(field.name + "$" + string(offset), replacement, None, field.span, type_id=type_id, pack=field.name))
                 offset += 1
             continue
         annotation = replace_annotation(field.annotation, template.type_parameters, replacements)
         type_id = type_annotation(definitions, annotation, records, template.lookup)
         if type_id.index == 2:
             return error(diagnostics.diagnostic_at("E000205", "unit cannot be stored in a record field", field.span))
-        fields.append(universal.FunctionParameter(field.name, annotation, field.default, field.span, type_id=type_id))
+        fields.append(model_syntax_function_function.FunctionParameter(field.name, annotation, field.default, field.span, type_id=type_id))
     record.fields = fields
     record.methods = template.methods
-    traits: list[universal.TypeAnnotation] = []
+    traits: list[model_syntax_type_annotation.TypeAnnotation] = []
     for trait in template.traits:
         traits.append(replace_annotation(trait, template.type_parameters, replacements))
     record.traits = traits
@@ -773,7 +786,7 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
 
 
 
-def record_instance(definitions: SemanticDefinitions, type_id: universal.TypeId) -> RecordInstance | None:
+def record_instance(definitions: SemanticDefinitions, type_id: model_syntax_symbol_symbol.TypeId) -> RecordInstance | None:
     for instance in definitions.record_instances:
         if instance.type_id.index == type_id.index:
             return instance
@@ -782,7 +795,7 @@ def record_instance(definitions: SemanticDefinitions, type_id: universal.TypeId)
 
 # Defaults are written in the declaration's scope. Actual arguments continue
 # to resolve in the caller's scope, including earlier arguments used by defaults.
-def scoped_default(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, namespace: string) -> universal.TypeAnnotation:
+def scoped_default(definitions: SemanticDefinitions, annotation: model_syntax_type_annotation.TypeAnnotation, namespace: string) -> model_syntax_type_annotation.TypeAnnotation:
     match annotation.kind:
         case Named:
             qualified := name
@@ -792,16 +805,16 @@ def scoped_default(definitions: SemanticDefinitions, annotation: universal.TypeA
             record ?= record_template(definitions, name, namespace)
             if record != None:
                 qualified = record.name
-            nested: list[universal.TypeAnnotation] = []
+            nested: list[model_syntax_type_annotation.TypeAnnotation] = []
             for argument in arguments:
                 nested.append(scoped_default(definitions, argument, namespace))
-            return universal.TypeAnnotation(universal.Named(qualified, nested), annotation.span, binding=annotation.binding)
+            return model_syntax_type_annotation.TypeAnnotation(model_syntax_type_annotation.Named(qualified, nested), annotation.span, binding=annotation.binding)
         case _:
             return annotation
 
 
-def scoped_defaults(definitions: SemanticDefinitions, defaults: list[universal.TypeAnnotation], namespace: string) -> list[universal.TypeAnnotation]:
-    result: list[universal.TypeAnnotation] = []
+def scoped_defaults(definitions: SemanticDefinitions, defaults: list[model_syntax_type_annotation.TypeAnnotation], namespace: string) -> list[model_syntax_type_annotation.TypeAnnotation]:
+    result: list[model_syntax_type_annotation.TypeAnnotation] = []
     for default in defaults:
         result.append(scoped_default(definitions, default, namespace))
     return result
@@ -809,9 +822,9 @@ def scoped_defaults(definitions: SemanticDefinitions, defaults: list[universal.T
 
 # Value parameters retain literal spellings separately from type identities.
 # Resolving an alias here lets one generic forward its capacity to another.
-def value_argument(definitions: SemanticDefinitions, annotation: universal.TypeAnnotation, namespace: string, active: list[string] = []) -> string:
+def value_argument(definitions: SemanticDefinitions, annotation: model_syntax_type_annotation.TypeAnnotation, namespace: string, active: list[string] = []) -> string:
     name := ""
-    supplied ?= universal.simple_type_name(annotation)
+    supplied ?= model_syntax_type_annotation.simple_type_name(annotation)
     if supplied != None:
         name = supplied
     numeric := name != ""
@@ -832,7 +845,7 @@ def value_argument(definitions: SemanticDefinitions, annotation: universal.TypeA
     return ""
 
 
-def record_position(records: list[universal.RecordDeclaration], type_id: universal.TypeId) -> int:
+def record_position(records: list[model_syntax_function_function.RecordDeclaration], type_id: model_syntax_symbol_symbol.TypeId) -> int:
     position := 0
     for record in records:
         if record.type_id.index == type_id.index:

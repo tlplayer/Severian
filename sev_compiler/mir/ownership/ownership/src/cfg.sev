@@ -1,11 +1,14 @@
-import universal
+import * from "../../../cfg/branch.sev" as model_mir_cfg_branch
+import * from "../../../cfg/cfg.sev" as model_mir_cfg_cfg
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import source
 import * from "provenance.sev" as provenance
 import diagnostics
-from universal import availability
-from universal import dominance as graph
+import * from "../../../cfg/availability.sev" as availability
+import * from "../../../cfg/dominance.sev" as graph
 
-def successors(exit: universal.CfgExit) -> list[universal.CfgEdge]:
+def successors(exit: model_mir_cfg_branch.CfgExit) -> list[model_mir_cfg_branch.CfgEdge]:
     match exit:
         case Jump:
             return [edge]
@@ -15,7 +18,7 @@ def successors(exit: universal.CfgExit) -> list[universal.CfgEdge]:
             return []
 
 
-def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
+def operation_inputs(operation: model_syntax_function_function.Operation) -> list[model_syntax_symbol_symbol.ValueId]:
     match operation:
         case Coverage:
             value ?= point.condition
@@ -46,7 +49,7 @@ def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
             return []
 
 
-def operation_results(operation: universal.Operation) -> list[universal.ValueId]:
+def operation_results(operation: model_syntax_function_function.Operation) -> list[model_syntax_symbol_symbol.ValueId]:
     match operation:
         case TypeLayout:
             return [result]
@@ -74,7 +77,7 @@ def operation_results(operation: universal.Operation) -> list[universal.ValueId]
             return []
 
 
-def reachable_blocks(body: universal.CfgBody) -> list[int]:
+def reachable_blocks(body: model_mir_cfg_cfg.CfgBody) -> list[int]:
     reachable = [body.entry]
     cursor := 0
     while cursor < len(reachable):
@@ -87,7 +90,7 @@ def reachable_blocks(body: universal.CfgBody) -> list[int]:
     return reachable
 
 
-def dominators(body: universal.CfgBody) -> list[int]:
+def dominators(body: model_mir_cfg_cfg.CfgBody) -> list[int]:
     sources: list[int] = []
     targets: list[int] = []
     for block in body.blocks:
@@ -99,21 +102,21 @@ def dominators(body: universal.CfgBody) -> list[int]:
     return graph.tree(int(len(body.blocks)), body.entry, sources, targets)
 
 
-def verify_inputs(values: list[universal.ValueId], available: list[int], span: source.Span | None) -> bool | diagnostics.Diagnostic:
+def verify_inputs(values: list[model_syntax_symbol_symbol.ValueId], available: list[int], span: source.Span | None) -> bool | diagnostics.Diagnostic:
     for value in values:
         if int(value.index) not in available:
             return error(diagnostics.Diagnostic("E000230", "CFG value does not dominate its use", span))
     return true
 
 
-def verify_ssa_inputs(values: list[universal.ValueId], definitions: availability.Definitions, parents: list[int], block: int, position: int, span: source.Span | None) -> bool | diagnostics.Diagnostic:
+def verify_ssa_inputs(values: list[model_syntax_symbol_symbol.ValueId], definitions: availability.Definitions, parents: list[int], block: int, position: int, span: source.Span | None) -> bool | diagnostics.Diagnostic:
     for value in values:
         if not availability.usable(definitions, parents, int(value.index), block, position):
             return error(diagnostics.Diagnostic("E000230", "CFG value does not dominate its use", span))
     return true
 
 
-def verify_availability(body: universal.CfgBody, parameters: list[universal.ValueId]) -> bool | diagnostics.Diagnostic:
+def verify_availability(body: model_mir_cfg_cfg.CfgBody, parameters: list[model_syntax_symbol_symbol.ValueId]) -> bool | diagnostics.Diagnostic:
     parents = dominators(body)
     count := int(len(parameters))
     for block in body.blocks:
@@ -151,7 +154,7 @@ def verify_availability(body: universal.CfgBody, parameters: list[universal.Valu
             for operation in block.operations:
                 verify_ssa_inputs(operation_inputs(operation), definitions, parents, block.id, position, provenance.origin_at(body, block, position).span)
                 position += 1
-            inputs: list[universal.ValueId] = []
+            inputs: list[model_syntax_symbol_symbol.ValueId] = []
             match terminal.exit:
                 case Raise:
                     inputs.append(value)

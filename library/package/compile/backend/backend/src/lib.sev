@@ -1,0 +1,8 @@
+import * from "native_mlir.sev"
+
+enum ArtifactKind:
+    Executable
+
+class Artifact:
+    path: string
+    kind: ArtifactKind

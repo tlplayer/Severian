@@ -1,4 +1,5 @@
-import * from "../source/assertion_origin.sev"
+import * from "../type/mlir.sev"
+import * from "../source.sev"
 import source
 import * from "../symbol/symbol.sev"
 import * from "../type/annotation.sev"
@@ -163,6 +164,12 @@ class RecordDeclaration:
     storage_element: TypeId = TypeId(0)
     source_name: string = ""
     extension_target: TypeAnnotation | None = None
+    decorators: list[Decorator] = []
+    mlir: MlirTypeBinding | None = None
+    mlir_parameters: list[MlirTypeParameter] = []
+    mlir_arguments: list[tuple[string, TypeId]] = []
+    mlir_shape: list[int] = []
+    mlir_element: TypeId = TypeId(0)
 
 
 def union_variants(record: RecordDeclaration) -> list[TypeId]:
@@ -293,3 +300,42 @@ enum Operation:
 
 # F groups concrete callable, expression and operation contracts.
 FunctionDeclaration | Expression | Operation as F
+
+
+# Functions use @mlir for operation identity; type declarations use it for a
+# type spelling. Both preserve the same parsed decorator/sentence data.
+def record_mlir_binding(record: RecordDeclaration) -> MlirTypeBinding | None:
+    selected ?= record.mlir
+    seen := false
+    for decorator in record.decorators:
+        if decorator.name != "mlir":
+            continue
+        if seen:
+            throw Error("duplicate MLIR type annotation: " + record.name)
+        seen = true
+        if len(decorator.arguments) != 1:
+            throw Error("MLIR type annotation requires one spelling")
+        match decorator.arguments[0].value:
+            case String:
+                if value == "":
+                    throw Error("MLIR type annotation requires a spelling")
+                selected = MlirTypeBinding(value)
+            case _:
+                throw Error("MLIR type annotation requires a string")
+    if selected == None:
+        return MlirTypeBinding("!llvm.struct<({elements})>", "struct", dimensions=0)
+    return selected
+
+
+
+class ExpressionConversion:
+    from_type: TypeId
+    to_type: TypeId
+    kind: ExpressionConversionKind
+
+
+enum ExpressionConversionKind:
+    NumericWidening
+    UnionInjection
+    Borrow
+    User(function: DefId)

@@ -1,5 +1,6 @@
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import package
-import universal
 import lexer
 import source
 import os
@@ -10,7 +11,7 @@ import * from "package:semantic/semantic/src/lazy_bodies.sev" as lazy_bodies
 
 
 class Prelude:
-    module: universal.Module
+    module: model_hir_module_module.Module
     registry: lexer.SyntaxRegistry
     files: list[source.SourceFile]
     prepared: list[semantic.PreludeAnalysis]
@@ -26,7 +27,7 @@ def validate_names(excluded: list[string], available: list[string]) -> unit | Er
             throw Error("unknown prelude exclusion: " + name)
 
 
-def write(destination: string, module: universal.Module, registry: lexer.SyntaxRegistry, files: list[source.SourceFile], resolution: package.Resolution, sysroot: string) -> unit | Error:
+def write(destination: string, module: model_hir_module_module.Module, registry: lexer.SyntaxRegistry, files: list[source.SourceFile], resolution: package.Resolution, sysroot: string) -> unit | Error:
     root = resolution.packages[0].root
     portable: list[source.SourceFile] = []
     for file in files:
@@ -39,16 +40,16 @@ def write(destination: string, module: universal.Module, registry: lexer.SyntaxR
         lexical.append(package.portable_path(location, resolution, root, sysroot))
     syntax = lexer.SyntaxRegistry(registry.operators, registry.descriptors, discovered, registry.rules, lexical)
     output = [archive.schema()]
-    archive.put_universal_Module(output, module)
+    archive.put_model_hir_module_module_Module(output, module)
     archive.put_lexer_SyntaxRegistry(output, syntax)
     archive.put_list_source_SourceFile(output, portable)
     package.write_text(destination, output.join("\n") + "\n")
     snapshot: list[string] = []
-    archive.put_universal_Module(snapshot, module)
-    indexed = archive.get_universal_Module(archive.ArchiveInput(snapshot))
+    archive.put_model_hir_module_module_Module(snapshot, module)
+    indexed = archive.get_model_hir_module_module_Module(archive.ArchiveInput(snapshot))
     directory = destination + ".bodies"
     package.mkdir(directory)
-    items: list[universal.Item] = []
+    items: list[model_hir_module_module.Item] = []
     slot := 0
     for item in indexed.items:
         match item:
@@ -58,11 +59,11 @@ def write(destination: string, module: universal.Module, registry: lexer.SyntaxR
                 result ?= declaration.result
                 expression_macro := false
                 if result != None:
-                    expression_macro = universal.simple_type_name(result) == "Ex"
+                    expression_macro = model_syntax_type_annotation.simple_type_name(result) == "Ex"
                 if not expression_macro and len(declaration.attachments) == 0:
                     declaration = lazy_bodies.store(declaration, directory, slot)
                     slot += 1
-                items.append(universal.Function(declaration))
+                items.append(model_hir_module_module.Function(declaration))
             case _:
                 items.append(item)
     indexed.items = items
@@ -70,7 +71,7 @@ def write(destination: string, module: universal.Module, registry: lexer.SyntaxR
     for file in portable:
         locations.append(source.SourceFile(file.id, file.path, ""))
     index = ["indexed-prelude-1", archive.schema()]
-    archive.put_universal_Module(index, indexed)
+    archive.put_model_hir_module_module_Module(index, indexed)
     archive.put_lexer_SyntaxRegistry(index, syntax)
     archive.put_list_source_SourceFile(index, locations)
     package.write_text(destination + ".index", index.join("\n"))
@@ -98,7 +99,7 @@ def read(sysroot: string) -> PreludeResult | Error:
     input = archive.ArchiveInput(package.read_text(location).split("\n"))
     if archive.take(input) != archive.schema():
         throw Error("incompatible prelude frontend archive")
-    module = archive.get_universal_Module(input)
+    module = archive.get_model_hir_module_module_Module(input)
     registry = archive.get_lexer_SyntaxRegistry(input)
     files = archive.get_list_source_SourceFile(input)
     prepared = archive.get_list_semantic_PreludeAnalysis(input)
@@ -121,12 +122,12 @@ def read_index(location: string, resolution: package.Resolution, root: string, s
     input = archive.ArchiveInput(package.read_text(location + ".index").split("\n"))
     if archive.take(input) != "indexed-prelude-1" or archive.take(input) != archive.schema():
         throw Error("incompatible indexed prelude")
-    module = archive.get_universal_Module(input)
+    module = archive.get_model_hir_module_module_Module(input)
     registry = archive.get_lexer_SyntaxRegistry(input)
     files = archive.get_list_source_SourceFile(input)
     if input.cursor != len(input.lines):
         throw Error("trailing indexed prelude data")
-    items: list[universal.Item] = []
+    items: list[model_hir_module_module.Item] = []
     for item in module.items:
         match item:
             case Function:
@@ -135,7 +136,7 @@ def read_index(location: string, resolution: package.Resolution, root: string, s
                     if not name.starts_with("body-") or not name.ends_with(".txt") or name.contains("/") or name.contains("..") or name.contains("\\"):
                         throw Error("invalid indexed prelude body location")
                     declaration.lazy_body = location + ".bodies/" + name
-                items.append(universal.Function(declaration))
+                items.append(model_hir_module_module.Function(declaration))
             case _:
                 items.append(item)
     module.items = items

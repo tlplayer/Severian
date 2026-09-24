@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "profiling": {
-      "path": "../../../library/system/profiling"
+      "path": "../../../library/system/profiling",
+      "package": "profiling"
     },
     "diagnostics": {
       "path": "../../syntax/diagnostics",
@@ -21,17 +22,13 @@
       "path": "../source",
       "package": "sev-compiler-source"
     },
-    "universal": {
-      "path": "../../universal",
-      "package": "sev-compiler-universal"
-    },
     "syntax": {
-      "package": "sev-compiler-syntax",
-      "path": "../../syntax"
+      "path": "../../syntax",
+      "package": "sev-compiler-syntax"
     },
     "primitives": {
-      "package": "sev-compiler-primitives",
-      "path": "../../syntax/primitive"
+      "path": "../../syntax/primitive",
+      "package": "sev-compiler-primitives"
     }
   }
 }

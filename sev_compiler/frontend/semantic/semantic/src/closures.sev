@@ -1,14 +1,15 @@
-import universal
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 
 
 class Closure:
-    type_id: universal.TypeId
+    type_id: model_syntax_symbol_symbol.TypeId
     parameters: list[string]
-    body: universal.Expression
+    body: model_syntax_function_function.Expression
     captures: list[string]
 
 
-def names(value: universal.Expression, result: list[string]):
+def names(value: model_syntax_function_function.Expression, result: list[string]):
     match value.kind:
         case Name:
             if name not in result:

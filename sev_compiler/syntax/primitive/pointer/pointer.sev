@@ -18,6 +18,7 @@ trait Pointer[T]: Primitive:
 
 class pointer[T]: Pointer:
     identity: PrimitiveId = PointerPrimitive().identity
+    mlir: MlirTypeBinding = PointerPrimitive().mlir
     id: TypeId = PointerPrimitive().id
     literal: LiteralSyntax | None = PointerPrimitive().literal
     literal_family: string = PointerPrimitive().literal_family

@@ -1,13 +1,12 @@
-import artifact
-import universal
+import * from "../../../hir/module/module.sev" as model_hir_module_module
 import * from "cfg.sev"
 import * from "../../ownership/ownership/src/plan.sev"
 import * from "passes.sev"
 import * from "verify.sev"
 import * from "build/mod.sev"
 
-def empty_module() -> universal.Module:
-    return universal.empty_module()
+def empty_module() -> model_hir_module_module.Module:
+    return model_hir_module_module.empty_module()
 
 import * from "agent_ir.sev"
 import * from "callable.sev"

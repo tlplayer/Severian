@@ -1,6 +1,6 @@
+import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import artifact
 import mlir
-import universal
 import * from "error.sev"
 import * from "model.sev"
 
@@ -9,12 +9,12 @@ trait CompileHandler:
 
 
 class CompilerRegistry:
-    handlers: map[universal.CompilerId, CompileHandler]
+    handlers: map[model_syntax_symbol_symbol.CompilerId, CompileHandler]
 
     def CompilerRegistry():
         handlers = {}
 
-    def register(compiler: universal.CompilerId, handler: CompileHandler) -> unit | CompileError:
+    def register(compiler: model_syntax_symbol_symbol.CompilerId, handler: CompileHandler) -> unit | CompileError:
         if handlers.contains(compiler):
             return error(DuplicateHandler(compiler))
         handlers[compiler] = handler

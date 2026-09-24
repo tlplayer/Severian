@@ -1,3 +1,4 @@
+import * from "mlir.sev"
 import * from "../symbol/symbol.sev"
 import * from "../type/type.sev"
 import * from "../source.sev"
@@ -43,7 +44,7 @@ class LiteralBinding:
 
 # Identity and literal behavior are required parts of the primitive contract.
 # TypeId is a compilation handle; identity is the declaration's stable identity.
-trait Primitive: Type
+trait Primitive: Type + MlirTypeProvider
     property identity: PrimitiveId
     property id: TypeId
     property category: PrimitiveCategory

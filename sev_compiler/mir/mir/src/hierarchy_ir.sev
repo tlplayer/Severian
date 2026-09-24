@@ -1,4 +1,6 @@
-import universal
+import * from "../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
+import * from "../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../syntax/block/block.sev" as model_syntax_block_block
 import source
 
 
@@ -6,7 +8,7 @@ def quoted(value: string) -> string:
     return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
 
 
-def block_kind(kind: universal.BlockKind) -> string:
+def block_kind(kind: model_syntax_block_block.BlockKind) -> string:
     match kind:
         case Global:
             return "global"
@@ -33,24 +35,24 @@ def source_location(origin: source.Span | None, files: list[source.SourceFile]) 
     return "null"
 
 
-def emit(module: universal.Module, graph: universal.DefinitionGraph, files: list[source.SourceFile] = []) -> string:
+def emit(module: model_hir_module_module.Module, graph: model_frontend_modules_graph_model.DefinitionGraph, files: list[source.SourceFile] = []) -> string:
     dispatch: list[string] = []
     for function in module.functions:
         if len(function.dispatch_candidates) > 0:
             candidates: list[string] = []
             for name in function.dispatch_candidates:
                 candidates.append(quoted(name))
-            dispatch.append("{\"definition\":" + quoted(universal.definition_identity(function.definition)) + ",\"candidates\":[" + candidates.join(",") + "]}")
+            dispatch.append("{\"definition\":" + quoted(model_frontend_modules_graph_model.definition_identity(function.definition)) + ",\"candidates\":[" + candidates.join(",") + "]}")
     keys: list[string] = []
     for node in graph.nodes:
-        keys.append("{\"definition\":" + quoted(universal.definition_identity(node.definition)) + ",\"key\":" + quoted(node.semantic_key) + "}")
+        keys.append("{\"definition\":" + quoted(model_frontend_modules_graph_model.definition_identity(node.definition)) + ",\"key\":" + quoted(node.semantic_key) + "}")
     regions: list[string] = []
     for region in module.hierarchy.regions:
         parent := "null"
         owner ?= region.parent
         if owner != None:
             parent = string(owner.index)
-        regions.append("{\"id\":" + string(region.id.index) + ",\"definition\":" + quoted(universal.definition_identity(region.definition)) + ",\"parent\":" + parent + "}")
+        regions.append("{\"id\":" + string(region.id.index) + ",\"definition\":" + quoted(model_frontend_modules_graph_model.definition_identity(region.definition)) + ",\"parent\":" + parent + "}")
     sentences: list[string] = []
     for sentence in module.hierarchy.sentences:
         sentences.append("{\"id\":" + string(sentence.id.index) + ",\"region\":" + string(sentence.region.index) + ",\"ordinal\":" + string(sentence.ordinal) + "}")
@@ -67,7 +69,7 @@ def emit(module: universal.Module, graph: universal.DefinitionGraph, files: list
         children: list[string] = []
         for child in block.children:
             children.append(string(child.index))
-        blocks.append("{\"id\":" + string(block.id.index) + ",\"kind\":" + quoted(block_kind(block.kind)) + ",\"definition\":" + quoted(universal.definition_identity(block.owner)) + ",\"parent\":" + parent + ",\"introduced_by\":" + introduced + ",\"children\":[" + children.join(",") + "],\"source\":" + source_location(block.span, files) + "}")
+        blocks.append("{\"id\":" + string(block.id.index) + ",\"kind\":" + quoted(block_kind(block.kind)) + ",\"definition\":" + quoted(model_frontend_modules_graph_model.definition_identity(block.owner)) + ",\"parent\":" + parent + ",\"introduced_by\":" + introduced + ",\"children\":[" + children.join(",") + "],\"source\":" + source_location(block.span, files) + "}")
     obligations: list[string] = []
     for obligation in module.obligations:
         role := "context"
@@ -84,5 +86,5 @@ def emit(module: universal.Module, graph: universal.DefinitionGraph, files: list
                 role = "setup"
             case Context:
                 role = "context"
-        obligations.append("{\"definition\":" + quoted(universal.definition_identity(obligation.owner)) + ",\"role\":" + quoted(role) + ",\"proof\":\"unknown\"}")
+        obligations.append("{\"definition\":" + quoted(model_frontend_modules_graph_model.definition_identity(obligation.owner)) + ",\"role\":" + quoted(role) + ",\"proof\":\"unknown\"}")
     return "{\"dispatch\":[" + dispatch.join(",") + "],\"keys\":[" + keys.join(",") + "],\"regions\":[" + regions.join(",") + "],\"sentences\":[" + sentences.join(",") + "],\"blocks\":[" + blocks.join(",") + "],\"obligations\":[" + obligations.join(",") + "]}"

@@ -1,9 +1,12 @@
-import * from "package:interface/src/package_metadata.sev" as metadata
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import * from "package:interface/interface/src/package_metadata.sev" as metadata
 import lexer
 import diagnostics
 import source
 from source import SourceFile
-import universal
 import package
 import interfaces
 from io import IOError
@@ -12,7 +15,7 @@ import * from "lexical.sev"
 import * from "imports.sev" as import_selection
 import * from "identity.sev" as semantic_identity
 import * from "semantic_interface.sev" as semantic_interface
-import * from "package:interface/src/semantic_payload.sev" as semantic_payload
+import * from "package:interface/interface/src/semantic_payload.sev" as semantic_payload
 
 def read_source(path: string) -> source.SourceFile | diagnostics.Diagnostic:
     # Normalize IO failures before entering a Diagnostic-only result. Passing
@@ -219,7 +222,7 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
     registry.discovered.append(file.path)
 
 
-def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "", active_prefixes: list[string] = [], required_imports: list[string] = []) -> universal.Module | diagnostics.Diagnostic:
+def load_source_module(input: source.SourceFile, prefix: string, active: list[string], root: bool, files: list[source.SourceFile], registry: lexer.SyntaxRegistry, resolution: package.Resolution = package.Resolution([], [], ""), sysroot: string = "", active_prefixes: list[string] = [], required_imports: list[string] = []) -> model_hir_module_module.Module | diagnostics.Diagnostic:
     path = normalized_path(input.path)
     if path.ends_with(".sevi"):
         try:
@@ -241,7 +244,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
             if active[index] == path and index < int(len(active_prefixes)) and active_prefixes[index] == prefix:
                 # Relative declaration cycles share one namespace. The outer
                 # visit contributes these declarations before semantic analysis.
-                return universal.empty_module()
+                return model_hir_module_module.empty_module()
         return error(diagnostics.diagnostic("E000120", "cyclic source import: " + path))
     if len(active) >= 64:
         return error(diagnostics.diagnostic("E000120", "source import depth exceeds 64 modules"))
@@ -270,7 +273,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
     narrow = narrow and configured
     if not narrow:
         import_selection.require_name(required, "*")
-    result = universal.empty_module()
+    result = model_hir_module_module.empty_module()
     aliases: list[string] = []
     for item in parsed.items:
         match item:
@@ -328,36 +331,36 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                                             # An alias needs fresh lowering metadata. Sharing
                                             # the values list appends both functions' ABI
                                             # parameters to the same declaration.
-                                            imported = universal.FunctionDeclaration(name=prefix + imported_name, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode, type_defaults=declaration.type_defaults[:], definition=declaration.definition, semantic_key=declaration.semantic_key, attachments=declaration.attachments[:], dispatch_candidates=declaration.dispatch_candidates[:], dispatch_predicates=declaration.dispatch_predicates[:], lazy_body=declaration.lazy_body)
-                                            result.items.append(universal.Function(imported))
+                                            imported = model_syntax_function_function.FunctionDeclaration(name=prefix + imported_name, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode, type_defaults=declaration.type_defaults[:], definition=declaration.definition, semantic_key=declaration.semantic_key, attachments=declaration.attachments[:], dispatch_candidates=declaration.dispatch_candidates[:], dispatch_predicates=declaration.dispatch_predicates[:], lazy_body=declaration.lazy_body)
+                                            result.items.append(model_hir_module_module.Function(imported))
                                             selected = true
                                     case Record:
-                                        imported_record: universal.RecordDeclaration = declaration
+                                        imported_record: model_syntax_function_function.RecordDeclaration = declaration
                                         if imported_record.name == child_prefix + name:
                                             if len(imported_record.type_parameters) == 0:
-                                                target = universal.named_type(imported_record.name, [], imported_record.span)
-                                                result.items.append(universal.Type(universal.TypeDeclaration([], prefix + imported_name, [], [], target, imported_record.span, lookup=imported_record.lookup)))
+                                                target = model_syntax_type_annotation.named_type(imported_record.name, [], imported_record.span)
+                                                result.items.append(model_hir_module_module.Item.Type(model_syntax_function_syntax.TypeDeclaration([], prefix + imported_name, [], [], target, imported_record.span, lookup=imported_record.lookup)))
                                             else:
                                                 imported_record.name = prefix + imported_name
-                                                result.items.append(universal.Record(imported_record))
+                                                result.items.append(model_hir_module_module.Record(imported_record))
                                             selected = true
                                     case Trait:
-                                        imported_trait: universal.TraitDeclaration = declaration
+                                        imported_trait: model_syntax_function_syntax.TraitDeclaration = declaration
                                         if imported_trait.name == child_prefix + name:
                                             imported_trait.name = prefix + imported_name
-                                            result.items.append(universal.Trait(imported_trait))
+                                            result.items.append(model_hir_module_module.Trait(imported_trait))
                                             selected = true
                                     case Type:
-                                        imported_type: universal.TypeDeclaration = declaration
+                                        imported_type: model_syntax_function_syntax.TypeDeclaration = declaration
                                         if imported_type.name == child_prefix + name:
                                             imported_type.name = prefix + imported_name
-                                            result.items.append(universal.Type(imported_type))
+                                            result.items.append(model_hir_module_module.Item.Type(imported_type))
                                             selected = true
                                     case BindingItem:
                                         if binding.name == child_prefix + name:
                                             imported := binding
                                             imported.name = prefix + imported_name
-                                            result.items.append(universal.BindingItem(imported))
+                                            result.items.append(model_hir_module_module.BindingItem(imported))
                                             selected = true
                                     case _:
                                         throw diagnostics.diagnostic("E000124", "unimplemented (sev_compiler/frontend/modules/modules/src/source.sev)")
@@ -370,28 +373,28 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                 trait_declaration.source_name = declaration.name
                 trait_declaration.name = prefix + declaration.name
                 trait_declaration.lookup = prefix
-                result.items.append(universal.Trait(trait_declaration))
+                result.items.append(model_hir_module_module.Trait(trait_declaration))
             case Type:
                 type_declaration := declaration
                 type_declaration.name = prefix + declaration.name
                 type_declaration.lookup = prefix
-                result.items.append(universal.Type(type_declaration))
+                result.items.append(model_hir_module_module.Item.Type(type_declaration))
             case Record:
                 record_declaration := declaration
                 record_declaration.source_name = declaration.name
                 record_declaration.name = declaration.name if declaration.extension else prefix + declaration.name
                 record_declaration.lookup = prefix
-                result.items.append(universal.Record(record_declaration))
+                result.items.append(model_hir_module_module.Record(record_declaration))
             case Function:
                 function := declaration
                 function.name = prefix + declaration.name
                 function.lookup = prefix
-                result.items.append(universal.Function(function))
+                result.items.append(model_hir_module_module.Function(function))
             case Test:
                 if root:
                     test_declaration := declaration
                     test_declaration.lookup = prefix
-                    result.items.append(universal.Test(test_declaration))
+                    result.items.append(model_hir_module_module.Test(test_declaration))
             case BindingItem:
                 if not root:
                     if binding.mutable or binding.update:
@@ -400,7 +403,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         case LiteralValue:
                             constant := binding
                             constant.name = prefix + binding.name
-                            result.items.append(universal.BindingItem(constant))
+                            result.items.append(model_hir_module_module.BindingItem(constant))
                         case _:
                             return error(diagnostics.diagnostic("E000120", "imported globals must be immutable literals"))
                 else:
@@ -427,20 +430,20 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
 
 # Diamond imports share declarations; distinct source declarations still reach
 # semantic duplicate checking, even if their visible names are identical.
-def append_selected_import(result: universal.Module, child: universal.Module, namespace: string, name: string, exposed: string) -> unit | diagnostics.Diagnostic:
+def append_selected_import(result: model_hir_module_module.Module, child: model_hir_module_module.Module, namespace: string, name: string, exposed: string) -> unit | diagnostics.Diagnostic:
     selected := false
     for item in child.items:
         match item:
             case Function:
                 if declaration.name == namespace + name:
-                    imported = universal.FunctionDeclaration(name=exposed, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode, type_defaults=declaration.type_defaults[:], definition=declaration.definition, semantic_key=declaration.semantic_key, attachments=declaration.attachments[:], dispatch_candidates=declaration.dispatch_candidates[:], dispatch_predicates=declaration.dispatch_predicates[:], lazy_body=declaration.lazy_body)
-                    append_imported_item(result, universal.Function(imported))
+                    imported = model_syntax_function_function.FunctionDeclaration(name=exposed, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode, type_defaults=declaration.type_defaults[:], definition=declaration.definition, semantic_key=declaration.semantic_key, attachments=declaration.attachments[:], dispatch_candidates=declaration.dispatch_candidates[:], dispatch_predicates=declaration.dispatch_predicates[:], lazy_body=declaration.lazy_body)
+                    append_imported_item(result, model_hir_module_module.Function(imported))
                     selected = true
             case BindingItem:
                 if binding.name == namespace + name:
                     imported := binding
                     imported.name = exposed
-                    append_imported_item(result, universal.BindingItem(imported))
+                    append_imported_item(result, model_hir_module_module.BindingItem(imported))
                     selected = true
             case _:
                 throw diagnostics.diagnostic("E000124", "unimplemented (sev_compiler/frontend/modules/modules/src/source.sev)")
@@ -448,7 +451,7 @@ def append_selected_import(result: universal.Module, child: universal.Module, na
         return error(diagnostics.diagnostic("E000124", "missing or unsupported imported declaration: " + name))
 
 
-def imported_item_key(item: universal.Item) -> string:
+def imported_item_key(item: model_hir_module_module.Item) -> string:
     match item:
         case Record:
             return "record:" + declaration.name + ":" + string(declaration.span.source.index) + ":" + string(declaration.span.start)
@@ -467,7 +470,7 @@ def imported_item_key(item: universal.Item) -> string:
             return ""
 
 
-def append_imported_item(module: universal.Module, item: universal.Item):
+def append_imported_item(module: model_hir_module_module.Module, item: model_hir_module_module.Item):
     key = imported_item_key(item)
     if key != "":
         for previous in module.items:

@@ -13,3 +13,6 @@ import * from "../../primitive/contract.sev"
 import * from "../../block/block.sev"
 import * from "../../sentence/sentence.sev" as sentence
 import * from "../../token.sev"
+
+import * from "../../type/mlir.sev"
+import * from "../../function/lowering.sev"

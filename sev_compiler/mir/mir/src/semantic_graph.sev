@@ -1,16 +1,23 @@
+import * from "../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
+import * from "../../../hir/module/hierarchy.sev" as model_hir_module_hierarchy
+import * from "../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../cfg/cfg.sev" as model_mir_cfg_cfg
+import * from "../../../syntax/constraint/model.sev" as model_syntax_constraint_model
+import * from "../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import source
-import universal
-from universal import graph_verify
+import * from "../../../frontend/modules/graph/verify.sev" as graph_verify
 
 
-def callable_definition(module: universal.Module, function: universal.FunctionId) -> universal.DefId | Error:
+def callable_definition(module: model_hir_module_module.Module, function: model_syntax_symbol_symbol.FunctionId) -> model_syntax_symbol_symbol.DefId | Error:
     for declaration in borrow module.functions:
         if declaration.id.value == function.value:
             return declaration.definition
     throw Error("call graph refers to an unknown function: " + string(function.value))
 
 
-def grammar_parent(module: universal.Module, declaration: universal.TraitDeclaration, name: string) -> universal.DefId | Error:
+def grammar_parent(module: model_hir_module_module.Module, declaration: model_syntax_function_syntax.TraitDeclaration, name: string) -> model_syntax_symbol_symbol.DefId | Error:
     for parent in borrow module.traits:
         if parent.name == declaration.lookup + name:
             return parent.definition
@@ -20,8 +27,8 @@ def grammar_parent(module: universal.Module, declaration: universal.TraitDeclara
     throw Error("semantic graph refers to an unknown base: " + name)
 
 
-def body_dependencies(graph: universal.DefinitionGraph, module: universal.Module, definition: universal.DefId, body: universal.CfgBody) -> unit | Error:
-    owner = universal.definition_index(graph, definition)
+def body_dependencies(graph: model_frontend_modules_graph_model.DefinitionGraph, module: model_hir_module_module.Module, definition: model_syntax_symbol_symbol.DefId, body: model_mir_cfg_cfg.CfgBody) -> unit | Error:
+    owner = model_frontend_modules_graph_model.definition_index(graph, definition)
     for block in body.blocks:
         position := 0
         for operation in block.operations:
@@ -29,16 +36,16 @@ def body_dependencies(graph: universal.DefinitionGraph, module: universal.Module
             position += 1
             match operation:
                 case Call:
-                    target = universal.definition_index(graph, callable_definition(module, function))
-                    universal.add_dependency(graph, owner, target, universal.DependencyKind.Invocation, origin)
+                    target = model_frontend_modules_graph_model.definition_index(graph, callable_definition(module, function))
+                    model_frontend_modules_graph_model.add_dependency(graph, owner, target, model_frontend_modules_graph_model.DependencyKind.Invocation, origin)
                 case CallFields:
-                    target = universal.definition_index(graph, callable_definition(module, function))
-                    universal.add_dependency(graph, owner, target, universal.DependencyKind.Invocation, origin)
+                    target = model_frontend_modules_graph_model.definition_index(graph, callable_definition(module, function))
+                    model_frontend_modules_graph_model.add_dependency(graph, owner, target, model_frontend_modules_graph_model.DependencyKind.Invocation, origin)
                 case _:
                     continue
 
 
-def source_owner(owners: list[universal.SourceUnit], span: source.Span | None, fallback: int) -> int | Error:
+def source_owner(owners: list[model_frontend_modules_graph_model.SourceUnit], span: source.Span | None, fallback: int) -> int | Error:
     origin ?= span
     if origin != None:
         for owner in owners:
@@ -48,12 +55,12 @@ def source_owner(owners: list[universal.SourceUnit], span: source.Span | None, f
     return fallback
 
 
-def build(module: universal.Module, owners: list[universal.SourceUnit], root: int) -> universal.DefinitionGraph | Error:
-    graph = universal.DefinitionGraph()
+def build(module: model_hir_module_module.Module, owners: list[model_frontend_modules_graph_model.SourceUnit], root: int) -> model_frontend_modules_graph_model.DefinitionGraph | Error:
+    graph = model_frontend_modules_graph_model.DefinitionGraph()
     module.obligations = []
     for declaration in module.traits:
-        kind = universal.DefinitionKind.GrammarDefinition if declaration.grammar else universal.DefinitionKind.TraitDefinition
-        universal.add_definition(graph, declaration.definition, kind, declaration.name, declaration.span, alias=true, submodule=source_owner(owners, declaration.span, root))
+        kind = model_frontend_modules_graph_model.DefinitionKind.GrammarDefinition if declaration.grammar else model_frontend_modules_graph_model.DefinitionKind.TraitDefinition
+        model_frontend_modules_graph_model.add_definition(graph, declaration.definition, kind, declaration.name, declaration.span, alias=true, submodule=source_owner(owners, declaration.span, root))
     executable_ids: list[string] = []
     for declaration in module.functions:
         key := string(declaration.id.value)
@@ -61,13 +68,13 @@ def build(module: universal.Module, owners: list[universal.SourceUnit], root: in
             throw Error("duplicate executable function identity: " + key)
         executable_ids.append(key)
         unit = source_owner(owners, declaration.span, root)
-        node = universal.add_definition(graph, declaration.definition, universal.DefinitionKind.Callable, declaration.name, declaration.span, alias=true, submodule=unit)
+        node = model_frontend_modules_graph_model.add_definition(graph, declaration.definition, model_frontend_modules_graph_model.DefinitionKind.Callable, declaration.name, declaration.span, alias=true, submodule=unit)
         owner_key := ""
         for owner in owners:
             if owner.submodule == unit:
                 owner_key = owner.key
                 break
-        key = universal.callable_key(declaration, owner_key)
+        key = model_syntax_symbol_symbol.callable_key(declaration, owner_key)
         if declaration.semantic_key != "":
             key = declaration.semantic_key
         definition_node = graph.nodes[node.index]
@@ -78,19 +85,19 @@ def build(module: universal.Module, owners: list[universal.SourceUnit], root: in
             layout ?= body.layout
             if layout == None:
                 throw Error("callable has no source block layout")
-            region = universal.RegionId(layout.id.index)
+            region = model_syntax_symbol_symbol.RegionId(layout.id.index)
             for attachment in declaration.attachments:
-                module.obligations.append(universal.ConstraintObligation(declaration.definition, attachment.role, attachment.condition, region=region))
-    initializer = universal.DefId(0, 0, universal.DeclarationId(0))
+                module.obligations.append(model_syntax_constraint_model.ConstraintObligation(declaration.definition, attachment.role, attachment.condition, region=region))
+    initializer = model_syntax_symbol_symbol.DefId(0, 0, model_syntax_symbol_symbol.DeclarationId(0))
     if len(module.cfg_bodies) > 0:
-        universal.add_definition(graph, initializer, universal.DefinitionKind.Callable, "$initializer", None, submodule=root)
+        model_frontend_modules_graph_model.add_definition(graph, initializer, model_frontend_modules_graph_model.DefinitionKind.Callable, "$initializer", None, submodule=root)
     for declaration in module.traits:
-        owner = universal.definition_index(graph, declaration.definition)
+        owner = model_frontend_modules_graph_model.definition_index(graph, declaration.definition)
         for base in declaration.bases:
-            name ?= universal.simple_type_name(base)
+            name ?= model_syntax_type_annotation.simple_type_name(base)
             if name != None:
-                target = universal.definition_index(graph, grammar_parent(module, declaration, name))
-                universal.add_dependency(graph, owner, target, universal.DependencyKind.Inheritance)
+                target = model_frontend_modules_graph_model.definition_index(graph, grammar_parent(module, declaration, name))
+                model_frontend_modules_graph_model.add_dependency(graph, owner, target, model_frontend_modules_graph_model.DependencyKind.Inheritance)
     for declaration in module.functions:
         if declaration.cfg_index >= len(module.cfg_bodies):
             throw Error("callable CFG index is out of bounds")
@@ -98,6 +105,6 @@ def build(module: universal.Module, owners: list[universal.SourceUnit], root: in
             body_dependencies(graph, module, declaration.definition, module.cfg_bodies[declaration.cfg_index])
     if len(module.cfg_bodies) > 0:
         body_dependencies(graph, module, initializer, module.cfg_bodies[0])
-    universal.verify_hierarchy(module.hierarchy)
+    model_hir_module_hierarchy.verify_hierarchy(module.hierarchy)
     graph_verify.freeze_definitions(graph)
     return graph

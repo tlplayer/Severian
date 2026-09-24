@@ -1,0 +1,67 @@
+# A type declaration owns its MLIR spelling. Lowering substitutes resolved
+# parameters; it does not choose a dialect from a compiler-owned type enum.
+class MlirTypeParameter:
+    name: string
+    value: string
+
+
+trait MlirTypeProvider:
+    property mlir: MlirTypeBinding
+
+
+class MlirTypeBinding:
+    spelling: string
+    category: string = "opaque"
+    scalar: string = ""
+    bits: u16 = 0
+    signed: bool = false
+    # The declaration supplies these structural requirements, including for
+    # dialect types unknown to the compiler.
+    dimensions: int = -1
+    elements: int = -1
+    ranked: bool = true
+    value: bool = true
+
+    def render(parameters: list[MlirTypeParameter] = []) -> string:
+        output := ""
+        cursor := 0
+        characters = spelling.characters()
+        while cursor < len(characters):
+            if characters[cursor] != "{":
+                output += string(characters[cursor])
+                cursor += 1
+                continue
+            cursor += 1
+            start = cursor
+            while cursor < len(characters) and characters[cursor] != "}":
+                cursor += 1
+            if cursor == len(characters):
+                throw Error("unterminated MLIR type parameter")
+            name = characters[start:cursor].join("")
+            found := false
+            for parameter in parameters:
+                if parameter.name == name:
+                    if found:
+                        throw Error("duplicate MLIR type parameter: " + name)
+                    output += parameter.value
+                    found = true
+            if not found:
+                throw Error("unresolved MLIR type parameter: " + name)
+            cursor += 1
+        if output == "" and value:
+            throw Error("an MLIR value type requires a spelling")
+        return output
+
+
+test "MLIR type bindings accept an open dialect and resolved parameters":
+    binding = MlirTypeBinding("!example.tile<{N} x {T}>")
+    assert(binding.render([MlirTypeParameter("N", "4"), MlirTypeParameter("T", "i32")]) == "!example.tile<4 x i32>")
+
+
+test "MLIR type bindings reject unresolved parameters":
+    rejected := false
+    try:
+        MlirTypeBinding("!example.tile<{T}>").render()
+    catch failure: Error:
+        rejected = true
+    assert(rejected)

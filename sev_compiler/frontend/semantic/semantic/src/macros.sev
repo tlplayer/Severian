@@ -1,12 +1,16 @@
+import * from "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import lexer
 import diagnostics
 from lexer import TokenKind
 import parser
 import source
-import universal
-from universal import scalar
-from universal import scalar_conversion as conversions
-from universal import integer_spelling
+import * from "../../../../syntax/primitive/catalog.sev" as scalar
+import * from "../../../../syntax/type/scalar_conversion.sev" as conversions
+import * from "../../../../syntax/type/integer_spelling.sev" as integer_spelling
 import * from "definitions.sev" as family_definitions
 
 
@@ -142,7 +146,7 @@ class MacroCondition:
     value: bool = false
 
 
-def macro_integer(expression: universal.Expression) -> MacroInteger:
+def macro_integer(expression: model_syntax_function_function.Expression) -> MacroInteger:
     match expression.kind:
         case LiteralValue:
             match value:
@@ -155,7 +159,7 @@ def macro_integer(expression: universal.Expression) -> MacroInteger:
     return MacroInteger(false)
 
 
-def macro_condition(expression: universal.Expression) -> MacroCondition:
+def macro_condition(expression: model_syntax_function_function.Expression) -> MacroCondition:
     match expression.kind:
         case LiteralValue:
             match value:
@@ -186,8 +190,8 @@ def macro_condition(expression: universal.Expression) -> MacroCondition:
     return MacroCondition(false)
 
 
-def macro_block(block: universal.Block) -> universal.Block:
-    result = universal.empty_block()
+def macro_block(block: model_syntax_block_block.Block) -> model_syntax_block_block.Block:
+    result = model_syntax_block_block.empty_block()
     for statement in block.statements:
         match statement:
             case If:
@@ -202,7 +206,7 @@ def macro_block(block: universal.Block) -> universal.Block:
                             case _:
                                 throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/macros.sev)")
                 else:
-                    result.statements.append(universal.If(condition, macro_block(then_block), macro_block(else_block), span))
+                    result.statements.append(model_syntax_sentence_sentence.Statement.If(condition, macro_block(then_block), macro_block(else_block), span))
             case Return:
                 result.statements.append(statement)
                 return result
@@ -211,7 +215,7 @@ def macro_block(block: universal.Block) -> universal.Block:
     return result
 
 
-def macro_instance(definition: ScalarMacro, types: list[scalar.ScalarType], output: universal.Module):
+def macro_instance(definition: ScalarMacro, types: list[scalar.ScalarType], output: model_hir_module_module.Module):
     suffix := ""
     for type in types:
         suffix += "$" + type.name
@@ -252,17 +256,17 @@ def macro_instance(definition: ScalarMacro, types: list[scalar.ScalarType], outp
                 body ?= function.body
                 if body != None:
                     function.body = macro_block(body)
-                output.items.append(universal.Function(function))
+                output.items.append(model_hir_module_module.Function(function))
             case Test:
                 test_declaration := declaration
                 test_declaration.body = macro_block(declaration.body)
-                output.items.append(universal.Test(test_declaration))
+                output.items.append(model_hir_module_module.Test(test_declaration))
             case OperatorItem:
                 operation := declaration
                 body ?= operation.body
                 if body != None:
                     operation.body = macro_block(body)
-                output.items.append(universal.OperatorItem(operation))
+                output.items.append(model_hir_module_module.OperatorItem(operation))
             case _:
                 throw Error("enumerative macro bodies must emit functions, operators or tests")
 
@@ -275,7 +279,7 @@ def macro_family(name: string, environment: family_definitions.SemanticDefinitio
             if conversions.scalar_numeric(type.id) and ((name == "float") == (type.representation == "float")):
                 members.append(type)
         return members
-    for id in family_definitions.family_members(environment, universal.named_type(name, [], span), [], ""):
+    for id in family_definitions.family_members(environment, model_syntax_type_annotation.named_type(name, [], span), [], ""):
         type ?= scalar.scalar_type(id)
         if type == None:
             return error(diagnostics.diagnostic_at("E000205", "enumerative macro requires primitive type metadata", span))
@@ -284,7 +288,7 @@ def macro_family(name: string, environment: family_definitions.SemanticDefinitio
     return members
 
 
-def macro_enumerate(definition: ScalarMacro, types: list[scalar.ScalarType], output: universal.Module, environment: family_definitions.SemanticDefinitions) -> unit | diagnostics.Diagnostic:
+def macro_enumerate(definition: ScalarMacro, types: list[scalar.ScalarType], output: model_hir_module_module.Module, environment: family_definitions.SemanticDefinitions) -> unit | diagnostics.Diagnostic:
     if len(types) == len(definition.bindings):
         macro_instance(definition, types, output)
         return
@@ -295,11 +299,11 @@ def macro_enumerate(definition: ScalarMacro, types: list[scalar.ScalarType], out
         macro_enumerate(definition, selected, output, environment)
 
 
-def parse_module(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Diagnostic:
+def parse_module(tokens: list[lexer.Token]) -> model_hir_module_module.Module | diagnostics.Diagnostic:
     input = parser.Parser(tokens)
     definitions: list[ScalarMacro] = []
     ordinary: list[lexer.Token] = []
-    expanded = universal.empty_module()
+    expanded = model_hir_module_module.empty_module()
     invoked: list[string] = []
     depth := 0
     line_start := true

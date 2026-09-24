@@ -4,12 +4,12 @@ import * from "../../syntax/symbol/symbol.sev"
 import * from "../../syntax/function/syntax.sev"
 import * from "../../syntax/function/function.sev"
 import * from "../../syntax/sentence/sentence.sev"
-import * from "../cfg/cfg.sev"
-import * from "../value/lowered.sev"
-import * from "../grammar/grammar.sev"
-import * from "../source/quality.sev"
+import * from "../../mir/cfg/cfg.sev"
+import * from "../../mir/value.sev"
+import * from "../../syntax/grammar/grammar.sev"
+import * from "../../syntax/source.sev"
 import * from "hierarchy.sev"
-import * from "../constraint/model.sev"
+import * from "../../syntax/constraint/model.sev"
 
 
 enum Item:

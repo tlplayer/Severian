@@ -1,36 +1,37 @@
-import universal
+import * from "../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
 
 
 # The bounded evaluator never executes user code. Unsupported predicates remain
 # Unknown and must retain their runtime check or fail a static-only requirement.
-def prove_condition(expression: universal.Expression) -> universal.ProofResult:
+def prove_condition(expression: model_syntax_function_function.Expression) -> model_syntax_constraint_model.ProofResult:
     match expression.kind:
         case LiteralValue:
             match value:
                 case BooleanValue:
-                    return universal.ProofResult.Proven if value else universal.ProofResult.Refuted
+                    return model_syntax_constraint_model.ProofResult.Proven if value else model_syntax_constraint_model.ProofResult.Refuted
                 case _:
-                    return universal.ProofResult.Unknown
+                    return model_syntax_constraint_model.ProofResult.Unknown
         case Unary:
             if operator.symbol == "not":
                 result = prove_condition(operand)
-                if result == universal.ProofResult.Proven:
-                    return universal.ProofResult.Refuted
-                if result == universal.ProofResult.Refuted:
-                    return universal.ProofResult.Proven
+                if result == model_syntax_constraint_model.ProofResult.Proven:
+                    return model_syntax_constraint_model.ProofResult.Refuted
+                if result == model_syntax_constraint_model.ProofResult.Refuted:
+                    return model_syntax_constraint_model.ProofResult.Proven
         case Binary:
             first = prove_condition(left)
             second = prove_condition(right)
             if operator.symbol == "and":
-                if first == universal.ProofResult.Refuted or second == universal.ProofResult.Refuted:
-                    return universal.ProofResult.Refuted
-                if first == universal.ProofResult.Proven and second == universal.ProofResult.Proven:
-                    return universal.ProofResult.Proven
+                if first == model_syntax_constraint_model.ProofResult.Refuted or second == model_syntax_constraint_model.ProofResult.Refuted:
+                    return model_syntax_constraint_model.ProofResult.Refuted
+                if first == model_syntax_constraint_model.ProofResult.Proven and second == model_syntax_constraint_model.ProofResult.Proven:
+                    return model_syntax_constraint_model.ProofResult.Proven
             if operator.symbol == "or":
-                if first == universal.ProofResult.Proven or second == universal.ProofResult.Proven:
-                    return universal.ProofResult.Proven
-                if first == universal.ProofResult.Refuted and second == universal.ProofResult.Refuted:
-                    return universal.ProofResult.Refuted
+                if first == model_syntax_constraint_model.ProofResult.Proven or second == model_syntax_constraint_model.ProofResult.Proven:
+                    return model_syntax_constraint_model.ProofResult.Proven
+                if first == model_syntax_constraint_model.ProofResult.Refuted and second == model_syntax_constraint_model.ProofResult.Refuted:
+                    return model_syntax_constraint_model.ProofResult.Refuted
         case _:
-            return universal.ProofResult.Unknown
-    return universal.ProofResult.Unknown
+            return model_syntax_constraint_model.ProofResult.Unknown
+    return model_syntax_constraint_model.ProofResult.Unknown

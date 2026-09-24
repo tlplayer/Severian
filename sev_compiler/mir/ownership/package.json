@@ -9,17 +9,13 @@
     "path": "ownership/src/lib.sev"
   },
   "dependencies": {
-    "universal": {
-      "package": "sev-compiler-universal",
-      "path": "../../universal"
-    },
     "source": {
-      "package": "sev-compiler-source",
-      "path": "../../frontend/source"
+      "path": "../../frontend/source",
+      "package": "sev-compiler-source"
     },
     "diagnostics": {
-      "package": "sev-compiler-diagnostics",
-      "path": "../../syntax/diagnostics"
+      "path": "../../syntax/diagnostics",
+      "package": "sev-compiler-diagnostics"
     }
   }
 }

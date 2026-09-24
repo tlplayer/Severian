@@ -11,23 +11,24 @@
   },
   "dependencies": {
     "source": {
-      "package": "sev-compiler-source",
-      "path": "../../frontend/source"
+      "path": "../../frontend/source",
+      "package": "sev-compiler-source"
     },
     "profiling": {
-      "path": "../../../library/system/profiling"
-    },
-    "universal": {
-      "package": "sev-compiler-universal",
-      "path": "../../universal"
+      "path": "../../../library/system/profiling",
+      "package": "profiling"
     },
     "mir": {
       "package": "sev-compiler-mir",
       "path": "../../mir"
     },
     "ownership": {
-      "package": "sev-compiler-mir-ownership",
-      "path": "../../mir/ownership"
+      "path": "../../mir/ownership",
+      "package": "sev-compiler-mir-ownership"
+    },
+    "primitives": {
+      "path": "../../syntax/primitive",
+      "package": "sev-compiler-primitives"
     }
   }
 }

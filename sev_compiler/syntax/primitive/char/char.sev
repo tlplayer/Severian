@@ -73,6 +73,7 @@ trait Character:
 
 class char[T: char_storage = u32]: Character, PrimitiveAlias[T]:
     identity: PrimitiveId = CharPrimitive().identity
+    mlir: MlirTypeBinding = CharPrimitive().mlir
     id: TypeId = CharPrimitive().id
     literal: LiteralSyntax | None = CharPrimitive().literal
     literal_family: string = CharPrimitive().literal_family

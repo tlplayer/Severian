@@ -1,5 +1,10 @@
+import * from "../../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "../../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import source
-import universal
 import * from "package:lexer/lexer/src/lib.sev" as lexer
 import * from "package:parser/parser/src/lib.sev" as parser
 import * from "../callable.sev" as semantic
@@ -8,15 +13,15 @@ import * from "../callable.sev" as semantic
 def callable_fixture_tokens(input: source.SourceFile) -> list[lexer.Token]:
     # These isolated parser/HIR tests supply their syntax environment explicitly;
     # the executable obtains its environment from source G declarations.
-    syntax = [universal.operator_syntax(universal.Add()),
-        universal.operator_syntax(universal.Equal()),
-        universal.operator_syntax(universal.LeftShift()),
-        universal.OperatorSyntax("+=", universal.Fixity.Infix, 1, universal.Associativity.Left)]
+    syntax = [model_syntax_function_syntax.operator_syntax(model_syntax_function_syntax.Add()),
+        model_syntax_function_syntax.operator_syntax(model_syntax_function_syntax.Equal()),
+        model_syntax_function_syntax.operator_syntax(model_syntax_function_syntax.LeftShift()),
+        model_syntax_function_syntax.OperatorSyntax("+=", model_syntax_function_syntax.Fixity.Infix, 1, model_syntax_function_syntax.Associativity.Left)]
     return lexer.scan(input, syntax)
 
 
 
-def callable_fixture_environment(module: universal.Module) -> universal.Module:
+def callable_fixture_environment(module: model_hir_module_module.Module) -> model_hir_module_module.Module:
     # HIR fixtures resolve control contracts explicitly, just as their syntax
     # fixtures do. Native CFG tests exercise the executable source bodies.
     input = source.SourceFile(source.SourceId(1), "control-contracts.sev", "trait G:\n    throw Error("Unimplemented (sev_compiler/frontend/semantic/semantic/src/callable/semantic_ir_tests.sev)")trait If: G:\n    control_flow: ControlFlow = Branch\ntrait Return: G:\n    control_flow: ControlFlow = Return\n")
@@ -26,7 +31,7 @@ def callable_fixture_environment(module: universal.Module) -> universal.Module:
     return module
 
 
-def resolved_expression(expression: universal.Expression):
+def resolved_expression(expression: model_syntax_function_function.Expression):
     assert(expression.type_id.index != 0)
     match expression.kind:
         case LiteralValue:
@@ -44,7 +49,7 @@ def resolved_expression(expression: universal.Expression):
             assert(false)
 
 
-def resolved_block(block: universal.Block) -> int:
+def resolved_block(block: model_syntax_block_block.Block) -> int:
     returns := 0
     for statement in block.statements:
         match statement:
@@ -133,7 +138,7 @@ test "operator grammar constraints retain ordinary generic parameter syntax":
             match operation.constraints[0]:
                 case Parameter:
                     assert(parameter == "Grammar")
-                    assert(universal.simple_type_name(bound) == "Add")
+                    assert(model_syntax_type_annotation.simple_type_name(bound) == "Add")
                 case _:
                     assert(false)
         case _:
@@ -221,11 +226,11 @@ test "package and executable entries share type and member registration":
 
 
 test "callable specialization metadata survives list storage":
-    function = universal.FunctionDeclaration()
-    function.id = universal.FunctionId(449)
-    function.template = universal.DefId(0, 1, universal.DeclarationId(7))
-    function.type_arguments = [universal.TypeBinding(universal.GenericParamId(0), universal.TypeId(64))]
-    functions: list[universal.FunctionDeclaration] = []
+    function = model_syntax_function_function.FunctionDeclaration()
+    function.id = model_syntax_symbol_symbol.FunctionId(449)
+    function.template = model_syntax_symbol_symbol.DefId(0, 1, model_syntax_symbol_symbol.DeclarationId(7))
+    function.type_arguments = [model_syntax_symbol_symbol.TypeBinding(model_syntax_symbol_symbol.GenericParamId(0), model_syntax_symbol_symbol.TypeId(64))]
+    functions: list[model_syntax_function_function.FunctionDeclaration] = []
     functions.append(function)
     stored = functions[0]
     assert(stored.id.value == 449)
@@ -235,7 +240,7 @@ test "callable specialization metadata survives list storage":
 
 test "generic contract pack calls do not enqueue symbolic native functions":
     input = source.virtual_source("generic-pack.sev", "def sink(*values: V):\n    throw Error("Unimplemented (sev_compiler/frontend/semantic/semantic/src/callable/semantic_ir_tests.sev)")def forward[T](value: T) -> T:\n    sink(value)\n    return value\ndef main() -> i32:\n    forward(1)\n    return 0\n")
-    module = callable_fixture_environment(parser.parse(lexer.scan(input, [universal.operator_syntax(universal.Multiply())])))
+    module = callable_fixture_environment(parser.parse(lexer.scan(input, [model_syntax_function_syntax.operator_syntax(model_syntax_function_syntax.Multiply())])))
     result = semantic.analyze_callables(module)
     for function in result.functions:
         for type_id in function.parameter_types:

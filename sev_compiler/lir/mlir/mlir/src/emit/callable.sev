@@ -1,47 +1,60 @@
+import * from "../../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../../mir/cfg/block.sev" as model_mir_cfg_block
+import * from "../../../../../mir/cfg/cfg.sev" as model_mir_cfg_cfg
+import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "../ir/text.sev" as type_printer
 import * from "package:ownership/ownership/src/plan.sev" as ownership
-import universal
-from universal import storage as storage_types
-from universal import scalar
+import * from "../../../../../syntax/type/storage.sev" as storage_types
+import * from "../../../../../syntax/primitive/catalog.sev" as scalar
 import * from "../ir/lib.sev"
 import * from "strings.sev"
 import * from "debug.sev" as debug
 import * from "numeric_comparison.sev" as numeric_comparison
-from universal import scalar_declarations as boundary
+import * from "../../../../../syntax/function/lowering.sev" as boundary
 
 
-def callable_mlir_type(id: universal.TypeId, records: borrow list[universal.RecordDeclaration] = []) -> MlirType:
+def callable_mlir_type(id: model_syntax_symbol_symbol.TypeId, records: borrow list[model_syntax_function_function.RecordDeclaration] = []) -> MlirType:
     for record in borrow records:
-        if record.type_id.index == id.index:
-            if record.storage_element.index != 0 and record.representation != "OwnedBuffer":
-                return memref_type(integer_type(8).scalar, [-1])
-            fields: list[MlirType] = []
-            for field in borrow record.fields:
-                fields.append(callable_storage_type(callable_mlir_type(field.type_id, records)))
-            return struct_type(fields)
-    if id.index == 2:
-        throw Error("unit has no scalar SSA value")
+        if record.type_id.index != id.index:
+            continue
+        fields: list[MlirType] = []
+        for field in borrow record.fields:
+            fields.append(callable_storage_type(callable_mlir_type(field.type_id, records)))
+        binding ?= model_syntax_function_function.record_mlir_binding(record)
+        if binding != None:
+            parameters = record.mlir_parameters[:]
+            for argument in record.mlir_arguments:
+                parameters.append(MlirTypeParameter(argument[0], type_printer.type_text(callable_mlir_type(argument[1], records))))
+            # Structural operands are supplied by the declaration, not a type-name switch.
+            if len(parameters) > 0:
+                # Resolve generic arguments while preserving structural placeholders
+                # for the terminal renderer.
+                for name in ["shape", "element", "elements"]:
+                    parameters.append(MlirTypeParameter(name, "{" + name + "}"))
+                for index in range(int(len(fields))):
+                    parameters.append(MlirTypeParameter("element" + string(index), "{element" + string(index) + "}"))
+                binding = MlirTypeBinding(binding.render(parameters), binding.category, binding.scalar, binding.bits, binding.signed, binding.dimensions, binding.elements, binding.ranked, binding.value)
+            element: MlirScalarType | None = None
+            if record.mlir_element.index != 0:
+                element = callable_mlir_type(record.mlir_element, records).scalar
+            return declared_mlir_type(binding, record.mlir_shape, fields, element)
+        throw Error("record has no MLIR binding")
     known ?= scalar.scalar_type(id)
     if known != None:
-        if known.representation == "buffer":
-            element = callable_mlir_type(universal.TypeId(id.index - 200), records)
-            return memref_type(element.scalar, [-1])
-        if known.representation == "utf8":
-            return utf8_view_type()
-        if known.representation == "index":
-            return index_type()
-        if known.representation == "float":
-            if known.name == "bf16":
-                return bf16_type()
-            if known.bits == 8:
-                return float8_type(known.name == "f8e5m2")
-            return float_type(known.bits)
-        if known.representation == "pointer":
-            return pointer_type()
-        return integer_type(known.bits, not known.boolean and known.signed)
-    throw Error("scalar MIR has an unknown value type")
+        element ?= scalar.scalar_type(known.element)
+        if element != None:
+            return declared_mlir_type(known.mlir, [-1], element=callable_mlir_type(element.id, records).scalar)
+        dimensions: list[int] = []
+        if known.mlir.dimensions > 0:
+            for index in range(known.mlir.dimensions):
+                dimensions.append(-1)
+        return declared_mlir_type(known.mlir, dimensions)
+    throw Error("type has no declaration-owned MLIR binding")
 
 
-def callable_mlir_results(id: universal.TypeId, records: borrow list[universal.RecordDeclaration] = []) -> list[MlirType]:
+
+def callable_mlir_results(id: model_syntax_symbol_symbol.TypeId, records: borrow list[model_syntax_function_function.RecordDeclaration] = []) -> list[MlirType]:
     if id.index == 2:
         return []
     results: list[MlirType] = []
@@ -50,15 +63,15 @@ def callable_mlir_results(id: universal.TypeId, records: borrow list[universal.R
     return results
 
 
-def callable_mlir_value(module: borrow universal.Module, id: universal.ValueId) -> MlirValue:
+def callable_mlir_value(module: borrow model_hir_module_module.Module, id: model_syntax_symbol_symbol.ValueId) -> MlirValue:
     return MlirValue(int(id.index), callable_mlir_type(module.values[id.index].type_id, module.records))
 
 
-def callable_function_symbol(id: universal.FunctionId) -> string:
+def callable_function_symbol(id: model_syntax_symbol_symbol.FunctionId) -> string:
     return "__sev_scalar_" + string(id.value)
 
 
-def callable_operation_attributes(function: borrow universal.FunctionDeclaration) -> list[MlirNamedAttribute]:
+def callable_operation_attributes(function: borrow model_syntax_function_function.FunctionDeclaration) -> list[MlirNamedAttribute]:
     attributes: list[MlirNamedAttribute] = []
     for decorator in borrow function.decorators:
         if decorator.name != "mlir":
@@ -81,7 +94,7 @@ def callable_operation_attributes(function: borrow universal.FunctionDeclaration
     return attributes
 
 
-def callable_mlir_block(builder: MlirOpBuilder, module: borrow universal.Module, block: borrow universal.BasicBlock, location: MlirLocation | None = None):
+def callable_mlir_block(builder: MlirOpBuilder, module: borrow model_hir_module_module.Module, block: borrow model_mir_cfg_block.BasicBlock, location: MlirLocation | None = None):
     cursor := 0
     for operation in borrow block.operations:
         cursor += 1
@@ -291,10 +304,10 @@ def callable_external(builder: MlirOpBuilder, symbol: string, parameters: list[M
     return handle
 
 
-def validate_external_contracts(module: borrow universal.Module):
+def validate_external_contracts(module: borrow model_hir_module_module.Module):
     # Check declarations even when they have no live calls. Validation must
     # not make an otherwise unused provider an emitted dependency.
-    declarations: list[universal.FunctionDeclaration] = []
+    declarations: list[model_syntax_function_function.FunctionDeclaration] = []
     for function in borrow module.functions:
         symbol = boundary.scalar_boundary(function, "c")
         if symbol == "":
@@ -321,7 +334,7 @@ def validate_external_contracts(module: borrow universal.Module):
         declarations.append(function)
 
 
-def lower_callables(module: borrow universal.Module, library: bool = false, export_names: list[string] = [], export_symbols: list[string] = [], selected: list[int] = [], partitioned: bool = false) -> MlirProgram:
+def lower_callables(module: borrow model_hir_module_module.Module, library: bool = false, export_names: list[string] = [], export_symbols: list[string] = [], selected: list[int] = [], partitioned: bool = false) -> MlirProgram:
     builder = MlirOpBuilder(int(len(module.values)))
     handles: list[MlirFunctionHandle] = []
     for function in borrow module.functions:
@@ -449,7 +462,7 @@ def callable_load(builder: MlirOpBuilder, address: MlirValue, output: MlirValue)
 
 
 
-def callable_cfg(builder: MlirOpBuilder, module: borrow universal.Module, body: borrow universal.CfgBody, entry: MlirBlockHandle, location: MlirLocation | None = None):
+def callable_cfg(builder: MlirOpBuilder, module: borrow model_hir_module_module.Module, body: borrow model_mir_cfg_cfg.CfgBody, entry: MlirBlockHandle, location: MlirLocation | None = None):
     handles = [entry]
     for block in body.blocks[1:]:
         parameters: list[MlirValue] = []
@@ -506,7 +519,7 @@ def callable_cfg(builder: MlirOpBuilder, module: borrow universal.Module, body: 
 
 # Preserve FunctionOpInterface exits until ownership has run. The assertion
 # prevents execution of the placeholder result; LLVM conversion happens later.
-def callable_unreachable(builder: MlirOpBuilder, module: borrow universal.Module, body: borrow universal.CfgBody):
+def callable_unreachable(builder: MlirOpBuilder, module: borrow model_hir_module_module.Module, body: borrow model_mir_cfg_cfg.CfgBody):
     failed = builder_new_value(builder, integer_type(1))
     builder_constant(builder, failed, boolean_attribute(false))
     builder_assert(builder, failed, "unreachable control flow")
@@ -551,7 +564,7 @@ def callable_buffer_address(builder: MlirOpBuilder, buffer: MlirValue, position:
     return pointer
 
 
-def callable_buffer_operation(builder: MlirOpBuilder, module: borrow universal.Module, function: borrow universal.FunctionDeclaration, operation: string, inputs: list[MlirValue], outputs: list[MlirValue]) -> bool:
+def callable_buffer_operation(builder: MlirOpBuilder, module: borrow model_hir_module_module.Module, function: borrow model_syntax_function_function.FunctionDeclaration, operation: string, inputs: list[MlirValue], outputs: list[MlirValue]) -> bool:
     if operation not in ["memref.alloc", "memref.load", "memref.store", "memref.dim"]:
         return false
     buffer_type := function.result_type

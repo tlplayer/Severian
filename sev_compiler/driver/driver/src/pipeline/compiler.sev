@@ -1,0 +1,29 @@
+import backend
+import source
+import * from "source.sev" as pipeline
+
+class Compiler:
+    sysroot: string = "."
+
+    def compile_source(input: source.SourceFile, output: string) -> backend.Artifact | Error:
+        mlir = pipeline.compile_to_mlir(input, sysroot=sysroot)
+        backend.emit_native(mlir, output, sysroot=sysroot)
+        return backend.Artifact(output, backend.Executable)
+
+    def compile_file(path: string, output: string) -> backend.Artifact | Error:
+        return compile_source(pipeline.load_input(path), output)
+
+    def check_file(path: string):
+        pipeline.compile_to_mlir(pipeline.load_input(path), sysroot=sysroot, emit="check")
+
+
+def compile_source(input: source.SourceFile, output: string) -> backend.Artifact | Error:
+    return Compiler().compile_source(input, output)
+
+
+def compile_file(path: string, output: string) -> backend.Artifact | Error:
+    return Compiler().compile_file(path, output)
+
+
+def check_file(path: string):
+    Compiler().check_file(path)

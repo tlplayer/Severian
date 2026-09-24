@@ -1,6 +1,12 @@
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../syntax/literal/value.sev" as model_syntax_literal_value
+import * from "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import diagnostics
 import source
-import universal
 
 
 # Test policies are source declarations. This pass only composes their lifecycle
@@ -20,7 +26,7 @@ class Policy:
     span: source.Span
 
 
-def path(expression: universal.Expression) -> string:
+def path(expression: model_syntax_function_function.Expression) -> string:
     match expression.kind:
         case Name:
             return name
@@ -30,7 +36,7 @@ def path(expression: universal.Expression) -> string:
             return ""
 
 
-def property_value(declaration: universal.TraitDeclaration, name: string) -> universal.Expression | diagnostics.Diagnostic:
+def property_value(declaration: model_syntax_function_syntax.TraitDeclaration, name: string) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     for property in declaration.properties:
         if property.name == name:
             value ?= property.default
@@ -39,7 +45,7 @@ def property_value(declaration: universal.TraitDeclaration, name: string) -> uni
     return error(diagnostics.diagnostic_at("E000215", "test policy requires " + name, declaration.span))
 
 
-def policy(declaration: universal.TraitDeclaration) -> Policy | diagnostics.Diagnostic:
+def policy(declaration: model_syntax_function_syntax.TraitDeclaration) -> Policy | diagnostics.Diagnostic:
     fields: list[string] = []
     for field in ["context", "begin", "ready", "before", "after", "finish", "failure"]:
         value = property_value(declaration, field)
@@ -88,80 +94,80 @@ def policy(declaration: universal.TraitDeclaration) -> Policy | diagnostics.Diag
     return Policy(mode, declaration.lookup, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], names, getters, declaration.span)
 
 
-def name(value: string, span: source.Span) -> universal.Expression:
-    return universal.Expression(universal.Name(value), span)
+def name(value: string, span: source.Span) -> model_syntax_function_function.Expression:
+    return model_syntax_function_function.Expression(model_syntax_function_function.Name(value), span)
 
 
-def call(function: string, values: list[universal.Expression], span: source.Span) -> universal.Expression:
-    arguments: list[universal.CallArgument] = []
+def call(function: string, values: list[model_syntax_function_function.Expression], span: source.Span) -> model_syntax_function_function.Expression:
+    arguments: list[model_syntax_function_function.CallArgument] = []
     for value in values:
-        arguments.append(universal.CallArgument(None, value, value.span))
-    return universal.Expression(universal.Call(name(function, span), arguments), span)
+        arguments.append(model_syntax_function_function.CallArgument(None, value, value.span))
+    return model_syntax_function_function.Expression(model_syntax_function_function.Call(name(function, span), arguments), span)
 
 
-def optional(expression: universal.Expression | None, names: list[string], getters: list[string], contexts: list[string], bound: list[string]) -> universal.Expression | None:
+def optional(expression: model_syntax_function_function.Expression | None, names: list[string], getters: list[string], contexts: list[string], bound: list[string]) -> model_syntax_function_function.Expression | None:
     value ?= expression
     if value != None:
         return project(value, names, getters, contexts, bound)
     return None
 
 
-def project(expression: universal.Expression, names: list[string], getters: list[string], contexts: list[string], bound: list[string]) -> universal.Expression:
+def project(expression: model_syntax_function_function.Expression, names: list[string], getters: list[string], contexts: list[string], bound: list[string]) -> model_syntax_function_function.Expression:
     kind := expression.kind
     match expression.kind:
         case Ownership:
-            kind = universal.Ownership(mode, project(value, names, getters, contexts, bound))
+            kind = model_syntax_function_function.Ownership(mode, project(value, names, getters, contexts, bound))
         case AddressOf:
-            kind = universal.AddressOf(project(value, names, getters, contexts, bound))
+            kind = model_syntax_function_function.AddressOf(project(value, names, getters, contexts, bound))
         case Name:
             index := 0
             for binding in names:
                 if binding == name and name not in bound:
-                    return call(getters[index], [universal.Expression(universal.Name(contexts[index]), expression.span)], expression.span)
+                    return call(getters[index], [model_syntax_function_function.Expression(model_syntax_function_function.Name(contexts[index]), expression.span)], expression.span)
                 index += 1
         case Member:
-            kind = universal.Member(project(object, names, getters, contexts, bound), name)
+            kind = model_syntax_function_function.Member(project(object, names, getters, contexts, bound), name)
         case Fallback:
-            kind = universal.Fallback(project(value, names, getters, contexts, bound), project(alternative, names, getters, contexts, bound))
+            kind = model_syntax_function_function.Fallback(project(value, names, getters, contexts, bound), project(alternative, names, getters, contexts, bound))
         case ThrowValue:
-            kind = universal.ThrowValue(project(value, names, getters, contexts, bound))
+            kind = model_syntax_function_function.ThrowValue(project(value, names, getters, contexts, bound))
         case Call:
-            rewritten: list[universal.CallArgument] = []
+            rewritten: list[model_syntax_function_function.CallArgument] = []
             for argument in arguments:
-                rewritten.append(universal.CallArgument(argument.name, project(argument.value, names, getters, contexts, bound), argument.span, spread=argument.spread))
-            kind = universal.Call(project(callee, names, getters, contexts, bound), rewritten)
+                rewritten.append(model_syntax_function_function.CallArgument(argument.name, project(argument.value, names, getters, contexts, bound), argument.span, spread=argument.spread))
+            kind = model_syntax_function_function.Call(project(callee, names, getters, contexts, bound), rewritten)
         case ListLiteral:
-            rewritten: list[universal.Expression] = []
+            rewritten: list[model_syntax_function_function.Expression] = []
             for element in elements:
                 rewritten.append(project(element, names, getters, contexts, bound))
-            kind = universal.ListLiteral(rewritten)
+            kind = model_syntax_function_function.ListLiteral(rewritten)
         case MapLiteral:
-            projected_keys: list[universal.Expression] = []
-            projected_values: list[universal.Expression] = []
+            projected_keys: list[model_syntax_function_function.Expression] = []
+            projected_values: list[model_syntax_function_function.Expression] = []
             for key in keys:
                 projected_keys.append(project(key, names, getters, contexts, bound))
             for value in values:
                 projected_values.append(project(value, names, getters, contexts, bound))
-            kind = universal.MapLiteral(projected_keys, projected_values)
+            kind = model_syntax_function_function.MapLiteral(projected_keys, projected_values)
         case Subscript:
-            kind = universal.Subscript(project(object, names, getters, contexts, bound), project(index, names, getters, contexts, bound))
+            kind = model_syntax_function_function.Subscript(project(object, names, getters, contexts, bound), project(index, names, getters, contexts, bound))
         case Slice:
-            kind = universal.Slice(project(object, names, getters, contexts, bound), optional(start, names, getters, contexts, bound), optional(stop, names, getters, contexts, bound), optional(step, names, getters, contexts, bound))
+            kind = model_syntax_function_function.ExpressionKind.Slice(project(object, names, getters, contexts, bound), optional(start, names, getters, contexts, bound), optional(stop, names, getters, contexts, bound), optional(step, names, getters, contexts, bound))
         case Unary:
-            kind = universal.Unary(operator, project(operand, names, getters, contexts, bound))
+            kind = model_syntax_function_function.Unary(operator, project(operand, names, getters, contexts, bound))
         case Binary:
-            kind = universal.Binary(operator, project(left, names, getters, contexts, bound), project(right, names, getters, contexts, bound))
+            kind = model_syntax_function_function.Binary(operator, project(left, names, getters, contexts, bound), project(right, names, getters, contexts, bound))
         case Conditional:
-            kind = universal.Conditional(project(condition, names, getters, contexts, bound), project(then_value, names, getters, contexts, bound), project(else_value, names, getters, contexts, bound))
+            kind = model_syntax_function_function.ExpressionKind.Conditional(project(condition, names, getters, contexts, bound), project(then_value, names, getters, contexts, bound), project(else_value, names, getters, contexts, bound))
         case Stringify:
-            kind = universal.Stringify(project(value, names, getters, contexts, bound))
+            kind = model_syntax_function_function.Stringify(project(value, names, getters, contexts, bound))
         case _:
             throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
-    return universal.Expression(kind, expression.span, grammar=expression.grammar)
+    return model_syntax_function_function.Expression(kind, expression.span, grammar=expression.grammar)
 
 
-def project_block(block: universal.Block, names: list[string], getters: list[string], contexts: list[string], bound: list[string], failures: list[universal.Statement], ordinal: list[int], assert_calls: bool = true) -> universal.Block:
-    result = universal.empty_block()
+def project_block(block: model_syntax_block_block.Block, names: list[string], getters: list[string], contexts: list[string], bound: list[string], failures: list[model_syntax_sentence_sentence.Statement], ordinal: list[int], assert_calls: bool = true) -> model_syntax_block_block.Block:
+    result = model_syntax_block_block.empty_block()
     for statement in block.statements:
         projected := statement
         # Parenthesized assert is parsed as an ordinary call so prelude
@@ -175,72 +181,72 @@ def project_block(block: universal.Block, names: list[string], getters: list[str
                             for argument in arguments:
                                 positional = positional and argument.name == None and not argument.spread
                             if positional:
-                                message: universal.Expression | None := None
+                                message: model_syntax_function_function.Expression | None := None
                                 if len(arguments) == 2:
                                     message = arguments[1].value
-                                projected = universal.Assert(arguments[0].value, message, expression.span, arguments[0].value.span)
+                                projected = model_syntax_sentence_sentence.Assert(arguments[0].value, message, expression.span, arguments[0].value.span)
                     case _:
                         throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
             case _:
                 throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
         match projected:
             case Defer:
-                result.statements.append(universal.Defer(project(value, names, getters, contexts, bound), span))
+                result.statements.append(model_syntax_sentence_sentence.Defer(project(value, names, getters, contexts, bound), span))
             case Unsafe:
-                result.statements.append(universal.Unsafe(project_block(body, names, getters, contexts, bound[:], failures, ordinal, assert_calls), span))
+                result.statements.append(model_syntax_sentence_sentence.Unsafe(project_block(body, names, getters, contexts, bound[:], failures, ordinal, assert_calls), span))
             case BindingStatement:
                 value = project(binding.value, names, getters, contexts, bound)
-                result.statements.append(universal.BindingStatement(universal.Binding(binding.name, binding.annotation, value, binding.update, binding.preserve_error, binding.span, mutable=binding.mutable)))
+                result.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(binding.name, binding.annotation, value, binding.update, binding.preserve_error, binding.span, mutable=binding.mutable)))
                 if binding.name not in bound:
                     bound.append(binding.name)
             case ExpressionStatement:
-                result.statements.append(universal.ExpressionStatement(project(expression, names, getters, contexts, bound)))
+                result.statements.append(model_syntax_sentence_sentence.ExpressionStatement(project(expression, names, getters, contexts, bound)))
             case Return:
-                result.statements.append(universal.Return(optional(value, names, getters, contexts, bound), span))
+                result.statements.append(model_syntax_sentence_sentence.Statement.Return(optional(value, names, getters, contexts, bound), span))
             case Throw:
-                result.statements.append(universal.Throw(project(value, names, getters, contexts, bound), span))
+                result.statements.append(model_syntax_sentence_sentence.Statement.Throw(project(value, names, getters, contexts, bound), span))
             case Assert:
                 checked = "$assert$" + string(ordinal[0])
                 ordinal[0] += 1
-                result.statements.append(universal.BindingStatement(universal.Binding(checked, None, project(condition, names, getters, contexts, bound), false, false, span)))
+                result.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(checked, None, project(condition, names, getters, contexts, bound), false, false, span)))
                 # Evaluate once, restore policy resources on failure, then keep
                 # the ordinary assertion and its source location.
-                result.statements.append(universal.If(name(checked, span), universal.empty_block(), universal.Block(failures[:]), span))
-                result.statements.append(universal.Assert(name(checked, span), optional(message, names, getters, contexts, bound), span, condition_span))
+                result.statements.append(model_syntax_sentence_sentence.Statement.If(name(checked, span), model_syntax_block_block.empty_block(), model_syntax_block_block.Block(failures[:]), span))
+                result.statements.append(model_syntax_sentence_sentence.Assert(name(checked, span), optional(message, names, getters, contexts, bound), span, condition_span))
             case If:
-                result.statements.append(universal.If(project(condition, names, getters, contexts, bound), project_block(then_block, names, getters, contexts, bound[:], failures, ordinal, assert_calls), project_block(else_block, names, getters, contexts, bound[:], failures, ordinal, assert_calls), span))
+                result.statements.append(model_syntax_sentence_sentence.Statement.If(project(condition, names, getters, contexts, bound), project_block(then_block, names, getters, contexts, bound[:], failures, ordinal, assert_calls), project_block(else_block, names, getters, contexts, bound[:], failures, ordinal, assert_calls), span))
             case While:
-                result.statements.append(universal.While(project(condition, names, getters, contexts, bound), project_block(body, names, getters, contexts, bound[:], failures, ordinal, assert_calls), span))
+                result.statements.append(model_syntax_sentence_sentence.Statement.While(project(condition, names, getters, contexts, bound), project_block(body, names, getters, contexts, bound[:], failures, ordinal, assert_calls), span))
             case ForEach:
                 local = bound[:]
                 local.append(name)
-                result.statements.append(universal.ForEach(name, project(iterable, names, getters, contexts, bound), project_block(body, names, getters, contexts, local, failures, ordinal, assert_calls), span))
+                result.statements.append(model_syntax_sentence_sentence.ForEach(name, project(iterable, names, getters, contexts, bound), project_block(body, names, getters, contexts, local, failures, ordinal, assert_calls), span))
             case FieldSet:
-                result.statements.append(universal.FieldSet(project(target, names, getters, contexts, bound), project(value, names, getters, contexts, bound), span, update))
+                result.statements.append(model_syntax_sentence_sentence.FieldSet(project(target, names, getters, contexts, bound), project(value, names, getters, contexts, bound), span, update))
             case GrammarApply:
-                rewritten: list[universal.Expression] = []
-                blocks: list[universal.Block] = []
+                rewritten: list[model_syntax_function_function.Expression] = []
+                blocks: list[model_syntax_block_block.Block] = []
                 for operand in operands:
                     rewritten.append(project(operand, names, getters, contexts, bound))
                 for body in bodies:
                     blocks.append(project_block(body, names, getters, contexts, bound[:], failures, ordinal, assert_calls))
-                result.statements.append(universal.GrammarApply(syntax, rewritten, blocks, span, exits))
+                result.statements.append(model_syntax_sentence_sentence.GrammarApply(syntax, rewritten, blocks, span, exits))
             case Match:
-                rewritten: list[universal.MatchArm] = []
+                rewritten: list[model_syntax_sentence_sentence.MatchArm] = []
                 for arm in arms:
                     local = bound[:]
                     binding ?= arm.binding_name
                     if binding != None:
                         local.append(binding)
-                    rewritten.append(universal.MatchArm(project_block(arm.body, names, getters, contexts, local, failures, ordinal, assert_calls), arm.binding_name, arm.annotation, arm.span, pattern=optional(arm.pattern, names, getters, contexts, bound)))
-                result.statements.append(universal.Match(project(subject, names, getters, contexts, bound), rewritten, span))
+                    rewritten.append(model_syntax_sentence_sentence.MatchArm(project_block(arm.body, names, getters, contexts, local, failures, ordinal, assert_calls), arm.binding_name, arm.annotation, arm.span, pattern=optional(arm.pattern, names, getters, contexts, bound)))
+                result.statements.append(model_syntax_sentence_sentence.Match(project(subject, names, getters, contexts, bound), rewritten, span))
             case _:
                 result.statements.append(statement)
     return result
 
 
-def mode_values(declaration: universal.TestDeclaration, mode: string, count: int) -> list[universal.Expression] | diagnostics.Diagnostic:
-    values: list[universal.Expression] := []
+def mode_values(declaration: model_syntax_function_syntax.TestDeclaration, mode: string, count: int) -> list[model_syntax_function_function.Expression] | diagnostics.Diagnostic:
+    values: list[model_syntax_function_function.Expression] := []
     for supplied in declaration.mode_arguments:
         if supplied.name == mode:
             values = supplied.values
@@ -249,7 +255,7 @@ def mode_values(declaration: universal.TestDeclaration, mode: string, count: int
     return values
 
 
-def runner_block(declaration: universal.TestDeclaration, body: universal.Block, ordinal: int) -> universal.Block | diagnostics.Diagnostic:
+def runner_block(declaration: model_syntax_function_syntax.TestDeclaration, body: model_syntax_block_block.Block, ordinal: int) -> model_syntax_block_block.Block | diagnostics.Diagnostic:
     span = declaration.span
     result := body
     label := "test " + string(ordinal)
@@ -260,37 +266,37 @@ def runner_block(declaration: universal.TestDeclaration, body: universal.Block, 
         mode_values(declaration, "bench", 0)
         # Warmup and measured iterations use the same isolated callable body.
         # Measurement and reporting remain ordinary source library functions.
-        result = universal.Block(body.statements[:])
+        result = model_syntax_block_block.Block(body.statements[:])
         timer = "$benchmark$" + string(ordinal)
-        result.statements.append(universal.BindingStatement(universal.Binding(timer, None, call("__test_bench_begin", [], span), false, false, span)))
-        zero = universal.Expression(universal.LiteralValue(universal.IntegerValue("0")), span)
+        result.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(timer, None, call("__test_bench_begin", [], span), false, false, span)))
+        zero = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue("0")), span)
         count = call("__test_bench_iterations", [], span)
-        result.statements.append(universal.ForEach("$sample$" + string(ordinal), call("range", [zero, count], span), body, span))
-        label_value = universal.Expression(universal.LiteralValue(universal.StringValue(label)), span)
-        result.statements.append(universal.ExpressionStatement(call("__test_bench_report", [name(timer, span), label_value], span)))
+        result.statements.append(model_syntax_sentence_sentence.ForEach("$sample$" + string(ordinal), call("range", [zero, count], span), body, span))
+        label_value = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue(label)), span)
+        result.statements.append(model_syntax_sentence_sentence.ExpressionStatement(call("__test_bench_report", [name(timer, span), label_value], span)))
     if "timeout" in declaration.source_modes:
         values = mode_values(declaration, "timeout", 1)[:]
-        values.append(universal.Expression(universal.LiteralValue(universal.StringValue(label)), span))
+        values.append(model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue(label)), span))
         ticket = "$deadline$" + string(ordinal)
-        child = universal.Block(result.statements[:])
-        child.statements.append(universal.ExpressionStatement(call("__test_complete", [], span)))
-        result = universal.Block([
-            universal.BindingStatement(universal.Binding(ticket, None, call("__test_start", values, span), false, false, span)),
-            universal.If(call("__test_is_child", [name(ticket, span)], span), child, universal.empty_block(), span),
-            universal.ExpressionStatement(call("__test_wait", [name(ticket, span)], span)),
+        child = model_syntax_block_block.Block(result.statements[:])
+        child.statements.append(model_syntax_sentence_sentence.ExpressionStatement(call("__test_complete", [], span)))
+        result = model_syntax_block_block.Block([
+            model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(ticket, None, call("__test_start", values, span), false, false, span)),
+            model_syntax_sentence_sentence.Statement.If(call("__test_is_child", [name(ticket, span)], span), child, model_syntax_block_block.empty_block(), span),
+            model_syntax_sentence_sentence.ExpressionStatement(call("__test_wait", [name(ticket, span)], span)),
         ])
     if "repeat" in declaration.source_modes:
         values = mode_values(declaration, "repeat", 1)
         count = call("__test_repeat", values, span)
-        zero = universal.Expression(universal.LiteralValue(universal.IntegerValue("0")), span)
-        result = universal.Block([universal.ForEach("$repeat$" + string(ordinal), call("range", [zero, count], span), result, span)])
+        zero = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue("0")), span)
+        result = model_syntax_block_block.Block([model_syntax_sentence_sentence.ForEach("$repeat$" + string(ordinal), call("range", [zero, count], span), result, span)])
     if "parallel" in declaration.source_modes:
         # Eligibility metadata: the default runner is serial.
         mode_values(declaration, "parallel", 0)
     return result
 
 
-def label(declaration: universal.TestDeclaration, files: list[source.SourceFile]) -> string:
+def label(declaration: model_syntax_function_syntax.TestDeclaration, files: list[source.SourceFile]) -> string:
     title := "unnamed test"
     supplied ?= declaration.name
     if supplied != None:
@@ -308,21 +314,21 @@ def label(declaration: universal.TestDeclaration, files: list[source.SourceFile]
     return title
 
 
-def report(message: string, span: source.Span) -> universal.Statement:
+def report(message: string, span: source.Span) -> model_syntax_sentence_sentence.Statement:
     # Use the same unbuffered hosted boundary as assertion diagnostics. Reports
     # must not change program stdout or disappear when stdout is redirected.
     text = message + "\n"
-    literal = universal.Expression(universal.LiteralValue(universal.StringValue(text)), span)
-    storage = universal.Expression(universal.Member(literal, "storage"), span)
-    data = universal.Expression(universal.Member(storage, "data"), span)
+    literal = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue(text)), span)
+    storage = model_syntax_function_function.Expression(model_syntax_function_function.Member(literal, "storage"), span)
+    data = model_syntax_function_function.Expression(model_syntax_function_function.Member(storage, "data"), span)
     address = call("__assert_pointer", [call("__assert_index", [call("__assert_address", [data], span)], span)], span)
-    descriptor = universal.Expression(universal.LiteralValue(universal.IntegerValue("2")), span)
-    size = universal.Expression(universal.LiteralValue(universal.IntegerValue(string(len(text.bytes())))), span)
-    return universal.ExpressionStatement(call("__assert_write", [descriptor, address, size], span))
+    descriptor = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue("2")), span)
+    size = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue(string(len(text.bytes())))), span)
+    return model_syntax_sentence_sentence.ExpressionStatement(call("__assert_write", [descriptor, address, size], span))
 
 
-def reported_tests(module: universal.Module, files: list[source.SourceFile]) -> universal.Module:
-    items: list[universal.Item] = []
+def reported_tests(module: model_hir_module_module.Module, files: list[source.SourceFile]) -> model_hir_module_module.Module:
+    items: list[model_hir_module_module.Item] = []
     ordinal := 0
     for item in module.items:
         match item:
@@ -330,15 +336,15 @@ def reported_tests(module: universal.Module, files: list[source.SourceFile]) -> 
                 if len(declaration.source_modes) == 0:
                     function_name = "$case$report$" + string(ordinal)
                     ordinal += 1
-                    items.append(universal.Function(universal.FunctionDeclaration(name=function_name, body=declaration.body, span=declaration.span, lookup=declaration.lookup)))
+                    items.append(model_hir_module_module.Function(model_syntax_function_function.FunctionDeclaration(name=function_name, body=declaration.body, span=declaration.span, lookup=declaration.lookup)))
                     title = label(declaration, files)
                     reported := declaration
-                    reported.body = universal.Block([
+                    reported.body = model_syntax_block_block.Block([
                         report("  RUN " + title, declaration.span),
-                        universal.ExpressionStatement(call(function_name, [], declaration.span)),
+                        model_syntax_sentence_sentence.ExpressionStatement(call(function_name, [], declaration.span)),
                         report("  ok " + title, declaration.span),
                     ])
-                    items.append(universal.Test(reported))
+                    items.append(model_hir_module_module.Test(reported))
                 else:
                     items.append(item)
             case _:
@@ -347,16 +353,16 @@ def reported_tests(module: universal.Module, files: list[source.SourceFile]) -> 
     return module
 
 
-def summary(count: int, span: source.Span, namespace: string) -> universal.Item:
+def summary(count: int, span: source.Span, namespace: string) -> model_hir_module_module.Item:
     message = "Tests: " + string(count) + " passed" if count > 0 else "Tests: 0 (no test declarations)"
-    body = universal.Block([report(message, span)])
-    return universal.Test(universal.TestDeclaration("$test_summary$", [], body, [], span, lookup=namespace))
+    body = model_syntax_block_block.Block([report(message, span)])
+    return model_hir_module_module.Test(model_syntax_function_syntax.TestDeclaration("$test_summary$", [], body, [], span, lookup=namespace))
 
 
-def expand(module: universal.Module, enabled: bool, namespace: string, inherited: list[universal.TraitDeclaration] = [], files: list[source.SourceFile] = []) -> universal.Module | diagnostics.Diagnostic:
+def expand(module: model_hir_module_module.Module, enabled: bool, namespace: string, inherited: list[model_syntax_function_syntax.TraitDeclaration] = [], files: list[source.SourceFile] = []) -> model_hir_module_module.Module | diagnostics.Diagnostic:
     if not enabled:
         return module
-    expanded: list[universal.Item] = []
+    expanded: list[model_hir_module_module.Item] = []
     for item in module.items:
         table := false
         match item:
@@ -365,10 +371,10 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                     table = true
                     ordinal := 0
                     for row in declaration.case_rows:
-                        body = universal.empty_block()
+                        body = model_syntax_block_block.empty_block()
                         index := 0
                         for value in row.values:
-                            body.statements.append(universal.BindingStatement(universal.Binding(declaration.case_names[index], None, value, false, false, value.span)))
+                            body.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(declaration.case_names[index], None, value, false, false, value.span)))
                             index += 1
                         for statement in declaration.body.statements:
                             body.statements.append(statement)
@@ -377,7 +383,7 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                         if supplied != None:
                             label = supplied
                         case_label = f"{label} [{ordinal}]"
-                        expanded.append(universal.Test(universal.TestDeclaration(case_label, declaration.source_modes, body, [], declaration.span, lookup=declaration.lookup, mode_arguments=declaration.mode_arguments)))
+                        expanded.append(model_hir_module_module.Test(model_syntax_function_syntax.TestDeclaration(case_label, declaration.source_modes, body, [], declaration.span, lookup=declaration.lookup, mode_arguments=declaration.mode_arguments)))
                         ordinal += 1
             case _:
                 throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
@@ -417,7 +423,7 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                 throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
     for declaration in declarations:
         for base in declaration.bases:
-            if universal.simple_type_name(base) == "TestMode":
+            if model_syntax_type_annotation.simple_type_name(base) == "TestMode":
                 selected = policy(declaration)
                 if selected.name in wanted:
                     for previous in policies:
@@ -433,16 +439,16 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
         if not found:
             return error(diagnostics.diagnostic_at("E000215", "no source test policy for " + mode + "; load a trait implementing TestMode with this name", wanted_spans[mode_index]))
         mode_index += 1
-    suite = universal.empty_block()
+    suite = model_syntax_block_block.empty_block()
     for selected in policies:
         context = "$mode$" + selected.name
-        suite.statements.append(universal.BindingStatement(universal.Binding(context, None, call(selected.begin, [], selected.span), false, false, selected.span, mutable=true)))
-    items: list[universal.Item] = []
+        suite.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(context, None, call(selected.begin, [], selected.span), false, false, selected.span, mutable=true)))
+    items: list[model_hir_module_module.Item] = []
     bindings: list[string] = []
     for item in module.items:
         match item:
             case ExpressionItem:
-                suite.statements.append(universal.ExpressionStatement(expression))
+                suite.statements.append(model_syntax_sentence_sentence.ExpressionStatement(expression))
             case BindingItem:
                 constant := false
                 if binding.name not in bindings and not binding.mutable and not binding.update:
@@ -458,14 +464,14 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                 if constant:
                     items.append(item)
                 else:
-                    suite.statements.append(universal.BindingStatement(binding))
+                    suite.statements.append(model_syntax_sentence_sentence.BindingStatement(binding))
             case Test:
                 throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
             case _:
                 items.append(item)
     for selected in policies[::-1]:
         context = "$mode$" + selected.name
-        suite.statements.append(universal.BindingStatement(universal.Binding(context, None, call(selected.ready, [name(context, selected.span)], selected.span), true, false, selected.span)))
+        suite.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(context, None, call(selected.ready, [name(context, selected.span)], selected.span), true, false, selected.span)))
     case_index := 0
     for item in module.items:
         match item:
@@ -475,14 +481,14 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                         return error(diagnostics.diagnostic_at("E000215", "compiler mode cannot compose with runtime policies", declaration.span))
                     items.append(item)
                     continue
-                parameters: list[universal.FunctionParameter] = []
-                values: list[universal.Expression] = []
+                parameters: list[model_syntax_function_function.FunctionParameter] = []
+                values: list[model_syntax_function_function.Expression] = []
                 names: list[string] = []
                 getters: list[string] = []
                 contexts: list[string] = []
-                failures: list[universal.Statement] = []
-                cleanup: list[universal.Statement] = []
-                prepare: list[universal.Statement] = []
+                failures: list[model_syntax_sentence_sentence.Statement] = []
+                cleanup: list[model_syntax_sentence_sentence.Statement] = []
+                prepare: list[model_syntax_sentence_sentence.Statement] = []
                 seen: list[string] = []
                 for mode in declaration.source_modes:
                     if mode in seen:
@@ -495,12 +501,12 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                         if selected.name != mode:
                             continue
                         context = "$mode$" + mode
-                        parameters.append(universal.FunctionParameter(context, universal.named_type(selected.context, [], declaration.span), None, declaration.span))
+                        parameters.append(model_syntax_function_function.FunctionParameter(context, model_syntax_type_annotation.named_type(selected.context, [], declaration.span), None, declaration.span))
                         prepared = "$prepared$" + mode + "$" + string(case_index)
-                        prepare.append(universal.BindingStatement(universal.Binding(prepared, None, call(selected.before, [name(context, declaration.span)], declaration.span), false, false, declaration.span)))
+                        prepare.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(prepared, None, call(selected.before, [name(context, declaration.span)], declaration.span), false, false, declaration.span)))
                         values.append(name(prepared, declaration.span))
-                        failures.append(universal.ExpressionStatement(call(selected.failure, [name(context, declaration.span)], declaration.span)))
-                        cleanup.append(universal.ExpressionStatement(call(selected.after, [name(prepared, declaration.span)], declaration.span)))
+                        failures.append(model_syntax_sentence_sentence.ExpressionStatement(call(selected.failure, [name(context, declaration.span)], declaration.span)))
+                        cleanup.append(model_syntax_sentence_sentence.ExpressionStatement(call(selected.after, [name(prepared, declaration.span)], declaration.span)))
                         index := 0
                         for binding in selected.names:
                             if binding in names:
@@ -512,16 +518,16 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
                 function_name = "$case$" + string(case_index)
                 case_index += 1
                 body = project_block(declaration.body, names, getters, contexts, [], failures[::-1], [0], "assert" not in module.excluded_functions)
-                function = universal.FunctionDeclaration(name=function_name, parameters=parameters, body=body, span=declaration.span, lookup=declaration.lookup)
-                items.append(universal.Function(function))
-                execution = universal.Block(prepare)
-                execution.statements.append(universal.ExpressionStatement(call(function_name, values, declaration.span)))
+                function = model_syntax_function_function.FunctionDeclaration(name=function_name, parameters=parameters, body=body, span=declaration.span, lookup=declaration.lookup)
+                items.append(model_hir_module_module.Function(function))
+                execution = model_syntax_block_block.Block(prepare)
+                execution.statements.append(model_syntax_sentence_sentence.ExpressionStatement(call(function_name, values, declaration.span)))
                 measured_contexts: list[string] = []
                 for context in contexts:
                     measured_contexts.append(context.replace("$mode$", "$prepared$") + "$" + string(case_index - 1))
                 for contract in declaration.contracts:
                     condition = project(contract, names, getters, measured_contexts, [])
-                    execution.statements.append(universal.Assert(condition, None, contract.span, contract.span))
+                    execution.statements.append(model_syntax_sentence_sentence.Assert(condition, None, contract.span, contract.span))
                 for statement in cleanup[::-1]:
                     execution.statements.append(statement)
                 title = label(declaration, files)
@@ -532,8 +538,8 @@ def expand(module: universal.Module, enabled: bool, namespace: string, inherited
             case _:
                 throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
     for selected in policies[::-1]:
-        suite.statements.append(universal.ExpressionStatement(call(selected.finish, [name("$mode$" + selected.name, selected.span)], selected.span)))
-    items.append(universal.Test(universal.TestDeclaration("test policies", [], suite, [], suite_span, lookup=namespace)))
+        suite.statements.append(model_syntax_sentence_sentence.ExpressionStatement(call(selected.finish, [name("$mode$" + selected.name, selected.span)], selected.span)))
+    items.append(model_hir_module_module.Test(model_syntax_function_syntax.TestDeclaration("test policies", [], suite, [], suite_span, lookup=namespace)))
     items.append(summary(test_count, suite_span, namespace))
     module.items = items
     return module

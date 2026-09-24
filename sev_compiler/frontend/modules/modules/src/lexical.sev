@@ -2,7 +2,6 @@ import lexer
 import parser
 import source
 import diagnostics
-import universal
 
 
 def lexical_definition(descriptor: lexer.OperatorDescriptor) -> bool:

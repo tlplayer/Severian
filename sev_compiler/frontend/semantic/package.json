@@ -11,53 +11,57 @@
   },
   "dependencies": {
     "parser": {
-      "package": "sev-compiler-parser",
-      "path": "../parser"
+      "path": "../parser",
+      "package": "sev-compiler-parser"
     },
     "lexer": {
-      "package": "sev-compiler-lexer",
-      "path": "../lexer"
+      "path": "../lexer",
+      "package": "sev-compiler-lexer"
     },
     "environment": {
-      "path": "../../../library/system/environment"
+      "path": "../../../library/system/environment",
+      "package": "environment"
     },
     "process": {
-      "path": "../../../library/system/process"
+      "path": "../../../library/system/process",
+      "package": "process"
     },
     "time": {
-      "path": "../../../library/core/time"
+      "path": "../../../library/core/time",
+      "package": "time"
     },
     "diagnostics": {
-      "package": "sev-compiler-diagnostics",
-      "path": "../../syntax/diagnostics"
+      "path": "../../syntax/diagnostics",
+      "package": "sev-compiler-diagnostics"
     },
     "source": {
       "path": "../source",
       "package": "sev-compiler-source"
     },
-    "universal": {
-      "package": "sev-compiler-universal",
-      "path": "../../universal"
-    },
     "ownership": {
-      "package": "sev-compiler-mir-ownership",
-      "path": "../../mir/ownership"
+      "path": "../../mir/ownership",
+      "package": "sev-compiler-mir-ownership"
     },
     "file": {
-      "path": "../../../library/system/file"
+      "path": "../../../library/system/file",
+      "package": "file"
     },
     "primitives": {
-      "package": "sev-compiler-primitives",
-      "path": "../../syntax/primitive"
+      "path": "../../syntax/primitive",
+      "package": "sev-compiler-primitives"
     },
     "syntax": {
       "package": "sev-compiler-syntax",
       "path": "../../syntax"
+    },
+    "modules": {
+      "path": "../modules",
+      "package": "sev-compiler-modules"
     }
   },
   "build": {
     "generators": [
-      "build/body_codec.py"
+      "generate_body_codec.py"
     ]
   }
 }

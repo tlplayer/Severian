@@ -15,8 +15,12 @@
       "package": "sev-compiler-source"
     },
     "diagnostics": {
-      "package": "sev-compiler-diagnostics",
-      "path": "../../syntax/diagnostics"
+      "path": "../../syntax/diagnostics",
+      "package": "sev-compiler-diagnostics"
+    },
+    "syntax": {
+      "path": "../../syntax",
+      "package": "sev-compiler-syntax"
     }
   }
 }

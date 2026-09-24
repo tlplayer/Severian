@@ -1,8 +1,8 @@
-import universal
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
 import * from "plan.sev"
 import * from "validate/mod.sev"
 
-def validate(program: universal.Program):
+def validate(program: model_hir_module_module.Program):
     for module in program.modules:
         validate_module(module)
     return unit

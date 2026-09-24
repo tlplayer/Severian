@@ -1,5 +1,5 @@
+import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import modules
-import universal
 import * from "../package.sev"
 
 test "program indexes start with stable empty tables":
@@ -9,8 +9,8 @@ test "program indexes start with stable empty tables":
 
 
 test "overload sets retain both definitions":
-    first = universal.DefId(1, 2, universal.DeclarationId(3))
-    second = universal.DefId(1, 2, universal.DeclarationId(4))
+    first = model_syntax_symbol_symbol.DefId(1, 2, model_syntax_symbol_symbol.DeclarationId(3))
+    second = model_syntax_symbol_symbol.DefId(1, 2, model_syntax_symbol_symbol.DeclarationId(4))
     bindings: map[string, Resolution] = {}
     insert_resolution(bindings, "run", first)
     insert_resolution(bindings, "run", second)

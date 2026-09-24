@@ -1,7 +1,7 @@
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
 import profiling
 import diagnostics
 import * from "token/mod.sev"
-import universal
 import * from "rule.sev"
 
 
@@ -10,7 +10,7 @@ class LexicalSymbol:
     characters: list[string]
 
 
-def lexical_symbols(operators: list[universal.OperatorSyntax]) -> list[LexicalSymbol]:
+def lexical_symbols(operators: list[model_syntax_function_syntax.OperatorSyntax]) -> list[LexicalSymbol]:
     # Only the declaration/structural bootstrap is closed. Value operations are
     # supplied by registered source descriptors and use one open token category.
     symbols: list[LexicalSymbol] = []

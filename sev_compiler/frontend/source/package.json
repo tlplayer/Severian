@@ -11,11 +11,8 @@
   },
   "dependencies": {
     "file": {
-      "path": "../../../library/system/file"
-    },
-    "syntax": {
-      "package": "sev-compiler-syntax",
-      "path": "../../syntax"
+      "path": "../../../library/system/file",
+      "package": "file"
     }
   }
 }

@@ -6,43 +6,32 @@ import * from "model.sev"
 # Text is a terminal inspection/bootstrap format. Lowering and optimization
 # consume MlirProgram objects and never parse or edit this output.
 def scalar_type_text(type_id: MlirScalarType) -> string:
-    kind = scalar_kind_name(type_id.kind)
-    if kind == "integer":
-        return "i" + string(i64(type_id.bits))
-    if kind == "ieee_float":
-        return "f" + string(i64(type_id.bits))
-    if kind == "f8e4m3fn":
-        return "f8E4M3FN"
-    if kind == "f8e5m2":
-        return "f8E5M2"
-    if kind == "brain_float":
-        return "bf16"
-    if kind == "index":
-        return "index"
-    if type_id.address_space == 0:
-        return "!llvm.ptr"
-    return "!llvm.ptr<" + string(type_id.address_space) + ">"
+    if type_id.spelling == "":
+        throw Error("MLIR scalar has no declaration-owned spelling")
+    return type_id.spelling
 
 
 def type_text(type_id: MlirType) -> string:
-    if type_kind_name(type_id.kind) == "array":
-        return "!llvm.array<" + string(type_id.dimensions[0]) + " x " + type_text(type_id.elements[0]) + ">"
-    if type_kind_name(type_id.kind) == "struct":
-        members: list[string] = []
-        for element in type_id.elements:
-            members.append(type_text(element))
-        return "!llvm.struct<(" + members.join(", ") + ")>"
-    if type_kind_name(type_id.kind) == "scalar":
-        return scalar_type_text(type_id.scalar)
-    if type_kind_name(type_id.kind) == "unranked_tensor":
-        return "tensor<*x" + scalar_type_text(type_id.scalar) + ">"
-    if type_kind_name(type_id.kind) == "unranked_memref":
-        return "memref<*x" + scalar_type_text(type_id.scalar) + ">"
+    parameters: list[MlirTypeParameter] = []
     dimensions: list[string] = []
+    index := 0
     for dimension in type_id.dimensions:
-        dimensions.append(dimension_text(dimension))
-    prefix = "tensor<" if type_kind_name(type_id.kind) == "tensor" else "memref<"
-    return prefix + dimensions.join("x") + "x" + scalar_type_text(type_id.scalar) + ">"
+        rendered = dimension_text(dimension)
+        dimensions.append(rendered)
+        parameters.append(MlirTypeParameter("dimension" + string(index), rendered))
+        index += 1
+    elements: list[string] = []
+    index = 0
+    for element in type_id.elements:
+        rendered = type_text(element)
+        elements.append(rendered)
+        parameters.append(MlirTypeParameter("element" + string(index), rendered))
+        index += 1
+    parameters.append(MlirTypeParameter("shape", dimensions.join("x") + ("x" if len(dimensions) > 0 else "")))
+    parameters.append(MlirTypeParameter("element", type_id.scalar.spelling))
+    parameters.append(MlirTypeParameter("elements", elements.join(", ")))
+    return type_id.kind.render(parameters)
+
 
 
 def value_text(value: MlirValue) -> string:
@@ -297,3 +286,13 @@ def print_program_unchecked(program: borrow MlirProgram) -> string:
 def print_program(program: borrow MlirProgram) -> string | MlirVerificationError:
     validate(program)
     return print_program_unchecked(program)
+
+
+test "type printing uses declaration bindings for new dialects":
+    value = declared_mlir_type(MlirTypeBinding("!example.box<{element0}>", elements=1), elements=[integer_type(32)])
+    assert(type_text(value) == "!example.box<i32>")
+
+
+test "rank zero shaped types omit the dimension separator":
+    assert(type_text(tensor_type(integer_type(32).scalar, [])) == "tensor<i32>")
+    assert(type_text(array_type(4, integer_type(8))) == "!llvm.array<4 x i8>")

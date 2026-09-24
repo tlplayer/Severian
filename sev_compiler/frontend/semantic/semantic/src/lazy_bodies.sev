@@ -1,4 +1,6 @@
-import universal
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import diagnostics
 import file
 import * from "../../package.pkg/build/body_archive.sev" as codec
@@ -6,27 +8,27 @@ import * from "../../package.pkg/build/body_archive.sev" as codec
 
 class BodyCache:
     paths: list[string] = []
-    bodies: list[universal.Block] = []
+    bodies: list[model_syntax_block_block.Block] = []
 
 
-def require(required: list[universal.DefId], definition: universal.DefId) -> universal.DefId:
+def require(required: list[model_syntax_symbol_symbol.DefId], definition: model_syntax_symbol_symbol.DefId) -> model_syntax_symbol_symbol.DefId:
     for previous in required:
-        if universal.same_definition(previous, definition):
+        if model_syntax_symbol_symbol.same_definition(previous, definition):
             return definition
     required.append(definition)
     return definition
 
 
-def needed(required: list[universal.DefId], function: universal.FunctionDeclaration) -> bool:
+def needed(required: list[model_syntax_symbol_symbol.DefId], function: model_syntax_function_function.FunctionDeclaration) -> bool:
     if function.lazy_body == "":
         return true
     for definition in required:
-        if universal.same_definition(definition, function.definition):
+        if model_syntax_symbol_symbol.same_definition(definition, function.definition):
             return true
     return false
 
 
-def load(function: universal.FunctionDeclaration, cache: BodyCache) -> universal.FunctionDeclaration | diagnostics.Diagnostic:
+def load(function: model_syntax_function_function.FunctionDeclaration, cache: BodyCache) -> model_syntax_function_function.FunctionDeclaration | diagnostics.Diagnostic:
     if function.lazy_body == "":
         return function
     index := 0
@@ -40,7 +42,7 @@ def load(function: universal.FunctionDeclaration, cache: BodyCache) -> universal
         input = codec.ArchiveInput(file.read(function.lazy_body).split("\n"))
         if codec.take(input) != codec.schema():
             throw Error("incompatible indexed prelude body")
-        body = codec.get_universal_Block(input)
+        body = codec.get_model_syntax_block_block_Block(input)
         if input.cursor != len(input.lines):
             throw Error("trailing indexed prelude body data")
         cache.paths.append(function.lazy_body)
@@ -52,29 +54,29 @@ def load(function: universal.FunctionDeclaration, cache: BodyCache) -> universal
         return error(diagnostics.Diagnostic("E000124", failure.message, function.span))
 
 
-def store(function: universal.FunctionDeclaration, directory: string, slot: int) -> universal.FunctionDeclaration | Error:
+def store(function: model_syntax_function_function.FunctionDeclaration, directory: string, slot: int) -> model_syntax_function_function.FunctionDeclaration | Error:
     body ?= function.body
     if body == None:
         return function
     if body != None:
         output = [codec.schema()]
-        codec.put_universal_Block(output, body)
+        codec.put_model_syntax_block_block_Block(output, body)
         name = "body-" + string(slot) + ".txt"
         if file.write(directory + "/" + name, output.join("\n")) != 0:
             throw Error("could not write indexed prelude body")
         function.lazy_body = name
         # An empty body marks a source implementation, not an external symbol.
-        function.body = universal.empty_block()
+        function.body = model_syntax_block_block.empty_block()
     return function
 
 test "unused indexed declarations do not require a body read":
-    function = universal.FunctionDeclaration(
+    function = model_syntax_function_function.FunctionDeclaration(
         name="unused",
-        definition=universal.named_definition("prelude", "function", "unused"),
-        body=universal.empty_block(),
+        definition=model_syntax_symbol_symbol.named_definition("prelude", "function", "unused"),
+        body=model_syntax_block_block.empty_block(),
         lazy_body="/missing-unused-body.txt",
     )
-    required: list[universal.DefId] = []
+    required: list[model_syntax_symbol_symbol.DefId] = []
     assert(not lazy.needed(required, function))
     lazy.require(required, function.definition)
     assert(lazy.needed(required, function))
@@ -83,12 +85,12 @@ test "unused indexed declarations do not require a body read":
 
 
 test "body cache reuses an already decoded declaration":
-    function = universal.FunctionDeclaration(
+    function = model_syntax_function_function.FunctionDeclaration(
         name="cached",
-        body=universal.empty_block(),
+        body=model_syntax_block_block.empty_block(),
         lazy_body="/missing-cached-body.txt",
     )
-    cache = lazy.BodyCache([function.lazy_body], [universal.empty_block()])
+    cache = lazy.BodyCache([function.lazy_body], [model_syntax_block_block.empty_block()])
     loaded = lazy.load(function, cache)
     assert(loaded.body != None)
     assert(loaded.lazy_body == "")
@@ -96,5 +98,5 @@ test "body cache reuses an already decoded declaration":
 
 
 test "ordinary application declarations remain semantic roots":
-    function = universal.FunctionDeclaration(name="application")
+    function = model_syntax_function_function.FunctionDeclaration(name="application")
     assert(lazy.needed([], function))

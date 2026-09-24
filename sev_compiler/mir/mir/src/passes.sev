@@ -1,3 +1,5 @@
+import * from "../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../cfg/cfg.sev" as model_mir_cfg_cfg
 import * from "cfg.sev"
 
 enum IrStage:
@@ -55,8 +57,8 @@ class AnalysisManager:
 
 trait Pass:
     metadata() -> PassMetadata
-    run_module(module: universal.Module, analyses: AnalysisManager) -> unit | PassError
-    run_function(body: universal.CfgBody, analyses: AnalysisManager) -> unit | PassError
+    run_module(module: model_hir_module_module.Module, analyses: AnalysisManager) -> unit | PassError
+    run_function(body: model_mir_cfg_cfg.CfgBody, analyses: AnalysisManager) -> unit | PassError
 
 
 class PassManager:
@@ -68,7 +70,7 @@ class PassManager:
     def add(pass: Pass):
         passes.append(pass)
 
-    def run(module: universal.Module, stage: IrStage) -> IrStage | PassError:
+    def run(module: model_hir_module_module.Module, stage: IrStage) -> IrStage | PassError:
         analyses = AnalysisManager()
         for pass in passes:
             metadata = pass.metadata()

@@ -1,17 +1,21 @@
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import package
 import source
-import universal
-from universal import scalar
+import * from "../../../../syntax/primitive/catalog.sev" as scalar
 import * from "package:mir/mir/src/agent_ir.sev" as agent_ir
 
 class EditorIndex:
     definitions: list[string] = []
     references: list[string] = []
     files: list[source.SourceFile] = []
-    module: universal.Module = universal.Module([])
+    module: model_hir_module_module.Module = model_hir_module_module.Module([])
     relationships: list[string] = []
 
-def editor_type(module: universal.Module, type_id: universal.TypeId) -> string:
+def editor_type(module: model_hir_module_module.Module, type_id: model_syntax_symbol_symbol.TypeId) -> string:
     if type_id.index == 64:
         return "int"
     if type_id.index == 164:
@@ -30,13 +34,13 @@ def editor_definition(index: EditorIndex, id: string, name: string, kind: string
 def editor_reference(index: EditorIndex, id: string, caller: string, span: source.Span):
     index.references.append("{\"symbol\":" + package.document_quote(id) + ",\"caller\":" + package.document_quote(caller) + ",\"source\":" + agent_ir.span_json(span, index.files) + "}")
 
-def editor_symbol(definition: universal.DefId) -> string:
+def editor_symbol(definition: model_syntax_symbol_symbol.DefId) -> string:
     return string(definition.package) + ":" + string(definition.module) + ":" + string(definition.declaration.value)
 
-def editor_relationship(index: EditorIndex, implementation: universal.DefId, contract: universal.DefId):
+def editor_relationship(index: EditorIndex, implementation: model_syntax_symbol_symbol.DefId, contract: model_syntax_symbol_symbol.DefId):
     index.relationships.append("{\"from\":" + package.document_quote(editor_symbol(implementation)) + ",\"to\":" + package.document_quote(editor_symbol(contract)) + ",\"kind\":\"implements\"}")
 
-def editor_expression(state: EditorIndex, expression: universal.Expression, caller: string):
+def editor_expression(state: EditorIndex, expression: model_syntax_function_function.Expression, caller: string):
     match expression.kind:
         case BindingReference:
             editor_reference(state, caller + ":local:" + string(binding.index), caller, expression.span)
@@ -85,7 +89,7 @@ def editor_expression(state: EditorIndex, expression: universal.Expression, call
         case _:
             throw Error("unimplemented (sev_compiler/boundaries/driver/src/pipeline/editor.sev)")
 
-def editor_block(index: EditorIndex, body: universal.Block, caller: string):
+def editor_block(index: EditorIndex, body: model_syntax_block_block.Block, caller: string):
     for statement in body.statements:
         match statement:
             case BindingStatement:
@@ -126,7 +130,7 @@ def editor_documentation(files: list[source.SourceFile], declared: source.Span) 
                 line -= 1
     return documentation
 
-def editor_index(module: universal.Module, files: list[source.SourceFile], resolution: package.Resolution) -> string:
+def editor_index(module: model_hir_module_module.Module, files: list[source.SourceFile], resolution: package.Resolution) -> string:
     index = EditorIndex([], [], files, module)
     for trait in module.traits:
         if not trait.grammar:
@@ -134,7 +138,7 @@ def editor_index(module: universal.Module, files: list[source.SourceFile], resol
     for record in module.records:
         editor_definition(index, editor_symbol(record.definition), record.name, "class", record.span, record.name, editor_documentation(files, record.span))
         for annotation in record.traits:
-            name ?= universal.simple_type_name(annotation)
+            name ?= model_syntax_type_annotation.simple_type_name(annotation)
             if name != None:
                 for trait in module.traits:
                     if trait.name == name or trait.name == record.lookup + name:
@@ -177,7 +181,7 @@ def editor_documented_source(files: list[source.SourceFile], span: source.Span, 
             return file.path.starts_with(resolution.packages[0].root + "/")
     return false
 
-def editor_package_docs(module: universal.Module, files: list[source.SourceFile], resolution: package.Resolution) -> string:
+def editor_package_docs(module: model_hir_module_module.Module, files: list[source.SourceFile], resolution: package.Resolution) -> string:
     sections: list[string] = ["# Package API"]
     for record in module.records:
         if not record.name.starts_with("_") and int(record.span.source.index) not in module.prelude_sources and editor_documented_source(files, record.span, resolution):

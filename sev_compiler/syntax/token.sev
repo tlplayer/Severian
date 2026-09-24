@@ -1,0 +1,19 @@
+import * from "lexeme.sev"
+
+enum TokenKind:
+    Identifier
+    Integer
+    Float
+    Character
+    String
+    FormattedString
+    Symbol
+    Newline
+    Indent
+    Dedent
+    Eof
+
+
+trait TokenTerm:
+    property lexeme: Lexeme
+    property span: Span

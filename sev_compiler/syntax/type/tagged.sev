@@ -1,6 +1,8 @@
+import * from "../function/function.sev" as model_syntax_function_function
+import * from "../symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "annotation.sev" as model_syntax_type_annotation
 import diagnostics
 import source
-import * from "../syntax/src/lib.sev" as universal
 
 
 class VariantSelection:
@@ -10,13 +12,13 @@ class VariantSelection:
 
 # Tagged types use the same tagged aggregate storage as declared outcomes. Their
 # nominal type stays distinct, so success propagation does not unwrap them.
-def layouts(records: list[universal.RecordDeclaration], first: int = 0) -> unit | diagnostics.Diagnostic:
+def layouts(records: list[model_syntax_function_function.RecordDeclaration], first: int = 0) -> unit | diagnostics.Diagnostic:
     count = len(records)
     cursor := first
     while cursor < count:
         record := records[cursor]
         if record.representation == "TaggedAggregate":
-            fields = [universal.FunctionParameter("$tag", universal.named_type("int", [], record.span), absent, record.span)]
+            fields = [model_syntax_function_function.FunctionParameter("$tag", model_syntax_type_annotation.named_type("int", [], record.span), absent, record.span)]
             names: list[string] = []
             index := 0
             for variant in record.alternatives:
@@ -24,9 +26,9 @@ def layouts(records: list[universal.RecordDeclaration], first: int = 0) -> unit 
                     return error(diagnostics.diagnostic_at("E000206", "duplicate tagged variant " + variant.name, variant.span))
                 names.append(variant.name)
                 payload_name = record.name + "." + variant.name
-                payload = universal.RecordDeclaration(payload_name, variant.fields, [], variant.span, type_id=universal.TypeId(u32(1000 + len(records))), lookup=record.lookup)
+                payload = model_syntax_function_function.RecordDeclaration(payload_name, variant.fields, [], variant.span, type_id=model_syntax_symbol_symbol.TypeId(u32(1000 + len(records))), lookup=record.lookup)
                 records.append(payload)
-                fields.append(universal.FunctionParameter("$variant" + string(index), universal.named_type(payload_name, [], variant.span), absent, variant.span))
+                fields.append(model_syntax_function_function.FunctionParameter("$variant" + string(index), model_syntax_type_annotation.named_type(payload_name, [], variant.span), absent, variant.span))
                 index += 1
             for variant in record.alternatives:
                 seen: list[string] = []
@@ -41,7 +43,7 @@ def layouts(records: list[universal.RecordDeclaration], first: int = 0) -> unit 
         cursor += 1
 
 
-def select(records: list[universal.RecordDeclaration], namespace: string, path: string, expected: universal.TypeId, span: source.Span) -> VariantSelection | diagnostics.Diagnostic:
+def select(records: list[model_syntax_function_function.RecordDeclaration], namespace: string, path: string, expected: model_syntax_symbol_symbol.TypeId, span: source.Span) -> VariantSelection | diagnostics.Diagnostic:
     result := VariantSelection()
     ordinal := 0
     for record in records:
@@ -65,7 +67,7 @@ def select(records: list[universal.RecordDeclaration], namespace: string, path: 
     return result
 
 
-def path(expression: universal.Expression) -> string:
+def path(expression: model_syntax_function_function.Expression) -> string:
     match expression.kind:
         case Name:
             return name

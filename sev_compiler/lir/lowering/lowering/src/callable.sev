@@ -1,0 +1,13 @@
+import * from "package:hir/module/module.sev" as hir
+import * from "package:syntax/symbol/symbol.sev" as symbols
+import * from "package:syntax/function/function.sev" as callable
+import * from "package:mlir/mlir/src/emit/callable.sev" as emission
+import * from "package:mlir/mlir/src/ir/model.sev" as mlir
+
+
+def lower_type(type_id: symbols.TypeId, records: borrow list[callable.RecordDeclaration] = []) -> mlir.MlirType:
+    return emission.callable_mlir_type(type_id, records)
+
+
+def lower(module: borrow hir.Module, library: bool = false, export_names: list[string] = [], export_symbols: list[string] = [], selected: list[int] = [], partitioned: bool = false) -> mlir.MlirProgram:
+    return emission.lower_callables(module, library, export_names, export_symbols, selected, partitioned)

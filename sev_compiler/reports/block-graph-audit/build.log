@@ -1,0 +1,1 @@
+error: while resolving package `sev_compiler` dependency `backend`: could not resolve /home/tplayer/Documents/Severian/sev_compiler/boundaries/backend/package.json: No such file or directory (os error 2)

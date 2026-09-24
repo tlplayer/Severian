@@ -1,62 +1,65 @@
-import universal
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 
 
-def operator_key(operation: universal.OperatorDeclaration, owner: string) -> string:
+def operator_key(operation: model_syntax_function_syntax.OperatorDeclaration, owner: string) -> string:
     parts = [owner, "operator", operation.syntax.symbol]
     for parameter in operation.parameters:
-        parts.append(universal.annotation_key(parameter.annotation, operation.type_parameters))
+        parts.append(model_syntax_symbol_symbol.annotation_key(parameter.annotation, operation.type_parameters))
         parts.append(parameter.mode)
-    return universal.semantic_key(parts)
+    return model_syntax_symbol_symbol.semantic_key(parts)
 
 
-def stamp_function(function: universal.FunctionDeclaration, owner: string) -> universal.FunctionDeclaration:
-    function.semantic_key = universal.callable_key(function, owner)
-    function.definition = universal.definition_from_key(function.semantic_key)
+def stamp_function(function: model_syntax_function_function.FunctionDeclaration, owner: string) -> model_syntax_function_function.FunctionDeclaration:
+    function.semantic_key = model_syntax_symbol_symbol.callable_key(function, owner)
+    function.definition = model_syntax_symbol_symbol.definition_from_key(function.semantic_key)
     return function
 
 
 # Stamp before import aliases are introduced. Membership is supplied exclusively
 # by library/package; no path, discovery ordinal or source span enters these IDs.
-def stamp_module(module: universal.Module, owner: string) -> universal.Module:
-    items: list[universal.Item] = []
+def stamp_module(module: model_hir_module_module.Module, owner: string) -> model_hir_module_module.Module:
+    items: list[model_hir_module_module.Item] = []
     for item in module.items:
         match item:
             case Function:
-                items.append(universal.Function(stamp_function(declaration, owner)))
+                items.append(model_hir_module_module.Function(stamp_function(declaration, owner)))
             case Trait:
-                declaration.definition = universal.named_definition(owner, "trait", declaration.name)
-                member_owner = universal.semantic_key([owner, "trait", declaration.name])
-                properties: list[universal.PropertyDeclaration] = []
+                declaration.definition = model_syntax_symbol_symbol.named_definition(owner, "trait", declaration.name)
+                member_owner = model_syntax_symbol_symbol.semantic_key([owner, "trait", declaration.name])
+                properties: list[model_syntax_function_syntax.PropertyDeclaration] = []
                 for property in declaration.properties:
-                    property.definition = universal.named_definition(member_owner, "property", property.name)
+                    property.definition = model_syntax_symbol_symbol.named_definition(member_owner, "property", property.name)
                     properties.append(property)
-                methods: list[universal.FunctionDeclaration] = []
+                methods: list[model_syntax_function_function.FunctionDeclaration] = []
                 for method in declaration.methods:
                     methods.append(stamp_function(method, member_owner))
-                operations: list[universal.OperatorDeclaration] = []
+                operations: list[model_syntax_function_syntax.OperatorDeclaration] = []
                 for operation in declaration.operators:
-                    operation.definition = universal.definition_from_key(operator_key(operation, member_owner))
+                    operation.definition = model_syntax_symbol_symbol.definition_from_key(operator_key(operation, member_owner))
                     operations.append(operation)
                 declaration.properties = properties
                 declaration.methods = methods
                 declaration.operators = operations
-                items.append(universal.Trait(declaration))
+                items.append(model_hir_module_module.Trait(declaration))
             case OperatorItem:
-                declaration.definition = universal.definition_from_key(operator_key(declaration, owner))
-                items.append(universal.OperatorItem(declaration))
+                declaration.definition = model_syntax_symbol_symbol.definition_from_key(operator_key(declaration, owner))
+                items.append(model_hir_module_module.OperatorItem(declaration))
             case Record:
-                member_owner = universal.semantic_key([owner, "extension" if declaration.extension else "record", declaration.name])
-                declaration.definition = universal.definition_from_key(member_owner)
-                methods: list[universal.FunctionDeclaration] = []
+                member_owner = model_syntax_symbol_symbol.semantic_key([owner, "extension" if declaration.extension else "record", declaration.name])
+                declaration.definition = model_syntax_symbol_symbol.definition_from_key(member_owner)
+                methods: list[model_syntax_function_function.FunctionDeclaration] = []
                 for method in declaration.methods:
                     methods.append(stamp_function(method, member_owner))
-                operations: list[universal.OperatorDeclaration] = []
+                operations: list[model_syntax_function_syntax.OperatorDeclaration] = []
                 for operation in declaration.operators:
-                    operation.definition = universal.definition_from_key(operator_key(operation, member_owner))
+                    operation.definition = model_syntax_symbol_symbol.definition_from_key(operator_key(operation, member_owner))
                     operations.append(operation)
                 declaration.methods = methods
                 declaration.operators = operations
-                items.append(universal.Record(declaration))
+                items.append(model_hir_module_module.Record(declaration))
             case _:
                 items.append(item)
     module.items = items

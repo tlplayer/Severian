@@ -14,10 +14,11 @@ class PrimitiveDescriptor: Primitive
     default_literal: bool
     literal_family: string = ""
     literal_bindings: list[LiteralBinding] = []
+    mlir: MlirTypeBinding = MlirTypeBinding("", value=false)
 
 
 def describe_primitive[T: Primitive](value: T) -> PrimitiveDescriptor:
-    return PrimitiveDescriptor(value.identity, value.id, value.name, value.size, value.alignment, value.constructors, value.category, value.representation, value.literal, value.default_literal, value.literal_family, value.literal_bindings)
+    return PrimitiveDescriptor(value.identity, value.id, value.name, value.size, value.alignment, value.constructors, value.category, value.representation, value.literal, value.default_literal, value.literal_family, value.literal_bindings, value.mlir)
 
 
 PrimitiveCatalog: list[PrimitiveDescriptor] = []
@@ -69,6 +70,8 @@ class ScalarType:
     boolean: bool
     representation: string = "integer"
     signed: bool = true
+    mlir: MlirTypeBinding = MlirTypeBinding("", value=false)
+    element: TypeId = TypeId(0)
 
 
 def scalar_from_primitive(value: PrimitiveDescriptor) -> ScalarType:
@@ -99,6 +102,7 @@ def scalar_from_primitive(value: PrimitiveDescriptor) -> ScalarType:
             result.representation = "aggregate"
     if value.id.index == index_type_id().index:
         result.representation = "index"
+    result.mlir = value.mlir
     return result
 
 
@@ -142,7 +146,7 @@ def initialize_scalar_catalog():
         if identity >= 800 or ScalarCatalog[identity].value != None or ScalarCatalog[identity + 200].value != None:
             throw Error("duplicate or out-of-range primitive identity")
         ScalarCatalog[identity] = ScalarSlot(descriptor)
-        ScalarCatalog[identity + 200] = ScalarSlot(ScalarType(TypeId(u32(identity + 200)), "$buffer$" + descriptor.name, descriptor.bits, false, "buffer"))
+        ScalarCatalog[identity + 200] = ScalarSlot(ScalarType(TypeId(u32(identity + 200)), "$buffer$" + descriptor.name, descriptor.bits, false, "buffer", mlir=memref_mlir(), element=descriptor.id))
 
 
 def scalar_descriptor(id: TypeId, name: string = "") -> ScalarType | None:

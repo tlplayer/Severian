@@ -1,17 +1,20 @@
-import universal
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../cfg/block.sev" as model_mir_cfg_block
+import * from "../../../cfg/cfg.sev" as model_mir_cfg_cfg
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
 import diagnostics
 
 
-def origin_at(body: universal.CfgBody, block: universal.BasicBlock, position: int) -> universal.OperationOrigin:
+def origin_at(body: model_mir_cfg_cfg.CfgBody, block: model_mir_cfg_block.BasicBlock, position: int) -> model_syntax_block_block.OperationOrigin:
     if position >= 0 and position < len(block.origins):
         return block.origins[position]
     terminal ?= block.terminator
     if terminal != None:
-        return universal.OperationOrigin(terminal.span, body.origin.block, body.origin.callable, body.origin.path)
+        return model_syntax_block_block.OperationOrigin(terminal.span, body.origin.block, body.origin.callable, body.origin.path)
     return body.origin
 
 
-def frame(module: universal.Module, origin: universal.CallableOrigin, label: string = "") -> diagnostics.CallFrame:
+def frame(module: model_hir_module_module.Module, origin: model_syntax_block_block.CallableOrigin, label: string = "") -> diagnostics.CallFrame:
     name = origin.name if label == "" else label + ": " + origin.name
     path := module.path
     line := 0
@@ -37,12 +40,12 @@ def frame(module: universal.Module, origin: universal.CallableOrigin, label: str
     return diagnostics.CallFrame(string(origin.definition.package), name, path, line, column)
 
 
-def memory_diagnostic(module: universal.Module, message: string, origin: universal.OperationOrigin, related: universal.OperationOrigin | None = None) -> diagnostics.Diagnostic:
+def memory_diagnostic(module: model_hir_module_module.Module, message: string, origin: model_syntax_block_block.OperationOrigin, related: model_syntax_block_block.OperationOrigin | None = None) -> diagnostics.Diagnostic:
     frames: list[diagnostics.CallFrame] = []
     previous ?= related
     if previous != None:
         for call in previous.path:
-            frames.append(frame(module, universal.CallableOrigin(call.definition, call.name, previous.span), "storage origin"))
+            frames.append(frame(module, model_syntax_block_block.CallableOrigin(call.definition, call.name, previous.span), "storage origin"))
     cursor := int(len(origin.path))
     while cursor > 0:
         cursor -= 1

@@ -1,4 +1,7 @@
-import universal
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../cfg/cfg.sev" as model_mir_cfg_cfg
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import diagnostics
 import * from "cfg.sev" as cfg
 import * from "provenance.sev" as provenance
@@ -6,18 +9,18 @@ import * from "initialization.sev" as initialization
 
 
 class ValueAlias:
-    source: universal.ValueId
-    target: universal.ValueId
+    source: model_syntax_symbol_symbol.ValueId
+    target: model_syntax_symbol_symbol.ValueId
 
 
 class StorageOrigin:
-    value: universal.ValueId
-    origin: universal.OperationOrigin
+    value: model_syntax_symbol_symbol.ValueId
+    origin: model_syntax_block_block.OperationOrigin
 
 
 class OwnershipPlan:
-    views: list[universal.ValueId] = []
-    storage: list[universal.ValueId] = []
+    views: list[model_syntax_symbol_symbol.ValueId] = []
+    storage: list[model_syntax_symbol_symbol.ValueId] = []
     aliases: list[ValueAlias] = []
     origins: list[StorageOrigin] = []
 
@@ -25,11 +28,11 @@ class OwnershipPlan:
 # MIR is the executable ownership boundary. Source effects remain attached to
 # typed bodies, while availability, initialization and stack escapes are checked
 # on the completed graph and repeated after transformations before emission.
-def analyze_ownership(module: universal.Module, body: universal.CfgBody, parameters: list[universal.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
+def analyze_ownership(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBody, parameters: list[model_syntax_symbol_symbol.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
     try:
         cfg.verify_availability(body, parameters)
     catch failure: diagnostics.Diagnostic:
-        origin = universal.OperationOrigin(failure.span, body.origin.block, body.origin.callable, body.origin.path)
+        origin = model_syntax_block_block.OperationOrigin(failure.span, body.origin.block, body.origin.callable, body.origin.path)
         annotated = provenance.memory_diagnostic(module, failure.message, origin)
         annotated.code = failure.code
         return error(annotated)
@@ -63,7 +66,7 @@ def analyze_ownership(module: universal.Module, body: universal.CfgBody, paramet
     return report
 
 
-def storage_origin(plan: borrow OwnershipPlan, value: universal.ValueId) -> universal.OperationOrigin | None:
+def storage_origin(plan: borrow OwnershipPlan, value: model_syntax_symbol_symbol.ValueId) -> model_syntax_block_block.OperationOrigin | None:
     reachable: list[int] = [int(value.index)]
     cursor := 0
     while cursor < len(reachable):
@@ -78,18 +81,18 @@ def storage_origin(plan: borrow OwnershipPlan, value: universal.ValueId) -> univ
     return None
 
 
-def stack_owner(plan: borrow OwnershipPlan, value: universal.ValueId) -> bool:
+def stack_owner(plan: borrow OwnershipPlan, value: model_syntax_symbol_symbol.ValueId) -> bool:
     return storage_origin(plan, value) != None
 
 
-def verify_escapes(module: universal.Module, body: borrow universal.CfgBody, plan: borrow OwnershipPlan) -> unit | diagnostics.Diagnostic:
+def verify_escapes(module: model_hir_module_module.Module, body: borrow model_mir_cfg_cfg.CfgBody, plan: borrow OwnershipPlan) -> unit | diagnostics.Diagnostic:
     reachable = cfg.reachable_blocks(body)
     for block in borrow body.blocks:
         if block.id not in reachable:
             continue
         terminal ?= block.terminator
         if terminal != None:
-            returned_values: list[universal.ValueId] := []
+            returned_values: list[model_syntax_symbol_symbol.ValueId] := []
             match terminal.exit:
                 case Finish:
                     returned ?= value
@@ -105,5 +108,5 @@ def verify_escapes(module: universal.Module, body: borrow universal.CfgBody, pla
                     return error(provenance.memory_diagnostic(module, "returned view outlives its local storage owner", provenance.origin_at(body, block, int(len(block.operations))), owner))
 
 
-def authorize_lowering(module: borrow universal.Module, body: borrow universal.CfgBody, parameters: borrow list[universal.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
+def authorize_lowering(module: borrow model_hir_module_module.Module, body: borrow model_mir_cfg_cfg.CfgBody, parameters: borrow list[model_syntax_symbol_symbol.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
     return analyze_ownership(module, body, parameters)

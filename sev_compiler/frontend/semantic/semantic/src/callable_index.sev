@@ -1,4 +1,4 @@
-import universal
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
 
 
 # Declaration lists grow as generic instances and record methods are registered.
@@ -10,7 +10,7 @@ class FunctionIndex:
     operators: list[string] = []
 
 
-def refresh(index: FunctionIndex, functions: borrow list[universal.FunctionDeclaration]):
+def refresh(index: FunctionIndex, functions: borrow list[model_syntax_function_function.FunctionDeclaration]):
     while len(index.names) < len(functions):
         function = functions[len(index.names)]
         index.names.append(function.name)
@@ -21,9 +21,9 @@ def refresh(index: FunctionIndex, functions: borrow list[universal.FunctionDecla
             index.operators.append("")
 
 
-def named(index: FunctionIndex, functions: borrow list[universal.FunctionDeclaration], name: string, allow_prelude: bool = true) -> list[universal.FunctionDeclaration]:
+def named(index: FunctionIndex, functions: borrow list[model_syntax_function_function.FunctionDeclaration], name: string, allow_prelude: bool = true) -> list[model_syntax_function_function.FunctionDeclaration]:
     refresh(index, functions)
-    result: list[universal.FunctionDeclaration] = []
+    result: list[model_syntax_function_function.FunctionDeclaration] = []
     position := 0
     for candidate in index.names:
         if candidate == name:
@@ -34,9 +34,9 @@ def named(index: FunctionIndex, functions: borrow list[universal.FunctionDeclara
     return result
 
 
-def matching_operators(index: FunctionIndex, functions: borrow list[universal.FunctionDeclaration], symbol: string) -> list[universal.FunctionDeclaration]:
+def matching_operators(index: FunctionIndex, functions: borrow list[model_syntax_function_function.FunctionDeclaration], symbol: string) -> list[model_syntax_function_function.FunctionDeclaration]:
     refresh(index, functions)
-    result: list[universal.FunctionDeclaration] = []
+    result: list[model_syntax_function_function.FunctionDeclaration] = []
     position := 0
     for candidate in index.operators:
         if candidate != "" and candidate == symbol:
@@ -45,6 +45,6 @@ def matching_operators(index: FunctionIndex, functions: borrow list[universal.Fu
     return result
 
 
-def has_operator(index: FunctionIndex, functions: borrow list[universal.FunctionDeclaration], symbol: string) -> bool:
+def has_operator(index: FunctionIndex, functions: borrow list[model_syntax_function_function.FunctionDeclaration], symbol: string) -> bool:
     refresh(index, functions)
     return symbol != "" and symbol in index.operators

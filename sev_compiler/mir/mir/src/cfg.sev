@@ -1,21 +1,29 @@
+import * from "../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../cfg/block.sev" as model_mir_cfg_block
+import * from "../../cfg/branch.sev" as model_mir_cfg_branch
+import * from "../../cfg/cfg.sev" as model_mir_cfg_cfg
+import * from "../../value.sev" as model_mir_value
+import * from "../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../syntax/literal/value.sev" as model_syntax_literal_value
+import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import * from "package:ownership/ownership/src/cfg.sev" as ownership_cfg
-from universal import availability
-from universal import dominance as graph
-import * from "package:cfg_builder/src/lib.sev"
-import universal
-from universal import storage as storage_types
+import * from "../../cfg/availability.sev" as availability
+import * from "../../cfg/dominance.sev" as graph
+import * from "package:cfg_builder/builder.sev"
+import * from "../../../syntax/type/storage.sev" as storage_types
 import source
 import diagnostics
 
 
-def origin(module: universal.Module, name: string, span: source.Span) -> universal.CfgTerminator:
+def origin(module: model_hir_module_module.Module, name: string, span: source.Span) -> model_mir_cfg_branch.CfgTerminator:
     for definition in module.traits:
         if definition.grammar and definition.name == name:
-            return universal.CfgTerminator(universal.CfgExit.Dead, definition.definition, span)
+            return model_mir_cfg_branch.CfgTerminator(model_mir_cfg_branch.CfgExit.Dead, definition.definition, span)
     throw Error("missing source grammar contract " + name)
 
 
-def successors(exit: universal.CfgExit) -> list[universal.CfgEdge]:
+def successors(exit: model_mir_cfg_branch.CfgExit) -> list[model_mir_cfg_branch.CfgEdge]:
     match exit:
         case Jump:
             return [edge]
@@ -25,17 +33,17 @@ def successors(exit: universal.CfgExit) -> list[universal.CfgEdge]:
             return []
 
 
-def finish(module: universal.Module, context: ExecutionContext, span: source.Span, parameters: list[universal.ValueId] = []) -> bool | diagnostics.Diagnostic:
+def finish(module: model_hir_module_module.Module, context: ExecutionContext, span: source.Span, parameters: list[model_syntax_symbol_symbol.ValueId] = []) -> bool | diagnostics.Diagnostic:
     origin = origin(module, "Return", span)
     if open(context):
-        terminate(context, universal.CfgExit.Finish(None) if context.body.return_type.index == 2 else universal.CfgExit.Dead, origin)
+        terminate(context, model_mir_cfg_branch.CfgExit.Finish(None) if context.body.return_type.index == 2 else model_mir_cfg_branch.CfgExit.Dead, origin)
     verify(module, context.body)
     prune_unreachable(context.body)
     verify_availability(context.body, parameters)
     return verify(module, context.body)
 
 
-def verify(module: universal.Module, body: universal.CfgBody) -> bool | diagnostics.Diagnostic:
+def verify(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBody) -> bool | diagnostics.Diagnostic:
     if body.entry < 0 or body.entry >= len(body.blocks):
         return error(diagnostics.Diagnostic("E000230", "CFG entry block does not exist", None))
     block_index := 0
@@ -61,7 +69,7 @@ def verify(module: universal.Module, body: universal.CfgBody) -> bool | diagnost
                     type_id = module.values[value.index].type_id
                     valid := false
                     for record in module.records:
-                        if record.type_id.index == type_id.index and len(universal.outcome_variants(record)) != 0:
+                        if record.type_id.index == type_id.index and len(model_syntax_function_function.outcome_variants(record)) != 0:
                             valid = true
                     if not valid:
                         return error(diagnostics.Diagnostic("E000230", "CFG raise requires a typed outcome", terminator.span))
@@ -100,16 +108,16 @@ def verify(module: universal.Module, body: universal.CfgBody) -> bool | diagnost
 
 
 
-def value(module: universal.Module, type_id: universal.TypeId) -> universal.ValueId:
-    id = universal.ValueId(u32(len(module.values)))
-    module.values.append(universal.Value(id, type_id))
+def value(module: model_hir_module_module.Module, type_id: model_syntax_symbol_symbol.TypeId) -> model_syntax_symbol_symbol.ValueId:
+    id = model_syntax_symbol_symbol.ValueId(u32(len(module.values)))
+    module.values.append(model_mir_value.Value(id, type_id))
     return id
 
 
-def simplify_storage(module: universal.Module, body: universal.CfgBody):
-    slots: list[universal.ValueId] = []
+def simplify_storage(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBody):
+    slots: list[model_syntax_symbol_symbol.ValueId] = []
     counts: list[int] = []
-    initialized: list[universal.ValueId] = []
+    initialized: list[model_syntax_symbol_symbol.ValueId] = []
     definitions: list[int] = []
     positions: list[int] = []
     direct: list[bool] = []
@@ -170,9 +178,9 @@ def simplify_storage(module: universal.Module, body: universal.CfgBody):
         body.blocks[block.id] = simplify_storage_block(block, slots, initialized, direct)
 
 
-def simplify_storage_block(block: universal.BasicBlock, slots: list[universal.ValueId], initialized: list[universal.ValueId], direct: list[bool]) -> universal.BasicBlock:
-    operations: list[universal.Operation] = []
-    origins: list[universal.OperationOrigin] = []
+def simplify_storage_block(block: model_mir_cfg_block.BasicBlock, slots: list[model_syntax_symbol_symbol.ValueId], initialized: list[model_syntax_symbol_symbol.ValueId], direct: list[bool]) -> model_mir_cfg_block.BasicBlock:
+    operations: list[model_syntax_function_function.Operation] = []
+    origins: list[model_syntax_block_block.OperationOrigin] = []
     position := 0
     for operation in block.operations:
         origin = block.origins[position]
@@ -195,7 +203,7 @@ def simplify_storage_block(block: universal.BasicBlock, slots: list[universal.Va
                 index := 0
                 for slot in slots:
                     if slot.index == address.index and direct[index]:
-                        operations.append(universal.Operation.Alias(initialized[index], result))
+                        operations.append(model_syntax_function_function.Operation.Alias(initialized[index], result))
                         origins.append(origin)
                         retained = false
                     index += 1
@@ -209,12 +217,12 @@ def simplify_storage_block(block: universal.BasicBlock, slots: list[universal.Va
     return block
 
 
-def promote_storage(module: universal.Module, body: universal.CfgBody):
+def promote_storage(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBody):
     simplify_storage(module, body)
-    slots: list[universal.ValueId] = []
-    initial: list[universal.ValueId] = []
-    prefix: list[universal.Operation] = []
-    prefix_origins: list[universal.OperationOrigin] = []
+    slots: list[model_syntax_symbol_symbol.ValueId] = []
+    initial: list[model_syntax_symbol_symbol.ValueId] = []
+    prefix: list[model_syntax_function_function.Operation] = []
+    prefix_origins: list[model_syntax_block_block.OperationOrigin] = []
     for selected in body.blocks:
         position := 0
         for operation in selected.operations:
@@ -226,7 +234,7 @@ def promote_storage(module: universal.Module, body: universal.CfgBody):
                         slots.append(result)
                         empty = value(module, type_id)
                         initial.append(empty)
-                        prefix.append(universal.Operation.Constant(universal.StringValue("") if type_id.index == 3 else universal.NoneValue(), empty))
+                        prefix.append(model_syntax_function_function.Operation.Constant(model_syntax_literal_value.StringValue("") if type_id.index == 3 else model_syntax_literal_value.NoneValue(), empty))
                         prefix_origins.append(origin)
                     else:
                         prefix.append(operation)
@@ -237,7 +245,7 @@ def promote_storage(module: universal.Module, body: universal.CfgBody):
         body.blocks[selected.id] = promote_storage_block(module, selected, body.entry, slots, initial, prefix, prefix_origins)
 
 
-def promote_storage_block(module: universal.Module, selected: universal.BasicBlock, entry: int, slots: list[universal.ValueId], initial: list[universal.ValueId], prefix: list[universal.Operation], prefix_origins: list[universal.OperationOrigin]) -> universal.BasicBlock:
+def promote_storage_block(module: model_hir_module_module.Module, selected: model_mir_cfg_block.BasicBlock, entry: int, slots: list[model_syntax_symbol_symbol.ValueId], initial: list[model_syntax_symbol_symbol.ValueId], prefix: list[model_syntax_function_function.Operation], prefix_origins: list[model_syntax_block_block.OperationOrigin]) -> model_mir_cfg_block.BasicBlock:
     current := initial[:]
     if selected.id != entry:
         current = []
@@ -245,8 +253,8 @@ def promote_storage_block(module: universal.Module, selected: universal.BasicBlo
             parameter = value(module, module.values[initial[len(current)].index].type_id)
             selected.parameters.append(parameter)
             current.append(parameter)
-    operations: list[universal.Operation] := []
-    origins: list[universal.OperationOrigin] := []
+    operations: list[model_syntax_function_function.Operation] := []
+    origins: list[model_syntax_block_block.OperationOrigin] := []
     if selected.id == entry:
         operations = prefix[:]
         origins = prefix_origins[:]
@@ -262,7 +270,7 @@ def promote_storage_block(module: universal.Module, selected: universal.BasicBlo
                 index := 0
                 for slot in slots:
                     if slot.index == address.index:
-                        operations.append(universal.Operation.Alias(current[index], result))
+                        operations.append(model_syntax_function_function.Operation.Alias(current[index], result))
                         origins.append(origin)
                         retained = false
                     index += 1
@@ -288,35 +296,35 @@ def promote_storage_block(module: universal.Module, selected: universal.BasicBlo
     return selected
 
 
-def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
+def operation_inputs(operation: model_syntax_function_function.Operation) -> list[model_syntax_symbol_symbol.ValueId]:
     return ownership_cfg.operation_inputs(operation)
 
 
-def operation_results(operation: universal.Operation) -> list[universal.ValueId]:
+def operation_results(operation: model_syntax_function_function.Operation) -> list[model_syntax_symbol_symbol.ValueId]:
     return ownership_cfg.operation_results(operation)
 
 
-def reachable_blocks(body: universal.CfgBody) -> list[int]:
+def reachable_blocks(body: model_mir_cfg_cfg.CfgBody) -> list[int]:
     return ownership_cfg.reachable_blocks(body)
 
 
-def dominators(body: universal.CfgBody) -> list[int]:
+def dominators(body: model_mir_cfg_cfg.CfgBody) -> list[int]:
     return ownership_cfg.dominators(body)
 
 
-def verify_inputs(values: list[universal.ValueId], available: list[int], span: source.Span) -> bool | diagnostics.Diagnostic:
+def verify_inputs(values: list[model_syntax_symbol_symbol.ValueId], available: list[int], span: source.Span) -> bool | diagnostics.Diagnostic:
     return ownership_cfg.verify_inputs(values, available, span)
 
 
-def verify_ssa_inputs(values: list[universal.ValueId], definitions: availability.Definitions, parents: list[int], block: int, position: int, span: source.Span) -> bool | diagnostics.Diagnostic:
+def verify_ssa_inputs(values: list[model_syntax_symbol_symbol.ValueId], definitions: availability.Definitions, parents: list[int], block: int, position: int, span: source.Span) -> bool | diagnostics.Diagnostic:
     return ownership_cfg.verify_ssa_inputs(values, definitions, parents, block, position, span)
 
 
-def verify_availability(body: universal.CfgBody, parameters: list[universal.ValueId]) -> bool | diagnostics.Diagnostic:
+def verify_availability(body: model_mir_cfg_cfg.CfgBody, parameters: list[model_syntax_symbol_symbol.ValueId]) -> bool | diagnostics.Diagnostic:
     return ownership_cfg.verify_availability(body, parameters)
 
 
-def prune_unreachable(body: universal.CfgBody):
+def prune_unreachable(body: model_mir_cfg_cfg.CfgBody):
     constants: list[int] = []
     booleans: list[bool] = []
     for block in body.blocks:
@@ -340,7 +348,7 @@ def prune_unreachable(body: universal.CfgBody):
                     for constant in constants:
                         if constant == int(condition.index):
                             edge = taken if booleans[index] else otherwise
-                            block.terminator = universal.CfgTerminator(universal.CfgExit.Jump(edge), terminal.grammar, terminal.span)
+                            block.terminator = model_mir_cfg_branch.CfgTerminator(model_mir_cfg_branch.CfgExit.Jump(edge), terminal.grammar, terminal.span)
                             body.blocks[block.id] = block
                         index += 1
                 case _:
@@ -360,7 +368,7 @@ def prune_unreachable(body: universal.CfgBody):
         mapping.append(next if block.id in reachable else -1)
         if block.id in reachable:
             next += 1
-    retained: list[universal.BasicBlock] = []
+    retained: list[model_mir_cfg_block.BasicBlock] = []
     for block in body.blocks:
         if block.id not in reachable:
             continue
@@ -369,14 +377,14 @@ def prune_unreachable(body: universal.CfgBody):
             exit := terminal.exit
             match terminal.exit:
                 case Jump:
-                    exit = universal.CfgExit.Jump(universal.CfgEdge(mapping[edge.target], edge.arguments))
+                    exit = model_mir_cfg_branch.CfgExit.Jump(model_mir_cfg_branch.CfgEdge(mapping[edge.target], edge.arguments))
                 case Conditional:
-                    left = universal.CfgEdge(mapping[taken.target], taken.arguments)
-                    right = universal.CfgEdge(mapping[otherwise.target], otherwise.arguments)
-                    exit = universal.CfgExit.Conditional(condition, left, right)
+                    left = model_mir_cfg_branch.CfgEdge(mapping[taken.target], taken.arguments)
+                    right = model_mir_cfg_branch.CfgEdge(mapping[otherwise.target], otherwise.arguments)
+                    exit = model_mir_cfg_branch.CfgExit.Conditional(condition, left, right)
                 case _:
                     throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
-            block.terminator = universal.CfgTerminator(exit, terminal.grammar, terminal.span)
+            block.terminator = model_mir_cfg_branch.CfgTerminator(exit, terminal.grammar, terminal.span)
         block.id = mapping[block.id]
         retained.append(block)
     body.entry = mapping[body.entry]

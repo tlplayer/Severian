@@ -1,10 +1,13 @@
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import diagnostics
-import universal
 import * from "definitions.sev" as definitions
-from universal import scalar
+import * from "../../../../syntax/primitive/catalog.sev" as scalar
 
 
-def path(expression: universal.Expression) -> string:
+def path(expression: model_syntax_function_function.Expression) -> string:
     match expression.kind:
         case Name:
             return name
@@ -14,21 +17,21 @@ def path(expression: universal.Expression) -> string:
             return ""
 
 
-def key_type(expression: universal.Expression) -> universal.TypeAnnotation | diagnostics.Diagnostic:
+def key_type(expression: model_syntax_function_function.Expression) -> model_syntax_type_annotation.TypeAnnotation | diagnostics.Diagnostic:
     match expression.kind:
         case Binary:
             if operator.symbol == "|":
-                return universal.TypeAnnotation(universal.Union([key_type(left), key_type(right)]), expression.span)
+                return model_syntax_type_annotation.TypeAnnotation(model_syntax_type_annotation.Union([key_type(left), key_type(right)]), expression.span)
         case _:
             throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/frontend/semantic/semantic/src/grammar_scalar.sev)")
     name = path(expression)
     if name == "":
         return error(diagnostics.diagnostic_at("E000212", "scalar operation map keys must be types", expression.span))
-    return universal.named_type(name, [], expression.span)
+    return model_syntax_type_annotation.named_type(name, [], expression.span)
 
 
-def descriptor(expression: universal.Expression) -> universal.ScalarOperation | diagnostics.Diagnostic:
-    result = universal.ScalarOperation("")
+def descriptor(expression: model_syntax_function_function.Expression) -> model_syntax_function_syntax.ScalarOperation | diagnostics.Diagnostic:
+    result = model_syntax_function_syntax.ScalarOperation("")
     match expression.kind:
         case Call:
             if path(callee) != "ScalarOperation":
@@ -83,13 +86,13 @@ def descriptor(expression: universal.Expression) -> universal.ScalarOperation | 
     return error(diagnostics.diagnostic_at("E000212", "grammar map requires ScalarOperation with a mnemonic", expression.span))
 
 
-def resolve(environment: definitions.SemanticDefinitions, records: list[universal.RecordDeclaration]) -> unit | diagnostics.Diagnostic:
+def resolve(environment: definitions.SemanticDefinitions, records: list[model_syntax_function_function.RecordDeclaration]) -> unit | diagnostics.Diagnostic:
     ordinal := 0
     for declaration in environment.traits:
         if declaration.grammar:
-            syntax = universal.OperatorSyntax("", universal.Fixity.Infix, 0, universal.Associativity.None, domain=universal.OperatorDomain.GrammarOperator, definition=declaration.definition, grammar_name=declaration.name)
+            syntax = model_syntax_function_syntax.OperatorSyntax("", model_syntax_function_syntax.Fixity.Infix, 0, model_syntax_function_syntax.Associativity.None, domain=model_syntax_function_syntax.OperatorDomain.GrammarOperator, definition=declaration.definition, grammar_name=declaration.name)
             properties: list[string] = []
-            operations: list[universal.ScalarOperation] = []
+            operations: list[model_syntax_function_syntax.ScalarOperation] = []
             for inherited in definitions.inherited_traits(environment, declaration):
                 for property in inherited.properties:
                     if property.name in properties:
@@ -107,13 +110,13 @@ def resolve(environment: definitions.SemanticDefinitions, records: list[universa
                                     throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/frontend/semantic/semantic/src/grammar_scalar.sev)")
                         elif property.name == "fixity":
                             if path(supplied).split(".")[-1] == "Prefix":
-                                syntax.fixity = universal.Fixity.Prefix
+                                syntax.fixity = model_syntax_function_syntax.Fixity.Prefix
                         elif property.name == "operations":
                             match property.annotation.kind:
                                 case Named:
                                     if name != "map" or len(arguments) != 2:
                                         return error(diagnostics.diagnostic_at("E000212", "grammar operations require {T: ScalarOperation}", property.span))
-                                    if universal.simple_type_name(arguments[0]) != "T" or universal.simple_type_name(arguments[1]) != "ScalarOperation":
+                                    if model_syntax_type_annotation.simple_type_name(arguments[0]) != "T" or model_syntax_type_annotation.simple_type_name(arguments[1]) != "ScalarOperation":
                                         return error(diagnostics.diagnostic_at("E000212", "grammar operations require {T: ScalarOperation}", property.span))
                                 case _:
                                     return error(diagnostics.diagnostic_at("E000212", "grammar operations require {T: ScalarOperation}", property.span))
@@ -129,7 +132,7 @@ def resolve(environment: definitions.SemanticDefinitions, records: list[universa
                                             for previous in operations:
                                                 if previous.operand_type.index == operand.index:
                                                     return error(diagnostics.diagnostic_at("E000212", "duplicate scalar operation type key", key.span))
-                                            operations.append(universal.ScalarOperation(operation.mnemonic, operation.predicate, operation.identity, operation.direct, operand))
+                                            operations.append(model_syntax_function_syntax.ScalarOperation(operation.mnemonic, operation.predicate, operation.identity, operation.direct, operand))
                                         entry += 1
                                 case _:
                                     return error(diagnostics.diagnostic_at("E000212", "grammar operations require a map literal", supplied.span))
@@ -143,21 +146,21 @@ def resolve(environment: definitions.SemanticDefinitions, records: list[universa
 
 
 class Selection:
-    syntax: universal.OperatorSyntax | None = None
+    syntax: model_syntax_function_syntax.OperatorSyntax | None = None
 
 
-def lookup(environment: definitions.SemanticDefinitions, symbol: string, arity: int, operand: universal.TypeId) -> Selection | diagnostics.Diagnostic:
-    selected: universal.OperatorSyntax | None := None
+def lookup(environment: definitions.SemanticDefinitions, symbol: string, arity: int, operand: model_syntax_symbol_symbol.TypeId) -> Selection | diagnostics.Diagnostic:
+    selected: model_syntax_function_syntax.OperatorSyntax | None := None
     for declaration in environment.traits:
         syntax ?= declaration.scalar_syntax
         if syntax != None:
-            count = 1 if syntax.fixity == universal.Fixity.Prefix else 2
+            count = 1 if syntax.fixity == model_syntax_function_syntax.Fixity.Prefix else 2
             if syntax.symbol == symbol and count == arity:
                 for operation in declaration.scalar_operations:
                     if operation.operand_type.index == operand.index:
                         if selected != None:
                             return error(diagnostics.diagnostic_at("E000212", "ambiguous scalar grammar operation " + symbol, declaration.span))
-                        selected = universal.OperatorSyntax(syntax.symbol, syntax.fixity, syntax.precedence, syntax.associativity, domain=syntax.domain, definition=syntax.definition, grammar_name=syntax.grammar_name, scalar_operation=operation)
+                        selected = model_syntax_function_syntax.OperatorSyntax(syntax.symbol, syntax.fixity, syntax.precedence, syntax.associativity, domain=syntax.domain, definition=syntax.definition, grammar_name=syntax.grammar_name, scalar_operation=operation)
     return Selection(selected)
 
 
@@ -165,7 +168,7 @@ def comparison(environment: definitions.SemanticDefinitions, symbol: string) -> 
     for declaration in environment.traits:
         syntax ?= declaration.scalar_syntax
         if syntax != None:
-            if syntax.symbol == symbol and syntax.fixity == universal.Fixity.Infix:
+            if syntax.symbol == symbol and syntax.fixity == model_syntax_function_syntax.Fixity.Infix:
                 for operation in declaration.scalar_operations:
                     if operation.predicate >= 0:
                         return true

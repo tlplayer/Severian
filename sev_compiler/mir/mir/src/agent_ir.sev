@@ -1,5 +1,11 @@
-import universal
-from universal import graph_queries
+import * from "../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
+import * from "../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../cfg/cfg.sev" as model_mir_cfg_cfg
+import * from "../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import * from "../../../frontend/modules/graph/queries.sev" as graph_queries
 import source
 import * from "hierarchy_ir.sev" as hierarchy_ir
 import * from "cfg.sev" as cfg
@@ -10,8 +16,8 @@ def quoted(value: string) -> string:
     return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
 
 
-def identity(id: universal.DefId) -> string:
-    return quoted(universal.definition_identity(id))
+def identity(id: model_syntax_symbol_symbol.DefId) -> string:
+    return quoted(model_frontend_modules_graph_model.definition_identity(id))
 
 
 def span_json(span: source.Span, files: list[source.SourceFile]) -> string | Error:
@@ -23,7 +29,7 @@ def span_json(span: source.Span, files: list[source.SourceFile]) -> string | Err
     throw Error("unknown source identity in Agent IR")
 
 
-def metadata_value(expression: universal.Expression) -> string:
+def metadata_value(expression: model_syntax_function_function.Expression) -> string:
     match expression.kind:
         case LiteralValue:
             match value:
@@ -49,14 +55,14 @@ def metadata_value(expression: universal.Expression) -> string:
             return "null"
 
 
-def values_json(values: list[universal.ValueId]) -> string:
+def values_json(values: list[model_syntax_symbol_symbol.ValueId]) -> string:
     output: list[string] = []
     for value in values:
         output.append(quoted(string(value.index)))
     return "[" + output.join(",") + "]"
 
 
-def operation_kind(operation: universal.Operation) -> string:
+def operation_kind(operation: model_syntax_function_function.Operation) -> string:
     match operation:
         case DebugOwnership:
             return "DebugOwnership"
@@ -96,7 +102,7 @@ def operation_kind(operation: universal.Operation) -> string:
             throw Error("noncanonical operation in Agent IR")
 
 
-def origin_json(origin: universal.OperationOrigin, files: list[source.SourceFile]) -> string | Error:
+def origin_json(origin: model_syntax_block_block.OperationOrigin, files: list[source.SourceFile]) -> string | Error:
     location := "null"
     span ?= origin.span
     if span != None:
@@ -115,7 +121,7 @@ def origin_json(origin: universal.OperationOrigin, files: list[source.SourceFile
     return "{\"block\":" + block + ",\"source\":" + location + ",\"callable_path\":[" + frames.join(",") + "]}"
 
 
-def body_json(definition: universal.DefId, body: universal.CfgBody, files: list[source.SourceFile], module: universal.Module) -> string | Error:
+def body_json(definition: model_syntax_symbol_symbol.DefId, body: model_mir_cfg_cfg.CfgBody, files: list[source.SourceFile], module: model_hir_module_module.Module) -> string | Error:
     blocks: list[string] = []
     for block in body.blocks:
         operations: list[string] = []
@@ -157,7 +163,7 @@ def body_json(definition: universal.DefId, body: universal.CfgBody, files: list[
     return "{\"definition\":" + identity(definition) + ",\"entry\":" + quoted(string(body.entry)) + ",\"blocks\":[" + blocks.join(",") + "]}"
 
 
-def emit(module: universal.Module, files: list[source.SourceFile], graph: universal.DefinitionGraph, package_graph: string) -> string | Error:
+def emit(module: model_hir_module_module.Module, files: list[source.SourceFile], graph: model_frontend_modules_graph_model.DefinitionGraph, package_graph: string) -> string | Error:
     if not graph.frozen:
         throw Error("Agent IR requires a verified semantic graph")
     definitions: list[string] = []
@@ -167,17 +173,17 @@ def emit(module: universal.Module, files: list[source.SourceFile], graph: univer
         values.append("{\"id\":" + quoted(string(value.id.index)) + ",\"type\":" + string(value.type_id.index) + "}")
     emitted: list[string] = []
     for declaration in module.traits:
-        key = universal.definition_identity(declaration.definition)
+        key = model_frontend_modules_graph_model.definition_identity(declaration.definition)
         if key in emitted:
             continue
         emitted.append(key)
-        node = graph.nodes[universal.definition_index(graph, declaration.definition).index]
+        node = graph.nodes[model_frontend_modules_graph_model.definition_index(graph, declaration.definition).index]
         aliases: list[string] = []
         for name in node.names:
             aliases.append(quoted(name))
         bases: list[string] = []
         for base in declaration.bases:
-            name ?= universal.simple_type_name(base)
+            name ?= model_syntax_type_annotation.simple_type_name(base)
             if name != None:
                 bases.append(identity(semantic_graph.grammar_parent(module, declaration, name)))
         properties: list[string] = []
@@ -188,11 +194,11 @@ def emit(module: universal.Module, files: list[source.SourceFile], graph: univer
         kind = "grammar" if declaration.grammar else "trait"
         definitions.append("{\"id\":" + identity(declaration.definition) + ",\"submodule\":" + string(node.submodule) + ",\"name\":" + quoted(declaration.name) + ",\"aliases\":[" + aliases.join(",") + "],\"kind\":" + quoted(kind) + ",\"bases\":[" + bases.join(",") + "],\"metadata\":{" + properties.join(",") + "},\"source\":" + span_json(declaration.span, files) + "}")
     for declaration in module.functions:
-        key = universal.definition_identity(declaration.definition)
+        key = model_frontend_modules_graph_model.definition_identity(declaration.definition)
         if key in emitted:
             continue
         emitted.append(key)
-        node = graph.nodes[universal.definition_index(graph, declaration.definition).index]
+        node = graph.nodes[model_frontend_modules_graph_model.definition_index(graph, declaration.definition).index]
         origin := "null"
         declared ?= declaration.span
         if declared != None:
@@ -201,13 +207,13 @@ def emit(module: universal.Module, files: list[source.SourceFile], graph: univer
         if declaration.cfg_index >= 0:
             functions.append(body_json(declaration.definition, module.cfg_bodies[declaration.cfg_index], files, module))
     if len(module.cfg_bodies) != 0:
-        definition = universal.DefId(0, 0, universal.DeclarationId(0))
-        node = graph.nodes[universal.definition_index(graph, definition).index]
+        definition = model_syntax_symbol_symbol.DefId(0, 0, model_syntax_symbol_symbol.DeclarationId(0))
+        node = graph.nodes[model_frontend_modules_graph_model.definition_index(graph, definition).index]
         definitions.append("{\"id\":" + identity(definition) + ",\"submodule\":" + string(node.submodule) + ",\"name\":\"$initializer\",\"kind\":\"function\",\"bases\":[],\"source\":null}")
         functions.append(body_json(definition, module.cfg_bodies[0], files, module))
     dependencies: list[string] = []
     for edge in graph.dependencies:
-        kind = "call" if edge.kind == universal.DependencyKind.Invocation else "inherits"
+        kind = "call" if edge.kind == model_frontend_modules_graph_model.DependencyKind.Invocation else "inherits"
         origin := "null"
         location ?= edge.origin
         if location != None:
@@ -223,10 +229,10 @@ def emit(module: universal.Module, files: list[source.SourceFile], graph: univer
 
 
 
-def operation_json(operation: universal.Operation, module: universal.Module) -> string | Error:
+def operation_json(operation: model_syntax_function_function.Operation, module: model_hir_module_module.Module) -> string | Error:
     fields := ""
-    operands: list[universal.ValueId] := []
-    results: list[universal.ValueId] = []
+    operands: list[model_syntax_symbol_symbol.ValueId] := []
+    results: list[model_syntax_symbol_symbol.ValueId] = []
     match operation:
         case DebugOwnership:
             fields = ",\"name\":" + quoted(name) + ",\"ownership\":" + quoted(mode)
@@ -244,7 +250,7 @@ def operation_json(operation: universal.Operation, module: universal.Module) -> 
             fields = ",\"type\":" + string(type_id.index)
             results.append(result)
         case Constant:
-            literal = universal.Expression(universal.LiteralValue(value), source.Span(source.SourceId(0), 0, 0))
+            literal = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(value), source.Span(source.SourceId(0), 0, 0))
             fields = ",\"value\":" + metadata_value(literal)
             results.append(result)
         case Load:

@@ -1,0 +1,42 @@
+import source
+import * from "symbol/symbol.sev"
+import * from "../frontend/source/source.sev"
+
+
+
+class AssertionOrigin:
+    statement_start: u32
+    condition_start: u32
+    condition_end: u32
+    location: AssertionLocation | None
+
+
+enum CoverageKind:
+    Line
+    Branch
+
+
+class CoveragePoint:
+    span_start: u32
+    kind: CoverageKind
+    ordinal: u32
+    key: string | None
+    file: string | None
+    line: u32 | None
+    condition: ValueId | None = None
+
+class AssertionLocation:
+    file: string
+    line: u32
+    column: u32
+    expression: string
+
+
+class QualityRegion:
+    id: int
+    kind: string
+    span: source.Span
+    file: string
+    line: int
+    column: int
+

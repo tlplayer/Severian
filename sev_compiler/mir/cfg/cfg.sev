@@ -6,10 +6,10 @@ import * from "control_flow.sev" as control_flow
 import source
 import * from "../../syntax/function/lowering.sev"
 import * from "../../syntax/symbol/symbol.sev"
-import * from "../literal/value.sev"
+import * from "../../syntax/literal/value.sev"
 import * from "../../syntax/function/syntax.sev"
-import * from "../type/expression_conversion.sev"
-import * from "../source/assertion_origin.sev"
+import * from "../../syntax/function/function.sev"
+import * from "../../syntax/source.sev"
 
 
 class LocalDecl:

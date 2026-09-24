@@ -1,0 +1,169 @@
+import * from "../../../../../../sev_compiler/hir/module/module.sev" as model_hir_module_module
+import lexer
+import source
+import * from "../../package.pkg/build/semantic_archive.sev" as codec
+
+
+class SemanticPayload:
+    module: model_hir_module_module.Module
+    registry: lexer.SyntaxRegistry
+    exports: list[string]
+
+
+def item_source(item: model_hir_module_module.Item) -> int:
+    match item:
+        case Function:
+            span ?= declaration.span
+            if span != None:
+                return int(span.source.index)
+            return -1
+        case Trait:
+            return int(declaration.span.source.index)
+        case Record:
+            return int(declaration.span.source.index)
+        case Type:
+            return int(declaration.span.source.index)
+        case OperatorItem:
+            return int(declaration.span.source.index)
+        case BindingItem:
+            return int(binding.span.source.index)
+        case _:
+            return -1
+
+
+def item_name(item: model_hir_module_module.Item) -> string:
+    match item:
+        case Function:
+            return declaration.name
+        case Trait:
+            return declaration.name
+        case Record:
+            return declaration.name
+        case Type:
+            return declaration.name
+        case BindingItem:
+            return binding.name
+        case _:
+            return ""
+
+
+def encode(module: model_hir_module_module.Module, registry: lexer.SyntaxRegistry, files: list[source.SourceFile], exports: list[string]) -> string | Error:
+    declarations = model_hir_module_module.empty_module()
+    available: list[string] = []
+    for item in module.items:
+        origin = item_source(item)
+        if origin < 0 or origin in module.prelude_sources:
+            continue
+        declarations.items.append(item)
+        available.append(item_name(item))
+    for name in exports:
+        if name not in available:
+            throw Error("semantic interface export has no declaration: " + name)
+    descriptors: list[lexer.OperatorDescriptor] = []
+    for descriptor in registry.descriptors:
+        if int(descriptor.span.source.index) not in module.prelude_sources:
+            descriptors.append(descriptor)
+    rules: list[lexer.SourceLexicalRule] = []
+    for rule in registry.rules:
+        if int(rule.span.source.index) not in module.prelude_sources:
+            rules.append(rule)
+    syntax = lexer.SyntaxRegistry([], descriptors, rules=rules)
+    output = ["severian-semantic-3", codec.schema()]
+    codec.put_list_source_SourceFile(output, files)
+    codec.put_model_hir_module_module_Module(output, declarations)
+    codec.put_lexer_SyntaxRegistry(output, syntax)
+    codec.put_list_string(output, exports)
+    return output.join("\n")
+
+
+def decode(text: string, location: string, files: list[source.SourceFile]) -> SemanticPayload | Error:
+    input = codec.ArchiveInput(text.split("\n"))
+    if codec.take(input) != "severian-semantic-3" or codec.take(input) != codec.schema():
+        throw Error("incompatible generic/grammar interface schema")
+    archived = codec.get_list_source_SourceFile(input)
+    index := 0
+    for file in archived:
+        if file.id.index != index:
+            throw Error("noncanonical interface source table")
+        path = location + "#semantic-source-" + string(index)
+        found := -1
+        for known in files:
+            if known.path == path:
+                if known.text != file.text:
+                    throw Error("interface source snapshot changed during compilation")
+                found = int(known.id.index)
+        if found < 0:
+            found = int(len(files))
+            files.append(source.SourceFile(source.SourceId(u32(found)), path, file.text))
+        input.source_ids.append(found)
+        index += 1
+    module = codec.get_model_hir_module_module_Module(input)
+    registry = codec.get_lexer_SyntaxRegistry(input)
+    for file in archived:
+        registry.lexical_discovered.append(location + "#semantic-source-" + string(file.id.index))
+    exports = codec.get_list_string(input)
+    if input.cursor != int(len(input.lines)):
+        throw Error("trailing generic/grammar interface data")
+    for name in exports:
+        found := false
+        for item in module.items:
+            found = found or item_name(item) == name
+        if not found:
+            throw Error("dangling semantic export: " + name)
+    return SemanticPayload(module, registry, exports)
+
+
+def qualify(item: model_hir_module_module.Item, prefix: string) -> model_hir_module_module.Item:
+    match item:
+        case Function:
+            declaration.name = prefix + declaration.name
+            lookup ?= declaration.lookup
+            declaration.lookup = prefix + lookup if lookup != None else prefix
+            return model_hir_module_module.Function(declaration)
+        case Trait:
+            declaration.name = prefix + declaration.name
+            declaration.lookup = prefix + declaration.lookup
+            return model_hir_module_module.Trait(declaration)
+        case Record:
+            if not declaration.extension:
+                declaration.name = prefix + declaration.name
+            declaration.lookup = prefix + declaration.lookup
+            return model_hir_module_module.Record(declaration)
+        case Type:
+            declaration.name = prefix + declaration.name
+            declaration.lookup = prefix + declaration.lookup
+            return model_hir_module_module.Item.Type(declaration)
+        case BindingItem:
+            binding.name = prefix + binding.name
+            return model_hir_module_module.BindingItem(binding)
+        case _:
+            return item
+
+
+def imported(payload: SemanticPayload, prefix: string) -> model_hir_module_module.Module:
+    module = model_hir_module_module.empty_module()
+    for item in payload.module.items:
+        module.items.append(qualify(item, prefix))
+    return module
+
+
+def register_grammar(payload: SemanticPayload, registry: lexer.SyntaxRegistry) -> unit | Error:
+    for path in payload.registry.lexical_discovered:
+        if path not in registry.lexical_discovered:
+            registry.lexical_discovered.append(path)
+    for rule in payload.registry.rules:
+        present := false
+        for previous in registry.rules:
+            if previous.name == rule.name and previous.span.source.index == rule.span.source.index:
+                present = true
+        if not present:
+            registry.rules.append(rule)
+    for descriptor in payload.registry.descriptors:
+        present := false
+        for previous in registry.descriptors:
+            if previous.name == descriptor.name and previous.semantic_owner == descriptor.semantic_owner:
+                present = true
+        if not present:
+            descriptor.resolved = false
+            descriptor.syntax = None
+            registry.descriptors.append(descriptor)

@@ -11,12 +11,20 @@
   },
   "dependencies": {
     "mir": {
-      "package": "sev-compiler-mir",
-      "path": ".."
+      "path": "../../mir",
+      "package": "sev-compiler-mir"
     },
-    "universal": {
-      "package": "sev-compiler-universal",
-      "path": "../../universal"
+    "syntax": {
+      "path": "../../syntax",
+      "package": "sev-compiler-syntax"
+    },
+    "mlir": {
+      "path": "../mlir",
+      "package": "sev-compiler-mlir"
+    },
+    "hir": {
+      "path": "../../hir",
+      "package": "sev-compiler-hir"
     }
   }
 }

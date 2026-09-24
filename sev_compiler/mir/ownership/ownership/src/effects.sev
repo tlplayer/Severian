@@ -1,6 +1,7 @@
-import universal
-from universal import scalar
-from universal import scalar_declarations as boundary
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/primitive/catalog.sev" as scalar
+import * from "../../../../syntax/function/lowering.sev" as boundary
 
 
 class CachedEffect:
@@ -10,7 +11,7 @@ class CachedEffect:
 
 # Effects form a lattice: read < write < transfer. Aliases retain their
 # parameter origin. Traversing a recursive edge again adds no new operation.
-def root(value: borrow universal.Expression) -> string:
+def root(value: borrow model_syntax_function_function.Expression) -> string:
     match value.kind:
         case Name:
             return name
@@ -32,7 +33,7 @@ def root(value: borrow universal.Expression) -> string:
     return ""
 
 
-def parameter(function: borrow universal.FunctionDeclaration, index: int, functions: borrow list[universal.FunctionDeclaration], active: list[string] = [], cache: list[CachedEffect] = [], visited: list[string] = []) -> int:
+def parameter(function: borrow model_syntax_function_function.FunctionDeclaration, index: int, functions: borrow list[model_syntax_function_function.FunctionDeclaration], active: list[string] = [], cache: list[CachedEffect] = [], visited: list[string] = []) -> int:
     if index >= len(function.parameters):
         return 1
     selected = function.parameters[index]
@@ -86,7 +87,7 @@ def parameter(function: borrow universal.FunctionDeclaration, index: int, functi
     return 1
 
 
-def effect_callable_path(value: borrow universal.Expression) -> string:
+def effect_callable_path(value: borrow model_syntax_function_function.Expression) -> string:
     match value.kind:
         case Name:
             return name
@@ -96,7 +97,7 @@ def effect_callable_path(value: borrow universal.Expression) -> string:
             return ""
 
 
-def call(name: string, index: int, functions: borrow list[universal.FunctionDeclaration], active: list[string], cache: list[CachedEffect], visited: list[string], receiver: bool = false) -> int:
+def call(name: string, index: int, functions: borrow list[model_syntax_function_function.FunctionDeclaration], active: list[string], cache: list[CachedEffect], visited: list[string], receiver: bool = false) -> int:
     result := 0
     found := false
     # Match ordinary calls in the caller's declaration scope. A same-named
@@ -127,7 +128,7 @@ def call(name: string, index: int, functions: borrow list[universal.FunctionDecl
     return result if found else 1
 
 
-def expression_effect(value: borrow universal.Expression, aliases: list[string], functions: borrow list[universal.FunctionDeclaration], active: list[string], cache: list[CachedEffect], visited: list[string]) -> int:
+def expression_effect(value: borrow model_syntax_function_function.Expression, aliases: list[string], functions: borrow list[model_syntax_function_function.FunctionDeclaration], active: list[string], cache: list[CachedEffect], visited: list[string]) -> int:
     result := 0
     match value.kind:
         case ResolvedCall:
@@ -209,7 +210,7 @@ def expression_effect(value: borrow universal.Expression, aliases: list[string],
     return result
 
 
-def block_effect(body: borrow universal.Block, aliases: list[string], functions: borrow list[universal.FunctionDeclaration], active: list[string], owns_result: bool, cache: list[CachedEffect], visited: list[string]) -> int:
+def block_effect(body: borrow model_syntax_block_block.Block, aliases: list[string], functions: borrow list[model_syntax_function_function.FunctionDeclaration], active: list[string], owns_result: bool, cache: list[CachedEffect], visited: list[string]) -> int:
     result := 0
     for statement in borrow body.statements:
         match statement:
@@ -279,7 +280,7 @@ def block_effect(body: borrow universal.Block, aliases: list[string], functions:
     return result
 
 
-def infer(function: borrow universal.FunctionDeclaration, index: int, functions: borrow list[universal.FunctionDeclaration], cache: list[CachedEffect]) -> int:
+def infer(function: borrow model_syntax_function_function.FunctionDeclaration, index: int, functions: borrow list[model_syntax_function_function.FunctionDeclaration], cache: list[CachedEffect]) -> int:
     # A pass visits each reachable parameter once. Repeat until the finite
     # lattice stabilizes so recursive and mutually recursive callers agree.
     result := 0

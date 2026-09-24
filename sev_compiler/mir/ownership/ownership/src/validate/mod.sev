@@ -1,7 +1,10 @@
+import * from "../../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import diagnostics
-import universal
 
-def validate_expression(expression: universal.Expression, declared: set[universal.BindingId]) -> unit | diagnostics.Diagnostic:
+def validate_expression(expression: model_syntax_function_function.Expression, declared: set[model_syntax_symbol_symbol.BindingId]) -> unit | diagnostics.Diagnostic:
     match expression.kind:
         case LiteralValue:
             return unit
@@ -24,7 +27,7 @@ def validate_expression(expression: universal.Expression, declared: set[universa
     return unit
 
 
-def validate_statement(statement: universal.Statement, bindings: map[universal.BindingId, universal.Binding], declared: set[universal.BindingId]) -> unit | diagnostics.Diagnostic:
+def validate_statement(statement: model_syntax_sentence_sentence.Statement, bindings: map[model_syntax_symbol_symbol.BindingId, model_syntax_sentence_sentence.Binding], declared: set[model_syntax_symbol_symbol.BindingId]) -> unit | diagnostics.Diagnostic:
     match statement:
         case BindingStatement:
             validate_expression(binding.value, declared)
@@ -57,11 +60,11 @@ def validate_statement(statement: universal.Statement, bindings: map[universal.B
     return unit
 
 
-def validate_module(module: universal.Module) -> unit | diagnostics.Diagnostic:
-    bindings: map[universal.BindingId, universal.Binding] = {}
+def validate_module(module: model_hir_module_module.Module) -> unit | diagnostics.Diagnostic:
+    bindings: map[model_syntax_symbol_symbol.BindingId, model_syntax_sentence_sentence.Binding] = {}
     for binding in module.bindings:
         bindings[binding.id] = binding
-    declared: set[universal.BindingId] = set()
+    declared: set[model_syntax_symbol_symbol.BindingId] = set()
     for statement in module.initializer.statements:
         validate_statement(statement, bindings, declared)
     globals = declared.copy()

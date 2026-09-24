@@ -10,11 +10,12 @@
   },
   "dependencies": {
     "syntax": {
-      "package": "sev-compiler-syntax",
-      "path": ".."
+      "path": "..",
+      "package": "sev-compiler-syntax"
     },
     "profiling": {
-      "path": "../../../library/system/profiling"
+      "path": "../../../library/system/profiling",
+      "package": "profiling"
     }
   }
 }

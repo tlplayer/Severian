@@ -1,16 +1,19 @@
-import universal
+import * from "../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
 import source
 import * from "../modules/src/imports.sev" as imports
 
 
 test "automatic import selection retains function implementation dependencies":
     span = source.Span(source.SourceId(0), 0, 1)
-    reference = universal.Expression(universal.Name("helper"), span)
-    call = universal.Expression(universal.Call(reference, []), span)
-    needed = universal.FunctionDeclaration(name="lib.needed", lookup="lib.", body=universal.Block([universal.ExpressionStatement(call)]))
-    helper = universal.FunctionDeclaration(name="lib.helper", lookup="lib.", body=universal.empty_block())
-    unused = universal.FunctionDeclaration(name="lib.unused", lookup="lib.", body=universal.empty_block())
-    child = universal.Module([universal.Function(needed), universal.Function(helper), universal.Function(unused)])
+    reference = model_syntax_function_function.Expression(model_syntax_function_function.Name("helper"), span)
+    call = model_syntax_function_function.Expression(model_syntax_function_function.Call(reference, []), span)
+    needed = model_syntax_function_function.FunctionDeclaration(name="lib.needed", lookup="lib.", body=model_syntax_block_block.Block([model_syntax_sentence_sentence.ExpressionStatement(call)]))
+    helper = model_syntax_function_function.FunctionDeclaration(name="lib.helper", lookup="lib.", body=model_syntax_block_block.empty_block())
+    unused = model_syntax_function_function.FunctionDeclaration(name="lib.unused", lookup="lib.", body=model_syntax_block_block.empty_block())
+    child = model_hir_module_module.Module([model_hir_module_module.Function(needed), model_hir_module_module.Function(helper), model_hir_module_module.Function(unused)])
     selected = imports.select_imported_items(child, "lib.", ["needed"], true)
     assert(len(selected) == 2)
     assert(imports.item_name(selected[0]) == "lib.needed")
@@ -28,8 +31,8 @@ test "downstream namespace requirements survive a selective alias":
 
 test "unsupported reference forms retain the original dependency":
     span = source.Span(source.SourceId(0), 0, 1)
-    unknown = universal.Expression(universal.UpdateOperand(0), span)
-    needed = universal.FunctionDeclaration(name="lib.needed", lookup="lib.", body=universal.Block([universal.ExpressionStatement(unknown)]))
-    unused = universal.FunctionDeclaration(name="lib.unused", lookup="lib.", body=universal.empty_block())
-    child = universal.Module([universal.Function(needed), universal.Function(unused)])
+    unknown = model_syntax_function_function.Expression(model_syntax_function_function.UpdateOperand(0), span)
+    needed = model_syntax_function_function.FunctionDeclaration(name="lib.needed", lookup="lib.", body=model_syntax_block_block.Block([model_syntax_sentence_sentence.ExpressionStatement(unknown)]))
+    unused = model_syntax_function_function.FunctionDeclaration(name="lib.unused", lookup="lib.", body=model_syntax_block_block.empty_block())
+    child = model_hir_module_module.Module([model_hir_module_module.Function(needed), model_hir_module_module.Function(unused)])
     assert(len(imports.select_imported_items(child, "lib.", ["needed"], true)) == 2)

@@ -1,9 +1,10 @@
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import package
-import universal
 
 # Version one uses the existing scalar C ABI. Unsupported contracts retain
 # source fallback; never describe records, effects or generics as scalar ABI.
-def interface_type(type_id: universal.TypeId) -> string:
+def interface_type(type_id: model_syntax_symbol_symbol.TypeId) -> string:
     if type_id.index == 2:
         return "unit"
     if type_id.index == 32:
@@ -20,7 +21,7 @@ def interface_type(type_id: universal.TypeId) -> string:
         return "f64"
     return ""
 
-def scalar_interface(module: borrow universal.Module, resolution: package.Resolution, names: list[string], symbols: list[string], libraries: list[string] = []) -> string:
+def scalar_interface(module: borrow model_hir_module_module.Module, resolution: package.Resolution, names: list[string], symbols: list[string], libraries: list[string] = []) -> string:
     if len(resolution.packages) == 0:
         return ""
     for item in borrow module.items:

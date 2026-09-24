@@ -1,5 +1,5 @@
-from universal import availability
-from universal import dominance as graph
+import * from "../../../../../mir/cfg/availability.sev" as availability
+import * from "../../../../../mir/cfg/dominance.sev" as graph
 import * from "builder.sev"
 import * from "model.sev"
 
@@ -37,14 +37,15 @@ def validate_location(location: MlirLocation) -> bool | MlirVerificationError:
 def validate_type(type_id: MlirType) -> bool | MlirVerificationError:
     for element in type_id.elements:
         validate_type(element)
-    kind = type_kind_name(type_id.kind)
-    scalar = scalar_kind_name(type_id.scalar.kind)
-    if kind == "scalar" and scalar == "integer" and type_id.scalar.bits == 0:
-        return error(InvalidType("integer width must be non-zero"))
-    if kind == "scalar" and scalar == "ieee_float" and type_id.scalar.bits != 16 and type_id.scalar.bits != 32 and type_id.scalar.bits != 64:
-        return error(InvalidType("native IEEE floating width must be 16, 32, or 64"))
-    if (kind == "unranked_tensor" or kind == "unranked_memref") and len(type_id.dimensions) != 0:
-        return error(InvalidType("unranked types cannot carry ranked dimensions"))
+    binding = type_id.kind
+    if binding.spelling == "" or not binding.value:
+        return error(InvalidType("type declaration has no MLIR value binding"))
+    if binding.dimensions >= 0 and len(type_id.dimensions) != binding.dimensions:
+        return error(InvalidType("MLIR dimensions do not match the type declaration"))
+    if binding.elements >= 0 and len(type_id.elements) != binding.elements:
+        return error(InvalidType("MLIR elements do not match the type declaration"))
+    if not binding.ranked and len(type_id.dimensions) != 0:
+        return error(InvalidType("unranked declaration cannot carry dimensions"))
     for dimension in type_id.dimensions:
         if dimension < -1:
             return error(InvalidType("dynamic dimensions use exactly -1"))

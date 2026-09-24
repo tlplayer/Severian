@@ -17,89 +17,80 @@
   ],
   "dependencies": {
     "interface": {
-      "package": "sev-compiler-interface",
-      "path": "../interface"
+      "path": "../../library/package/compile/interface",
+      "package": "sev-semantic-interface"
     },
     "environment": {
-      "path": "../../library/system/environment"
+      "path": "../../library/system/environment",
+      "package": "environment"
     },
     "file": {
-      "path": "../../library/system/file"
+      "path": "../../library/system/file",
+      "package": "file"
     },
     "os": {
-      "path": "../../library/system/os"
+      "path": "../../library/system/os",
+      "package": "os"
     },
     "path": {
-      "path": "../../library/system/path"
+      "path": "../../library/system/path",
+      "package": "path"
     },
     "process": {
-      "path": "../../library/system/process"
+      "path": "../../library/system/process",
+      "package": "process"
     },
     "time": {
-      "path": "../../library/core/time"
+      "path": "../../library/core/time",
+      "package": "time"
     },
     "package": {
-      "path": "../../library/package"
-    },
-    "abi": {
-      "package": "sev-compiler-abi",
-      "path": "../abi"
+      "path": "../../library/package",
+      "package": "package"
     },
     "backend": {
-      "package": "sev-compiler-backend",
-      "path": "../backend"
-    },
-    "compile": {
-      "package": "sev-compiler-compile",
-      "path": "../compile"
+      "path": "../../library/package/compile/backend",
+      "package": "sev-mlir-backend"
     },
     "diagnostics": {
-      "package": "sev-compiler-diagnostics",
-      "path": "../syntax/diagnostics"
+      "path": "../syntax/diagnostics",
+      "package": "sev-compiler-diagnostics"
     },
     "lexer": {
-      "package": "sev-compiler-lexer",
-      "path": "../frontend/lexer"
+      "path": "../frontend/lexer",
+      "package": "sev-compiler-lexer"
     },
     "modules": {
-      "package": "sev-compiler-modules",
-      "path": "../frontend/modules"
-    },
-    "lowering": {
-      "package": "sev-compiler-lowering",
-      "path": "../mir/lowering"
+      "path": "../frontend/modules",
+      "package": "sev-compiler-modules"
     },
     "mir": {
-      "package": "sev-compiler-mir",
-      "path": "../mir"
+      "path": "../mir",
+      "package": "sev-compiler-mir"
     },
     "mlir": {
-      "package": "sev-compiler-mlir",
-      "path": "../lir/mlir"
+      "path": "../lir/mlir",
+      "package": "sev-compiler-mlir"
     },
     "parser": {
-      "package": "sev-compiler-parser",
-      "path": "../frontend/parser"
+      "path": "../frontend/parser",
+      "package": "sev-compiler-parser"
     },
     "semantic": {
-      "package": "sev-compiler-semantic",
-      "path": "../frontend/semantic"
+      "path": "../frontend/semantic",
+      "package": "sev-compiler-semantic"
     },
     "source": {
       "path": "../frontend/source",
       "package": "sev-compiler-source"
     },
-    "universal": {
-      "package": "sev-compiler-universal",
-      "path": "../../universal"
-    },
-    "xxi": {
-      "package": "sev-compiler-xxi",
-      "path": "../xxi"
-    },
     "syntax": {
       "package": "sev-compiler-syntax",
       "path": "../syntax"
+    },
+    "lowering": {
+      "path": "../lir/lowering",
+      "package": "sev-compiler-lowering"
     }
   }
 }

@@ -1,6 +1,7 @@
+import * from "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import source
 import diagnostics
-import universal
 import * from "../token/mod.sev"
 import * from "../runtime.sev"
 
@@ -16,7 +17,7 @@ class OperatorDescriptor:
     properties: list[SyntaxProperty]
     span: source.Span
     resolved: bool = false
-    syntax: universal.OperatorSyntax | None = None
+    syntax: model_syntax_function_syntax.OperatorSyntax | None = None
     grammar: bool = false
     end: u32 = 0
 
@@ -24,15 +25,15 @@ class OperatorDescriptor:
 
 
 class SyntaxRegistry:
-    operators: list[universal.OperatorSyntax]
+    operators: list[model_syntax_function_syntax.OperatorSyntax]
     descriptors: list[OperatorDescriptor] = []
     discovered: list[string] = []
     rules: list[SourceLexicalRule] = []
     lexical_discovered: list[string] = []
 
 
-def symbol_syntaxes(operators: list[universal.OperatorSyntax], symbol: string) -> list[universal.OperatorSyntax]:
-    result: list[universal.OperatorSyntax] = []
+def symbol_syntaxes(operators: list[model_syntax_function_syntax.OperatorSyntax], symbol: string) -> list[model_syntax_function_syntax.OperatorSyntax]:
+    result: list[model_syntax_function_syntax.OperatorSyntax] = []
     for operation in operators:
         if operation.symbol == symbol:
             result.append(operation)
@@ -109,7 +110,7 @@ def discover_operator_descriptors(tokens: list[Token], registry: SyntaxRegistry)
         cursor += 1
 
 
-def register_operator_syntax(registry: SyntaxRegistry, syntax: universal.OperatorSyntax, span: source.Span) -> unit | diagnostics.Diagnostic:
+def register_operator_syntax(registry: SyntaxRegistry, syntax: model_syntax_function_syntax.OperatorSyntax, span: source.Span) -> unit | diagnostics.Diagnostic:
     if syntax.symbol == "":
         return error(diagnostics.diagnostic_at("E000103", "operator descriptor requires a nonempty symbol", span))
     for character in syntax.symbol.characters():
@@ -126,7 +127,7 @@ def register_operator_syntax(registry: SyntaxRegistry, syntax: universal.Operato
             if previous.definition.declaration.value != 0 and (previous.grammar_form == "Declaration" or syntax.grammar_form == "Declaration"):
                 if previous.grammar_form != syntax.grammar_form or previous.declaration_members != syntax.declaration_members or previous.representation != syntax.representation or previous.definition.module != syntax.definition.module or previous.definition.declaration.value != syntax.definition.declaration.value:
                     return error(diagnostics.diagnostic_at("E000103", "conflicting declaration grammar " + syntax.symbol, span))
-            if previous.definition.declaration.value == 0 or (syntax.domain == universal.OperatorDomain.GrammarOperator and previous.domain != universal.OperatorDomain.GrammarOperator):
+            if previous.definition.declaration.value == 0 or (syntax.domain == model_syntax_function_syntax.OperatorDomain.GrammarOperator and previous.domain != model_syntax_function_syntax.OperatorDomain.GrammarOperator):
                 registry.operators[index] = syntax
             return
         index += 1
@@ -143,7 +144,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                 index += 1
                 continue
             eligible := descriptor.grammar or descriptor.name == "operator" or descriptor.name == "Operator" or descriptor.name == "G"
-            inherited: universal.OperatorSyntax | None := None
+            inherited: model_syntax_function_syntax.OperatorSyntax | None := None
             for base in descriptor.bases:
                 if base == "operator" or base == "Operator":
                     eligible = true
@@ -164,9 +165,9 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
             grouping := false
             declaration_members := ""
             representation := ""
-            fixity := universal.Fixity.Infix
+            fixity := model_syntax_function_syntax.Fixity.Infix
             precedence := 0
-            associativity := universal.Associativity.Left
+            associativity := model_syntax_function_syntax.Associativity.Left
             base_syntax ?= inherited
             if base_syntax != None:
                 symbol = base_syntax.symbol
@@ -217,7 +218,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                 elif property.name in ["left", "right"]:
                     if len(property.tokens) != 0 and token_word(property.tokens[0]) == "Body":
                         form = "Body" if property.name == "left" else "ConditionBody"
-                        fixity = universal.Fixity.Prefix
+                        fixity = model_syntax_function_syntax.Fixity.Prefix
                 elif property.name == "members" or property.name == "representation":
                     contract = "DeclarationMembers" if property.name == "members" else "PrimitiveRepresentation"
                     if len(property.tokens) != 3 or token_word(property.tokens[0]) != contract or not token_is_symbol(property.tokens[1], "."):
@@ -232,11 +233,11 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                         return error(diagnostics.diagnostic_at("E000103", "grammar form requires GrammarForm", descriptor.span))
                     form = token_word(property.tokens[2])
                     if form != "Infix" and form != "Prefix" and form != "Postfix":
-                        fixity = universal.Fixity.Prefix
+                        fixity = model_syntax_function_syntax.Fixity.Prefix
                     elif form == "Prefix":
-                        fixity = universal.Fixity.Prefix
+                        fixity = model_syntax_function_syntax.Fixity.Prefix
                     elif form == "Postfix":
-                        fixity = universal.Fixity.Postfix
+                        fixity = model_syntax_function_syntax.Fixity.Postfix
                 elif property.name == "fixity" or property.name == "associativity":
                     contextual = descriptor.grammar and len(property.tokens) == 1
                     if not contextual and (len(property.tokens) != 3 or not token_is_symbol(property.tokens[1], ".")):
@@ -246,18 +247,18 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                         if token_word(property.tokens[0]) != "Fixity":
                             return error(diagnostics.diagnostic_at("E000103", "operator fixity requires Fixity", descriptor.span))
                         if member == "Prefix":
-                            fixity = universal.Fixity.Prefix
+                            fixity = model_syntax_function_syntax.Fixity.Prefix
                         elif member == "Postfix":
-                            fixity = universal.Fixity.Postfix
+                            fixity = model_syntax_function_syntax.Fixity.Postfix
                         elif member != "Infix":
                             return error(diagnostics.diagnostic_at("E000103", "unknown operator fixity", descriptor.span))
                     else:
                         if not contextual and token_word(property.tokens[0]) != "Associativity":
                             return error(diagnostics.diagnostic_at("E000103", "operator associativity requires Associativity", descriptor.span))
                         if member == "Right":
-                            associativity = universal.Associativity.Right
+                            associativity = model_syntax_function_syntax.Associativity.Right
                         elif member == "None":
-                            associativity = universal.Associativity.None
+                            associativity = model_syntax_function_syntax.Associativity.None
                         elif member != "Left":
                             return error(diagnostics.diagnostic_at("E000103", "unknown operator associativity", descriptor.span))
             descriptor.resolved = true
@@ -273,10 +274,10 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                         return error(diagnostics.diagnostic_at("E000103", "declaration grammar requires an aggregate representation", descriptor.span))
                     if (declaration_members == "Callables") != (representation == "TaggedAggregate"):
                         return error(diagnostics.diagnostic_at("E000103", "declaration members do not match the representation", descriptor.span))
-                identity = universal.named_definition(descriptor.semantic_owner, "trait", descriptor.name) if descriptor.semantic_owner != "" else universal.DefId(0, u128(descriptor.span.source.index) + 2, universal.DeclarationId(u128(descriptor.span.start) + 1))
-                syntax = universal.OperatorSyntax(symbol, fixity, u8(precedence), associativity, definition=identity, grammar_name=descriptor.name, grammar_form=form, closing=closing, separator=separator, grouping=grouping, declaration_members=declaration_members, representation=representation)
+                identity = model_syntax_symbol_symbol.named_definition(descriptor.semantic_owner, "trait", descriptor.name) if descriptor.semantic_owner != "" else model_syntax_symbol_symbol.DefId(0, u128(descriptor.span.source.index) + 2, model_syntax_symbol_symbol.DeclarationId(u128(descriptor.span.start) + 1))
+                syntax = model_syntax_function_syntax.OperatorSyntax(symbol, fixity, u8(precedence), associativity, definition=identity, grammar_name=descriptor.name, grammar_form=form, closing=closing, separator=separator, grouping=grouping, declaration_members=declaration_members, representation=representation)
                 if descriptor.grammar:
-                    syntax.domain = universal.OperatorDomain.GrammarOperator
+                    syntax.domain = model_syntax_function_syntax.OperatorDomain.GrammarOperator
                 register_operator_syntax(registry, syntax, descriptor.span)
                 descriptor.syntax = syntax
             registry.descriptors[index] = descriptor

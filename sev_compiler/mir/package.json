@@ -11,24 +11,20 @@
   },
   "dependencies": {
     "source": {
-      "package": "sev-compiler-source",
-      "path": "../frontend/source"
+      "path": "../frontend/source",
+      "package": "sev-compiler-source"
     },
     "diagnostics": {
-      "package": "sev-compiler-diagnostics",
-      "path": "../syntax/diagnostics"
-    },
-    "universal": {
-      "package": "sev-compiler-universal",
-      "path": "../universal"
+      "path": "../syntax/diagnostics",
+      "package": "sev-compiler-diagnostics"
     },
     "ownership": {
-      "package": "sev-compiler-mir-ownership",
-      "path": "ownership"
+      "path": "ownership",
+      "package": "sev-compiler-mir-ownership"
     },
     "cfg_builder": {
-      "package": "sev-compiler-cfg-builder",
-      "path": "cfg"
+      "path": "cfg",
+      "package": "sev-compiler-cfg"
     }
   }
 }

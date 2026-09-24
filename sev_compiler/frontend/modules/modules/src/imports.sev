@@ -1,4 +1,9 @@
-import universal
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 
 # Import requirements are collected from parsed expressions, including expanded
 # interpolation expressions. Unknown compiler terms fail conservatively: they
@@ -8,7 +13,7 @@ def require_name(names: list[string], name: string):
         names.append(name)
 
 
-def annotation_names(annotation: universal.TypeAnnotation, names: list[string]):
+def annotation_names(annotation: model_syntax_type_annotation.TypeAnnotation, names: list[string]):
     match annotation.kind:
         case Named:
             require_name(names, name)
@@ -19,14 +24,14 @@ def annotation_names(annotation: universal.TypeAnnotation, names: list[string]):
                 annotation_names(member, names)
 
 
-def optional_names(value: universal.Expression | None, names: list[string]) -> bool:
+def optional_names(value: model_syntax_function_function.Expression | None, names: list[string]) -> bool:
     selected ?= value
     if selected != None:
         return expression_names(selected, names)
     return true
 
 
-def expression_path(expression: universal.Expression) -> string:
+def expression_path(expression: model_syntax_function_function.Expression) -> string:
     match expression.kind:
         case Name:
             return name
@@ -39,7 +44,7 @@ def expression_path(expression: universal.Expression) -> string:
     return ""
 
 
-def expression_names(expression: universal.Expression, names: list[string]) -> bool:
+def expression_names(expression: model_syntax_function_function.Expression, names: list[string]) -> bool:
     match expression.kind:
         case Name:
             require_name(names, name)
@@ -159,14 +164,14 @@ def expression_names(expression: universal.Expression, names: list[string]) -> b
     return true
 
 
-def binding_names(binding: universal.Binding, names: list[string]) -> bool:
+def binding_names(binding: model_syntax_sentence_sentence.Binding, names: list[string]) -> bool:
     annotation ?= binding.annotation
     if annotation != None:
         annotation_names(annotation, names)
     return expression_names(binding.value, names)
 
 
-def statement_names(statement: universal.Statement, names: list[string]) -> bool:
+def statement_names(statement: model_syntax_sentence_sentence.Statement, names: list[string]) -> bool:
     match statement:
         case BindingStatement:
             return binding_names(binding, names)
@@ -228,7 +233,7 @@ def statement_names(statement: universal.Statement, names: list[string]) -> bool
             return false
 
 
-def arm_names(arm: universal.MatchArm, names: list[string]) -> bool:
+def arm_names(arm: model_syntax_sentence_sentence.MatchArm, names: list[string]) -> bool:
     annotation ?= arm.annotation
     if annotation != None:
         annotation_names(annotation, names)
@@ -237,7 +242,7 @@ def arm_names(arm: universal.MatchArm, names: list[string]) -> bool:
     return first and second
 
 
-def operator_names(operation: universal.OperatorDeclaration, names: list[string]) -> bool:
+def operator_names(operation: model_syntax_function_syntax.OperatorDeclaration, names: list[string]) -> bool:
     for parameter in operation.parameters:
         annotation_names(parameter.annotation, names)
     annotation_names(operation.result, names)
@@ -249,7 +254,7 @@ def operator_names(operation: universal.OperatorDeclaration, names: list[string]
     return complete
 
 
-def constraints_names(constraints: list[universal.GenericConstraint], names: list[string]) -> bool:
+def constraints_names(constraints: list[model_syntax_function_syntax.GenericConstraint], names: list[string]) -> bool:
     complete := true
     for constraint in constraints:
         match constraint:
@@ -261,7 +266,7 @@ def constraints_names(constraints: list[universal.GenericConstraint], names: lis
     return complete
 
 
-def decorators_names(decorators: list[universal.Decorator], names: list[string]):
+def decorators_names(decorators: list[model_syntax_function_syntax.Decorator], names: list[string]):
     for decorator in decorators:
         require_name(names, decorator.name)
         for argument in decorator.arguments:
@@ -272,7 +277,7 @@ def decorators_names(decorators: list[universal.Decorator], names: list[string])
                     continue
 
 
-def block_names(block: universal.Block, names: list[string]) -> bool:
+def block_names(block: model_syntax_block_block.Block, names: list[string]) -> bool:
     complete := true
     for statement in block.statements:
         if not statement_names(statement, names):
@@ -280,7 +285,7 @@ def block_names(block: universal.Block, names: list[string]) -> bool:
     return complete
 
 
-def function_names(function: universal.FunctionDeclaration, names: list[string]) -> bool:
+def function_names(function: model_syntax_function_function.FunctionDeclaration, names: list[string]) -> bool:
     complete := true
     for parameter in function.parameters:
         annotation_names(parameter.annotation, names)
@@ -318,7 +323,7 @@ def function_names(function: universal.FunctionDeclaration, names: list[string])
     return complete
 
 
-def item_name(item: universal.Item) -> string:
+def item_name(item: model_hir_module_module.Item) -> string:
     match item:
         case Function:
             return declaration.name
@@ -334,7 +339,7 @@ def item_name(item: universal.Item) -> string:
             return ""
 
 
-def item_names(item: universal.Item, names: list[string]) -> bool:
+def item_names(item: model_hir_module_module.Item, names: list[string]) -> bool:
     match item:
         case Function:
             return function_names(declaration, names)
@@ -411,7 +416,7 @@ def item_names(item: universal.Item, names: list[string]) -> bool:
             return false
 
 
-def module_names(module: universal.Module, names: list[string]) -> bool:
+def module_names(module: model_hir_module_module.Module, names: list[string]) -> bool:
     complete := true
     for item in module.items:
         if not item_names(item, names):
@@ -422,7 +427,7 @@ def module_names(module: universal.Module, names: list[string]) -> bool:
 # Keep the selected declarations and their implementation dependencies. Types,
 # extension registries and operators remain roots for implicit behavior. Unknown
 # terms retain the input until their reference contracts can be proved here.
-def select_imported_items(child: universal.Module, namespace: string, requested: list[string], enabled: bool) -> list[universal.Item]:
+def select_imported_items(child: model_hir_module_module.Module, namespace: string, requested: list[string], enabled: bool) -> list[model_hir_module_module.Item]:
     if not enabled or "*" in requested:
         return child.items
     needed = requested[:]
@@ -474,7 +479,7 @@ def select_imported_items(child: universal.Module, namespace: string, requested:
                 require_name(needed, lookup + dependency)
                 require_name(needed, dependency)
             changed = true
-    result: list[universal.Item] = []
+    result: list[model_hir_module_module.Item] = []
     for index in range(int(len(child.items))):
         if index in selected:
             result.append(child.items[index])

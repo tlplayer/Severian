@@ -11,16 +11,16 @@
   },
   "dependencies": {
     "source": {
-      "package": "sev-compiler-source",
-      "path": "../frontend/source"
+      "path": "../frontend/source",
+      "package": "sev-compiler-source"
     },
     "syntax": {
-      "package": "sev-compiler-syntax",
-      "path": "../syntax"
+      "path": "../syntax",
+      "package": "sev-compiler-syntax"
     },
     "primitives": {
-      "package": "sev-compiler-primitives",
-      "path": "../syntax/primitive"
+      "path": "../syntax/primitive",
+      "package": "sev-compiler-primitives"
     }
   }
 }

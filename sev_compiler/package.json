@@ -28,8 +28,8 @@
   ],
   "dependencies": {
     "backend": {
-      "package": "sev-compiler-backend",
-      "path": "boundaries/backend"
+      "package": "sev-mlir-backend",
+      "path": "../library/package/compile/backend"
     },
     "driver": {
       "package": "sev-compiler-driver",
@@ -40,48 +40,52 @@
       "path": "frontend/semantic"
     },
     "environment": {
-      "path": "../library/system/environment"
+      "path": "../library/system/environment",
+      "package": "environment"
     },
     "file": {
-      "path": "../library/system/file"
+      "path": "../library/system/file",
+      "package": "file"
     },
     "os": {
-      "path": "../library/system/os"
+      "path": "../library/system/os",
+      "package": "os"
     },
     "path": {
-      "path": "../library/system/path"
+      "path": "../library/system/path",
+      "package": "path"
     },
     "process": {
-      "path": "../library/system/process"
+      "path": "../library/system/process",
+      "package": "process"
     },
     "profiling": {
-      "path": "../library/system/profiling"
+      "path": "../library/system/profiling",
+      "package": "profiling"
     },
     "time": {
-      "path": "../library/core/time"
+      "path": "../library/core/time",
+      "package": "time"
     },
     "package": {
-      "path": "../library/package"
+      "path": "../library/package",
+      "package": "package"
     },
     "diagnostics": {
-      "package": "sev-compiler-diagnostics",
-      "path": "syntax/diagnostics"
+      "path": "syntax/diagnostics",
+      "package": "sev-compiler-diagnostics"
     },
     "lexer": {
-      "package": "sev-compiler-lexer",
-      "path": "frontend/lexer"
+      "path": "frontend/lexer",
+      "package": "sev-compiler-lexer"
     },
     "parser": {
-      "package": "sev-compiler-parser",
-      "path": "frontend/parser"
+      "path": "frontend/parser",
+      "package": "sev-compiler-parser"
     },
     "source": {
       "path": "frontend/source",
       "package": "sev-compiler-source"
-    },
-    "universal": {
-      "package": "sev-compiler-universal",
-      "path": "universal"
     },
     "interfaces": {
       "package": "package.interface",

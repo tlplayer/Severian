@@ -1,8 +1,12 @@
-import universal
+import * from "../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../syntax/source.sev" as model_syntax_source
+import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import source
 import * from "cfg.sev" as cfg
 
-def debug_source(module: universal.Module, span: source.Span) -> bool:
+def debug_source(module: model_hir_module_module.Module, span: source.Span) -> bool:
     for file in module.debug_files:
         if file.id.index == span.source.index:
             return true
@@ -10,7 +14,7 @@ def debug_source(module: universal.Module, span: source.Span) -> bool:
 
 # Region identities depend on source identity and position, not visitation order
 # or compilation-unit order. Reject a collision instead of merging measurements.
-def quality_region(module: universal.Module, span: source.Span, kind: string) -> int:
+def quality_region(module: model_hir_module_module.Module, span: source.Span, kind: string) -> int:
     for excluded in module.quality_exclusions:
         if excluded.source.index == span.source.index and span.start >= excluded.start and span.start < excluded.end:
             return 0
@@ -35,24 +39,24 @@ def quality_region(module: universal.Module, span: source.Span, kind: string) ->
                 column = 1
             else:
                 column += 1
-        module.quality_regions.append(universal.QualityRegion(id, kind, span, file.path, line, column))
+        module.quality_regions.append(model_syntax_source.QualityRegion(id, kind, span, file.path, line, column))
         return id
     return 0
 
-def quality_hit(module: universal.Module, context: cfg.ExecutionContext, span: source.Span, kind: string):
+def quality_hit(module: model_hir_module_module.Module, context: cfg.ExecutionContext, span: source.Span, kind: string):
     id = quality_region(module, span, kind)
     if id != 0:
-        cfg.append(context, universal.Operation.Coverage(universal.CoveragePoint(span.start, universal.CoverageKind.Line, 0, string(id), None, None)))
+        cfg.append(context, model_syntax_function_function.Operation.Coverage(model_syntax_source.CoveragePoint(span.start, model_syntax_source.CoverageKind.Line, 0, string(id), None, None)))
 
-def quality_decision(module: universal.Module, span: source.Span, kind: string, value: universal.ValueId) -> universal.Operation | None:
+def quality_decision(module: model_hir_module_module.Module, span: source.Span, kind: string, value: model_syntax_symbol_symbol.ValueId) -> model_syntax_function_function.Operation | None:
     otherwise = quality_region(module, span, kind + "False")
     if otherwise == 0:
         return None
     taken = quality_region(module, span, kind + "True")
     key = string(otherwise) + "," + string(taken)
-    return universal.Operation.Coverage(universal.CoveragePoint(span.start, universal.CoverageKind.Branch, 0, key, None, None, value))
+    return model_syntax_function_function.Operation.Coverage(model_syntax_source.CoveragePoint(span.start, model_syntax_source.CoverageKind.Branch, 0, key, None, None, value))
 
-def quality_branches(module: universal.Module):
+def quality_branches(module: model_hir_module_module.Module):
     for body in module.cfg_bodies:
         for block in body.blocks:
             terminal ?= block.terminator
@@ -62,6 +66,6 @@ def quality_branches(module: universal.Module):
                         measured ?= quality_decision(module, terminal.span, "Branch", condition)
                         if measured != None:
                             block.operations.append(measured)
-                            block.origins.append(universal.OperationOrigin(terminal.span, body.origin.block, body.origin.callable, body.origin.path))
+                            block.origins.append(model_syntax_block_block.OperationOrigin(terminal.span, body.origin.block, body.origin.callable, body.origin.path))
                     case _:
                         throw Error("unimplemented (sev_compiler/transforms/mir/src/quality.sev)")

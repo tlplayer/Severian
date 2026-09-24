@@ -1,12 +1,12 @@
+import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import mir
-import universal
 
 enum CompileError:
-    ConflictingCompilers(operation: int, compilers: list[universal.CompilerId])
+    ConflictingCompilers(operation: int, compilers: list[model_syntax_symbol_symbol.CompilerId])
     InvalidArtifact(message: string)
-    DuplicateHandler(compiler: universal.CompilerId)
-    MissingHandler(compiler: universal.CompilerId)
+    DuplicateHandler(compiler: model_syntax_symbol_symbol.CompilerId)
+    MissingHandler(compiler: model_syntax_symbol_symbol.CompilerId)
     MissingValue(value: u32)
     PlannerGeneratedOperation(operation: int)
-    Type(type_id: universal.TypeId, message: string)
+    Type(type_id: model_syntax_symbol_symbol.TypeId, message: string)
 

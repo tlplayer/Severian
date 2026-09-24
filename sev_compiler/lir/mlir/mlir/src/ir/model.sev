@@ -1,18 +1,10 @@
-enum MlirScalarKind:
-    IntegerScalar
-    IeeeFloatScalar
-    BrainFloatScalar
-    Float8E4M3FnScalar
-    Float8E5M2Scalar
-    IndexScalar
-    PointerScalar
-
-
+import * from "package:primitives/mlir.sev"
 class MlirScalarType:
-    kind: MlirScalarKind
+    kind: string
     bits: u16
     signed: bool
     address_space: int
+    spelling: string = ""
 
 
 def known_dimension(value: int) -> int:
@@ -24,65 +16,55 @@ def dynamic_dimension() -> int:
     return -1
 
 
-enum MlirTypeKind:
-    ScalarType
-    TensorType
-    UnrankedTensorType
-    MemRefType
-    UnrankedMemRefType
-    StructType
-    ArrayType
-
-
 class MlirType:
-    kind: MlirTypeKind
+    kind: MlirTypeBinding
     scalar: MlirScalarType
     dimensions: list[int]
     elements: list[MlirType] = []
 
 
 def integer_type(bits: u16, signed: bool = true) -> MlirType:
-    return MlirType(ScalarType, MlirScalarType(IntegerScalar, bits, signed, 0), [])
+    return MlirType(scalar_mlir("i" + string(bits), "integer", bits, signed), MlirScalarType("integer", bits, signed, 0, "i" + string(bits)), [])
 
 
 def float_type(bits: u16) -> MlirType:
-    return MlirType(ScalarType, MlirScalarType(IeeeFloatScalar, bits, true, 0), [])
+    return MlirType(scalar_mlir("f" + string(bits), "ieee_float", bits, true), MlirScalarType("ieee_float", bits, true, 0, "f" + string(bits)), [])
 
 
 def float8_type(e5m2: bool) -> MlirType:
-    return MlirType(ScalarType, MlirScalarType(Float8E5M2Scalar if e5m2 else Float8E4M3FnScalar, 8, true, 0), [])
+    return MlirType(scalar_mlir("f8E5M2" if e5m2 else "f8E4M3FN", "f8e5m2" if e5m2 else "f8e4m3fn", 8, true), MlirScalarType("f8e5m2" if e5m2 else "f8e4m3fn", 8, true, 0, "f8E5M2" if e5m2 else "f8E4M3FN"), [])
 
 
 def bf16_type() -> MlirType:
-    return MlirType(ScalarType, MlirScalarType(BrainFloatScalar, 16, true, 0), [])
+    return MlirType(scalar_mlir("bf16", "brain_float", 16, true), bf16_scalar_type(), [])
 
 
 def bf16_scalar_type() -> MlirScalarType:
-    return MlirScalarType(BrainFloatScalar, 16, true, 0)
+    return MlirScalarType("brain_float", 16, true, 0, "bf16")
 
 
 def index_type() -> MlirType:
-    return MlirType(ScalarType, MlirScalarType(IndexScalar, 0, false, 0), [])
+    return MlirType(scalar_mlir("index", "index"), MlirScalarType("index", 0, false, 0, "index"), [])
 
 
 def pointer_type(address_space: int = 0) -> MlirType:
-    return MlirType(ScalarType, MlirScalarType(PointerScalar, 0, false, address_space), [])
+    return MlirType(scalar_mlir("!llvm.ptr" if address_space == 0 else "!llvm.ptr<" + string(address_space) + ">", "pointer"), MlirScalarType("pointer", 0, false, address_space, "!llvm.ptr" if address_space == 0 else "!llvm.ptr<" + string(address_space) + ">"), [])
 
 
 def tensor_type(element: MlirScalarType, dimensions: list[int]) -> MlirType:
-    return MlirType(TensorType, element, dimensions)
+    return MlirType(tensor_mlir(), element, dimensions)
 
 
 def unranked_tensor_type(element: MlirScalarType) -> MlirType:
-    return MlirType(UnrankedTensorType, element, [])
+    return MlirType(unranked_tensor_mlir(), element, [])
 
 
 def memref_type(element: MlirScalarType, dimensions: list[int]) -> MlirType:
-    return MlirType(MemRefType, element, dimensions)
+    return MlirType(memref_mlir(), element, dimensions)
 
 
 def unranked_memref_type(element: MlirScalarType) -> MlirType:
-    return MlirType(UnrankedMemRefType, element, [])
+    return MlirType(unranked_memref_mlir(), element, [])
 
 
 class MlirLocation:
@@ -470,40 +452,14 @@ def empty_program(first_generated_value: int = 0) -> MlirProgram:
     return MlirProgram([], [], first_generated_value, 0, 0)
 
 
-def scalar_kind_name(kind: MlirScalarKind) -> string:
-    match kind:
-        case IntegerScalar:
-            return "integer"
-        case IeeeFloatScalar:
-            return "ieee_float"
-        case BrainFloatScalar:
-            return "brain_float"
-        case Float8E4M3FnScalar:
-            return "f8e4m3fn"
-        case Float8E5M2Scalar:
-            return "f8e5m2"
-        case IndexScalar:
-            return "index"
-        case PointerScalar:
-            return "pointer"
+def scalar_kind_name(kind: string) -> string:
+    return kind
 
 
-def type_kind_name(kind: MlirTypeKind) -> string:
-    match kind:
-        case ScalarType:
-            return "scalar"
-        case TensorType:
-            return "tensor"
-        case UnrankedTensorType:
-            return "unranked_tensor"
-        case MemRefType:
-            return "memref"
-        case UnrankedMemRefType:
-            return "unranked_memref"
-        case StructType:
-            return "struct"
-        case ArrayType:
-            return "array"
+
+def type_kind_name(kind: MlirTypeBinding) -> string:
+    return kind.category
+
 
 
 def dimension_text(dimension: int) -> string:
@@ -531,7 +487,7 @@ def dimension_identity(dimension: int) -> string:
 
 
 def same_type(left: MlirType, right: MlirType) -> bool:
-    if type_kind_name(left.kind) != type_kind_name(right.kind):
+    if left.kind.spelling != right.kind.spelling or type_kind_name(left.kind) != type_kind_name(right.kind):
         return false
     if len(left.elements) != len(right.elements):
         return false
@@ -568,14 +524,24 @@ def is_boolean(type_id: MlirType) -> bool:
 
 
 def struct_type(elements: list[MlirType]) -> MlirType:
-    return MlirType(StructType, MlirScalarType(IntegerScalar, 8, false, 0), [], elements)
+    return MlirType(struct_mlir(), MlirScalarType("integer", 8, false, 0), [], elements)
 
 
 def array_type(size: int, element: MlirType) -> MlirType:
-    return MlirType(ArrayType, MlirScalarType(IntegerScalar, 8, false, 0), [size], [element])
+    return MlirType(array_mlir(), MlirScalarType("integer", 8, false, 0), [size], [element])
 
 # Reassignments and ownership transitions retain one debugger variable identity.
 class MlirDebugVariable:
     scope: string
     name: string
     attribute: string
+
+
+def declared_mlir_type(binding: MlirTypeBinding, dimensions: list[int] = [], elements: list[MlirType] = [], element: MlirScalarType | None = None) -> MlirType:
+    if not binding.value:
+        throw Error("declaration has no MLIR SSA value")
+    scalar = MlirScalarType(binding.scalar, binding.bits, binding.signed, 0, binding.spelling)
+    supplied ?= element
+    if supplied != None:
+        scalar = supplied
+    return MlirType(binding, scalar, dimensions, elements)

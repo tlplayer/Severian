@@ -2,13 +2,13 @@ import * from "../symbol/symbol.sev"
 import source
 import * from "../literal/value.sev"
 import * from "syntax.sev"
-import * from "../source/assertion_origin.sev"
+import * from "../source.sev"
 import * from "../literal/lowered.sev"
-import * from "../source/assertion.sev"
+import * from "../source.sev"
 import * from "../sentence/sentence.sev"
 import * from "function.sev"
 import * from "../type/system.sev"
-import * from "operator/types/mod.sev"
+
 
 # Operations, registry contracts, and callable lowering metadata.
 
@@ -183,7 +183,7 @@ class RegisteredOperation:
 
 
 class IrContext:
-    types: TypeContext
+    types: TyInterner
     operations: OperationRegistry
 
 
@@ -293,3 +293,21 @@ test "effect sets compose without losing bits":
     assert(effects.contains(write_effect()))
     assert(effects.contains(io_effect()))
     assert(not effects.contains(throw_effect()))
+
+
+
+# Lowering retains the same open operation identity. These wrappers describe
+# arity only; adding an operation does not add a new lowered variant.
+class UnaryOperation:
+    id: OpId
+
+
+class BinaryOperation:
+    id: OpId
+
+
+# Keep compilation-unit identity across the compiler/backend boundary.
+class MlirObject:
+    key: string
+    text: string
+    entry: bool = false

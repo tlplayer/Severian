@@ -1,12 +1,12 @@
-from universal import scalar_declarations as boundary
+import * from "../../../syntax/function/lowering.sev" as boundary
 import package
 import source
 import os
 import path
 import * from "pipeline/source.sev" as pipeline
-import * from "package:backend/src/native_mlir.sev" as backend
+import * from "package:backend/backend/src/native_mlir.sev" as backend
 import * from "pipeline/frontend_archive.sev" as frontend_archive
-import * from "package:interface/src/package_metadata.sev" as metadata
+import * from "package:interface/interface/src/package_metadata.sev" as metadata
 import * from "pipeline/mir_archive.sev" as mir_archive
 import * from "pipeline/package_interface.sev" as package_interface
 import diagnostics
@@ -116,7 +116,7 @@ def compile_package_unit_checked(arguments: list[string]) -> unit | Error:
     interface: list[string] = []
     quality_maps: list[string] = []
     mir_outputs: list[list[u8]] = []
-    object_outputs: list[string] = []
+    object_outputs: list[boundary.MlirObject] = []
     semantic_outputs: list[string] = []
     requirements = boundary.LoweringRequirements()
     text = pipeline.compile_to_mlir(pipeline.load_input(arguments[2]), arguments[7] == "test", arguments[5], "mlir" if emit == "check" or emit == "sources" else emit, resolution, files, interface, quality_maps, requirements, mir_outputs, object_outputs, semantic_outputs)

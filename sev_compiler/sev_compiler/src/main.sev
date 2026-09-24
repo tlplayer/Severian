@@ -12,7 +12,7 @@ import * from "../../driver/driver/src/package_command.sev"
 import * from "../../driver/driver/src/package_compiler.sev"
 import * from "../../driver/driver/src/package_session.sev"
 import * from "../../driver/driver/src/pipeline/source.sev" as compiler
-import * from "../../boundaries/backend/src/native_mlir.sev" as backend
+import * from "../../../library/package/compile/backend/backend/src/native_mlir.sev" as backend
 import * from "../../driver/driver/src/profiling.sev" as profiling
 
 @c(symbol="exit")

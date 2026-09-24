@@ -1,20 +1,29 @@
+import * from "../../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
+import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../../syntax/grammar/grammar.sev" as model_syntax_grammar_grammar
+import * from "../../../../../syntax/literal/value.sev" as model_syntax_literal_value
+import * from "../../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import * from "../../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import * from "../../../../../syntax/type/system.sev" as model_syntax_type_system
 import lexer
 from lexer import TokenKind
 import diagnostics
 from diagnostics import Diagnostic
 import source
-import universal
-from universal import CompilerExpectation
-from universal import CompilerTestCase
+import * from "../../../../../syntax/function/syntax.sev"
+import * from "../../../../../syntax/function/syntax.sev"
 
-def formatted_string_expression(value: string, span: source.Span, syntaxes: list[universal.OperatorSyntax], lexical_rules: list[universal.RecordDeclaration] = []) -> universal.Expression | diagnostics.Diagnostic:
+def formatted_string_expression(value: string, span: source.Span, syntaxes: list[model_syntax_function_syntax.OperatorSyntax], lexical_rules: list[model_syntax_function_function.RecordDeclaration] = []) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     rules: list[lexer.SourceLexicalRule] = []
     for declaration in lexical_rules:
         rules.append(lexer.source_lexical_rule(declaration))
     characters = value.characters()
     cursor := 0
     literal := ""
-    parts: list[universal.Expression] = []
+    parts: list[model_syntax_function_function.Expression] = []
     while cursor < len(characters):
         if characters[cursor] == "{" and cursor + 1 < len(characters) and characters[cursor + 1] == "{":
             literal += "{"
@@ -31,7 +40,7 @@ def formatted_string_expression(value: string, span: source.Span, syntaxes: list
             cursor += 1
             continue
         if len(literal) > 0:
-            parts.append(universal.Expression(universal.LiteralValue(universal.StringValue(literal)), span))
+            parts.append(model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue(literal)), span))
             literal = ""
         expression_start = cursor + 1
         cursor = expression_start
@@ -56,18 +65,18 @@ def formatted_string_expression(value: string, span: source.Span, syntaxes: list
         parser_separators(expression_parser)
         if not parser_at_simple(expression_parser, Eof):
             return error(diagnostics.Diagnostic("E000113", "unexpected token in formatted string interpolation", span))
-        parts.append(universal.Expression(universal.Stringify(parsed_expression), span))
+        parts.append(model_syntax_function_function.Expression(model_syntax_function_function.Stringify(parsed_expression), span))
         cursor += 1
     if len(literal) > 0:
-        parts.append(universal.Expression(universal.LiteralValue(universal.StringValue(literal)), span))
+        parts.append(model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue(literal)), span))
     if len(parts) == 0:
-        return universal.Expression(universal.LiteralValue(universal.StringValue("")), span)
+        return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue("")), span)
     # Formatting owns its output while viewing interpolated inputs. Append
     # into one growing string, including the single-interpolation case.
-    result := universal.Expression(universal.LiteralValue(universal.StringValue("")), span)
+    result := model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue("")), span)
     for part in parts:
-        append = universal.Expression(universal.Member(result, "append"), span)
-        result = universal.Expression(universal.Call(append, [universal.CallArgument(None, part, span)]), span)
+        append = model_syntax_function_function.Expression(model_syntax_function_function.Member(result, "append"), span)
+        result = model_syntax_function_function.Expression(model_syntax_function_function.Call(append, [model_syntax_function_function.CallArgument(None, part, span)]), span)
     return result
 
 class Parser:
@@ -147,66 +156,73 @@ def parser_delimited_layout(parser: Parser):
     while parser_at_simple(parser, Newline) or parser_at_simple(parser, Indent) or parser_at_simple(parser, Dedent):
         parser_next(parser)
 
-def parser_module(parser: Parser) -> universal.Module | diagnostics.Diagnostic:
-    result = universal.Module([])
+def parser_module(parser: Parser) -> model_hir_module_module.Module | diagnostics.Diagnostic:
+    result = model_hir_module_module.Module([])
     parser_separators(parser)
     while not parser_at_simple(parser, Eof):
         if parser_declaration_syntax(parser).grammar_form == "Declaration":
-            result.items.append(universal.Record(parser_named_declaration(parser, parser_declaration_syntax(parser))))
+            result.items.append(model_hir_module_module.Record(parser_named_declaration(parser, parser_declaration_syntax(parser))))
         elif parser_at_symbol(parser, "@"):
-            decorators: list[universal.Decorator] = []
+            decorators: list[model_syntax_function_syntax.Decorator] = []
             while parser_at_symbol(parser, "@"):
                 decorators.append(parser_scalar_decorator(parser))
-            if not parser_at_identifier(parser, "def"):
-                return error(parser_fail(parser, "expected function after decorator"))
-            result.items.append(universal.Function(parser_function_declaration(parser, decorators)))
+            if parser_at_identifier(parser, "class"):
+                declaration = parser_record_declaration(parser)
+                declaration.decorators = decorators
+                result.items.append(model_hir_module_module.Record(declaration))
+            elif parser_at_identifier(parser, "trait"):
+                result.items.append(model_hir_module_module.Trait(parser_trait_declaration(parser, decorators)))
+            elif parser_at_identifier(parser, "def"):
+                result.items.append(model_hir_module_module.Function(parser_function_declaration(parser, decorators)))
+            else:
+                return error(parser_fail(parser, "expected class, trait, or function after decorator"))
         elif parser_at_identifier(parser, "from"):
             for declaration in parser_selective_imports(parser):
-                result.items.append(universal.Import(declaration))
+                result.items.append(model_hir_module_module.Import(declaration))
         elif parser_at_identifier(parser, "import"):
             for declaration in parser_import_members(parser):
-                result.items.append(universal.Import(declaration))
+                result.items.append(model_hir_module_module.Import(declaration))
         elif parser_at_identifier(parser, "trait"):
-            result.items.append(universal.Trait(parser_trait_declaration(parser, [])))
+            result.items.append(model_hir_module_module.Trait(parser_trait_declaration(parser, [])))
         elif parser_at_identifier(parser, "grammar"):
-            result.items.append(universal.GrammarItem(parser_grammar_declaration(parser)))
+            result.items.append(model_hir_module_module.GrammarItem(parser_grammar_declaration(parser)))
         elif parser_at_identifier(parser, "operator"):
             operation = parser_operator_declaration(parser)
             operation.receiver = false
-            result.items.append(universal.OperatorItem(operation))
+            result.items.append(model_hir_module_module.OperatorItem(operation))
         elif parser_at_identifier(parser, "def"):
-            result.items.append(universal.Function(parser_function_declaration(parser, [])))
+            result.items.append(model_hir_module_module.Function(parser_function_declaration(parser, [])))
         elif parser_at_identifier(parser, "class"):
-            result.items.append(universal.Record(parser_record_declaration(parser)))
+            result.items.append(model_hir_module_module.Record(parser_record_declaration(parser)))
         elif parser_at_identifier(parser, "extend"):
-            result.items.append(universal.Record(parser_record_declaration(parser, true)))
+            result.items.append(model_hir_module_module.Record(parser_record_declaration(parser, true)))
         elif parser_at_identifier(parser, "union"):
-            result.items.append(universal.Type(parser_family_declaration(parser)))
+            result.items.append(model_hir_module_module.Item.Type(parser_family_declaration(parser)))
         elif parser_at_identifier(parser, "type") and parser.cursor[0] + 1 < len(parser.tokens) and not lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], "("):
-            result.items.append(universal.Type(parser_type_declaration(parser, [])))
+            result.items.append(model_hir_module_module.Item.Type(parser_type_declaration(parser, [])))
         elif parser_at_type_alias(parser):
-            result.items.append(universal.Type(parser_type_alias(parser, [])))
+            result.items.append(model_hir_module_module.Item.Type(parser_type_alias(parser, [])))
         elif parser_at_identifier(parser, "test"):
-            result.items.append(universal.Test(parser_test_declaration(parser)))
+            result.items.append(model_hir_module_module.Test(parser_test_declaration(parser)))
         elif parser_at_identifier(parser, "return") or parser_at_identifier(parser, "break") or parser_at_identifier(parser, "continue"):
             return error(diagnostics.Diagnostic("E000121", "control flow is not valid at module scope", parser_peek(parser).span))
         else:
             statement = parser_simple_statement(parser)
             match statement:
                 case BindingStatement:
-                    result.items.append(universal.BindingItem(binding))
+                    result.items.append(model_hir_module_module.BindingItem(binding))
                 case ExpressionStatement:
-                    result.items.append(universal.ExpressionItem(expression))
+                    result.items.append(model_hir_module_module.ExpressionItem(expression))
                 case _:
                     return error(parser_fail(parser, "expected a module declaration"))
         parser_separators(parser)
     return result
 
-def parser_scalar_decorator(parser: Parser) -> universal.Decorator | diagnostics.Diagnostic:
+def parser_scalar_decorator(parser: Parser) -> model_syntax_function_syntax.Decorator | diagnostics.Diagnostic:
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected decorator name")[0]
     parser_expect_symbol(parser, "(", "expected decorator arguments")
-    arguments: list[universal.DecoratorArgument] = []
+    arguments: list[model_syntax_function_syntax.DecoratorArgument] = []
     while not parser_at_symbol(parser, ")"):
         argument_name := ""
         if parser.cursor[0] + 1 < len(parser.tokens) and lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], "="):
@@ -215,16 +231,16 @@ def parser_scalar_decorator(parser: Parser) -> universal.Decorator | diagnostics
         token = parser_next(parser)
         match token.kind:
             case String:
-                arguments.append(universal.DecoratorArgument(argument_name, universal.DecoratorValue.String(string(token)), token.span))
+                arguments.append(model_syntax_function_syntax.DecoratorArgument(argument_name, model_syntax_function_syntax.DecoratorValue.String(string(token)), token.span))
             case _:
                 return error(parser_fail(parser, "decorator requires string arguments"))
         if parser_take_symbol(parser, ",") == None:
             break
     end = parser_expect_symbol(parser, ")", "expected closing decorator parenthesis").span
     parser_expect(parser, Newline, "expected newline after decorator")
-    return universal.Decorator(name, arguments, source.Span(start.source, start.start, end.end))
+    return model_syntax_function_syntax.Decorator(name, arguments, source.Span(start.source, start.start, end.end))
 
-def parser_selective_imports(parser: Parser) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:
+def parser_selective_imports(parser: Parser) -> list[model_syntax_function_syntax.ImportDeclaration] | diagnostics.Diagnostic:
     parser_next(parser)
     locator = parser_at_simple(parser, String)
     package_name := ""
@@ -243,7 +259,7 @@ def parser_selective_imports(parser: Parser) -> list[universal.ImportDeclaration
         return error(parser_fail(parser, "a new-line import list requires braces or a backslash continuation"))
     if grouped:
         parser_delimited_layout(parser)
-    result: list[universal.ImportDeclaration] = []
+    result: list[model_syntax_function_syntax.ImportDeclaration] = []
     while true:
         member := ("", parser_peek(parser).span)
         if parser_at_symbol(parser, "*"):
@@ -259,9 +275,9 @@ def parser_selective_imports(parser: Parser) -> list[universal.ImportDeclaration
             selected: string | None := member[0]
             if member[0] == "*":
                 selected = None
-            result.append(universal.ImportDeclaration(universal.Locator(package_name), selected, alias, member[1]))
+            result.append(model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.Locator(package_name), selected, alias, member[1]))
         else:
-            result.append(universal.ImportDeclaration(universal.Name(member[0]), package_name, alias, member[1]))
+            result.append(model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.ImportSubject.Name(member[0]), package_name, alias, member[1]))
         if grouped:
             parser_delimited_layout(parser)
         if parser_take_symbol(parser, ",") == None:
@@ -275,7 +291,7 @@ def parser_selective_imports(parser: Parser) -> list[universal.ImportDeclaration
     return result
 
 
-def parser_import_members(parser: Parser) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:
+def parser_import_members(parser: Parser) -> list[model_syntax_function_syntax.ImportDeclaration] | diagnostics.Diagnostic:
     start = parser_next(parser).span
     names: list[string] = []
     aliases: list[string | None] = []
@@ -296,11 +312,11 @@ def parser_import_members(parser: Parser) -> list[universal.ImportDeclaration] |
         spans.append(span)
         if parser_take_symbol(parser, ",") == None:
             break
-    result: list[universal.ImportDeclaration] = []
+    result: list[model_syntax_function_syntax.ImportDeclaration] = []
     if not parser_at_identifier(parser, "from"):
         if len(names) != 1 or names[0] == "*":
             return error(parser_fail(parser, "expected from after import list"))
-        result.append(universal.ImportDeclaration(universal.Name(names[0]), None, aliases[0], source.Span(start.source, start.start, parser_peek(parser).span.start)))
+        result.append(model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.ImportSubject.Name(names[0]), None, aliases[0], source.Span(start.source, start.start, parser_peek(parser).span.start)))
         return result
     parser_next(parser)
     locator = parser_at_simple(parser, String)
@@ -322,13 +338,13 @@ def parser_import_members(parser: Parser) -> list[universal.ImportDeclaration] |
             selected: string | None := names[index]
             if names[index] == "*":
                 selected = None
-            result.append(universal.ImportDeclaration(universal.Locator(origin), selected, aliases[index], span))
+            result.append(model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.Locator(origin), selected, aliases[index], span))
         else:
-            result.append(universal.ImportDeclaration(universal.Name(names[index]), origin, aliases[index], span))
+            result.append(model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.ImportSubject.Name(names[index]), origin, aliases[index], span))
     return result
 
 
-def parser_import_declaration(parser: Parser) -> universal.ImportDeclaration | diagnostics.Diagnostic:
+def parser_import_declaration(parser: Parser) -> model_syntax_function_syntax.ImportDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     if parser_take_symbol(parser, "*") != None:
         if not parser_at_identifier(parser, "from"):
@@ -339,7 +355,7 @@ def parser_import_declaration(parser: Parser) -> universal.ImportDeclaration | d
         if parser_at_identifier(parser, "as"):
             parser_next(parser)
             alias = parser_identifier(parser, "expected an import alias")[0]
-        return universal.ImportDeclaration(universal.Locator(string(token)), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
+        return model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.Locator(string(token)), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
     if parser_at_simple(parser, String):
         return error(parser_fail(parser, "file imports require explicit `import * from` followed by a locator string"))
     first = parser_identifier(parser, "expected an import name")
@@ -351,22 +367,22 @@ def parser_import_declaration(parser: Parser) -> universal.ImportDeclaration | d
             if parser_at_identifier(parser, "as"):
                 parser_next(parser)
                 alias = parser_identifier(parser, "expected an import alias")[0]
-            return universal.ImportDeclaration(universal.Locator(string(locator)), first[0], alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
+            return model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.Locator(string(locator)), first[0], alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
         source_name = parser_identifier(parser, "expected an import source")[0]
         alias: string | None := None
         if parser_at_identifier(parser, "as"):
             parser_next(parser)
             alias = parser_identifier(parser, "expected an import alias")[0]
-        return universal.ImportDeclaration(universal.Name(first[0]), source_name, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
+        return model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.ImportSubject.Name(first[0]), source_name, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
     alias: string | None := None
     if parser_at_identifier(parser, "as"):
         parser_next(parser)
         alias = parser_identifier(parser, "expected an import alias")[0]
-    return universal.ImportDeclaration(universal.Name(first[0]), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
+    return model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.ImportSubject.Name(first[0]), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
 
-def parser_type_parameters(parser: Parser, pack: list[string] = [], defaults: list[universal.TypeAnnotation] = []) -> tuple[list[string], list[universal.GenericConstraint]] | diagnostics.Diagnostic:
+def parser_type_parameters(parser: Parser, pack: list[string] = [], defaults: list[model_syntax_type_annotation.TypeAnnotation] = []) -> tuple[list[string], list[model_syntax_function_syntax.GenericConstraint]] | diagnostics.Diagnostic:
     parameters: list[string] = []
-    constraints: list[universal.GenericConstraint] = []
+    constraints: list[model_syntax_function_syntax.GenericConstraint] = []
     if parser_take_symbol(parser, "[") == None:
         return (parameters, constraints)
     parser_delimited_layout(parser)
@@ -383,7 +399,7 @@ def parser_type_parameters(parser: Parser, pack: list[string] = [], defaults: li
             parameters.append(parameter[0])
             if parser_take_symbol(parser, ":") != None:
                 bound = parser_type_annotation(parser)
-                constraints.append(universal.Parameter(parameter[0], bound, source.Span(parameter[1].source, parameter[1].start, bound.span.end)))
+                constraints.append(model_syntax_type_system.Parameter(parameter[0], bound, source.Span(parameter[1].source, parameter[1].start, bound.span.end)))
             if parser_take_symbol(parser, "=") != None:
                 if packed:
                     return error(parser_fail(parser, "a type pack cannot have a default"))
@@ -401,13 +417,13 @@ def parser_type_parameters(parser: Parser, pack: list[string] = [], defaults: li
     parser_expect_symbol(parser, "]", "expected closing type parameter bracket")
     return (parameters, constraints)
 
-def parser_declaration_constraints(parser: Parser, attachments: list[universal.WithAttachment] = [], callable: bool = false) -> list[universal.GenericConstraint] | diagnostics.Diagnostic:
-    constraints: list[universal.GenericConstraint] = []
+def parser_declaration_constraints(parser: Parser, attachments: list[model_syntax_constraint_model.WithAttachment] = [], callable: bool = false) -> list[model_syntax_function_syntax.GenericConstraint] | diagnostics.Diagnostic:
+    constraints: list[model_syntax_function_syntax.GenericConstraint] = []
     if not parser_at_identifier(parser, "with"):
         return constraints
     parser_next(parser)
     if callable and not parser_at_symbol(parser, "{"):
-        attachments.append(universal.WithAttachment(universal.AttachmentRole.Dispatch, parser_expression(parser, 0)))
+        attachments.append(model_syntax_constraint_model.WithAttachment(model_syntax_constraint_model.AttachmentRole.Dispatch, parser_expression(parser, 0)))
         return constraints
     parser_expect_symbol(parser, "{", "expected { after declaration with")
     multiline = parser_take(parser, Newline) != None
@@ -416,22 +432,22 @@ def parser_declaration_constraints(parser: Parser, attachments: list[universal.W
     parser_separators(parser)
     while not parser_at_symbol(parser, "}") and not parser_at_simple(parser, Dedent):
         if callable and (parser_at_identifier(parser, "entry") or parser_at_identifier(parser, "fix") or parser_at_identifier(parser, "exit")):
-            role := universal.AttachmentRole.Entry
+            role := model_syntax_constraint_model.AttachmentRole.Entry
             if parser_at_identifier(parser, "fix"):
-                role = universal.AttachmentRole.Fix
+                role = model_syntax_constraint_model.AttachmentRole.Fix
             elif parser_at_identifier(parser, "exit"):
-                role = universal.AttachmentRole.Exit
+                role = model_syntax_constraint_model.AttachmentRole.Exit
             parser_next(parser)
-            attachments.append(universal.WithAttachment(role, parser_expression(parser, 0)))
+            attachments.append(model_syntax_constraint_model.WithAttachment(role, parser_expression(parser, 0)))
         elif parser.cursor[0] + 1 < len(parser.tokens) and lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], ":"):
             parameter = parser_identifier(parser, "expected constrained parameter")
             parser_expect_symbol(parser, ":", "expected colon after constrained parameter")
             bound = parser_type_annotation(parser)
-            constraints.append(universal.Parameter(parameter[0], bound, source.Span(parameter[1].source, parameter[1].start, bound.span.end)))
+            constraints.append(model_syntax_type_system.Parameter(parameter[0], bound, source.Span(parameter[1].source, parameter[1].start, bound.span.end)))
         elif callable:
-            attachments.append(universal.WithAttachment(universal.AttachmentRole.Dispatch, parser_expression(parser, 0)))
+            attachments.append(model_syntax_constraint_model.WithAttachment(model_syntax_constraint_model.AttachmentRole.Dispatch, parser_expression(parser, 0)))
         else:
-            constraints.append(universal.Predicate(parser_expression(parser, 0)))
+            constraints.append(model_syntax_function_syntax.Predicate(parser_expression(parser, 0)))
         parser_take_symbol(parser, ",")
         parser_separators(parser)
     if multiline:
@@ -439,15 +455,15 @@ def parser_declaration_constraints(parser: Parser, attachments: list[universal.W
     parser_expect_symbol(parser, "}", "expected } after declaration constraints")
     return constraints
 
-def parser_function_declaration(parser: Parser, decorators: list[universal.Decorator]) -> universal.FunctionDeclaration | diagnostics.Diagnostic:
+def parser_function_declaration(parser: Parser, decorators: list[model_syntax_function_syntax.Decorator]) -> model_syntax_function_function.FunctionDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected a function name")[0]
-    defaults: list[universal.TypeAnnotation] = []
+    defaults: list[model_syntax_type_annotation.TypeAnnotation] = []
     generic_parts = parser_type_parameters(parser, defaults=defaults)
     generics = generic_parts[0]
     constraints := generic_parts[1]
     parser_expect_symbol(parser, "(", "expected opening parenthesis")
-    parameters: list[universal.FunctionParameter] = []
+    parameters: list[model_syntax_function_function.FunctionParameter] = []
     keyword_only := false
     parser_delimited_layout(parser)
     while not parser_at_symbol(parser, ")"):
@@ -466,38 +482,38 @@ def parser_function_declaration(parser: Parser, decorators: list[universal.Decor
                 continue
             break
         parser_expect_symbol(parser, ":", "expected colon after parameter")
-        modifiers: list[universal.BoundaryModifier] = []
+        modifiers: list[model_syntax_function_function.BoundaryModifier] = []
         mode = parser_ownership_mode(parser)
         if mode != "":
-            modifiers.append(universal.BoundaryModifier(mode))
+            modifiers.append(model_syntax_function_function.BoundaryModifier(mode))
         annotation = parser_type_annotation(parser)
-        default: universal.Expression | absent := absent
+        default: model_syntax_function_function.Expression | absent := absent
         parameter_end := annotation.span.end
         if parser_take_symbol(parser, "=") != absent:
             parsed_default = parser_expression(parser, 0)
             default = parsed_default
             parameter_end = parsed_default.span.end
-        parameters.append(universal.FunctionParameter(parameter[0], annotation, default, source.Span(parameter[1].source, parameter[1].start, parameter_end), modifiers=modifiers, variadic=variadic, keyword_only=keyword_only and not variadic))
+        parameters.append(model_syntax_function_function.FunctionParameter(parameter[0], annotation, default, source.Span(parameter[1].source, parameter[1].start, parameter_end), modifiers=modifiers, variadic=variadic, keyword_only=keyword_only and not variadic))
         parser_delimited_layout(parser)
         if parser_take_symbol(parser, ",") == None:
             break
         parser_delimited_layout(parser)
     close = parser_expect_symbol(parser, ")", "expected closing parenthesis").span
-    result := universal.named_type("unit", [], close)
+    result := model_syntax_type_annotation.named_type("unit", [], close)
     result_mode := ""
     if parser_take_symbol(parser, "->") != None:
         result_mode = parser_ownership_mode(parser)
         result = parser_type_annotation(parser)
-    attachments: list[universal.WithAttachment] = []
+    attachments: list[model_syntax_constraint_model.WithAttachment] = []
     for constraint in parser_declaration_constraints(parser, attachments, true):
         constraints.append(constraint)
-    body: universal.Block | None := None
+    body: model_syntax_block_block.Block | None := None
     end := result.span.end
     if parser_take_symbol(parser, ":") != None:
         block = parser_indented_block(parser, "function")
         body = block[0]
         end = block[1]
-    return universal.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end), result_mode=result_mode, type_defaults=defaults, attachments=attachments)
+    return model_syntax_function_function.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end), result_mode=result_mode, type_defaults=defaults, attachments=attachments)
 
 def parser_ownership_mode(parser: Parser) -> string:
     if parser_at_identifier(parser, "view"):
@@ -535,44 +551,44 @@ def parser_at_type_alias(parser: Parser) -> bool:
     return false
 
 
-def parser_type_alias(parser: Parser, decorators: list[universal.Decorator]) -> universal.TypeDeclaration | diagnostics.Diagnostic:
+def parser_type_alias(parser: Parser, decorators: list[model_syntax_function_syntax.Decorator]) -> model_syntax_function_syntax.TypeDeclaration | diagnostics.Diagnostic:
     definition = parser_type_annotation(parser)
     if not parser_at_identifier(parser, "as"):
         return error(parser_fail(parser, "expected as before alias name"))
     parser_next(parser)
     name = parser_identifier(parser, "expected an alias name")[0]
-    defaults: list[universal.TypeAnnotation] = []
+    defaults: list[model_syntax_type_annotation.TypeAnnotation] = []
     generic_parts = parser_type_parameters(parser, defaults=defaults)
     constraints := generic_parts[1]
     for constraint in parser_declaration_constraints(parser):
         constraints.append(constraint)
-    return universal.TypeDeclaration(decorators, name, generic_parts[0], constraints, definition, source.Span(definition.span.source, definition.span.start, parser_peek(parser).span.start), type_defaults=defaults)
+    return model_syntax_function_syntax.TypeDeclaration(decorators, name, generic_parts[0], constraints, definition, source.Span(definition.span.source, definition.span.start, parser_peek(parser).span.start), type_defaults=defaults)
 
 
-def parser_type_declaration(parser: Parser, decorators: list[universal.Decorator]) -> universal.TypeDeclaration | diagnostics.Diagnostic:
+def parser_type_declaration(parser: Parser, decorators: list[model_syntax_function_syntax.Decorator]) -> model_syntax_function_syntax.TypeDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected a type name")[0]
-    defaults: list[universal.TypeAnnotation] = []
+    defaults: list[model_syntax_type_annotation.TypeAnnotation] = []
     generic_parts = parser_type_parameters(parser, defaults=defaults)
     parameters = generic_parts[0]
     constraints := generic_parts[1]
-    definition: universal.TypeAnnotation | None := None
+    definition: model_syntax_type_annotation.TypeAnnotation | None := None
     if parser_at_symbol(parser, "="):
         return error(parser_fail(parser, "type aliases use B as X, not type X = B"))
     for constraint in parser_declaration_constraints(parser):
         constraints.append(constraint)
-    return universal.TypeDeclaration(decorators, name, parameters, constraints, definition, source.Span(start.source, start.start, parser_peek(parser).span.start), type_defaults=defaults)
+    return model_syntax_function_syntax.TypeDeclaration(decorators, name, parameters, constraints, definition, source.Span(start.source, start.start, parser_peek(parser).span.start), type_defaults=defaults)
 
-def parser_trait_declaration(parser: Parser, decorators: list[universal.Decorator]) -> universal.TraitDeclaration | diagnostics.Diagnostic:
+def parser_trait_declaration(parser: Parser, decorators: list[model_syntax_function_syntax.Decorator]) -> model_syntax_function_syntax.TraitDeclaration | diagnostics.Diagnostic:
     start_token = parser_next(parser)
     start = start_token.span
     name = parser_identifier(parser, "expected a trait name")[0]
-    defaults: list[universal.TypeAnnotation] = []
+    defaults: list[model_syntax_type_annotation.TypeAnnotation] = []
     generic_parts = parser_type_parameters(parser, defaults=defaults)
     constraints := generic_parts[1]
     for constraint in parser_declaration_constraints(parser):
         constraints.append(constraint)
-    bases: list[universal.TypeAnnotation] = []
+    bases: list[model_syntax_type_annotation.TypeAnnotation] = []
     parser_expect_symbol(parser, ":", "expected trait bases or body")
     if not parser_at_simple(parser, Newline):
         while true:
@@ -580,9 +596,9 @@ def parser_trait_declaration(parser: Parser, decorators: list[universal.Decorato
             if parser_take_symbol(parser, "+") == None:
                 break
         parser_take_symbol(parser, ":")
-    properties: list[universal.PropertyDeclaration] = []
-    operators: list[universal.OperatorDeclaration] = []
-    methods: list[universal.FunctionDeclaration] = []
+    properties: list[model_syntax_function_syntax.PropertyDeclaration] = []
+    operators: list[model_syntax_function_syntax.OperatorDeclaration] = []
+    methods: list[model_syntax_function_function.FunctionDeclaration] = []
     parser_separators(parser)
     if parser_take(parser, Indent) != None:
         parser_separators(parser)
@@ -598,37 +614,37 @@ def parser_trait_declaration(parser: Parser, decorators: list[universal.Decorato
                 property_name = parser_identifier(parser, "expected property name")[0]
                 parser_expect_symbol(parser, ":", "expected property type")
                 annotation = parser_type_annotation(parser)
-                default: universal.Expression | None := None
+                default: model_syntax_function_function.Expression | None := None
                 if parser_take_symbol(parser, "=") != None:
                     if start_token.grammar and property_name == "symbol":
                         symbol_token = parser_next(parser)
                         if len(symbol_token.syntaxes) == 0:
                             return error(parser_fail(parser, "expected a registered source symbol"))
                         syntax = start_token.syntaxes[0] if len(start_token.syntaxes) != 0 else symbol_token.syntaxes[0]
-                        default = universal.Expression(universal.SourceSymbol(syntax.symbol, syntax.definition), symbol_token.span)
+                        default = model_syntax_function_function.Expression(model_syntax_function_function.SourceSymbol(syntax.symbol, syntax.definition), symbol_token.span)
                     elif start_token.grammar and property_name in ["left", "right"]:
                         term = parser_type_primary(parser)
                         match term.kind:
                             case Named:
-                                default = universal.Expression(universal.CompilerTerm(name, arguments), term.span)
+                                default = model_syntax_function_function.Expression(model_syntax_function_function.CompilerTerm(name, arguments), term.span)
                             case _:
                                 return error(parser_fail(parser, "expected an operand requirement"))
                     else:
                         default = parser_expression(parser, 0)
-                properties.append(universal.PropertyDeclaration(property_name, annotation, default, property_start))
+                properties.append(model_syntax_function_syntax.PropertyDeclaration(property_name, annotation, default, property_start))
             else:
                 # A bare type in a trait body is an inherited contract.
                 bases.append(parser_type_annotation(parser))
             parser_separators(parser)
         parser_expect(parser, Dedent, "expected end of trait")
-    return universal.TraitDeclaration(decorators, name, generic_parts[0], constraints, bases, properties, operators, source.Span(start.source, start.start, parser_peek(parser).span.start), methods=methods, compiler_descriptor=start_token.descriptor, grammar=start_token.grammar, type_defaults=defaults)
+    return model_syntax_function_syntax.TraitDeclaration(decorators, name, generic_parts[0], constraints, bases, properties, operators, source.Span(start.source, start.start, parser_peek(parser).span.start), methods=methods, compiler_descriptor=start_token.descriptor, grammar=start_token.grammar, type_defaults=defaults)
 
 
-def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration | diagnostics.Diagnostic:
+def parser_operator_declaration(parser: Parser) -> model_syntax_function_syntax.OperatorDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     token = parser_next(parser)
     symbol := ""
-    syntax := universal.operator_syntax(universal.Add())
+    syntax := model_syntax_function_syntax.operator_syntax(model_syntax_function_syntax.Add())
     if len(token.syntaxes) != 0:
         syntax = token.syntaxes[0]
         symbol = syntax.symbol
@@ -640,7 +656,7 @@ def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration
                 symbol = string(token)
             case _:
                 return error(parser_fail(parser, "expected a registered operator symbol"))
-    syntax = universal.OperatorSyntax(symbol, syntax.fixity, syntax.precedence, syntax.associativity, definition=syntax.definition)
+    syntax = model_syntax_function_syntax.OperatorSyntax(symbol, syntax.fixity, syntax.precedence, syntax.associativity, definition=syntax.definition)
     # Operator parameters use the same parameter:constraint grammar as other
     # declarations. Whether a constraint denotes compiler grammar is resolved
     # later, through its actual definition and inherited contracts.
@@ -648,22 +664,22 @@ def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration
     type_parameters = generic_parts[0]
     operator_constraints = generic_parts[1]
     parser_expect_symbol(parser, "(", "expected operator parameters")
-    parameters: list[universal.OperatorParameter] = []
+    parameters: list[model_syntax_function_syntax.OperatorParameter] = []
     while not parser_at_symbol(parser, ")"):
         prefix_mode = parser_ownership_mode(parser)
         parameter = parser_identifier(parser, "expected operator parameter")
-        annotation := universal.named_type("Self", [], parameter[1])
+        annotation := model_syntax_type_annotation.named_type("Self", [], parameter[1])
         mode := prefix_mode
         if parser_take_symbol(parser, ":") != None:
             mode = parser_ownership_mode(parser)
             annotation = parser_type_annotation(parser)
         elif parameter[0] != "self":
             return error(parser_fail(parser, "expected operator parameter type"))
-        parameters.append(universal.OperatorParameter(parameter[0], annotation, parameter[1], mode=mode))
+        parameters.append(model_syntax_function_syntax.OperatorParameter(parameter[0], annotation, parameter[1], mode=mode))
         if parser_take_symbol(parser, ",") == None:
             break
     close = parser_expect_symbol(parser, ")", "expected closing operator parenthesis")
-    result := universal.named_type("unit", [], close.span)
+    result := model_syntax_type_annotation.named_type("unit", [], close.span)
     result_mode := ""
     if parser_take_symbol(parser, "->") != None:
         result_mode = parser_ownership_mode(parser)
@@ -671,47 +687,47 @@ def parser_operator_declaration(parser: Parser) -> universal.OperatorDeclaration
     constraints = operator_constraints
     for constraint in parser_declaration_constraints(parser):
         constraints.append(constraint)
-    body: universal.Block | None := None
+    body: model_syntax_block_block.Block | None := None
     if parser_take_symbol(parser, ":") != None:
         body = parser_indented_block(parser, "operator")[0]
     receiver := len(parameters) < 2
     if len(parameters) == 1 and parameters[0].name == "self":
-        syntax = universal.OperatorSyntax(symbol, universal.Fixity.Prefix, 10, universal.Associativity.Right, domain=syntax.domain, grammar_name=syntax.grammar_name)
+        syntax = model_syntax_function_syntax.OperatorSyntax(symbol, model_syntax_function_syntax.Fixity.Prefix, 10, model_syntax_function_syntax.Associativity.Right, domain=syntax.domain, grammar_name=syntax.grammar_name)
         receiver = false
-    return universal.OperatorDeclaration(syntax, parameters, result, source.Span(start.source, start.start, parser_peek(parser).span.start), type_parameters=type_parameters, constraints=constraints, body=body, receiver=receiver, result_mode=result_mode)
+    return model_syntax_function_syntax.OperatorDeclaration(syntax, parameters, result, source.Span(start.source, start.start, parser_peek(parser).span.start), type_parameters=type_parameters, constraints=constraints, body=body, receiver=receiver, result_mode=result_mode)
 
 
-def parser_destructor(operation: universal.OperatorDeclaration) -> universal.FunctionDeclaration | diagnostics.Diagnostic:
+def parser_destructor(operation: model_syntax_function_syntax.OperatorDeclaration) -> model_syntax_function_function.FunctionDeclaration | diagnostics.Diagnostic:
     if len(operation.parameters) != 1 or operation.parameters[0].name != "self" or operation.parameters[0].mode != "move":
         return error(diagnostics.diagnostic_at("E000117", "destructor requires operator drop(move self) -> unit", operation.span))
     if len(operation.type_parameters) != 0 or len(operation.constraints) != 0 or operation.result_mode != "" or operation.body == None:
         return error(diagnostics.diagnostic_at("E000117", "destructor requires a non-generic cleanup body", operation.span))
     parameter = operation.parameters[0]
-    receiver = universal.FunctionParameter("self", parameter.annotation, None, parameter.span, modifiers=[universal.BoundaryModifier("move")])
-    return universal.FunctionDeclaration(name="drop", parameters=[receiver], result=operation.result, body=operation.body, span=operation.span)
+    receiver = model_syntax_function_function.FunctionParameter("self", parameter.annotation, None, parameter.span, modifiers=[model_syntax_function_function.BoundaryModifier("move")])
+    return model_syntax_function_function.FunctionDeclaration(name="drop", parameters=[receiver], result=operation.result, body=operation.body, span=operation.span)
 
 
-def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagnostics.Diagnostic:
+def parser_test_declaration(parser: Parser) -> model_syntax_function_syntax.TestDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     if parser_at_simple(parser, Newline):
         parser_separators(parser)
     if parser_at_symbol(parser, "[") or (not parser_at_identifier(parser, "with") and parser_peek(parser).kind == Identifier):
         return parser_case_test(parser, start)
     modes: list[string] = []
-    mode_arguments: list[universal.TestModeArguments] = []
+    mode_arguments: list[model_syntax_function_syntax.TestModeArguments] = []
     if parser_at_identifier(parser, "with"):
         parser_next(parser)
         while true:
             mode = parser_identifier(parser, "expected test mode")[0]
             modes.append(mode)
-            values: list[universal.Expression] = []
+            values: list[model_syntax_function_function.Expression] = []
             if parser_take_symbol(parser, "(") != None:
                 while not parser_at_symbol(parser, ")"):
                     values.append(parser_expression(parser, 0))
                     if parser_take_symbol(parser, ",") == None:
                         break
                 parser_expect_symbol(parser, ")", "expected closing test mode parenthesis")
-            mode_arguments.append(universal.TestModeArguments(mode, values))
+            mode_arguments.append(model_syntax_function_syntax.TestModeArguments(mode, values))
             if not parser_at_identifier(parser, "and"):
                 break
             parser_next(parser)
@@ -721,7 +737,7 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
             name = string(parser_next(parser))
         case _:
             throw diagnostics.diagnostic("E000113", "unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
-    contracts: list[universal.Expression] = []
+    contracts: list[model_syntax_function_function.Expression] = []
     if parser_at_identifier(parser, "with"):
         if "profile" not in modes:
             return error(parser_fail(parser, "test resource contracts require profile mode"))
@@ -741,8 +757,8 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
         parser_expect(parser, Newline, "expected newline after compiler test")
         parser_separators(parser)
         parser_expect(parser, Indent, "expected compiler test body")
-        cases: list[universal.CompilerTestCase] = []
-        setup: list[universal.Statement] = []
+        cases: list[model_syntax_function_syntax.CompilerTestCase] = []
+        setup: list[model_syntax_sentence_sentence.Statement] = []
         parser_separators(parser)
         while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
             case_start = parser_peek(parser).span
@@ -780,27 +796,27 @@ def parser_test_declaration(parser: Parser) -> universal.TestDeclaration | diagn
             end = parser_peek(parser).span
             tokens.append(lexer.token_from_lexeme(Eof, lexer.Lexeme("", source.Span(end.source, end.start, end.start))))
             if len(setup) != 0:
-                cases.append(universal.CompilerTestCase(Accept, None, universal.Block(setup[:]), case_start))
+                cases.append(model_syntax_function_syntax.CompilerTestCase(Accept, None, model_syntax_block_block.Block(setup[:]), case_start))
             parsed ?= parser_compiler_case(Parser(tokens), expectation, setup, case_start)
             if parsed is Diagnostic:
-                cases.append(universal.CompilerTestCase(expectation, None, universal.empty_block(), case_start, parse_error=parsed.message))
+                cases.append(model_syntax_function_syntax.CompilerTestCase(expectation, None, model_syntax_block_block.empty_block(), case_start, parse_error=parsed.message))
             if parsed is CompilerTestCase:
                 cases.append(parsed)
             parser_separators(parser)
         end = parser_expect(parser, Dedent, "expected end of compiler test").span.end
-        return universal.TestDeclaration(name, modes, universal.empty_block(), cases, source.Span(start.source, start.start, end), mode_arguments=mode_arguments)
+        return model_syntax_function_syntax.TestDeclaration(name, modes, model_syntax_block_block.empty_block(), cases, source.Span(start.source, start.start, end), mode_arguments=mode_arguments)
     block = parser_indented_block(parser, "test")
-    return universal.TestDeclaration(name, modes, block[0], [], source.Span(start.source, start.start, block[1]), mode_arguments=mode_arguments, contracts=contracts)
+    return model_syntax_function_syntax.TestDeclaration(name, modes, block[0], [], source.Span(start.source, start.start, block[1]), mode_arguments=mode_arguments, contracts=contracts)
 
 
-def parser_case_test(parser: Parser, start: source.Span) -> universal.TestDeclaration | diagnostics.Diagnostic:
+def parser_case_test(parser: Parser, start: source.Span) -> model_syntax_function_syntax.TestDeclaration | diagnostics.Diagnostic:
     names: list[string] = []
-    rows: list[universal.TestCaseRow] := []
+    rows: list[model_syntax_function_syntax.TestCaseRow] := []
     product = parser_take_symbol(parser, "[") != None
     label := "cases"
     if product:
-        initial: list[universal.Expression] = []
-        rows.append(universal.TestCaseRow(initial))
+        initial: list[model_syntax_function_function.Expression] = []
+        rows.append(model_syntax_function_syntax.TestCaseRow(initial))
         parser_delimited_layout(parser)
         while not parser_at_symbol(parser, "]"):
             parameter = parser_identifier(parser, "expected case parameter")[0]
@@ -811,14 +827,14 @@ def parser_case_test(parser: Parser, start: source.Span) -> universal.TestDeclar
                 return error(parser_fail(parser, "expected in after case parameter"))
             parser_next(parser)
             values = parser_expression(parser, 0)
-            expanded: list[universal.TestCaseRow] = []
+            expanded: list[model_syntax_function_syntax.TestCaseRow] = []
             match values.kind:
                 case ListLiteral:
                     for row in rows:
                         for element in elements:
                             next = row.values[:]
                             next.append(element)
-                            expanded.append(universal.TestCaseRow(next))
+                            expanded.append(model_syntax_function_syntax.TestCaseRow(next))
                 case _:
                     return error(parser_fail(parser, "Cartesian cases require literal lists"))
             rows = expanded
@@ -856,7 +872,7 @@ def parser_case_test(parser: Parser, start: source.Span) -> universal.TestDeclar
         while not parser_at_symbol(parser, "}"):
             parser_expect_symbol(parser, "(", "expected case row")
             parser_delimited_layout(parser)
-            values: list[universal.Expression] = []
+            values: list[model_syntax_function_function.Expression] = []
             while not parser_at_symbol(parser, ")"):
                 values.append(parser_expression(parser, 0))
                 parser_delimited_layout(parser)
@@ -866,7 +882,7 @@ def parser_case_test(parser: Parser, start: source.Span) -> universal.TestDeclar
             parser_expect_symbol(parser, ")", "expected closing case row")
             if len(values) != len(names):
                 return error(parser_fail(parser, "case row does not match parameter count"))
-            rows.append(universal.TestCaseRow(values))
+            rows.append(model_syntax_function_syntax.TestCaseRow(values))
             parser_delimited_layout(parser)
             if parser_take_symbol(parser, ",") == None:
                 break
@@ -876,62 +892,69 @@ def parser_case_test(parser: Parser, start: source.Span) -> universal.TestDeclar
         return error(parser_fail(parser, "case table must contain at least one case"))
     parser_expect_symbol(parser, ":", "expected colon after cases")
     body = parser_indented_block(parser, "cases")
-    return universal.TestDeclaration(label, [], body[0], [], source.Span(start.source, start.start, body[1]), case_names=names, case_rows=rows)
+    return model_syntax_function_syntax.TestDeclaration(label, [], body[0], [], source.Span(start.source, start.start, body[1]), case_names=names, case_rows=rows)
 
 
-def parser_compiler_case(parser: Parser, expectation: universal.CompilerExpectation, setup: list[universal.Statement], span: source.Span) -> universal.CompilerTestCase | diagnostics.Diagnostic:
+def parser_compiler_case(parser: Parser, expectation: model_syntax_function_syntax.CompilerExpectation, setup: list[model_syntax_sentence_sentence.Statement], span: source.Span) -> model_syntax_function_syntax.CompilerTestCase | diagnostics.Diagnostic:
     statements = setup[:]
-    declarations: list[universal.Item] = []
+    declarations: list[model_hir_module_module.Item] = []
     parser_separators(parser)
     while not parser_at_simple(parser, Eof):
         if parser_declaration_syntax(parser).grammar_form == "Declaration":
-            declarations.append(universal.Record(parser_named_declaration(parser, parser_declaration_syntax(parser))))
+            declarations.append(model_hir_module_module.Record(parser_named_declaration(parser, parser_declaration_syntax(parser))))
         elif parser_at_identifier(parser, "class"):
-            declarations.append(universal.Record(parser_record_declaration(parser)))
+            declarations.append(model_hir_module_module.Record(parser_record_declaration(parser)))
         elif parser_at_identifier(parser, "extend"):
-            declarations.append(universal.Record(parser_record_declaration(parser, true)))
+            declarations.append(model_hir_module_module.Record(parser_record_declaration(parser, true)))
         elif parser_at_identifier(parser, "trait"):
-            declarations.append(universal.Trait(parser_trait_declaration(parser, [])))
+            declarations.append(model_hir_module_module.Trait(parser_trait_declaration(parser, [])))
         elif parser_at_identifier(parser, "def"):
-            declarations.append(universal.Function(parser_function_declaration(parser, [])))
+            declarations.append(model_hir_module_module.Function(parser_function_declaration(parser, [])))
         elif parser_at_symbol(parser, "@"):
-            decorators: list[universal.Decorator] = []
+            decorators: list[model_syntax_function_syntax.Decorator] = []
             while parser_at_symbol(parser, "@"):
                 decorators.append(parser_scalar_decorator(parser))
-            if not parser_at_identifier(parser, "def"):
-                return error(parser_fail(parser, "expected function after decorator"))
-            declarations.append(universal.Function(parser_function_declaration(parser, decorators)))
+            if parser_at_identifier(parser, "class"):
+                declaration = parser_record_declaration(parser)
+                declaration.decorators = decorators
+                declarations.append(model_hir_module_module.Record(declaration))
+            elif parser_at_identifier(parser, "trait"):
+                declarations.append(model_hir_module_module.Trait(parser_trait_declaration(parser, decorators)))
+            elif parser_at_identifier(parser, "def"):
+                declarations.append(model_hir_module_module.Function(parser_function_declaration(parser, decorators)))
+            else:
+                return error(parser_fail(parser, "expected class, trait, or function after decorator"))
         elif parser_at_identifier(parser, "operator"):
             operation = parser_operator_declaration(parser)
             operation.receiver = false
-            declarations.append(universal.OperatorItem(operation))
+            declarations.append(model_hir_module_module.OperatorItem(operation))
         elif parser_at_identifier(parser, "union"):
-            declarations.append(universal.Type(parser_family_declaration(parser)))
+            declarations.append(model_hir_module_module.Item.Type(parser_family_declaration(parser)))
         elif parser_at_identifier(parser, "type") and parser.cursor[0] + 1 < len(parser.tokens) and not lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 1], "("):
-            declarations.append(universal.Type(parser_type_declaration(parser, [])))
+            declarations.append(model_hir_module_module.Item.Type(parser_type_declaration(parser, [])))
         elif parser_at_type_alias(parser):
-            declarations.append(universal.Type(parser_type_alias(parser, [])))
+            declarations.append(model_hir_module_module.Item.Type(parser_type_alias(parser, [])))
         else:
             statements.append(parser_block_statement(parser))
         parser_separators(parser)
-    return universal.CompilerTestCase(expectation, None, universal.Block(statements), span, declarations=declarations)
+    return model_syntax_function_syntax.CompilerTestCase(expectation, None, model_syntax_block_block.Block(statements), span, declarations=declarations)
 
-def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Block, u32] | diagnostics.Diagnostic:
+def parser_indented_block(parser: Parser, owner: string) -> tuple[model_syntax_block_block.Block, u32] | diagnostics.Diagnostic:
     parser_expect(parser, Newline, "expected newline after " + owner)
     while parser_take(parser, Newline) != None:
         throw diagnostics.diagnostic("E000113", "unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
     start = parser_expect(parser, Indent, "expected indented " + owner + " body").span
-    statements: list[universal.Statement] = []
+    statements: list[model_syntax_sentence_sentence.Statement] = []
     parser_separators(parser)
     while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
         statements.append(parser_block_statement(parser))
         parser_separators(parser)
     end = parser_expect(parser, Dedent, "expected end of " + owner + " body").span.end
-    return (universal.Block(statements, [], [], source.Span(start.source, start.start, end)), end)
+    return (model_syntax_block_block.Block(statements, [], [], source.Span(start.source, start.start, end)), end)
 
 
 class LoopInitializer:
-    binding: universal.Binding | None = None
+    binding: model_syntax_sentence_sentence.Binding | None = None
 
 
 def parser_loop_initializer(parser: Parser) -> LoopInitializer | diagnostics.Diagnostic:
@@ -941,49 +964,49 @@ def parser_loop_initializer(parser: Parser) -> LoopInitializer | diagnostics.Dia
     return LoopInitializer()
 
 
-def parser_initialized_loop(loop: universal.Statement, initializer: LoopInitializer, span: source.Span) -> universal.Statement:
+def parser_initialized_loop(loop: model_syntax_sentence_sentence.Statement, initializer: LoopInitializer, span: source.Span) -> model_syntax_sentence_sentence.Statement:
     binding ?= initializer.binding
     if binding != None:
         # The initializer runs once in a scope enclosing the whole loop.
-        scope = universal.Block([universal.BindingStatement(binding), loop], span=span)
-        taken = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
-        return universal.If(taken, scope, universal.empty_block(), span)
+        scope = model_syntax_block_block.Block([model_syntax_sentence_sentence.BindingStatement(binding), loop], span=span)
+        taken = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), span)
+        return model_syntax_sentence_sentence.Statement.If(taken, scope, model_syntax_block_block.empty_block(), span)
     return loop
 
 
-def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+def parser_block_statement(parser: Parser) -> model_syntax_sentence_sentence.Statement | diagnostics.Diagnostic:
     if parser_at_identifier(parser, "defer"):
         start = parser_next(parser).span
         value = parser_expression(parser, 0)
         match value.kind:
             case Call:
-                return universal.Defer(value, source.Span(start.source, start.start, value.span.end))
+                return model_syntax_sentence_sentence.Defer(value, source.Span(start.source, start.start, value.span.end))
             case _:
                 return error(parser_fail(parser, "defer requires a call"))
     if parser_at_identifier(parser, "unsafe"):
         start = parser_next(parser).span
         parser_expect_symbol(parser, ":", "expected colon after unsafe")
         body = parser_indented_block(parser, "unsafe")
-        return universal.Unsafe(body[0], source.Span(start.source, start.start, body[1]))
+        return model_syntax_sentence_sentence.Unsafe(body[0], source.Span(start.source, start.start, body[1]))
     if parser_at_identifier(parser, "reject") or parser_at_identifier(parser, "accept"):
         rejected = parser_at_identifier(parser, "reject")
         start = parser_next(parser).span
         parser_expect_symbol(parser, ":", "expected colon after compiler expectation")
         body = parser_indented_block(parser, "compiler expectation")
-        return universal.CompilerCheck(rejected, body[0], source.Span(start.source, start.start, body[1]))
+        return model_syntax_sentence_sentence.CompilerCheck(rejected, body[0], source.Span(start.source, start.start, body[1]))
     if parser_at_identifier(parser, "drop"):
         start = parser_next(parser).span
         value = parser_expression(parser, 0)
-        return universal.Drop(value, source.Span(start.source, start.start, value.span.end))
+        return model_syntax_sentence_sentence.Drop(value, source.Span(start.source, start.start, value.span.end))
     for syntax in parser_peek(parser).syntaxes:
         if syntax.grammar_form in ["Body", "ConditionBody"]:
             start = parser_next(parser).span
-            operands: list[universal.Expression] = []
+            operands: list[model_syntax_function_function.Expression] = []
             if syntax.grammar_form == "ConditionBody":
                 operands.append(parser_expression(parser, 0))
             parser_expect_symbol(parser, ":", "expected colon after grammar operands")
             body = parser_indented_block(parser, syntax.grammar_name)
-            return universal.GrammarApply(syntax, operands, [body[0]], source.Span(start.source, start.start, body[1]), false)
+            return model_syntax_sentence_sentence.GrammarApply(syntax, operands, [body[0]], source.Span(start.source, start.start, body[1]), false)
     if parser_at_identifier(parser, "match"):
         return parser_match_statement(parser)
     if parser_at_identifier(parser, "while"):
@@ -993,12 +1016,12 @@ def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.
         parser_expect_symbol(parser, ":", "expected colon after while condition")
         body = parser_indented_block(parser, "while")
         span = source.Span(start.source, start.start, body[1])
-        loop: universal.Statement = universal.While(condition, body[0], span)
+        loop: model_syntax_sentence_sentence.Statement = model_syntax_sentence_sentence.Statement.While(condition, body[0], span)
         return parser_initialized_loop(loop, initializer, span)
     if parser_at_identifier(parser, "break"):
-        return universal.Break(parser_next(parser).span)
+        return model_syntax_sentence_sentence.Statement.Break(parser_next(parser).span)
     if parser_at_identifier(parser, "continue"):
-        return universal.Continue(parser_next(parser).span)
+        return model_syntax_sentence_sentence.Statement.Continue(parser_next(parser).span)
     if parser_at_identifier(parser, "for"):
         start = parser_next(parser).span
         name = parser_identifier(parser, "expected iteration binding")[0]
@@ -1010,40 +1033,40 @@ def parser_block_statement(parser: Parser) -> universal.Statement | diagnostics.
         parser_expect_symbol(parser, ":", "expected colon after iterable")
         body = parser_indented_block(parser, "for")
         span = source.Span(start.source, start.start, body[1])
-        return parser_initialized_loop(universal.ForEach(name, iterable, body[0], span), initializer, span)
+        return parser_initialized_loop(model_syntax_sentence_sentence.ForEach(name, iterable, body[0], span), initializer, span)
     if parser_at_identifier(parser, "if"):
         return parser_conditional(parser)
     if parser_at_identifier(parser, "throw"):
         start = parser_next(parser).span
         value = parser_expression(parser, 0)
-        return universal.Throw(value, source.Span(start.source, start.start, value.span.end))
+        return model_syntax_sentence_sentence.Statement.Throw(value, source.Span(start.source, start.start, value.span.end))
     if parser_at_identifier(parser, "return"):
         start = parser_next(parser).span
         if parser_at_simple(parser, Newline) or parser_at_simple(parser, Dedent):
-            return universal.Return(None, start)
+            return model_syntax_sentence_sentence.Statement.Return(None, start)
         value = parser_expression(parser, 0)
-        return universal.Return(value, source.Span(start.source, start.start, value.span.end))
+        return model_syntax_sentence_sentence.Statement.Return(value, source.Span(start.source, start.start, value.span.end))
     if parser_at_identifier(parser, "assert"):
         start = parser_next(parser).span
         if parser_at_symbol(parser, "("):
             parser.cursor[0] -= 1
             invocation = parser_postfix(parser)
-            return universal.ExpressionStatement(invocation)
+            return model_syntax_sentence_sentence.ExpressionStatement(invocation)
         condition = parser_expression(parser, 0)
-        message: universal.Expression | None := None
+        message: model_syntax_function_function.Expression | None := None
         if parser_take_symbol(parser, ",") != None:
             message = parser_expression(parser, 0)
-        return universal.Assert(condition, message, source.Span(start.source, start.start, condition.span.end), condition.span)
+        return model_syntax_sentence_sentence.Assert(condition, message, source.Span(start.source, start.start, condition.span.end), condition.span)
     return parser_simple_statement(parser)
 
-def parser_match_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+def parser_match_statement(parser: Parser) -> model_syntax_sentence_sentence.Statement | diagnostics.Diagnostic:
     start = parser_next(parser).span
     subject = parser_expression(parser, 0)
     parser_expect_symbol(parser, ":", "expected colon after match subject")
     parser_expect(parser, Newline, "expected newline after match subject")
     parser_separators(parser)
     parser_expect(parser, Indent, "expected indented match arms")
-    arms: list[universal.MatchArm] = []
+    arms: list[model_syntax_sentence_sentence.MatchArm] = []
     parser_separators(parser)
     while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
         arm_start = parser_peek(parser).span
@@ -1051,8 +1074,8 @@ def parser_match_statement(parser: Parser) -> universal.Statement | diagnostics.
             return error(parser_fail(parser, "expected case before match pattern"))
         parser_next(parser)
         capture: string | None := None
-        annotation: universal.TypeAnnotation | None := None
-        pattern: universal.Expression | None := None
+        annotation: model_syntax_type_annotation.TypeAnnotation | None := None
+        pattern: model_syntax_function_function.Expression | None := None
         if parser_at_identifier(parser, "_"):
             parser_next(parser)
         else:
@@ -1071,36 +1094,36 @@ def parser_match_statement(parser: Parser) -> universal.Statement | diagnostics.
             pattern = None
             parser_expect_symbol(parser, ":", "expected colon after capture type")
         body = parser_indented_block(parser, "match arm")
-        arms.append(universal.MatchArm(body[0], binding_name=capture, annotation=annotation, span=arm_start, pattern=pattern))
+        arms.append(model_syntax_sentence_sentence.MatchArm(body[0], binding_name=capture, annotation=annotation, span=arm_start, pattern=pattern))
         parser_separators(parser)
     end = parser_expect(parser, Dedent, "expected end of match").span.end
-    return universal.Match(subject, arms, source.Span(start.source, start.start, end))
+    return model_syntax_sentence_sentence.Match(subject, arms, source.Span(start.source, start.start, end))
 
-def parser_simple_statement(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+def parser_simple_statement(parser: Parser) -> model_syntax_sentence_sentence.Statement | diagnostics.Diagnostic:
     if parser_looks_like_binding(parser):
-        return universal.BindingStatement(parser_binding(parser))
+        return model_syntax_sentence_sentence.BindingStatement(parser_binding(parser))
     value = parser_expression(parser, 0)
     assignment = parser_peek(parser)
-    update: universal.OperatorSyntax | None := None
+    update: model_syntax_function_syntax.OperatorSyntax | None := None
     for syntax in assignment.syntaxes:
         if syntax.grammar_form == "Assignment":
             update = syntax
     if lexer.token_is_symbol(assignment, "=") or update != None:
         parser_next(parser)
         rhs = parser_expression(parser, 0)
-        return universal.FieldSet(value, rhs, value.span, update)
+        return model_syntax_sentence_sentence.FieldSet(value, rhs, value.span, update)
     if parser_take_symbol(parser, ":") != None:
         parser_expect(parser, Newline, "expected newline after call block")
-        statements: list[universal.Statement] = [universal.ExpressionStatement(value)]
+        statements: list[model_syntax_sentence_sentence.Statement] = [model_syntax_sentence_sentence.ExpressionStatement(value)]
         if parser_take(parser, Indent) != None:
             parser_separators(parser)
             while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
                 statements.append(parser_block_statement(parser))
                 parser_separators(parser)
             parser_expect(parser, Dedent, "expected end of call block")
-        condition = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), value.span)
-        return universal.If(condition, universal.Block(statements), universal.empty_block(), value.span)
-    return universal.ExpressionStatement(value)
+        condition = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), value.span)
+        return model_syntax_sentence_sentence.Statement.If(condition, model_syntax_block_block.Block(statements), model_syntax_block_block.empty_block(), value.span)
+    return model_syntax_sentence_sentence.ExpressionStatement(value)
 
 def parser_looks_like_binding(parser: Parser) -> bool:
     if parser.cursor[0] + 1 >= len(parser.tokens):
@@ -1119,13 +1142,13 @@ def parser_looks_like_binding(parser: Parser) -> bool:
             throw Error("unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
     return false
 
-def parser_binding(parser: Parser) -> universal.Binding | diagnostics.Diagnostic:
+def parser_binding(parser: Parser) -> model_syntax_sentence_sentence.Binding | diagnostics.Diagnostic:
     start = parser_peek(parser).span
     name := parser_identifier(parser, "expected binding name")[0]
-    annotation: universal.TypeAnnotation | None := None
+    annotation: model_syntax_type_annotation.TypeAnnotation | None := None
     match parser_peek(parser).kind:
         case Identifier:
-            annotation = universal.named_type(name, [], start)
+            annotation = model_syntax_type_annotation.named_type(name, [], start)
             name = parser_identifier(parser, "expected binding name after type")[0]
         case _:
             throw diagnostics.diagnostic("E000113", "unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
@@ -1136,27 +1159,27 @@ def parser_binding(parser: Parser) -> universal.Binding | diagnostics.Diagnostic
     if not inferred and not preserve_error:
         parser_expect_symbol(parser, "=", "expected `=`, `?=`, or `:=` after binding name")
     value = parser_expression(parser, 0)
-    return universal.Binding(name, annotation, value, false, preserve_error, source.Span(start.source, start.start, value.span.end), mutable=inferred)
+    return model_syntax_sentence_sentence.Binding(name, annotation, value, false, preserve_error, source.Span(start.source, start.start, value.span.end), mutable=inferred)
 
-def parser_expression(parser: Parser, minimum: int) -> universal.Expression | diagnostics.Diagnostic:
+def parser_expression(parser: Parser, minimum: int) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     return parse_expression(parser, minimum)
 
-def parser_unary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
+def parser_unary(parser: Parser) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     return parse_unary(parser)
 
-def parser_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
+def parser_postfix(parser: Parser) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     return parse_postfix(parser)
 
-def parser_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
+def parser_primary(parser: Parser) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     return parse_primary(parser)
 
-def parser_type_annotation(parser: Parser) -> universal.TypeAnnotation | diagnostics.Diagnostic:
+def parser_type_annotation(parser: Parser) -> model_syntax_type_annotation.TypeAnnotation | diagnostics.Diagnostic:
     return parse_type_annotation(parser)
 
-def parser_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics.Diagnostic:
+def parser_type_primary(parser: Parser) -> model_syntax_type_annotation.TypeAnnotation | diagnostics.Diagnostic:
     return parse_type_primary(parser)
 
-def parse_expression(parser: Parser, minimum: int) -> universal.Expression | diagnostics.Diagnostic:
+def parse_expression(parser: Parser, minimum: int) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     left := parser_unary(parser)
     while true:
         if parser_at_identifier(parser, "not") and parser.cursor[0] + 1 < len(parser.tokens):
@@ -1167,12 +1190,12 @@ def parse_expression(parser: Parser, minimum: int) -> universal.Expression | dia
                     break
                 negation = parser_next(parser)
                 parser_next(parser)
-                prefix ?= token_operator(negation, universal.Fixity.Prefix)
+                prefix ?= token_operator(negation, model_syntax_function_syntax.Fixity.Prefix)
                 if prefix != None:
                     right = parse_expression(parser, precedence(operator) + 1)
                     span = source.Span(left.span.source, left.span.start, right.span.end)
-                    membership = universal.Expression(universal.Binary(operator, left, right), span)
-                    left = universal.Expression(universal.Unary(prefix, membership), span)
+                    membership = model_syntax_function_function.Expression(model_syntax_function_function.Binary(operator, left, right), span)
+                    left = model_syntax_function_function.Expression(model_syntax_function_function.Unary(prefix, membership), span)
                     continue
                 return error(parser_fail(parser, "not in requires a negation operator"))
         if not is_binary_operator(parser_peek(parser)):
@@ -1183,7 +1206,7 @@ def parse_expression(parser: Parser, minimum: int) -> universal.Expression | dia
             break
         token = parser_next(parser)
         next_minimum := operator_precedence
-        if operator.associativity != universal.Associativity.Right:
+        if operator.associativity != model_syntax_function_syntax.Associativity.Right:
             next_minimum += 1
         right = parse_expression(parser, next_minimum)
         if operator.symbol in ["<", "<=", ">", ">=", "==", "!="]:
@@ -1197,9 +1220,9 @@ def parse_expression(parser: Parser, minimum: int) -> universal.Expression | dia
                 operands.append(parse_expression(parser, operator_precedence + 1))
                 operators.append(following)
             if len(operators) > 1:
-                left = universal.Expression(universal.ComparisonChain(operands, operators), source.Span(token.span.source, left.span.start, operands[-1].span.end))
+                left = model_syntax_function_function.Expression(model_syntax_function_function.ComparisonChain(operands, operators), source.Span(token.span.source, left.span.start, operands[-1].span.end))
                 continue
-        left = universal.Expression(universal.Binary(operator, left, right), source.Span(token.span.source, left.span.start, right.span.end))
+        left = model_syntax_function_function.Expression(model_syntax_function_function.Binary(operator, left, right), source.Span(token.span.source, left.span.start, right.span.end))
     if minimum == 0 and parser_at_identifier(parser, "if"):
         parser_next(parser)
         condition = parse_expression(parser, 1)
@@ -1207,15 +1230,15 @@ def parse_expression(parser: Parser, minimum: int) -> universal.Expression | dia
             return error(parser_fail(parser, "conditional expression requires else"))
         parser_next(parser)
         otherwise = parse_expression(parser, 0)
-        return universal.Expression(universal.Conditional(condition, left, otherwise), source.Span(left.span.source, left.span.start, otherwise.span.end))
+        return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Conditional(condition, left, otherwise), source.Span(left.span.source, left.span.start, otherwise.span.end))
     if minimum == 0 and parser_at_identifier(parser, "else"):
         parser_next(parser)
         otherwise = parse_expression(parser, 0)
-        return universal.Expression(universal.Fallback(left, otherwise), source.Span(left.span.source, left.span.start, otherwise.span.end))
+        return model_syntax_function_function.Expression(model_syntax_function_function.Fallback(left, otherwise), source.Span(left.span.source, left.span.start, otherwise.span.end))
     return left
 
 
-def parse_unary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
+def parse_unary(parser: Parser) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     token = parser_peek(parser)
     if parser_at_identifier(parser, "lambda"):
         parser_next(parser)
@@ -1229,7 +1252,7 @@ def parse_unary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic
                 break
         parser_expect_symbol(parser, ":", "expected : before lambda body")
         body = parse_expression(parser, 0)
-        return universal.Expression(universal.Lambda(parameters, body), source.Span(token.span.source, token.span.start, body.span.end))
+        return model_syntax_function_function.Expression(model_syntax_function_function.Lambda(parameters, body), source.Span(token.span.source, token.span.start, body.span.end))
     # Parenthesized calls keep ordinary callable lookup; prefix ownership forms
     # carry their operation explicitly through parsing and semantic analysis.
     if parser_at_identifier(parser, "view") or parser_at_identifier(parser, "borrow") or parser_at_identifier(parser, "move") or parser_at_identifier(parser, "copy") or parser_at_identifier(parser, "clone") or parser_at_identifier(parser, "mirror"):
@@ -1244,20 +1267,20 @@ def parse_unary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic
             elif mode == "copy":
                 mode = "clone"
             value = parse_unary(parser)
-            return universal.Expression(universal.Ownership(mode, value), source.Span(token.span.source, token.span.start, value.span.end))
+            return model_syntax_function_function.Expression(model_syntax_function_function.Ownership(mode, value), source.Span(token.span.source, token.span.start, value.span.end))
     if parser_take_symbol(parser, "&") != None:
         value = parse_unary(parser)
-        return universal.Expression(universal.AddressOf(value), source.Span(token.span.source, token.span.start, value.span.end))
-    operator = token_operator(token, universal.Fixity.Prefix)
+        return model_syntax_function_function.Expression(model_syntax_function_function.AddressOf(value), source.Span(token.span.source, token.span.start, value.span.end))
+    operator = token_operator(token, model_syntax_function_syntax.Fixity.Prefix)
     selected ?= operator
     if selected != None:
         parser_next(parser)
         operand = parse_unary(parser)
-        return universal.Expression(universal.Unary(selected, operand), source.Span(token.span.source, token.span.start, operand.span.end))
+        return model_syntax_function_function.Expression(model_syntax_function_function.Unary(selected, operand), source.Span(token.span.source, token.span.start, operand.span.end))
     return parser_postfix(parser)
 
 
-def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
+def parse_postfix(parser: Parser) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     value := parser_primary(parser)
     continuation := false
     while true:
@@ -1278,8 +1301,8 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                 case _:
                     throw diagnostics.diagnostic("E000113", "unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
             if mock_call:
-                calls: list[universal.Expression] = []
-                results: list[universal.Expression] = []
+                calls: list[model_syntax_function_function.Expression] = []
+                results: list[model_syntax_function_function.Expression] = []
                 parser_delimited_layout(parser)
                 while not parser_at_identifier(parser, "else"):
                     if parser_at_symbol(parser, ")"):
@@ -1294,9 +1317,9 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                 fallback = parse_expression(parser, 0)
                 parser_delimited_layout(parser)
                 end = parser_expect_symbol(parser, ")", "expected ) after mock rules").span.end
-                value = universal.Expression(universal.MockValue(calls, results, fallback), source.Span(value.span.source, value.span.start, end))
+                value = model_syntax_function_function.Expression(model_syntax_function_function.MockValue(calls, results, fallback), source.Span(value.span.source, value.span.start, end))
                 continue
-            arguments: list[universal.CallArgument] = []
+            arguments: list[model_syntax_function_function.CallArgument] = []
             parser_delimited_layout(parser)
             while not parser_at_symbol(parser, ")"):
                 start = parser_peek(parser).span
@@ -1306,17 +1329,17 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                     parser_expect_symbol(parser, "=", "expected = after argument name")
                 spread = parser_take_symbol(parser, "...") != None
                 argument = parse_expression(parser, 0)
-                arguments.append(universal.CallArgument(argument_name, argument, source.Span(start.source, start.start, argument.span.end), spread=spread))
+                arguments.append(model_syntax_function_function.CallArgument(argument_name, argument, source.Span(start.source, start.start, argument.span.end), spread=spread))
                 parser_delimited_layout(parser)
                 if throws_call and parser_take_symbol(parser, "->") != None:
                     expected = parse_expression(parser, 0)
-                    arguments.append(universal.CallArgument("$error", expected, expected.span))
+                    arguments.append(model_syntax_function_function.CallArgument("$error", expected, expected.span))
                     parser_delimited_layout(parser)
                 if parser_take_symbol(parser, ",") == None:
                     break
                 parser_delimited_layout(parser)
             end = parser_expect_symbol(parser, ")", "expected closing parenthesis").span.end
-            value = universal.Expression(universal.Call(value, arguments), source.Span(value.span.source, value.span.start, end))
+            value = model_syntax_function_function.Expression(model_syntax_function_function.Call(value, arguments), source.Span(value.span.source, value.span.start, end))
         elif parser_take_symbol(parser, "[") != None:
             # Commas distinguish a generic application from an index or slice.
             # A single colon remains a slice syntactically; declaration lookup
@@ -1324,33 +1347,33 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
             if parser_multiple_type_arguments(parser):
                 types = parser_type_arguments(parser)
                 end = parser_expect_symbol(parser, "]", "expected closing type bracket").span.end
-                value = universal.Expression(universal.TypeApplication(value, types), source.Span(value.span.source, value.span.start, end))
+                value = model_syntax_function_function.Expression(model_syntax_function_function.TypeApplication(value, types), source.Span(value.span.source, value.span.start, end))
                 continue
-            first: universal.Expression | None := None
+            first: model_syntax_function_function.Expression | None := None
             if parser_at_symbol(parser, "]"):
-                first = universal.Expression(universal.LiteralValue(universal.IntegerValue("0")), parser_peek(parser).span)
+                first = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue("0")), parser_peek(parser).span)
             elif not parser_at_symbol(parser, ":"):
                 first = parse_expression(parser, 0)
             if parser_take_symbol(parser, ":") != None:
-                stop: universal.Expression | None := None
-                step: universal.Expression | None := None
+                stop: model_syntax_function_function.Expression | None := None
+                step: model_syntax_function_function.Expression | None := None
                 if not parser_at_symbol(parser, ":") and not parser_at_symbol(parser, "]"):
                     stop = parse_expression(parser, 0)
                 if parser_take_symbol(parser, ":") != None:
                     if not parser_at_symbol(parser, "]"):
                         step = parse_expression(parser, 0)
                 end = parser_expect_symbol(parser, "]", "expected closing slice bracket").span.end
-                value = universal.Expression(universal.Slice(value, first, stop, step), source.Span(value.span.source, value.span.start, end))
+                value = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Slice(value, first, stop, step), source.Span(value.span.source, value.span.start, end))
                 continue
             index ?= first
             if index != None:
                 end = parser_expect_symbol(parser, "]", "expected closing subscript bracket").span.end
-                value = universal.Expression(universal.Subscript(value, index), source.Span(value.span.source, value.span.start, end))
+                value = model_syntax_function_function.Expression(model_syntax_function_function.Subscript(value, index), source.Span(value.span.source, value.span.start, end))
             else:
                 return error(parser_fail(parser, "expected a subscript index"))
         elif parser_take_symbol(parser, ".") != None:
             member = parser_identifier(parser, "expected member name")
-            value = universal.Expression(universal.Member(value, member[0]), source.Span(value.span.source, value.span.start, member[1].end))
+            value = model_syntax_function_function.Expression(model_syntax_function_function.Member(value, member[0]), source.Span(value.span.source, value.span.start, member[1].end))
         else:
             break
     if continuation:
@@ -1362,23 +1385,23 @@ def parse_postfix(parser: Parser) -> universal.Expression | diagnostics.Diagnost
     return value
 
 
-def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnostic:
+def parse_primary(parser: Parser) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     if parser_at_identifier(parser, "match"):
         statement = parser_match_statement(parser)
         match statement:
             case Match:
-                return universal.Expression(universal.MatchExpression(subject, arms), span)
+                return model_syntax_function_function.Expression(model_syntax_function_function.MatchExpression(subject, arms), span)
             case _:
                 return error(parser_fail(parser, "expected match expression"))
     token = parser_next(parser)
     for syntax in token.syntaxes:
         if syntax.grammar_form == "Delimited" and lexer.token_is_symbol(token, syntax.symbol):
-            arguments: list[universal.CallArgument] = []
+            arguments: list[model_syntax_function_function.CallArgument] = []
             separated := false
             parser_delimited_layout(parser)
             while not parser_at_symbol(parser, syntax.closing):
                 value = parse_expression(parser, 0)
-                arguments.append(universal.CallArgument(None, value, value.span))
+                arguments.append(model_syntax_function_function.CallArgument(None, value, value.span))
                 parser_delimited_layout(parser)
                 if parser_take_symbol(parser, syntax.separator) == None:
                     break
@@ -1391,42 +1414,42 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                 grouped.span = span
                 grouped.grammar = syntax.definition
                 return grouped
-            callee = universal.Expression(universal.SourceSymbol(syntax.grammar_name, syntax.definition), token.span)
-            return universal.Expression(universal.Call(callee, arguments), span, grammar=syntax.definition)
+            callee = model_syntax_function_function.Expression(model_syntax_function_function.SourceSymbol(syntax.grammar_name, syntax.definition), token.span)
+            return model_syntax_function_function.Expression(model_syntax_function_function.Call(callee, arguments), span, grammar=syntax.definition)
     match token.kind:
         case Identifier:
             value = string(token)
             if value == "throw":
                 raised = parse_expression(parser, 0)
-                return universal.Expression(universal.ThrowValue(raised), source.Span(token.span.source, token.span.start, raised.span.end))
+                return model_syntax_function_function.Expression(model_syntax_function_function.ThrowValue(raised), source.Span(token.span.source, token.span.start, raised.span.end))
             if value == "true":
-                return universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), token.span, literal=lexer.token_literal(token))
+                return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), token.span, literal=lexer.token_literal(token))
             if value == "false":
-                return universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), token.span, literal=lexer.token_literal(token))
+                return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(false)), token.span, literal=lexer.token_literal(token))
             if value == "None":
-                return universal.Expression(universal.LiteralValue(universal.LiteralValue.NoneValue), token.span, literal=lexer.token_literal(token))
+                return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.LiteralValue.NoneValue), token.span, literal=lexer.token_literal(token))
             if value == "absent":
-                return universal.Expression(universal.LiteralValue(universal.LiteralValue.AbsentValue), token.span, literal=lexer.token_literal(token))
-            return universal.Expression(universal.Name(value), token.span)
+                return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.LiteralValue.AbsentValue), token.span, literal=lexer.token_literal(token))
+            return model_syntax_function_function.Expression(model_syntax_function_function.Name(value), token.span)
         case Integer:
             value = lexer.token_number(token)
-            return parser_numeric_suffix(parser, token, universal.Expression(universal.LiteralValue(universal.IntegerValue(value)), token.span, literal=lexer.token_literal(token)))
+            return parser_numeric_suffix(parser, token, model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue(value)), token.span, literal=lexer.token_literal(token)))
         case Float:
             value = lexer.token_number(token)
-            return parser_numeric_suffix(parser, token, universal.Expression(universal.LiteralValue(universal.FloatValue(value)), token.span, literal=lexer.token_literal(token)))
+            return parser_numeric_suffix(parser, token, model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.FloatValue(value)), token.span, literal=lexer.token_literal(token)))
         case Character:
             value = lexer.literal_codepoint(string(token))
-            return universal.Expression(universal.LiteralValue(universal.CharacterValue(value)), token.span, literal=lexer.token_literal(token))
+            return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.CharacterValue(value)), token.span, literal=lexer.token_literal(token))
         case String:
             value = string(token)
-            return universal.Expression(universal.LiteralValue(universal.StringValue(value)), token.span, literal=lexer.token_literal(token))
+            return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue(value)), token.span, literal=lexer.token_literal(token))
         case FormattedString:
             value = string(token)
             return formatted_string_expression(value, token.span, token.syntaxes, token.lexical_rules)
         case _:
             throw diagnostics.diagnostic("E000113", "unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
     if lexer.token_is_symbol(token, "["):
-        elements: list[universal.Expression] = []
+        elements: list[model_syntax_function_function.Expression] = []
         parser_delimited_layout(parser)
         while not parser_at_symbol(parser, "]"):
             elements.append(parse_expression(parser, 0))
@@ -1435,10 +1458,10 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                 break
             parser_delimited_layout(parser)
         end = parser_expect_symbol(parser, "]", "expected closing list bracket").span.end
-        return universal.Expression(universal.ListLiteral(elements), source.Span(token.span.source, token.span.start, end))
+        return model_syntax_function_function.Expression(model_syntax_function_function.ListLiteral(elements), source.Span(token.span.source, token.span.start, end))
     if lexer.token_is_symbol(token, "{"):
-        keys: list[universal.Expression] = []
-        values: list[universal.Expression] = []
+        keys: list[model_syntax_function_function.Expression] = []
+        values: list[model_syntax_function_function.Expression] = []
         parser_delimited_layout(parser)
         while not parser_at_symbol(parser, "}"):
             keys.append(parse_expression(parser, 0))
@@ -1449,7 +1472,7 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                 break
             parser_delimited_layout(parser)
         end = parser_expect_symbol(parser, "}", "expected closing map brace").span.end
-        return universal.Expression(universal.MapLiteral(keys, values), source.Span(token.span.source, token.span.start, end))
+        return model_syntax_function_function.Expression(model_syntax_function_function.MapLiteral(keys, values), source.Span(token.span.source, token.span.start, end))
     if lexer.token_is_symbol(token, "("):
         expression = parse_expression(parser, 0)
         parser_expect_symbol(parser, ")", "expected closing parenthesis")
@@ -1457,26 +1480,26 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
     return error(diagnostics.Diagnostic("E000120", "expected an expression", token.span))
 
 
-def parser_numeric_suffix(parser: Parser, number: lexer.Token, value: universal.Expression) -> universal.Expression:
+def parser_numeric_suffix(parser: Parser, number: lexer.Token, value: model_syntax_function_function.Expression) -> model_syntax_function_function.Expression:
     suffix = parser_peek(parser)
     if suffix.kind == TokenKind.Identifier and suffix.span.start == number.span.end:
         parser_next(parser)
-        name = universal.Expression(universal.Name("literal_" + string(suffix)), suffix.span)
+        name = model_syntax_function_function.Expression(model_syntax_function_function.Name("literal_" + string(suffix)), suffix.span)
         span = source.Span(number.span.source, number.span.start, suffix.span.end)
-        return universal.Expression(universal.Call(name, [universal.CallArgument(None, value, value.span)]), span)
+        return model_syntax_function_function.Expression(model_syntax_function_function.Call(name, [model_syntax_function_function.CallArgument(None, value, value.span)]), span)
     return value
 
 
-def parse_type_annotation(parser: Parser) -> universal.TypeAnnotation | diagnostics.Diagnostic:
+def parse_type_annotation(parser: Parser) -> model_syntax_type_annotation.TypeAnnotation | diagnostics.Diagnostic:
     first = parser_type_primary(parser)
     if parser_take_symbol(parser, "|") == None:
         return first
-    members: list[universal.TypeAnnotation] = [first]
+    members: list[model_syntax_type_annotation.TypeAnnotation] = [first]
     while true:
         members.append(parser_type_primary(parser))
         if parser_take_symbol(parser, "|") == None:
             break
-    return universal.TypeAnnotation(universal.Union(members), source.Span(first.span.source, first.span.start, members[-1].span.end))
+    return model_syntax_type_annotation.TypeAnnotation(model_syntax_type_annotation.Union(members), source.Span(first.span.source, first.span.start, members[-1].span.end))
 
 
 def parser_multiple_type_arguments(parser: Parser) -> bool:
@@ -1496,8 +1519,8 @@ def parser_multiple_type_arguments(parser: Parser) -> bool:
     return false
 
 
-def parser_type_arguments(parser: Parser) -> list[universal.TypeAnnotation] | diagnostics.Diagnostic:
-    arguments: list[universal.TypeAnnotation] = []
+def parser_type_arguments(parser: Parser) -> list[model_syntax_type_annotation.TypeAnnotation] | diagnostics.Diagnostic:
+    arguments: list[model_syntax_type_annotation.TypeAnnotation] = []
     parser_delimited_layout(parser)
     while not parser_at_symbol(parser, "]"):
         binding := ""
@@ -1514,30 +1537,30 @@ def parser_type_arguments(parser: Parser) -> list[universal.TypeAnnotation] | di
     return arguments
 
 
-def parse_type_primary(parser: Parser) -> universal.TypeAnnotation | diagnostics.Diagnostic:
+def parse_type_primary(parser: Parser) -> model_syntax_type_annotation.TypeAnnotation | diagnostics.Diagnostic:
     if parser_at_simple(parser, Integer):
         token = parser_next(parser)
-        return universal.named_type(lexer.token_number(token), [], token.span)
+        return model_syntax_type_annotation.named_type(lexer.token_number(token), [], token.span)
     if parser_at_symbol(parser, "{"):
         start = parser_next(parser).span
         key = parse_type_annotation(parser)
         parser_expect_symbol(parser, ":", "expected colon in map type")
         value = parse_type_annotation(parser)
         end = parser_expect_symbol(parser, "}", "expected closing map type brace").span.end
-        return universal.named_type("map", [key, value], source.Span(start.source, start.start, end))
+        return model_syntax_type_annotation.named_type("map", [key, value], source.Span(start.source, start.start, end))
     name = parser_identifier(parser, "expected a type name")
     qualified := name[0]
     while parser_take_symbol(parser, ".") != None:
         qualified += "." + parser_identifier(parser, "expected qualified type name")[0]
-    arguments: list[universal.TypeAnnotation] := []
+    arguments: list[model_syntax_type_annotation.TypeAnnotation] := []
     end := name[1].end
     if parser_take_symbol(parser, "[") != None:
         arguments = parser_type_arguments(parser)
         end = parser_expect_symbol(parser, "]", "expected closing type bracket").span.end
-    return universal.named_type(qualified, arguments, source.Span(name[1].source, name[1].start, end))
+    return model_syntax_type_annotation.named_type(qualified, arguments, source.Span(name[1].source, name[1].start, end))
 
 
-def token_operator(token: lexer.Token, fixity: universal.Fixity) -> universal.OperatorSyntax | None:
+def token_operator(token: lexer.Token, fixity: model_syntax_function_syntax.Fixity) -> model_syntax_function_syntax.OperatorSyntax | None:
     # Formatted literals carry the registry for their embedded expressions;
     # that registry does not make the literal itself an operator.
     match token.kind:
@@ -1552,50 +1575,50 @@ def token_operator(token: lexer.Token, fixity: universal.Fixity) -> universal.Op
 
 
 def is_binary_operator(token: lexer.Token) -> bool:
-    return token_operator(token, universal.Fixity.Infix) != None
+    return token_operator(token, model_syntax_function_syntax.Fixity.Infix) != None
 
 
-def binary_operator(token: lexer.Token) -> universal.OperatorSyntax:
-    syntax ?= token_operator(token, universal.Fixity.Infix)
+def binary_operator(token: lexer.Token) -> model_syntax_function_syntax.OperatorSyntax:
+    syntax ?= token_operator(token, model_syntax_function_syntax.Fixity.Infix)
     if syntax != None:
         return syntax
     throw Error("token has no registered infix operator")
 
 
-def precedence(operator: universal.OperatorSyntax) -> int:
+def precedence(operator: model_syntax_function_syntax.OperatorSyntax) -> int:
     return int(operator.precedence)
 
 
-def parse(tokens: list[lexer.Token]) -> universal.Module | diagnostics.Diagnostic:
+def parse(tokens: list[lexer.Token]) -> model_hir_module_module.Module | diagnostics.Diagnostic:
     return parser_module(Parser(tokens))
 
 
 # Named declaration syntax is supplied by a G contract. The structural parser
 # only distinguishes typed fields from named callable signatures.
-def parser_declaration_syntax(parser: Parser) -> universal.OperatorSyntax:
+def parser_declaration_syntax(parser: Parser) -> model_syntax_function_syntax.OperatorSyntax:
     token = parser_peek(parser)
     for syntax in token.syntaxes:
         if syntax.grammar_form == "Declaration" and string(token) == syntax.symbol and (token.kind == Identifier or token.kind == Symbol):
             return syntax
-    return universal.OperatorSyntax("", universal.Fixity.Prefix, 0, universal.Associativity.None)
+    return model_syntax_function_syntax.OperatorSyntax("", model_syntax_function_syntax.Fixity.Prefix, 0, model_syntax_function_syntax.Associativity.None)
 
 
-def parser_named_declaration(parser: Parser, syntax: universal.OperatorSyntax) -> universal.RecordDeclaration | diagnostics.Diagnostic:
+def parser_named_declaration(parser: Parser, syntax: model_syntax_function_syntax.OperatorSyntax) -> model_syntax_function_function.RecordDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected a declaration name")[0]
     parser_expect_symbol(parser, ":", "expected colon after declaration name")
     parser_expect(parser, Newline, "expected newline after declaration name")
     parser_separators(parser)
     parser_expect(parser, Indent, "expected indented declaration members")
-    alternatives: list[universal.CallableAlternative] = []
-    fields: list[universal.FunctionParameter] = []
+    alternatives: list[model_syntax_function_function.CallableAlternative] = []
+    fields: list[model_syntax_function_function.FunctionParameter] = []
     parser_separators(parser)
     while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
         member = parser_identifier(parser, "expected a declaration member")
         if syntax.declaration_members == "Fields":
             fields.append(parser_named_field(parser, member))
         else:
-            parameters: list[universal.FunctionParameter] = []
+            parameters: list[model_syntax_function_function.FunctionParameter] = []
             if parser_take_symbol(parser, "(") != None:
                 parser_delimited_layout(parser)
                 while not parser_at_symbol(parser, ")"):
@@ -1612,26 +1635,26 @@ def parser_named_declaration(parser: Parser, syntax: universal.OperatorSyntax) -
                     transitions.append(parser_identifier(parser, "expected transition destination")[0])
                     if parser_take_symbol(parser, "|") == None:
                         break
-            alternatives.append(universal.CallableAlternative(member[0], parameters, member[1], transitions=transitions))
+            alternatives.append(model_syntax_function_function.CallableAlternative(member[0], parameters, member[1], transitions=transitions))
         parser_expect(parser, Newline, "expected newline after declaration member")
         parser_separators(parser)
     end = parser_expect(parser, Dedent, "expected end of declaration").span.end
     if syntax.representation == "TaggedAggregate" and len(alternatives) == 0:
         return error(parser_fail(parser, "tagged type requires at least one alternative"))
-    return universal.RecordDeclaration(name, fields, [], source.Span(start.source, start.start, end), alternatives=alternatives, representation=syntax.representation, declaration_grammar=syntax.definition)
+    return model_syntax_function_function.RecordDeclaration(name, fields, [], source.Span(start.source, start.start, end), alternatives=alternatives, representation=syntax.representation, declaration_grammar=syntax.definition)
 
 
-def parser_named_field(parser: Parser, field: tuple[string, source.Span]) -> universal.FunctionParameter | diagnostics.Diagnostic:
+def parser_named_field(parser: Parser, field: tuple[string, source.Span]) -> model_syntax_function_function.FunctionParameter | diagnostics.Diagnostic:
     parser_expect_symbol(parser, ":", "expected field annotation")
     annotation = parser_type_annotation(parser)
-    default: universal.Expression | absent := absent
+    default: model_syntax_function_function.Expression | absent := absent
     if parser_take_symbol(parser, "=") != None:
         default = parser_expression(parser, 0)
-    return universal.FunctionParameter(field[0], annotation, default, field[1])
+    return model_syntax_function_function.FunctionParameter(field[0], annotation, default, field[1])
 
 
-def parser_field_constraints(parser: Parser) -> list[universal.FieldConstraint] | diagnostics.Diagnostic:
-    constraints: list[universal.FieldConstraint] = []
+def parser_field_constraints(parser: Parser) -> list[model_syntax_function_function.FieldConstraint] | diagnostics.Diagnostic:
+    constraints: list[model_syntax_function_function.FieldConstraint] = []
     saved = parser.cursor[0]
     while parser_at_simple(parser, Newline):
         parser_next(parser)
@@ -1644,10 +1667,10 @@ def parser_field_constraints(parser: Parser) -> list[universal.FieldConstraint] 
             return error(parser_fail(parser, "expected } to close field constraints"))
         condition = parser_expression(parser, 0)
         parser_delimited_layout(parser)
-        failure: universal.Expression | None := None
+        failure: model_syntax_function_function.Expression | None := None
         if parser_take_symbol(parser, "->") != None:
             failure = parser_expression(parser, 0)
-        constraints.append(universal.FieldConstraint(condition, failure))
+        constraints.append(model_syntax_function_function.FieldConstraint(condition, failure))
         parser_delimited_layout(parser)
         if parser_take_symbol(parser, ",") == None and not parser_at_symbol(parser, "}"):
             return error(parser_fail(parser, "expected , or } after field constraint"))
@@ -1656,14 +1679,14 @@ def parser_field_constraints(parser: Parser) -> list[universal.FieldConstraint] 
     return constraints
 
 
-def parser_record_declaration(parser: Parser, extension: bool = false) -> universal.RecordDeclaration | diagnostics.Diagnostic:
+def parser_record_declaration(parser: Parser, extension: bool = false) -> model_syntax_function_function.RecordDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     record_name := ""
     pack: list[string] = []
-    defaults: list[universal.TypeAnnotation] = []
+    defaults: list[model_syntax_type_annotation.TypeAnnotation] = []
     parameters: list[string] := []
-    generic_constraints: list[universal.GenericConstraint] := []
-    extension_target: universal.TypeAnnotation | None := None
+    generic_constraints: list[model_syntax_function_syntax.GenericConstraint] := []
+    extension_target: model_syntax_type_annotation.TypeAnnotation | None := None
     if extension:
         generic_parts = parser_type_parameters(parser, pack, defaults)
         parameters = generic_parts[0]
@@ -1683,7 +1706,7 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> univer
         parameters = generic_parts[0]
         generic_constraints = generic_parts[1]
     parser_expect_symbol(parser, ":", "expected colon after class name")
-    traits: list[universal.TypeAnnotation] = []
+    traits: list[model_syntax_type_annotation.TypeAnnotation] = []
     if not parser_at_simple(parser, Newline):
         while true:
             traits.append(parser_type_annotation(parser))
@@ -1691,9 +1714,9 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> univer
                 break
         parser_take_symbol(parser, ":")
     parser_separators(parser)
-    fields: list[universal.FunctionParameter] = []
-    methods: list[universal.FunctionDeclaration] = []
-    operators: list[universal.OperatorDeclaration] = []
+    fields: list[model_syntax_function_function.FunctionParameter] = []
+    methods: list[model_syntax_function_function.FunctionDeclaration] = []
+    operators: list[model_syntax_function_syntax.OperatorDeclaration] = []
     if parser_take(parser, Indent) != None:
         while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
             if parser_at_identifier(parser, "def"):
@@ -1713,31 +1736,31 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> univer
                 packed = parser_take_symbol(parser, "...") != None
                 annotation = parser_type_annotation(parser)
                 constraints = parser_field_constraints(parser)
-                default: universal.Expression | None := None
+                default: model_syntax_function_function.Expression | None := None
                 if parser_take_symbol(parser, "=") != None:
                     default = parser_expression(parser, 0)
-                fields.append(universal.FunctionParameter(field[0], annotation, default, field[1], variadic=packed, field_constraints=constraints))
+                fields.append(model_syntax_function_function.FunctionParameter(field[0], annotation, default, field[1], variadic=packed, field_constraints=constraints))
             parser_separators(parser)
         parser_expect(parser, Dedent, "expected end of class")
-    return universal.RecordDeclaration(record_name, fields, methods, source.Span(start.source, start.start, parser_peek(parser).span.start), traits=traits, operators=operators, type_parameters=parameters, constraints=generic_constraints, extension=extension, type_pack=pack[0] if len(pack) != 0 else "", type_defaults=defaults, extension_target=extension_target)
+    return model_syntax_function_function.RecordDeclaration(record_name, fields, methods, source.Span(start.source, start.start, parser_peek(parser).span.start), traits=traits, operators=operators, type_parameters=parameters, constraints=generic_constraints, extension=extension, type_pack=pack[0] if len(pack) != 0 else "", type_defaults=defaults, extension_target=extension_target)
 
 
-def parser_family_declaration(parser: Parser) -> universal.TypeDeclaration | diagnostics.Diagnostic:
+def parser_family_declaration(parser: Parser) -> model_syntax_function_syntax.TypeDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected family name")[0]
     parser_expect_symbol(parser, ":", "expected family body")
     parser_expect(parser, Newline, "expected family members")
     parser_expect(parser, Indent, "expected indented family")
-    members: list[universal.TypeAnnotation] = []
+    members: list[model_syntax_type_annotation.TypeAnnotation] = []
     parser_separators(parser)
     while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
         members.append(parser_type_annotation(parser))
         parser_separators(parser)
     parser_expect(parser, Dedent, "expected end of family")
-    return universal.TypeDeclaration([], name, [], [], universal.TypeAnnotation(universal.Union(members), start), start)
+    return model_syntax_function_syntax.TypeDeclaration([], name, [], [], model_syntax_type_annotation.TypeAnnotation(model_syntax_type_annotation.Union(members), start), start)
 
 
-def parser_grammar_declaration(parser: Parser) -> universal.GrammarDeclaration | diagnostics.Diagnostic:
+def parser_grammar_declaration(parser: Parser) -> model_syntax_grammar_grammar.GrammarDeclaration | diagnostics.Diagnostic:
     start = parser_peek(parser)
     declaration = parser_function_declaration(parser, [])
     if len(declaration.type_parameters) != 1 or declaration.type_parameters[0] != "G" or len(declaration.constraints) != 0:
@@ -1749,16 +1772,16 @@ def parser_grammar_declaration(parser: Parser) -> universal.GrammarDeclaration |
         return error(parser_fail(parser, "grammar requires registered symbol and form metadata"))
     if body != None:
         syntax = start.syntaxes[0]
-        return universal.GrammarDeclaration(declaration.name, declaration.parameters, body, start.span, syntax=syntax, definition=syntax.definition, result=declaration.result)
+        return model_syntax_grammar_grammar.GrammarDeclaration(declaration.name, declaration.parameters, body, start.span, syntax=syntax, definition=syntax.definition, result=declaration.result)
     return error(parser_fail(parser, "grammar requires a lowering body"))
 
 
-def parser_conditional(parser: Parser) -> universal.Statement | diagnostics.Diagnostic:
+def parser_conditional(parser: Parser) -> model_syntax_sentence_sentence.Statement | diagnostics.Diagnostic:
     start = parser_next(parser).span
     condition = parser_expression(parser, 0)
     parser_expect_symbol(parser, ":", "expected colon after if condition")
     taken = parser_indented_block(parser, "if")
-    otherwise := universal.empty_block()
+    otherwise := model_syntax_block_block.empty_block()
     end := taken[1]
     if parser_at_identifier(parser, "elif"):
         otherwise.statements.append(parser_conditional(parser))
@@ -1769,4 +1792,18 @@ def parser_conditional(parser: Parser) -> universal.Statement | diagnostics.Diag
         rejected = parser_indented_block(parser, "else")
         otherwise = rejected[0]
         end = rejected[1]
-    return universal.If(condition, taken[0], otherwise, source.Span(start.source, start.start, end))
+    return model_syntax_sentence_sentence.Statement.If(condition, taken[0], otherwise, source.Span(start.source, start.start, end))
+
+
+test "MLIR type annotations survive class parsing":
+    input = source.virtual_source("type.sev", "@mlir(\"!example.handle\")\nclass Handle:\n    value: int\n")
+    parsed = parser_module(Parser(lexer.scan_bootstrap(input)))
+    assert(len(parsed.items) == 1)
+    match parsed.items[0]:
+        case Record:
+            binding ?= model_syntax_function_function.record_mlir_binding(declaration)
+            assert(binding != None)
+            if binding != None:
+                assert(binding.spelling == "!example.handle")
+        case _:
+            assert(false)

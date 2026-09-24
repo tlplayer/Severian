@@ -1,10 +1,12 @@
-import universal
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
 
 
 # Each compiler case gets a fresh module. Its declarations are checked with the
 # subject's normal imports and cannot leak into later accept/reject cases.
-def module(subject: universal.Module, case: universal.CompilerTestCase, namespace: string) -> universal.Module:
-    result = universal.empty_module()
+def module(subject: model_hir_module_module.Module, case: model_syntax_function_syntax.CompilerTestCase, namespace: string) -> model_hir_module_module.Module:
+    result = model_hir_module_module.empty_module()
     for item in subject.items:
         match item:
             case Test:
@@ -17,23 +19,23 @@ def module(subject: universal.Module, case: universal.CompilerTestCase, namespac
                 record := declaration
                 record.name = declaration.name if declaration.extension else namespace + declaration.name
                 record.lookup = namespace
-                result.items.append(universal.Record(record))
+                result.items.append(model_hir_module_module.Record(record))
             case Function:
                 function := declaration
                 function.name = namespace + declaration.name
                 function.lookup = namespace
-                result.items.append(universal.Function(function))
+                result.items.append(model_hir_module_module.Function(function))
             case Trait:
                 trait := declaration
                 trait.name = namespace + declaration.name
                 trait.lookup = namespace
-                result.items.append(universal.Trait(trait))
+                result.items.append(model_hir_module_module.Trait(trait))
             case Type:
                 type := declaration
                 type.name = namespace + declaration.name
                 type.lookup = namespace
-                result.items.append(universal.Type(type))
+                result.items.append(model_hir_module_module.Item.Type(type))
             case _:
                 result.items.append(item)
-    result.items.append(universal.Function(universal.FunctionDeclaration(name=namespace + "$compiler_case$" + string(case.span.start), body=case.body, span=case.span, lookup=namespace)))
+    result.items.append(model_hir_module_module.Function(model_syntax_function_function.FunctionDeclaration(name=namespace + "$compiler_case$" + string(case.span.start), body=case.body, span=case.span, lookup=namespace)))
     return result

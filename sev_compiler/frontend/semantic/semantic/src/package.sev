@@ -1,11 +1,13 @@
-import universal
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 
 enum Visibility:
     Public
 
 
 enum DefKind:
-    Function(signature: universal.FunctionDeclaration)
+    Function(signature: model_syntax_function_function.FunctionDeclaration)
     Type
     Trait
     Constant
@@ -13,18 +15,18 @@ enum DefKind:
 
 
 class Definition:
-    id: universal.DefId
+    id: model_syntax_symbol_symbol.DefId
     name: string
-    module: universal.ModuleId
+    module: model_syntax_symbol_symbol.ModuleId
     visibility: Visibility
     kind: DefKind
 
 
 enum Resolution:
-    Def(definition: universal.DefId)
-    Module(module: universal.ModuleId)
-    OverloadSet(definitions: list[universal.DefId])
-    Ambiguous(definitions: list[universal.DefId])
+    Def(definition: model_syntax_symbol_symbol.DefId)
+    Module(module: model_syntax_symbol_symbol.ModuleId)
+    OverloadSet(definitions: list[model_syntax_symbol_symbol.DefId])
+    Ambiguous(definitions: list[model_syntax_symbol_symbol.DefId])
 
 
 class Scope:
@@ -32,31 +34,31 @@ class Scope:
 
 
 class ModuleScope:
-    id: universal.ModuleId
-    package: universal.PackageId
-    items: list[universal.DefId]
+    id: model_syntax_symbol_symbol.ModuleId
+    package: model_syntax_symbol_symbol.PackageId
+    items: list[model_syntax_symbol_symbol.DefId]
     scope: Scope
 
 
 class ProgramIndex:
-    packages: map[universal.PackageId, list[universal.ModuleId]]
-    modules: map[universal.ModuleId, ModuleScope]
-    definitions: map[universal.DefId, Definition]
-    exports: map[universal.ModuleId, map[string, Resolution]]
+    packages: map[model_syntax_symbol_symbol.PackageId, list[model_syntax_symbol_symbol.ModuleId]]
+    modules: map[model_syntax_symbol_symbol.ModuleId, ModuleScope]
+    definitions: map[model_syntax_symbol_symbol.DefId, Definition]
+    exports: map[model_syntax_symbol_symbol.ModuleId, map[string, Resolution]]
 
 
 class TypedProgram:
     index: ProgramIndex
-    hir_program: universal.Program
+    hir_program: model_hir_module_module.Program
 
-def definition_id(package: universal.PackageId, module: universal.ModuleId, name: string, ordinal: int) -> universal.DefId:
+def definition_id(package: model_syntax_symbol_symbol.PackageId, module: model_syntax_symbol_symbol.ModuleId, name: string, ordinal: int) -> model_syntax_symbol_symbol.DefId:
     declaration: u128 = module.value ^ u128(ordinal + 1)
     for character in name.characters():
         declaration = declaration * 1099511628211 ^ u128(int(character))
-    return universal.DefId(u128(package.index), module.value, universal.DeclarationId(declaration))
+    return model_syntax_symbol_symbol.DefId(u128(package.index), module.value, model_syntax_symbol_symbol.DeclarationId(declaration))
 
 
-def insert_resolution(bindings: map[string, Resolution], name: string, new_definition: universal.DefId):
+def insert_resolution(bindings: map[string, Resolution], name: string, new_definition: model_syntax_symbol_symbol.DefId):
     existing = bindings.get(name)
     if existing == None:
         bindings[name] = Def(new_definition)
@@ -74,10 +76,10 @@ def insert_resolution(bindings: map[string, Resolution], name: string, new_defin
             bindings[name] = Ambiguous([new_definition])
 
 
-def collect_declarations(graph: universal.ModuleGraph) -> ProgramIndex:
+def collect_declarations(graph: model_hir_module_module.ModuleGraph) -> ProgramIndex:
     index = ProgramIndex({}, {}, {}, {})
     for module in graph.modules:
-        items: list[universal.DefId] = []
+        items: list[model_syntax_symbol_symbol.DefId] = []
         scope = Scope({})
         exports: map[string, Resolution] = {}
         ordinal = 0
@@ -113,7 +115,7 @@ def collect_declarations(graph: universal.ModuleGraph) -> ProgramIndex:
     return index
 
 
-def resolve_imports(graph: universal.ModuleGraph, index: ProgramIndex):
+def resolve_imports(graph: model_hir_module_module.ModuleGraph, index: ProgramIndex):
     for module in graph.modules:
         scope = index.modules[module.id].scope
         for item in module.items:
@@ -135,7 +137,7 @@ def resolve_imports(graph: universal.ModuleGraph, index: ProgramIndex):
                             scope.bindings[declaration.alias if declaration.alias != None else name] = exported
 
 
-def analyze_package(graph: universal.ModuleGraph, context: universal.UniversalContext) -> TypedProgram:
+def analyze_package(graph: model_hir_module_module.ModuleGraph) -> TypedProgram:
     index = collect_declarations(graph)
     resolve_imports(graph, index)
-    return TypedProgram(index, universal.empty_program())
+    return TypedProgram(index, model_hir_module_module.empty_program())

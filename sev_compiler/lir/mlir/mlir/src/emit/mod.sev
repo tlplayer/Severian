@@ -1,10 +1,17 @@
+import * from "../../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../../syntax/function/lowering.sev" as model_syntax_function_lowering
+import * from "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../../syntax/literal/lowered.sev" as model_syntax_literal_lowered
+import * from "../../../../../syntax/lowered.sev" as model_syntax_lowered
+import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import artifact
 import target
-import universal
 import * from "../ir/lib.sev"
 
 
-def lowered_type(type_id: universal.LoweredType) -> MlirType | MlirError:
+def lowered_type(type_id: model_syntax_lowered.LoweredType) -> MlirType | MlirError:
     match type_id:
         case Integer:
             return integer_type(bits, signed)
@@ -28,17 +35,17 @@ def lowered_type(type_id: universal.LoweredType) -> MlirType | MlirError:
             return pointer_type()
 
 
-def value_type(module: universal.Module, value: universal.ValueId) -> universal.LoweredType | MlirError:
+def value_type(module: model_hir_module_module.Module, value: model_syntax_symbol_symbol.ValueId) -> model_syntax_lowered.LoweredType | MlirError:
     if value.index >= len(module.values):
         return error(InvalidValue(value))
     return module.values[value.index].lowered_type
 
 
-def mlir_value(builder: MlirOpBuilder, module: universal.Module, value: universal.ValueId) -> MlirValue | MlirError:
+def mlir_value(builder: MlirOpBuilder, module: model_hir_module_module.Module, value: model_syntax_symbol_symbol.ValueId) -> MlirValue | MlirError:
     return builder_value(builder, value.index, lowered_type(value_type(module, value)))
 
 
-def function_identity(module: universal.Module, function: universal.FunctionDeclaration) -> MlirFunctionIdentity:
+def function_identity(module: model_hir_module_module.Module, function: model_syntax_function_function.FunctionDeclaration) -> MlirFunctionIdentity:
     specialization: list[string] = []
     for type_id in function.parameter_types:
         specialization.append(string(type_id.index))
@@ -52,7 +59,7 @@ def function_identity(module: universal.Module, function: universal.FunctionDecl
     )
 
 
-def function_symbol(module: universal.Module, function: universal.FunctionDeclaration) -> string:
+def function_symbol(module: model_hir_module_module.Module, function: model_syntax_function_function.FunctionDeclaration) -> string:
     match function.linkage:
         case External:
             return symbol
@@ -60,7 +67,7 @@ def function_symbol(module: universal.Module, function: universal.FunctionDeclar
             return generated_mlir_function_name(function_identity(module, function)).value
 
 
-def function_results(result: universal.LoweredType) -> list[MlirType] | MlirError:
+def function_results(result: model_syntax_lowered.LoweredType) -> list[MlirType] | MlirError:
     match result:
         case Unit:
             return []
@@ -68,7 +75,7 @@ def function_results(result: universal.LoweredType) -> list[MlirType] | MlirErro
             return [lowered_type(result)]
 
 
-def constant_attribute(value: universal.Constant, type_id: universal.LoweredType, lowered: MlirType) -> MlirAttributeValue | MlirError:
+def constant_attribute(value: model_syntax_literal_lowered.Constant, type_id: model_syntax_lowered.LoweredType, lowered: MlirType) -> MlirAttributeValue | MlirError:
     match value:
         case Integer:
             return integer_attribute(int(value), lowered)
@@ -104,7 +111,7 @@ def ensure_declaration(builder: MlirOpBuilder, name: string, arguments: list[Mli
     return unit
 
 
-def comparison_predicate(operator: universal.BinaryOperation, signed: bool, floating: bool = false) -> string | MlirError:
+def comparison_predicate(operator: model_syntax_function_lowering.BinaryOperation, signed: bool, floating: bool = false) -> string | MlirError:
     match operator:
         case Equal:
             return "oeq" if floating else "eq"
@@ -122,7 +129,7 @@ def comparison_predicate(operator: universal.BinaryOperation, signed: bool, floa
             return error(UnsupportedOperation("operator is not a comparison"))
 
 
-def binary_operation_name(operator: universal.BinaryOperation, type_id: MlirType) -> MlirOperationName | MlirError:
+def binary_operation_name(operator: model_syntax_function_lowering.BinaryOperation, type_id: MlirType) -> MlirOperationName | MlirError:
     floating = is_float(type_id)
     signed = type_id.scalar.signed
     match operator:
@@ -160,7 +167,7 @@ def binary_operation_name(operator: universal.BinaryOperation, type_id: MlirType
             return error(UnsupportedOperation("containment requires a collection operation"))
 
 
-def binary_attributes(operator: universal.BinaryOperation, type_id: MlirType) -> list[MlirNamedAttribute] | MlirError:
+def binary_attributes(operator: model_syntax_function_lowering.BinaryOperation, type_id: MlirType) -> list[MlirNamedAttribute] | MlirError:
     name = operation_name_text(binary_operation_name(operator, type_id))
     if name == "arith.cmpi" or name == "arith.cmpf":
         predicate = comparison_predicate(operator, type_id.scalar.signed, is_float(type_id))
@@ -168,10 +175,10 @@ def binary_attributes(operator: universal.BinaryOperation, type_id: MlirType) ->
     return []
 
 
-def lower_unary(builder: MlirOpBuilder, module: universal.Module, operator: universal.UnaryOperation, operand_id: universal.ValueId, result_id: universal.ValueId) -> unit | MlirError | MlirBuilderError:
+def lower_unary(builder: MlirOpBuilder, module: model_hir_module_module.Module, operator: model_syntax_function_lowering.UnaryOperation, operand_id: model_syntax_symbol_symbol.ValueId, result_id: model_syntax_symbol_symbol.ValueId) -> unit | MlirError | MlirBuilderError:
     operand = mlir_value(builder, module, operand_id)
     result = mlir_value(builder, module, result_id)
-    if operator == universal.Not:
+    if operator == model_syntax_function_syntax.Not:
         one = builder_new_value(builder, integer_type(1, false))
         builder_constant(builder, one, boolean_attribute(true))
         builder_binary(builder, result, operation_name("arith", "xori"), operand, one)
@@ -181,14 +188,14 @@ def lower_unary(builder: MlirOpBuilder, module: universal.Module, operator: univ
         builder_constant(builder, zero, float_attribute(0.0, operand.type_id))
     else:
         builder_constant(builder, zero, integer_attribute(0, operand.type_id))
-    if operator == universal.Positive:
+    if operator == model_syntax_function_syntax.Positive:
         builder_binary(builder, result, operation_name("arith", "addf" if is_float(operand.type_id) else "addi"), operand, zero)
     else:
         builder_binary(builder, result, operation_name("arith", "subf" if is_float(operand.type_id) else "subi"), zero, operand)
     return unit
 
 
-def lower_block(builder: MlirOpBuilder, module: universal.Module, block: universal.Block) -> unit | MlirError | MlirBuilderError:
+def lower_block(builder: MlirOpBuilder, module: model_hir_module_module.Module, block: model_syntax_block_block.Block) -> unit | MlirError | MlirBuilderError:
     for operation in block.lowered_operations:
         match operation:
             case LoweredCoverage:
@@ -264,7 +271,7 @@ def lower_block(builder: MlirOpBuilder, module: universal.Module, block: univers
     return unit
 
 
-def create_function(builder: MlirOpBuilder, module: universal.Module, function: universal.FunctionDeclaration) -> MlirFunctionHandle | MlirError | MlirBuilderError:
+def create_function(builder: MlirOpBuilder, module: model_hir_module_module.Module, function: model_syntax_function_function.FunctionDeclaration) -> MlirFunctionHandle | MlirError | MlirBuilderError:
     arguments: list[MlirValue] = []
     for parameter in function.values:
         arguments.append(mlir_value(builder, module, parameter))
@@ -283,7 +290,7 @@ def create_function(builder: MlirOpBuilder, module: universal.Module, function: 
             )
 
 
-def lower(module: universal.Module) -> MlirProgram | MlirError | MlirBuilderError | MlirVerificationError:
+def lower(module: model_hir_module_module.Module) -> MlirProgram | MlirError | MlirBuilderError | MlirVerificationError:
     builder = MlirOpBuilder(int(len(module.values)))
     handles: list[MlirFunctionHandle] = []
     for function in module.functions:
@@ -313,5 +320,5 @@ def lower(module: universal.Module) -> MlirProgram | MlirError | MlirBuilderErro
     return builder.program
 
 
-def render(module: universal.Module) -> string | MlirError | MlirBuilderError | MlirVerificationError:
+def render(module: model_hir_module_module.Module) -> string | MlirError | MlirBuilderError | MlirVerificationError:
     return print_program(lower(module))

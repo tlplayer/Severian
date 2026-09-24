@@ -1,0 +1,51 @@
+{
+  "package": {
+    "name": "sev-semantic-interface",
+    "version": "0.1.0",
+    "edition": "2026",
+    "publish": true
+  },
+  "lib": {
+    "name": "interface",
+    "path": "interface/src/lib.sev"
+  },
+  "dependencies": {
+    "syntax": {
+      "path": "../../../../sev_compiler/syntax",
+      "package": "sev-compiler-syntax"
+    },
+    "hir": {
+      "path": "../../../../sev_compiler/hir",
+      "package": "sev-compiler-hir"
+    },
+    "lexer": {
+      "path": "../../../../sev_compiler/frontend/lexer",
+      "package": "sev-compiler-lexer"
+    },
+    "source": {
+      "path": "../../../../sev_compiler/frontend/source",
+      "package": "sev-compiler-source"
+    },
+    "package": {
+      "path": "../..",
+      "package": "package"
+    },
+    "file": {
+      "path": "../../../system/file",
+      "package": "file"
+    },
+    "os": {
+      "path": "../../../system/os",
+      "package": "os"
+    },
+    "semantic": {
+      "path": "../../../../sev_compiler/frontend/semantic",
+      "package": "sev-compiler-semantic"
+    }
+  },
+  "build": {
+    "generators": [
+      "generate_codec.py"
+    ]
+  }
+}

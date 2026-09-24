@@ -1,3 +1,8 @@
+import * from "../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../mir/value.sev" as model_mir_value
+import * from "../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import artifact
 import mir
 import target
@@ -10,16 +15,16 @@ class EffectSet:
 
 
 class CompileRegion:
-    id: universal.CompiledRegionId
-    compiler: universal.CompilerId
-    operations: list[universal.Operation]
-    inputs: list[universal.Value]
-    outputs: list[universal.Value]
+    id: model_syntax_symbol_symbol.CompiledRegionId
+    compiler: model_syntax_symbol_symbol.CompilerId
+    operations: list[model_syntax_function_function.Operation]
+    inputs: list[model_mir_value.Value]
+    outputs: list[model_mir_value.Value]
     effects: EffectSet
 
 
 class StandardRegion:
-    operations: list[universal.Operation]
+    operations: list[model_syntax_function_function.Operation]
 
 
 enum PlanSegment:
@@ -28,17 +33,17 @@ enum PlanSegment:
 
 
 class PlannedBlock:
-    source: universal.Block
+    source: model_syntax_block_block.Block
     segments: list[PlanSegment]
 
 
 class PlannedFunction:
-    declaration: universal.FunctionDeclaration
+    declaration: model_syntax_function_function.FunctionDeclaration
     body: PlannedBlock | None
 
 
 class CompilePlan:
-    source: universal.Module
+    source: model_hir_module_module.Module
     initializer: PlannedBlock
     functions: list[PlannedFunction]
     nested_regions: list[CompileRegion]
@@ -58,7 +63,7 @@ class CompilePlan:
                             return true
         return false
 
-    def resumed_mir() -> universal.Module:
+    def resumed_mir() -> model_hir_module_module.Module:
         module = source
         module.initializer = resume_block(initializer)
         module.functions = []
@@ -75,20 +80,20 @@ class CompileContext:
     target_spec: target.TargetSpec
 
 
-def resume_block(block: PlannedBlock) -> universal.Block:
-    operations: list[universal.Operation] = []
+def resume_block(block: PlannedBlock) -> model_syntax_block_block.Block:
+    operations: list[model_syntax_function_function.Operation] = []
     for segment in block.segments:
         match segment:
             case Standard:
                 for operation in region.operations:
                     operations.append(operation)
             case Compiler:
-                inputs: list[universal.ValueId] = []
-                outputs: list[universal.ValueId] = []
+                inputs: list[model_syntax_symbol_symbol.ValueId] = []
+                outputs: list[model_syntax_symbol_symbol.ValueId] = []
                 for value in region.inputs:
                     inputs.append(value.id)
                 for value in region.outputs:
                     outputs.append(value.id)
-                operations.append(universal.CompiledRegionCall(artifact.artifact_for_region(region.id), inputs, outputs))
+                operations.append(model_syntax_function_function.CompiledRegionCall(artifact.artifact_for_region(region.id), inputs, outputs))
     block.source.operations = operations
     return block.source

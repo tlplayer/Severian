@@ -1,13 +1,15 @@
-import universal
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
 
 
 class BoundArguments:
-    arguments: list[universal.CallArgument] = []
+    arguments: list[model_syntax_function_function.CallArgument] = []
     message: string = ""
 
 
-def bind_arguments(function: universal.FunctionDeclaration, arguments: list[universal.CallArgument]) -> BoundArguments:
-    result: list[universal.CallArgument] = []
+def bind_arguments(function: model_syntax_function_function.FunctionDeclaration, arguments: list[model_syntax_function_function.CallArgument]) -> BoundArguments:
+    result: list[model_syntax_function_function.CallArgument] = []
     assigned: list[string] = []
     positional := 0
     keyword := false
@@ -36,12 +38,12 @@ def bind_arguments(function: universal.FunctionDeclaration, arguments: list[univ
         if name in assigned:
             return BoundArguments(message="duplicate argument " + name)
         assigned.append(name)
-        result.append(universal.CallArgument(name, argument.value, argument.span, spread=argument.spread))
+        result.append(model_syntax_function_function.CallArgument(name, argument.value, argument.span, spread=argument.spread))
     for parameter in function.parameters:
         if parameter.name not in assigned:
             default_value ?= parameter.default
             if default_value != None:
-                result.append(universal.CallArgument(parameter.name, default_value, parameter.span))
+                result.append(model_syntax_function_function.CallArgument(parameter.name, default_value, parameter.span))
             else:
                 return BoundArguments(message="wrong argument count: missing " + parameter.name)
     return BoundArguments(result)
@@ -56,75 +58,75 @@ def renamed(name: string, names: list[string], replacements: list[string]) -> st
     return name
 
 
-def rename_optional_expression(expression: universal.Expression | None, names: list[string], replacements: list[string]) -> universal.Expression | None:
+def rename_optional_expression(expression: model_syntax_function_function.Expression | None, names: list[string], replacements: list[string]) -> model_syntax_function_function.Expression | None:
     supplied ?= expression
     if supplied != None:
         return rename_expression(supplied, names, replacements)
     return None
 
 
-def rename_expression(expression: universal.Expression, names: list[string], replacements: list[string]) -> universal.Expression:
+def rename_expression(expression: model_syntax_function_function.Expression, names: list[string], replacements: list[string]) -> model_syntax_function_function.Expression:
     kind := expression.kind
     match expression.kind:
         case MockValue:
-            renamed_calls: list[universal.Expression] = []
-            renamed_results: list[universal.Expression] = []
+            renamed_calls: list[model_syntax_function_function.Expression] = []
+            renamed_results: list[model_syntax_function_function.Expression] = []
             for call in calls:
                 renamed_calls.append(rename_expression(call, names, replacements))
             for result in results:
                 renamed_results.append(rename_expression(result, names, replacements))
-            kind = universal.MockValue(renamed_calls, renamed_results, rename_expression(fallback, names, replacements))
+            kind = model_syntax_function_function.MockValue(renamed_calls, renamed_results, rename_expression(fallback, names, replacements))
         case Ownership:
-            kind = universal.Ownership(mode, rename_expression(value, names, replacements))
+            kind = model_syntax_function_function.Ownership(mode, rename_expression(value, names, replacements))
         case AddressOf:
-            kind = universal.AddressOf(rename_expression(value, names, replacements))
+            kind = model_syntax_function_function.AddressOf(rename_expression(value, names, replacements))
         case Name:
-            kind = universal.Name(renamed(name, names, replacements))
+            kind = model_syntax_function_function.Name(renamed(name, names, replacements))
         case Member:
-            kind = universal.Member(rename_expression(object, names, replacements), name)
+            kind = model_syntax_function_function.Member(rename_expression(object, names, replacements), name)
         case Fallback:
-            kind = universal.Fallback(rename_expression(value, names, replacements), rename_expression(alternative, names, replacements))
+            kind = model_syntax_function_function.Fallback(rename_expression(value, names, replacements), rename_expression(alternative, names, replacements))
         case ThrowValue:
-            kind = universal.ThrowValue(rename_expression(value, names, replacements))
+            kind = model_syntax_function_function.ThrowValue(rename_expression(value, names, replacements))
         case ComparisonChain:
-            values: list[universal.Expression] = []
+            values: list[model_syntax_function_function.Expression] = []
             for operand in operands:
                 values.append(rename_expression(operand, names, replacements))
-            kind = universal.ComparisonChain(values, operators)
+            kind = model_syntax_function_function.ComparisonChain(values, operators)
         case ListLiteral:
-            renamed_elements: list[universal.Expression] = []
+            renamed_elements: list[model_syntax_function_function.Expression] = []
             for element in elements:
                 renamed_elements.append(rename_expression(element, names, replacements))
-            kind = universal.ListLiteral(renamed_elements)
+            kind = model_syntax_function_function.ListLiteral(renamed_elements)
         case Subscript:
-            kind = universal.Subscript(rename_expression(object, names, replacements), rename_expression(index, names, replacements))
+            kind = model_syntax_function_function.Subscript(rename_expression(object, names, replacements), rename_expression(index, names, replacements))
         case Slice:
-            kind = universal.Slice(rename_expression(object, names, replacements), rename_optional_expression(start, names, replacements), rename_optional_expression(stop, names, replacements), rename_optional_expression(step, names, replacements))
+            kind = model_syntax_function_function.ExpressionKind.Slice(rename_expression(object, names, replacements), rename_optional_expression(start, names, replacements), rename_optional_expression(stop, names, replacements), rename_optional_expression(step, names, replacements))
         case RecordValue:
-            renamed_fields: list[universal.CallArgument] = []
+            renamed_fields: list[model_syntax_function_function.CallArgument] = []
             for field in fields:
-                renamed_fields.append(universal.CallArgument(field.name, rename_expression(field.value, names, replacements), field.span))
-            kind = universal.RecordValue(renamed_fields)
+                renamed_fields.append(model_syntax_function_function.CallArgument(field.name, rename_expression(field.value, names, replacements), field.span))
+            kind = model_syntax_function_function.RecordValue(renamed_fields)
         case Call:
-            operands: list[universal.CallArgument] = []
+            operands: list[model_syntax_function_function.CallArgument] = []
             for argument in arguments:
-                operands.append(universal.CallArgument(argument.name, rename_expression(argument.value, names, replacements), argument.span, spread=argument.spread))
-            kind = universal.Call(rename_expression(callee, names, replacements), operands)
+                operands.append(model_syntax_function_function.CallArgument(argument.name, rename_expression(argument.value, names, replacements), argument.span, spread=argument.spread))
+            kind = model_syntax_function_function.Call(rename_expression(callee, names, replacements), operands)
         case Unary:
-            kind = universal.Unary(operator, rename_expression(operand, names, replacements))
+            kind = model_syntax_function_function.Unary(operator, rename_expression(operand, names, replacements))
         case Binary:
-            kind = universal.Binary(operator, rename_expression(left, names, replacements), rename_expression(right, names, replacements))
+            kind = model_syntax_function_function.Binary(operator, rename_expression(left, names, replacements), rename_expression(right, names, replacements))
         case Conditional:
-            kind = universal.Conditional(rename_expression(condition, names, replacements), rename_expression(then_value, names, replacements), rename_expression(else_value, names, replacements))
+            kind = model_syntax_function_function.ExpressionKind.Conditional(rename_expression(condition, names, replacements), rename_expression(then_value, names, replacements), rename_expression(else_value, names, replacements))
         case Stringify:
-            kind = universal.Stringify(rename_expression(value, names, replacements))
+            kind = model_syntax_function_function.Stringify(rename_expression(value, names, replacements))
         case _:
             throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/packs.sev)")
-    return universal.Expression(kind, expression.span, type_id=expression.type_id, grammar=expression.grammar)
+    return model_syntax_function_function.Expression(kind, expression.span, type_id=expression.type_id, grammar=expression.grammar)
 
 
-def expand_block(block: universal.Block, pack: string, count: int, names: list[string], replacements: list[string], prefix: string) -> universal.Block:
-    result = universal.empty_block()
+def expand_block(block: model_syntax_block_block.Block, pack: string, count: int, names: list[string], replacements: list[string], prefix: string) -> model_syntax_block_block.Block:
+    result = model_syntax_block_block.empty_block()
     for statement in block.statements:
         match statement:
             case ForEach:
@@ -155,45 +157,45 @@ def expand_block(block: universal.Block, pack: string, count: int, names: list[s
                 if binding.name not in names:
                     names.append(binding.name)
                     replacements.append(prefix + binding.name)
-                result.statements.append(universal.BindingStatement(universal.Binding(renamed(binding.name, names, replacements), binding.annotation, value, binding.update, binding.preserve_error, binding.span, mutable=binding.mutable)))
+                result.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(renamed(binding.name, names, replacements), binding.annotation, value, binding.update, binding.preserve_error, binding.span, mutable=binding.mutable)))
             case FieldSet:
-                result.statements.append(universal.FieldSet(rename_expression(target, names, replacements), rename_expression(value, names, replacements), span, update))
+                result.statements.append(model_syntax_sentence_sentence.FieldSet(rename_expression(target, names, replacements), rename_expression(value, names, replacements), span, update))
             case ExpressionStatement:
-                result.statements.append(universal.ExpressionStatement(rename_expression(expression, names, replacements)))
+                result.statements.append(model_syntax_sentence_sentence.ExpressionStatement(rename_expression(expression, names, replacements)))
             case Return:
-                returned: universal.Expression | None := None
+                returned: model_syntax_function_function.Expression | None := None
                 expression_value ?= value
                 if expression_value != None:
                     returned = rename_expression(expression_value, names, replacements)
-                result.statements.append(universal.Return(returned, span))
+                result.statements.append(model_syntax_sentence_sentence.Statement.Return(returned, span))
             case Assert:
-                result.statements.append(universal.Assert(rename_expression(condition, names, replacements), message, span, condition_span))
+                result.statements.append(model_syntax_sentence_sentence.Assert(rename_expression(condition, names, replacements), message, span, condition_span))
             case If:
                 taken = expand_block(then_block, pack, count, names[:], replacements[:], prefix)
                 otherwise = expand_block(else_block, pack, count, names[:], replacements[:], prefix)
-                result.statements.append(universal.If(rename_expression(condition, names, replacements), taken, otherwise, span))
+                result.statements.append(model_syntax_sentence_sentence.Statement.If(rename_expression(condition, names, replacements), taken, otherwise, span))
             case Unsafe:
-                result.statements.append(universal.Unsafe(expand_block(body, pack, count, names[:], replacements[:], prefix), span))
+                result.statements.append(model_syntax_sentence_sentence.Unsafe(expand_block(body, pack, count, names[:], replacements[:], prefix), span))
             case Defer:
-                result.statements.append(universal.Defer(rename_expression(value, names, replacements), span))
+                result.statements.append(model_syntax_sentence_sentence.Defer(rename_expression(value, names, replacements), span))
             case _:
                 throw Error("statement is outside bootstrap variadic specialization")
     return result
 
 
-def pack_parameters(function: universal.FunctionDeclaration, count: int) -> list[universal.FunctionParameter]:
-    result: list[universal.FunctionParameter] = []
+def pack_parameters(function: model_syntax_function_function.FunctionDeclaration, count: int) -> list[model_syntax_function_function.FunctionParameter]:
+    result: list[model_syntax_function_function.FunctionParameter] = []
     pack = function.parameters[0]
     index := 0
     while index < count:
-        result.append(universal.FunctionParameter(pack.name + "__" + string(index), pack.annotation, None, pack.span))
+        result.append(model_syntax_function_function.FunctionParameter(pack.name + "__" + string(index), pack.annotation, None, pack.span))
         index += 1
     for parameter in function.parameters[1:]:
         result.append(parameter)
     return result
 
 
-def pack_body(function: universal.FunctionDeclaration, count: int) -> universal.Block:
+def pack_body(function: model_syntax_function_function.FunctionDeclaration, count: int) -> model_syntax_block_block.Block:
     names: list[string] = []
     for parameter in function.parameters:
         if not parameter.variadic:

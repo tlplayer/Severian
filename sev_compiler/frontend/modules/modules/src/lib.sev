@@ -1,31 +1,33 @@
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import lexer
 import parser
 import source
 import diagnostics
-import universal
 
-from universal import ModuleGraph
+import * from "../../../../hir/module/module.sev"
 
 
 class ResolvedPackage:
-    id: universal.PackageId
+    id: model_syntax_symbol_symbol.PackageId
     root: string
     library: string
-    dependencies: map[string, universal.PackageId]
+    dependencies: map[string, model_syntax_symbol_symbol.PackageId]
 
 
 class PackageGraph:
-    root: universal.PackageId
-    packages: map[universal.PackageId, ResolvedPackage]
+    root: model_syntax_symbol_symbol.PackageId
+    packages: map[model_syntax_symbol_symbol.PackageId, ResolvedPackage]
 
 
 class Resolver:
     packages: PackageGraph
-    parsed: map[string, universal.Module]
+    parsed: map[string, model_hir_module_module.Module]
     visiting: list[string]
     visited: set[string]
-    order: list[universal.Module]
-    module_ids: map[string, universal.ModuleId]
+    order: list[model_hir_module_module.Module]
+    module_ids: map[string, model_syntax_symbol_symbol.ModuleId]
     sources: source.SourceMap
 
     def Resolver(packages: PackageGraph):
@@ -37,7 +39,7 @@ class Resolver:
         module_ids = {}
         sources = source.SourceMap()
 
-    def visit(path: string, package: universal.PackageId) -> unit | diagnostics.Diagnostic:
+    def visit(path: string, package: model_syntax_symbol_symbol.PackageId) -> unit | diagnostics.Diagnostic:
         canonical = file.canonical(path)
         if canonical in visited:
             return unit
@@ -76,15 +78,15 @@ class Resolver:
         return unit
 
 
-def module_id(path: string, package: universal.PackageId) -> universal.ModuleId:
+def module_id(path: string, package: model_syntax_symbol_symbol.PackageId) -> model_syntax_symbol_symbol.ModuleId:
     hash: u128 = 14695981039346656037
     key = string(package.index) + ":" + path
     for character in key.characters():
         hash = (hash ^ u128(int(character))) * 1099511628211
-    return universal.ModuleId(hash)
+    return model_syntax_symbol_symbol.ModuleId(hash)
 
 
-def source_import(importer: string, package: universal.PackageId, declaration: universal.ImportDeclaration, packages: PackageGraph) -> tuple[string, universal.PackageId] | None | diagnostics.Diagnostic:
+def source_import(importer: string, package: model_syntax_symbol_symbol.PackageId, declaration: model_syntax_function_syntax.ImportDeclaration, packages: PackageGraph) -> tuple[string, model_syntax_symbol_symbol.PackageId] | None | diagnostics.Diagnostic:
     if declaration.source_name != None:
         current = packages.packages.get(package)
         dependency_id = current.dependencies.get(declaration.source_name)
@@ -104,7 +106,7 @@ def source_import(importer: string, package: universal.PackageId, declaration: u
             return (file.join(file.parent(importer), locator), package)
 
 
-def has_runtime_initializer(module: universal.Module) -> bool:
+def has_runtime_initializer(module: model_hir_module_module.Module) -> bool:
     for item in module.items:
         match item:
             case BindingItem:
@@ -121,7 +123,7 @@ def resolve_with_packages(root: string, packages: PackageGraph) -> ModuleGraph |
 
 
 def resolve(root: string) -> ModuleGraph | diagnostics.Diagnostic:
-    package = universal.PackageId(0)
+    package = model_syntax_symbol_symbol.PackageId(0)
     packages = PackageGraph(package, {package: ResolvedPackage(package, file.parent(root), root, {})})
     return resolve_with_packages(root, packages)
 

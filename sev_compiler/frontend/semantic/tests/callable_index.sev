@@ -1,9 +1,10 @@
-import universal
+import * from "../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../syntax/function/syntax.sev" as model_syntax_function_syntax
 import * from "../semantic/src/callable_index.sev" as lookup
 
 
 test "lookup preserves overload order and prelude filtering":
-    functions = [universal.FunctionDeclaration(name="pick", prelude=true), universal.FunctionDeclaration(name="unrelated"), universal.FunctionDeclaration(name="pick")]
+    functions = [model_syntax_function_function.FunctionDeclaration(name="pick", prelude=true), model_syntax_function_function.FunctionDeclaration(name="unrelated"), model_syntax_function_function.FunctionDeclaration(name="pick")]
     index = lookup.FunctionIndex()
     assert(len(lookup.named(index, functions, "missing")) == 0)
     assert(len(lookup.named(index, functions, "pick")) == 2)
@@ -12,25 +13,25 @@ test "lookup preserves overload order and prelude filtering":
     assert(not selected[0].prelude)
 
 test "late registrations extend lookup and operator indices":
-    functions: list[universal.FunctionDeclaration] = []
+    functions: list[model_syntax_function_function.FunctionDeclaration] = []
     index = lookup.FunctionIndex()
     assert(not lookup.has_operator(index, functions, "combine"))
     assert(len(lookup.named(index, functions, "specialized")) == 0)
-    syntax = universal.OperatorSyntax("combine", universal.Fixity.Infix, 7, universal.Associativity.Left)
-    functions.append(universal.FunctionDeclaration(name="specialized", operator_syntax=syntax))
+    syntax = model_syntax_function_syntax.OperatorSyntax("combine", model_syntax_function_syntax.Fixity.Infix, 7, model_syntax_function_syntax.Associativity.Left)
+    functions.append(model_syntax_function_function.FunctionDeclaration(name="specialized", operator_syntax=syntax))
     assert(lookup.has_operator(index, functions, "combine"))
     assert(len(lookup.matching_operators(index, functions, "combine")) == 1)
     assert(len(lookup.named(index, functions, "specialized")) == 1)
     assert(not lookup.has_operator(index, functions, ""))
 
 test "isolated specializations have independent lookup state":
-    functions = [universal.FunctionDeclaration(name="common")]
+    functions = [model_syntax_function_function.FunctionDeclaration(name="common")]
     index = lookup.FunctionIndex()
     assert(len(lookup.named(index, functions, "common")) == 1)
     isolated = functions[:]
     isolated_index = lookup.FunctionIndex()
-    isolated.append(universal.FunctionDeclaration(name="isolated"))
+    isolated.append(model_syntax_function_function.FunctionDeclaration(name="isolated"))
     assert(len(lookup.named(isolated_index, isolated, "isolated")) == 1)
-    functions.append(universal.FunctionDeclaration(name="original"))
+    functions.append(model_syntax_function_function.FunctionDeclaration(name="original"))
     assert(len(lookup.named(index, functions, "isolated")) == 0)
     assert(len(lookup.named(index, functions, "original")) == 1)

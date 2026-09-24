@@ -1,11 +1,11 @@
-import universal
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
 import diagnostics
 import * from "../callable.sev" as callable
 
 
 # Both driver entries construct CFG and obtain MIR ownership authorization.
-def build(program: universal.Program) -> universal.Module | diagnostics.Diagnostic:
-    result := universal.empty_module()
+def build(program: model_hir_module_module.Program) -> model_hir_module_module.Module | diagnostics.Diagnostic:
+    result := model_hir_module_module.empty_module()
     for module in program.modules:
         result = callable.build_callables(module)
     return result

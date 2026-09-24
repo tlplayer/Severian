@@ -1,9 +1,9 @@
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
 import package
-import universal
 import source
 import * from "package:mir/mir/src/quality.sev" as quality
 
-def prepare_quality(module: universal.Module, files: list[source.SourceFile], resolution: package.Resolution):
+def prepare_quality(module: model_hir_module_module.Module, files: list[source.SourceFile], resolution: package.Resolution):
     if len(resolution.packages) == 0:
         return
     project = resolution.packages[0]
@@ -23,7 +23,7 @@ def prepare_quality(module: universal.Module, files: list[source.SourceFile], re
             if declared != None:
                 module.quality_exclusions.append(declared)
 
-def quality_map(module: universal.Module) -> string:
+def quality_map(module: model_hir_module_module.Module) -> string:
     quality.quality_branches(module)
     regions: list[package.CoverageRegion] = []
     for region in module.quality_regions:

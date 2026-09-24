@@ -1,25 +1,33 @@
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../syntax/literal/value.sev" as model_syntax_literal_value
+import * from "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import diagnostics
 import source
-import universal
 
 
-def has_dispatch(function: universal.FunctionDeclaration) -> bool:
+def has_dispatch(function: model_syntax_function_function.FunctionDeclaration) -> bool:
     for attachment in function.attachments:
-        if attachment.role == universal.AttachmentRole.Dispatch:
+        if attachment.role == model_syntax_constraint_model.AttachmentRole.Dispatch:
             return true
     return false
 
 
-def predicate_key(expression: universal.Expression) -> string | diagnostics.Diagnostic:
+def predicate_key(expression: model_syntax_function_function.Expression) -> string | diagnostics.Diagnostic:
     match expression.kind:
         case Name:
-            return universal.semantic_key(["name", name])
+            return model_syntax_symbol_symbol.semantic_key(["name", name])
         case LiteralValue:
             match value:
                 case BooleanValue:
                     return "true" if value else "false"
                 case IntegerValue:
-                    return universal.semantic_key(["integer", spelling])
+                    return model_syntax_symbol_symbol.semantic_key(["integer", spelling])
                 case _:
                     return error(
                         diagnostics.diagnostic_at(
@@ -37,7 +45,7 @@ def predicate_key(expression: universal.Expression) -> string | diagnostics.Diag
                         expression.span,
                     ),
                 )
-            return universal.semantic_key(
+            return model_syntax_symbol_symbol.semantic_key(
                 [operator.symbol, predicate_key(left), predicate_key(right)],
             )
         case Unary:
@@ -49,7 +57,7 @@ def predicate_key(expression: universal.Expression) -> string | diagnostics.Diag
                         expression.span,
                     ),
                 )
-            return universal.semantic_key(["not", predicate_key(operand)])
+            return model_syntax_symbol_symbol.semantic_key(["not", predicate_key(operand)])
         case ComparisonChain:
             parts: list[string] = []
             for operand in operands:
@@ -64,7 +72,7 @@ def predicate_key(expression: universal.Expression) -> string | diagnostics.Diag
                         ),
                     )
                 parts.append(operator.symbol)
-            return universal.semantic_key(parts)
+            return model_syntax_symbol_symbol.semantic_key(parts)
         case _:
             return error(
                 diagnostics.diagnostic_at(
@@ -75,14 +83,14 @@ def predicate_key(expression: universal.Expression) -> string | diagnostics.Diag
             )
 
 
-def literal_integer(value: string, span: source.Span) -> universal.Expression:
-    return universal.Expression(
-        universal.LiteralValue(universal.IntegerValue(value)),
+def literal_integer(value: string, span: source.Span) -> model_syntax_function_function.Expression:
+    return model_syntax_function_function.Expression(
+        model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue(value)),
         span,
     )
 
 
-def stable_predicate_inputs(expression: universal.Expression, parameters: list[universal.FunctionParameter]) -> unit | diagnostics.Diagnostic:
+def stable_predicate_inputs(expression: model_syntax_function_function.Expression, parameters: list[model_syntax_function_function.FunctionParameter]) -> unit | diagnostics.Diagnostic:
     match expression.kind:
         case Name:
             for parameter in parameters:
@@ -103,18 +111,18 @@ def stable_predicate_inputs(expression: universal.Expression, parameters: list[u
             return error(diagnostics.diagnostic_at("E000219", "dispatch predicate needs stable scalar inputs", expression.span))
 
 
-def named(name: string, span: source.Span) -> universal.Expression:
-    return universal.Expression(universal.Name(name), span)
+def named(name: string, span: source.Span) -> model_syntax_function_function.Expression:
+    return model_syntax_function_function.Expression(model_syntax_function_function.Name(name), span)
 
 
-def binary(symbol: string, left: universal.Expression, right: universal.Expression, span: source.Span) -> universal.Expression:
-    return universal.Expression(
-        universal.Binary(
-            universal.OperatorSyntax(
+def binary(symbol: string, left: model_syntax_function_function.Expression, right: model_syntax_function_function.Expression, span: source.Span) -> model_syntax_function_function.Expression:
+    return model_syntax_function_function.Expression(
+        model_syntax_function_function.Binary(
+            model_syntax_function_syntax.OperatorSyntax(
                 symbol,
-                universal.Fixity.Infix,
+                model_syntax_function_syntax.Fixity.Infix,
                 30,
-                universal.Associativity.Left,
+                model_syntax_function_syntax.Associativity.Left,
             ),
             left,
             right,
@@ -123,13 +131,13 @@ def binary(symbol: string, left: universal.Expression, right: universal.Expressi
     )
 
 
-def guard(function: universal.FunctionDeclaration, span: source.Span) -> universal.Expression | diagnostics.Diagnostic:
-    condition := universal.Expression(
-        universal.LiteralValue(universal.BooleanValue(true)),
+def guard(function: model_syntax_function_function.FunctionDeclaration, span: source.Span) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
+    condition := model_syntax_function_function.Expression(
+        model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)),
         span,
     )
     for attachment in function.attachments:
-        if attachment.role == universal.AttachmentRole.Dispatch:
+        if attachment.role == model_syntax_constraint_model.AttachmentRole.Dispatch:
             predicate_key(attachment.condition)
             stable_predicate_inputs(attachment.condition, function.parameters)
             condition = binary("and", condition, attachment.condition, span)
@@ -138,12 +146,12 @@ def guard(function: universal.FunctionDeclaration, span: source.Span) -> univers
 
 # Each prefix is a reusable node. Its parent must pass before its next predicate
 # runs; two candidates sharing a prefix therefore evaluate it only once.
-def shared_guard(function: universal.FunctionDeclaration, span: source.Span, statements: list[universal.Statement], keys: list[string], names: list[string]) -> universal.Expression | diagnostics.Diagnostic:
-    prefix := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
+def shared_guard(function: model_syntax_function_function.FunctionDeclaration, span: source.Span, statements: list[model_syntax_sentence_sentence.Statement], keys: list[string], names: list[string]) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
+    prefix := model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), span)
     identity := "true"
     for attachment in function.attachments:
-        if attachment.role == universal.AttachmentRole.Dispatch:
-            identity = universal.semantic_key([identity, predicate_key(attachment.condition)])
+        if attachment.role == model_syntax_constraint_model.AttachmentRole.Dispatch:
+            identity = model_syntax_symbol_symbol.semantic_key([identity, predicate_key(attachment.condition)])
             selected := -1
             cursor := 0
             for key in keys:
@@ -156,8 +164,8 @@ def shared_guard(function: universal.FunctionDeclaration, span: source.Span, sta
                 name = "$dispatch$prefix$" + string(selected)
                 # Conditional makes the prerequisite explicit even when a
                 # user-defined boolean operator does not short-circuit.
-                condition = universal.Expression(universal.Conditional(prefix, attachment.condition, universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), span)), span)
-                statements.append(universal.BindingStatement(universal.Binding(name, None, condition, false, false, span)))
+                condition = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Conditional(prefix, attachment.condition, model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(false)), span)), span)
+                statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(name, None, condition, false, false, span)))
                 keys.append(identity)
                 names.append(name)
             prefix = named(names[selected], span)
@@ -167,18 +175,18 @@ def shared_guard(function: universal.FunctionDeclaration, span: source.Span, sta
 # Produce ordinary source-level control flow before callable registration. The
 # selected body is invoked only after every candidate's guard has been checked.
 # Arguments are wrapper parameters, so neither guards nor selection repeat them.
-def expand_dispatch(module: universal.Module, receiver: bool = false) -> universal.Module | diagnostics.Diagnostic:
+def expand_dispatch(module: model_hir_module_module.Module, receiver: bool = false) -> model_hir_module_module.Module | diagnostics.Diagnostic:
     # Expand method families before registration adds the nominal receiver.
     # Each record is a separate type-dispatch domain; predicates only distinguish
     # implementations within that domain and an identical callable signature.
     for item in module.items:
         match item:
             case Record:
-                methods: list[universal.Item] = []
+                methods: list[model_hir_module_module.Item] = []
                 for method in declaration.methods:
-                    methods.append(universal.Function(method))
-                expanded = expand_dispatch(universal.Module(methods), true)
-                replacements: list[universal.FunctionDeclaration] = []
+                    methods.append(model_hir_module_module.Function(method))
+                expanded = expand_dispatch(model_hir_module_module.Module(methods), true)
+                replacements: list[model_syntax_function_function.FunctionDeclaration] = []
                 for method in expanded.items:
                     match method:
                         case Function:
@@ -199,18 +207,18 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
             case Function:
                 if has_dispatch(declaration):
                     guarded_keys.append(
-                        universal.callable_key(declaration, declaration.name),
+                        model_syntax_symbol_symbol.callable_key(declaration, declaration.name),
                     )
             case _:
                 continue
     if len(guarded_keys) == 0:
         return module
     groups: list[string] = []
-    output: list[universal.Item] = []
+    output: list[model_hir_module_module.Item] = []
     for item in module.items:
         match item:
             case Function:
-                key = universal.callable_key(declaration, declaration.name)
+                key = model_syntax_symbol_symbol.callable_key(declaration, declaration.name)
                 guarded = key in guarded_keys
                 if not guarded:
                     output.append(item)
@@ -218,11 +226,11 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                 if key in groups:
                     continue
                 groups.append(key)
-                family: list[universal.FunctionDeclaration] = []
+                family: list[model_syntax_function_function.FunctionDeclaration] = []
                 for candidate_item in module.items:
                     match candidate_item:
                         case Function:
-                            if universal.callable_key(
+                            if model_syntax_symbol_symbol.callable_key(
                                 declaration,
                                 declaration.name,
                             ) == key:
@@ -252,7 +260,7 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                             ),
                         )
                     for parameter in first.parameters:
-                        name ?= universal.simple_type_name(parameter.annotation)
+                        name ?= model_syntax_type_annotation.simple_type_name(parameter.annotation)
                         if name == None:
                             return error(
                                 diagnostics.diagnostic_at(
@@ -278,10 +286,10 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                                     parameter.span,
                                 ),
                             )
-                    statements: list[universal.Statement] = []
+                    statements: list[model_syntax_sentence_sentence.Statement] = []
                     statements.append(
-                        universal.BindingStatement(
-                            universal.Binding(
+                        model_syntax_sentence_sentence.BindingStatement(
+                            model_syntax_sentence_sentence.Binding(
                                 "$dispatch$count",
                                 None,
                                 literal_integer("0", origin),
@@ -292,11 +300,11 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                             ),
                         ),
                     )
-                    calls: list[universal.Expression] = []
+                    calls: list[model_syntax_function_function.Expression] = []
                     guards: list[string] = []
                     predicate_keys: list[string] = []
                     candidate_names: list[string] = []
-                    candidate_predicates: list[universal.Expression] = []
+                    candidate_predicates: list[model_syntax_function_function.Expression] = []
                     prefix_keys: list[string] = []
                     prefix_names: list[string] = []
                     index := 0
@@ -321,9 +329,9 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                             return error(diagnostics.diagnostic_at("E000219", "dispatch candidates must have the same result", origin))
                         if result != None:
                             if first_result != None:
-                                if universal.annotation_key(
+                                if model_syntax_symbol_symbol.annotation_key(
                                     result,
-                                ) != universal.annotation_key(first_result):
+                                ) != model_syntax_symbol_symbol.annotation_key(first_result):
                                     return error(
                                         diagnostics.diagnostic_at(
                                             "E000219",
@@ -331,7 +339,7 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                                             origin,
                                         ),
                                     )
-                        arguments: list[universal.CallArgument] = []
+                        arguments: list[model_syntax_function_function.CallArgument] = []
                         cursor := 0
                         for parameter in candidate.parameters:
                             if parameter.name != first.parameters[cursor].name:
@@ -343,7 +351,7 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                                     ),
                                 )
                             arguments.append(
-                                universal.CallArgument(
+                                model_syntax_function_function.CallArgument(
                                     None,
                                     named(parameter.name, origin),
                                     origin,
@@ -366,8 +374,8 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                         flag = "$dispatch$guard$" + string(index)
                         guards.append(flag)
                         statements.append(
-                            universal.BindingStatement(
-                                universal.Binding(
+                            model_syntax_sentence_sentence.BindingStatement(
+                                model_syntax_sentence_sentence.Binding(
                                     flag,
                                     None,
                                     condition,
@@ -377,8 +385,8 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                                 ),
                             ),
                         )
-                        increment = universal.BindingStatement(
-                            universal.Binding(
+                        increment = model_syntax_sentence_sentence.BindingStatement(
+                            model_syntax_sentence_sentence.Binding(
                                 "$dispatch$count",
                                 None,
                                 binary(
@@ -393,35 +401,35 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                             ),
                         )
                         statements.append(
-                            universal.If(
+                            model_syntax_sentence_sentence.Statement.If(
                                 named(flag, origin),
-                                universal.Block([increment]),
-                                universal.empty_block(),
+                                model_syntax_block_block.Block([increment]),
+                                model_syntax_block_block.empty_block(),
                                 origin,
                             ),
                         )
                         candidate.name = family_name + "$dispatch$" + string(
                             index,
                         )
-                        candidate.semantic_key = universal.semantic_key(
+                        candidate.semantic_key = model_syntax_symbol_symbol.semantic_key(
                             [candidate.semantic_key, "dispatch", predicate_identity],
                         )
-                        candidate.definition = universal.definition_from_key(
+                        candidate.definition = model_syntax_symbol_symbol.definition_from_key(
                             candidate.semantic_key,
                         )
-                        contracts: list[universal.WithAttachment] = []
+                        contracts: list[model_syntax_constraint_model.WithAttachment] = []
                         for attachment in candidate.attachments:
-                            if attachment.role != universal.AttachmentRole.Dispatch:
+                            if attachment.role != model_syntax_constraint_model.AttachmentRole.Dispatch:
                                 contracts.append(attachment)
                         candidate.attachments = contracts
                         candidate_names.append(candidate.name)
-                        output.append(universal.Function(candidate))
+                        output.append(model_hir_module_module.Function(candidate))
                         target := named(candidate.name, origin)
                         if receiver:
-                            target = universal.Expression(universal.Member(named("self", origin), candidate.name), origin)
+                            target = model_syntax_function_function.Expression(model_syntax_function_function.Member(named("self", origin), candidate.name), origin)
                         calls.append(
-                            universal.Expression(
-                                universal.Call(
+                            model_syntax_function_function.Expression(
+                                model_syntax_function_function.Call(
                                     target,
                                     arguments,
                                 ),
@@ -429,16 +437,16 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                             ),
                         )
                         index += 1
-                    message = universal.Expression(
-                        universal.LiteralValue(
-                            universal.StringValue(
+                    message = model_syntax_function_function.Expression(
+                        model_syntax_function_function.ExpressionKind.LiteralValue(
+                            model_syntax_literal_value.StringValue(
                                 "dispatch requires exactly one matching implementation",
                             ),
                         ),
                         origin,
                     )
                     statements.append(
-                        universal.Assert(
+                        model_syntax_sentence_sentence.Assert(
                             binary(
                                 "==",
                                 named("$dispatch$count", origin),
@@ -450,26 +458,26 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                             origin,
                         ),
                     )
-                    tail := universal.empty_block()
+                    tail := model_syntax_block_block.empty_block()
                     index = int(len(calls))
                     result ?= first.result
                     is_unit := result == None
                     if result != None:
-                        is_unit = universal.simple_type_name(result) == "unit"
+                        is_unit = model_syntax_type_annotation.simple_type_name(result) == "unit"
                     while index > 0:
                         index -= 1
-                        branch = universal.Block(
-                            [universal.ExpressionStatement(
+                        branch = model_syntax_block_block.Block(
+                            [model_syntax_sentence_sentence.ExpressionStatement(
                                 calls[index],
-                            ), universal.Return(None, origin)],
-                        ) if is_unit else universal.Block(
-                            [universal.Return(calls[index], origin)],
+                            ), model_syntax_sentence_sentence.Statement.Return(None, origin)],
+                        ) if is_unit else model_syntax_block_block.Block(
+                            [model_syntax_sentence_sentence.Statement.Return(calls[index], origin)],
                         )
                         if index == int(len(calls)) - 1:
                             tail = branch
                         else:
-                            tail = universal.Block(
-                                [universal.If(
+                            tail = model_syntax_block_block.Block(
+                                [model_syntax_sentence_sentence.Statement.If(
                                     named(guards[index], origin),
                                     branch,
                                     tail,
@@ -478,25 +486,25 @@ def expand_dispatch(module: universal.Module, receiver: bool = false) -> univers
                             )
                     for statement in tail.statements:
                         statements.append(statement)
-                    wrapper = universal.FunctionDeclaration(
+                    wrapper = model_syntax_function_function.FunctionDeclaration(
                         name=family_name,
                         parameters=first.parameters,
                         result=first.result,
-                        body=universal.Block(statements),
+                        body=model_syntax_block_block.Block(statements),
                         span=first.span,
                         lookup=first.lookup,
                         result_mode=first.result_mode,
                         prelude=first.prelude,
                     )
-                    wrapper.semantic_key = universal.semantic_key(
+                    wrapper.semantic_key = model_syntax_symbol_symbol.semantic_key(
                         [family_identity, "dispatch-family"],
                     )
-                    wrapper.definition = universal.definition_from_key(
+                    wrapper.definition = model_syntax_symbol_symbol.definition_from_key(
                         wrapper.semantic_key,
                     )
                     wrapper.dispatch_candidates = candidate_names
                     wrapper.dispatch_predicates = candidate_predicates
-                    output.append(universal.Function(wrapper))
+                    output.append(model_hir_module_module.Function(wrapper))
             case _:
                 output.append(item)
     module.items = output

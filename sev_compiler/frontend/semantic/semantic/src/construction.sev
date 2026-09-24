@@ -1,10 +1,13 @@
-import universal
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 
 
 # A constructor initializes typed field locals, then returns the ordinary
 # record value. Missing initialization is diagnosed as an unbound field.
-def factory(record: universal.RecordDeclaration, method: universal.FunctionDeclaration) -> universal.FunctionDeclaration:
-    statements: list[universal.Statement] = []
+def factory(record: model_syntax_function_function.RecordDeclaration, method: model_syntax_function_function.FunctionDeclaration) -> model_syntax_function_function.FunctionDeclaration:
+    statements: list[model_syntax_sentence_sentence.Statement] = []
     initialized: list[string] = []
     for parameter in method.parameters:
         initialized.append(parameter.name)
@@ -19,17 +22,17 @@ def factory(record: universal.RecordDeclaration, method: universal.FunctionDecla
                             if field.name == local.name:
                                 local.annotation = field.annotation
                         initialized.append(local.name)
-                    statements.append(universal.BindingStatement(local))
+                    statements.append(model_syntax_sentence_sentence.BindingStatement(local))
                 case _:
                     statements.append(statement)
-    fields: list[universal.CallArgument] = []
+    fields: list[model_syntax_function_function.CallArgument] = []
     for field in record.fields:
         value ?= field.default
         if field.name not in initialized:
             if value != None:
-                statements.append(universal.BindingStatement(universal.Binding(field.name, field.annotation, value, false, false, field.span)))
-        reference = universal.Expression(universal.Name(field.name), field.span)
-        fields.append(universal.CallArgument(field.name, reference, field.span))
-    result = universal.Expression(universal.RecordValue(fields), record.span, type_id=record.type_id)
-    statements.append(universal.Return(result, record.span))
-    return universal.FunctionDeclaration(name=record.name + "$construct", parameters=method.parameters, result=universal.named_type(record.name, [], record.span), body=universal.Block(statements), span=method.span, lookup=record.lookup, owner_type=record.type_id, constructor=true)
+                statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(field.name, field.annotation, value, false, false, field.span)))
+        reference = model_syntax_function_function.Expression(model_syntax_function_function.Name(field.name), field.span)
+        fields.append(model_syntax_function_function.CallArgument(field.name, reference, field.span))
+    result = model_syntax_function_function.Expression(model_syntax_function_function.RecordValue(fields), record.span, type_id=record.type_id)
+    statements.append(model_syntax_sentence_sentence.Statement.Return(result, record.span))
+    return model_syntax_function_function.FunctionDeclaration(name=record.name + "$construct", parameters=method.parameters, result=model_syntax_type_annotation.named_type(record.name, [], record.span), body=model_syntax_block_block.Block(statements), span=method.span, lookup=record.lookup, owner_type=record.type_id, constructor=true)

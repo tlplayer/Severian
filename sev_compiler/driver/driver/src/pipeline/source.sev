@@ -1,4 +1,10 @@
-from universal import scalar_declarations as boundary
+import lowering
+import * from "../../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
+import * from "../../../../hir/module/hierarchy.sev" as model_hir_module_hierarchy
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import * from "../../../../syntax/function/lowering.sev" as boundary
 import * from "package:mir/mir/src/agent_ir.sev" as agent_ir
 import * from "package:mir/mir/src/semantic_graph.sev" as semantic_graph
 import source
@@ -8,7 +14,6 @@ import os
 import package
 import lexer
 import parser
-import universal
 import diagnostics
 from diagnostics import Diagnostic
 from semantic import callable as semantic
@@ -19,8 +24,8 @@ import * from "package:modules/modules/src/source.sev"
 import * from "timing.sev" as timing
 import * from "package_interface.sev" as package_interface
 import * from "mir_archive.sev" as mir_archive
-import * from "package:interface/src/semantic_payload.sev" as semantic_payload
-import * from "package:backend/src/native_mlir.sev" as native
+import * from "package:interface/interface/src/semantic_payload.sev" as semantic_payload
+import * from "package:backend/backend/src/native_mlir.sev" as native
 import * from "quality.sev" as quality
 import * from "editor.sev" as editor
 import * from "prelude_package.sev" as prelude_package
@@ -30,7 +35,7 @@ from semantic import definitions
 class PreludeSnapshot:
     root: string
     owner: int
-    module: universal.Module
+    module: model_hir_module_module.Module
     registry: lexer.SyntaxRegistry
     files: list[source.SourceFile]
     prepared: list[semantic.PreludeAnalysis] = []
@@ -60,9 +65,9 @@ def prepare_prelude(sysroot: string) -> unit | Error:
         throw Error(diagnostics.render(framed, files))
 
 
-def prelude_providers(file: source.SourceFile) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:
+def prelude_providers(file: source.SourceFile) -> list[model_syntax_function_syntax.ImportDeclaration] | diagnostics.Diagnostic:
     input = parser.Parser(lexer.scan_bootstrap(file))
-    result: list[universal.ImportDeclaration] = []
+    result: list[model_syntax_function_syntax.ImportDeclaration] = []
     parser.parser_separators(input)
     while not parser.parser_at_simple(input, lexer.TokenKind.Eof):
         if not parser.parser_at_identifier(input, "import"):
@@ -83,7 +88,7 @@ def load_input(path: string) -> source.SourceFile | Error:
     throw Error("could not read source file: " + path)
 
 
-def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = [], quality_maps: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = [], object_outputs: list[string] = [], semantic_outputs: list[string] = []) -> string | Error:
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = [], quality_maps: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = [], object_outputs: list[boundary.MlirObject] = [], semantic_outputs: list[string] = []) -> string | Error:
     result ?= compile_source(input, include_tests, sysroot, files, emit, resolution, interface=interface, quality_maps=quality_maps, requirements=requirements, mir_outputs=mir_outputs, object_outputs=object_outputs, semantic_outputs=semantic_outputs)
     if result is string:
         return result
@@ -95,7 +100,7 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     throw Error("source compilation returned no MLIR")
 
 
-def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = [], prelude_entry: string = "", archive_output: string = "", requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = [], object_outputs: list[string] = [], semantic_outputs: list[string] = []) -> string | diagnostics.Diagnostic:
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = [], prelude_entry: string = "", archive_output: string = "", requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = [], object_outputs: list[boundary.MlirObject] = [], semantic_outputs: list[string] = []) -> string | diagnostics.Diagnostic:
     if emit == "blocks":
         return parser.format_blocks(parser.parse_blocks(input, parser.standard_block_syntax()))
     timings = timing.begin()
@@ -107,13 +112,13 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     subject_path = normalized_path(input.path if input.path.starts_with("/") else working_directory + "/" + input.path)
     subject_loaded := false
     initializer_namespace := ""
-    parsed := universal.empty_module()
+    parsed := model_hir_module_module.empty_module()
     reused := false
     prepared: list[semantic.PreludeAnalysis] := []
     provider_items := 0
     source_provider := false
     if subject_path.starts_with(root + "/sev_compiler/") or subject_path.starts_with(root + "/library/"):
-        original_prelude = read_source(root + "/sev_compiler/universal/prelude.sev")
+        original_prelude = read_source(root + "/library/prelude/prelude.sev")
         for provider in prelude_providers(original_prelude):
             match provider.subject:
                 case Locator:
@@ -173,8 +178,8 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         catch failure: Error:
             return error(diagnostics.diagnostic("E000120", failure.message))
     if not reused:
-        prelude = registered_source(read_source(prelude_entry if prelude_entry != "" else root + "/sev_compiler/universal/prelude.sev"), files)
-        policy = registered_source(read_source(parent_path(prelude_entry) + "/prelude.toml" if prelude_entry != "" else root + "/sev_compiler/universal/prelude.toml"), files)
+        prelude = registered_source(read_source(prelude_entry if prelude_entry != "" else root + "/library/prelude/prelude.sev"), files)
+        policy = registered_source(read_source(parent_path(prelude_entry) + "/prelude.toml" if prelude_entry != "" else root + "/library/prelude/prelude.toml"), files)
         policy_entries = package.parse_document(policy.text)
         reserved = package.string_array(package.setting(policy_entries, "prelude", "functions", "[]"))
         excluded: list[string] := []
@@ -207,7 +212,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                 initializer_namespace = namespace
             library = load_source_module(input if is_subject else read_known_source(provider_path, files), namespace, [], is_subject, files, registry, resolution if prelude_entry != "" else package.Resolution([], [], ""), sysroot=root)
             if selected_name != None:
-                aliases = universal.empty_module()
+                aliases = model_hir_module_module.empty_module()
                 exposed := selected_name
                 if supplied != None:
                     exposed = supplied
@@ -221,7 +226,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                         if not provider_function.name.contains(".") and provider_function.name not in reserved:
                             reserved.append(provider_function.name)
                         provider_function.prelude = true
-                        parsed.items.append(universal.Function(provider_function))
+                        parsed.items.append(model_hir_module_module.Function(provider_function))
                         if not provider_function.name.contains(".") and provider_function.name not in excluded and provider_function.name not in parsed.reserved_functions:
                             parsed.reserved_functions.append(provider_function.name)
                     case _:
@@ -289,7 +294,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                     if "compiler" in declaration.source_modes:
                         prepared = []
                 case _:
-                    throw diagnostics.diagnostic("E000120", "unimplemented (sev_compiler/boundaries/driver/src/pipeline/source.sev)")
+                    continue
     if len(prepared) > 0:
         parsed.items = parsed.items[provider_items:]
     typed = semantic.analyze_registered_callables(parsed, include_tests, [], [], [], definitions.SemanticDefinitions(), initializer_namespace, files, prepared, captured)
@@ -333,7 +338,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     catch failure: Error:
         return error(diagnostics.diagnostic("E000230", failure.message))
     lowered = mir.build_callables(typed, library_sources, export_names)
-    graph := universal.DefinitionGraph()
+    graph := model_frontend_modules_graph_model.DefinitionGraph()
     planned_objects: list[package.ObjectUnit] = []
     package_graph := ""
     try:
@@ -341,11 +346,11 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         for file in files:
             locations.append(file.path)
         membership = package.semantic_plan(resolution, locations)
-        owners: list[universal.SourceUnit] = []
+        owners: list[model_frontend_modules_graph_model.SourceUnit] = []
         index := 0
         root_unit := 0
         for file in files:
-            owners.append(universal.SourceUnit(file.id, membership.sources[index].unit, package.semantic_unit_key(membership.units[membership.sources[index].unit])))
+            owners.append(model_frontend_modules_graph_model.SourceUnit(file.id, membership.sources[index].unit, package.semantic_unit_key(membership.units[membership.sources[index].unit])))
             if file.path == subject_path:
                 root_unit = membership.sources[index].unit
             index += 1
@@ -353,7 +358,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         lowered.hierarchy.modules = []
         lowered.hierarchy.submodules = []
         for unit in membership.units:
-            library_key = universal.semantic_key([unit.package.name, unit.package.version, unit.package.source])
+            library_key = model_syntax_symbol_symbol.semantic_key([unit.package.name, unit.package.version, unit.package.source])
             library_index := -1
             cursor := 0
             for library in lowered.hierarchy.libraries:
@@ -362,8 +367,8 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                 cursor += 1
             if library_index < 0:
                 library_index = int(len(lowered.hierarchy.libraries))
-                lowered.hierarchy.libraries.append(universal.SemanticLibrary(library_key))
-            module_key = universal.semantic_key([library_key, unit.module])
+                lowered.hierarchy.libraries.append(model_hir_module_hierarchy.SemanticLibrary(library_key))
+            module_key = model_syntax_symbol_symbol.semantic_key([library_key, unit.module])
             module_index := -1
             cursor = 0
             for semantic_module in lowered.hierarchy.modules:
@@ -372,8 +377,8 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                 cursor += 1
             if module_index < 0:
                 module_index = int(len(lowered.hierarchy.modules))
-                lowered.hierarchy.modules.append(universal.SemanticModule(module_key, library_index))
-            lowered.hierarchy.submodules.append(universal.SemanticSubmodule(package.semantic_unit_key(unit), module_index))
+                lowered.hierarchy.modules.append(model_hir_module_hierarchy.SemanticModule(module_key, library_index))
+            lowered.hierarchy.submodules.append(model_hir_module_hierarchy.SemanticSubmodule(package.semantic_unit_key(unit), module_index))
         graph = semantic_graph.build(lowered, owners, root_unit)
         planned_objects = package.object_units(membership, root_unit)
         dependents: list[int] = []
@@ -401,7 +406,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     requirements.quality = len(lowered.quality_files) > 0
     if emit == "library" and len(export_names) > 0:
         interface[0] = package_interface.scalar_interface(typed, resolution, [], [], requirements.libraries)
-    program = mlir.lower_callables(lowered, emit == "library", export_names, export_symbols)
+    program = lowering.lower(lowered, emit == "library", export_names, export_symbols)
     if len(requirements.passes) > 0:
         program.attributes.append(mlir.MlirNamedAttribute("sev.lowering.passes", mlir.string_array_attribute(requirements.passes)))
     if len(requirements.libraries) > 0:
@@ -415,7 +420,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                     case TypeLayout:
                         layout_query = true
                     case _:
-                        throw diagnostics.diagnostic("E000120", "unimplemented (sev_compiler/boundaries/driver/src/pipeline/source.sev)")
+                        continue
     if layout_query:
         layout = native.hosted_layout()
         program.attributes.append(mlir.MlirNamedAttribute("llvm.data_layout", mlir.string_attribute_value(layout.data_layout)))
@@ -426,13 +431,13 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
             selected: list[int] = []
             for function in lowered.functions:
                 for node in graph.nodes:
-                    if universal.same_definition(node.definition, function.definition) and node.submodule in object.submodules:
+                    if model_syntax_symbol_symbol.same_definition(node.definition, function.definition) and node.submodule in object.submodules:
                         selected.append(int(function.id.value))
             if len(selected) == 0 and not object.entry:
                 continue
-            part = mlir.lower_callables(lowered, not object.entry, [], [], selected, true)
+            part = lowering.lower(lowered, not object.entry, [], [], selected, true)
             part.attributes = program.attributes[:]
-            object_outputs.append(text.print_program(part))
+            object_outputs.append(boundary.MlirObject(object.key, text.print_program(part), object.entry))
     result = text.print_program(program)
     timing.finish_stage(timings, "print")
     return result

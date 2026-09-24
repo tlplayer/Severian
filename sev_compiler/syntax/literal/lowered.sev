@@ -1,0 +1,8 @@
+enum Constant:
+    Integer(value: string)
+    Float(value: string)
+    Boolean(value: bool)
+    String(value: string)
+    Bytes(value: list[u8])
+    NoneValue
+    Unit

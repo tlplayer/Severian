@@ -1,0 +1,40 @@
+{
+  "package": {
+    "name": "sev-mlir-backend",
+    "version": "0.1.0",
+    "edition": "2026"
+  },
+  "lib": {
+    "name": "backend",
+    "path": "backend/src/lib.sev"
+  },
+  "dependencies": {
+    "syntax": {
+      "path": "../../../../sev_compiler/syntax",
+      "package": "sev-compiler-syntax"
+    },
+    "environment": {
+      "path": "../../../system/environment",
+      "package": "environment"
+    },
+    "file": {
+      "path": "../../../system/file",
+      "package": "file"
+    },
+    "path": {
+      "path": "../../../system/path",
+      "package": "path"
+    },
+    "process": {
+      "path": "../../../system/process",
+      "package": "process"
+    },
+    "package": {
+      "path": "../..",
+      "package": "package"
+    },
+    "os": {
+      "path": "../../../system/os"
+    }
+  }
+}

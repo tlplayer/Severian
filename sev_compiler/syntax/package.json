@@ -8,5 +8,18 @@
   "lib": {
     "path": "syntax/src/lib.sev"
   },
-  "dependencies": {}
+  "dependencies": {
+    "source": {
+      "path": "../frontend/source",
+      "package": "sev-compiler-source"
+    },
+    "primitives": {
+      "path": "primitive",
+      "package": "sev-compiler-primitives"
+    },
+    "diagnostics": {
+      "path": "diagnostics",
+      "package": "sev-compiler-diagnostics"
+    }
+  }
 }

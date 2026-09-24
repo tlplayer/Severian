@@ -127,6 +127,7 @@ conversion edges.
 '''
 class f8e4m3fn: Floating :
     identity: PrimitiveId = F8E4M3FnPrimitive().identity
+    mlir: MlirTypeBinding = F8E4M3FnPrimitive().mlir
     id: TypeId = F8E4M3FnPrimitive().id
     literal: LiteralSyntax | None = F8E4M3FnPrimitive().literal
     literal_family: string = F8E4M3FnPrimitive().literal_family
@@ -148,6 +149,7 @@ class f8e4m3fn: Floating :
 
 class f8e5m2: Floating :
     identity: PrimitiveId = F8E5M2Primitive().identity
+    mlir: MlirTypeBinding = F8E5M2Primitive().mlir
     id: TypeId = F8E5M2Primitive().id
     literal: LiteralSyntax | None = F8E5M2Primitive().literal
     literal_family: string = F8E5M2Primitive().literal_family
@@ -169,6 +171,7 @@ class f8e5m2: Floating :
 
 class bf16: Floating :
     identity: PrimitiveId = BF16Primitive().identity
+    mlir: MlirTypeBinding = BF16Primitive().mlir
     id: TypeId = BF16Primitive().id
     literal: LiteralSyntax | None = BF16Primitive().literal
     literal_family: string = BF16Primitive().literal_family
@@ -190,6 +193,7 @@ class bf16: Floating :
 
 class f16: Floating :
     identity: PrimitiveId = F16Primitive().identity
+    mlir: MlirTypeBinding = F16Primitive().mlir
     id: TypeId = F16Primitive().id
     literal: LiteralSyntax | None = F16Primitive().literal
     literal_family: string = F16Primitive().literal_family
@@ -211,6 +215,7 @@ class f16: Floating :
 
 class f32: Floating :
     identity: PrimitiveId = F32Primitive().identity
+    mlir: MlirTypeBinding = F32Primitive().mlir
     id: TypeId = F32Primitive().id
     literal: LiteralSyntax | None = F32Primitive().literal
     literal_family: string = F32Primitive().literal_family
@@ -232,6 +237,7 @@ class f32: Floating :
 
 class f64: Floating :
     identity: PrimitiveId = F64Primitive().identity
+    mlir: MlirTypeBinding = F64Primitive().mlir
     id: TypeId = F64Primitive().id
     literal: LiteralSyntax | None = F64Primitive().literal
     literal_family: string = F64Primitive().literal_family
@@ -253,6 +259,7 @@ class f64: Floating :
 
 class f128: Floating :
     identity: PrimitiveId = F128Primitive().identity
+    mlir: MlirTypeBinding = F128Primitive().mlir
     id: TypeId = F128Primitive().id
     literal: LiteralSyntax | None = F128Primitive().literal
     literal_family: string = F128Primitive().literal_family
@@ -306,6 +313,7 @@ single MLIR primitive operations.
 
 class float: Floating:
     identity: PrimitiveId = F64Primitive().identity
+    mlir: MlirTypeBinding = F64Primitive().mlir
     id: TypeId = F64Primitive().id
     literal: LiteralSyntax | None = F64Primitive().literal
     literal_family: string = F64Primitive().literal_family

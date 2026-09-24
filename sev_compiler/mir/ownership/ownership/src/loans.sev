@@ -1,4 +1,4 @@
-import universal
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
 import diagnostics
 import source
 
@@ -9,7 +9,7 @@ class Loan:
     exclusive: bool
 
 
-def constant_index(expression: universal.Expression) -> int:
+def constant_index(expression: model_syntax_function_function.Expression) -> int:
     match expression.kind:
         case LiteralValue:
             match value:
@@ -22,7 +22,7 @@ def constant_index(expression: universal.Expression) -> int:
     return -1
 
 
-def binding(expression: universal.Expression) -> int:
+def binding(expression: model_syntax_function_function.Expression) -> int:
     if expression.loan_root >= 0:
         return expression.loan_root
     match expression.kind:

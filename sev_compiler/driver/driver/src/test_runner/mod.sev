@@ -1,3 +1,4 @@
+import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
 import * from "../pipeline/mod.sev"
 
 class TestResult:
@@ -15,10 +16,10 @@ throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.s
     for expectation in test.expectations:
         match expectation:
             case Contains:
-                stream_value = output.stdout if stream == universal.Stdout else output.stderr
+                stream_value = output.stdout if stream == model_syntax_function_syntax.Stdout else output.stderr
                 throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.sev)")ed = passed and stream_value.contains(value)
             case Equals:
-                stream_value = output.stdout if stream == universal.Stdout else output.stderr
+                stream_value = output.stdout if stream == model_syntax_function_syntax.Stdout else output.stderr
                 throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.sev)")ed = passed and stream_value == value
     return TestResult(test.name, passed, time.monotonic_milliseconds() - started, output.stdout, output.stderr)
 

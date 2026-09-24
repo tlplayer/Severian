@@ -1,9 +1,9 @@
 import * from "../ir/lib.sev"
-from universal import encoding
+import * from "../../../../../syntax/primitive/char/encoding.sev" as encoding
 
 
 def utf8_view_type() -> MlirType:
-    return memref_type(MlirScalarType(IntegerScalar, 8, false, 0), [-1])
+    return memref_type(integer_type(8, false).scalar, [-1])
 
 
 # Byte attributes are immutable IR values. Reuse the 256 possible descriptors

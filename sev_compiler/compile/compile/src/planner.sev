@@ -1,10 +1,15 @@
+import * from "../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../mir/value.sev" as model_mir_value
+import * from "../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import artifact
 import mir
 import universal
 import * from "error.sev"
 import * from "model.sev"
 
-def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
+def operation_inputs(operation: model_syntax_function_function.Operation) -> list[model_syntax_symbol_symbol.ValueId]:
     match operation:
         case Unary:
             return [operand]
@@ -17,7 +22,7 @@ def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
         case Assert:
             return [condition, message] if message != None else [condition]
         case If:
-            result: list[universal.ValueId] = [condition]
+            result: list[model_syntax_symbol_symbol.ValueId] = [condition]
             for nested in then_block.operations:
                 for value in operation_inputs(nested):
                     result.append(value)
@@ -33,7 +38,7 @@ def operation_inputs(operation: universal.Operation) -> list[universal.ValueId]:
             return []
 
 
-def operation_outputs(operation: universal.Operation) -> list[universal.ValueId]:
+def operation_outputs(operation: model_syntax_function_function.Operation) -> list[model_syntax_symbol_symbol.ValueId]:
     match operation:
         case Constant:
             return [result]
@@ -49,21 +54,21 @@ def operation_outputs(operation: universal.Operation) -> list[universal.ValueId]
             return []
 
 
-def operation_route(operation: universal.Operation, values: map[universal.ValueId, universal.Value], types: universal.TypeContext, index: int) -> universal.CompileRoute | CompileError:
+def operation_route(operation: model_syntax_function_function.Operation, values: map[model_syntax_symbol_symbol.ValueId, model_mir_value.Value], types: universal.TypeContext, index: int) -> model_syntax_function_function.CompileRoute | CompileError:
     match operation:
         case CompiledRegionCall:
             return error(PlannerGeneratedOperation(index))
         case Coverage:
-            return universal.Standard
+            return model_syntax_function_function.Standard
         case Return:
-            return universal.Standard
+            return model_syntax_function_function.Standard
         case Assert:
-            return universal.Standard
+            return model_syntax_function_function.Standard
         case If:
-            return universal.Standard
+            return model_syntax_function_function.Standard
         case Match:
-            return universal.Standard
-    compilers: set[universal.CompilerId] = set()
+            return model_syntax_function_function.Standard
+    compilers: set[model_syntax_symbol_symbol.CompilerId] = set()
     all_values = operation_inputs(operation) + operation_outputs(operation)
     for value_id in all_values:
         value = values.get(value_id)
@@ -74,23 +79,23 @@ def operation_route(operation: universal.Operation, values: map[universal.ValueI
             case Compiler:
                 compilers.add(compiler)
     if len(compilers) == 0:
-        return universal.Standard
+        return model_syntax_function_function.Standard
     if len(compilers) == 1:
-        return universal.Compiler(compilers.values()[0])
+        return model_syntax_function_function.Compiler(compilers.values()[0])
     return error(ConflictingCompilers(index, compilers.values()))
 
 
-def build_region(id: universal.CompiledRegionId, compiler: universal.CompilerId, operations: list[universal.Operation], values: map[universal.ValueId, universal.Value]) -> CompileRegion | CompileError:
-    produced: set[universal.ValueId] = set()
+def build_region(id: model_syntax_symbol_symbol.CompiledRegionId, compiler: model_syntax_symbol_symbol.CompilerId, operations: list[model_syntax_function_function.Operation], values: map[model_syntax_symbol_symbol.ValueId, model_mir_value.Value]) -> CompileRegion | CompileError:
+    produced: set[model_syntax_symbol_symbol.ValueId] = set()
     for operation in operations:
         for output in operation_outputs(operation):
             produced.add(output)
-    inputs: list[universal.Value] = []
+    inputs: list[model_mir_value.Value] = []
     for operation in operations:
         for input in operation_inputs(operation):
             if input not in produced and not inputs.contains(values[input]):
                 inputs.append(values[input])
-    outputs: list[universal.Value] = []
+    outputs: list[model_mir_value.Value] = []
     for output in produced:
         outputs.append(values[output])
     effects = EffectSet(false, false, false)
@@ -103,18 +108,18 @@ def build_region(id: universal.CompiledRegionId, compiler: universal.CompilerId,
     return CompileRegion(id, compiler, operations, inputs, outputs, effects)
 
 
-def plan_block(block: universal.Block, values: map[universal.ValueId, universal.Value], types: universal.TypeContext, next_region: u32) -> tuple[PlannedBlock, u32] | CompileError:
+def plan_block(block: model_syntax_block_block.Block, values: map[model_syntax_symbol_symbol.ValueId, model_mir_value.Value], types: universal.TypeContext, next_region: u32) -> tuple[PlannedBlock, u32] | CompileError:
     segments: list[PlanSegment] = []
-    current_standard: list[universal.Operation] = []
-    current_custom: list[universal.Operation] = []
-    current_compiler: universal.CompilerId | None = None
+    current_standard: list[model_syntax_function_function.Operation] = []
+    current_custom: list[model_syntax_function_function.Operation] = []
+    current_compiler: model_syntax_symbol_symbol.CompilerId | None = None
 
     for index, operation in block.operations.enumerated():
         route = operation_route(operation, values, types, index)
         match route:
             case Standard:
                 if len(current_custom) > 0:
-                    segments.append(Compiler(build_region(universal.CompiledRegionId(next_region), current_compiler, current_custom, values)))
+                    segments.append(Compiler(build_region(model_syntax_symbol_symbol.CompiledRegionId(next_region), current_compiler, current_custom, values)))
                     next_region += 1
                     current_custom = []
                     current_compiler = None
@@ -124,7 +129,7 @@ def plan_block(block: universal.Block, values: map[universal.ValueId, universal.
                     segments.append(Standard(StandardRegion(current_standard)))
                     current_standard = []
                 if current_compiler != None and current_compiler != compiler:
-                    segments.append(Compiler(build_region(universal.CompiledRegionId(next_region), current_compiler, current_custom, values)))
+                    segments.append(Compiler(build_region(model_syntax_symbol_symbol.CompiledRegionId(next_region), current_compiler, current_custom, values)))
                     next_region += 1
                     current_custom = []
                 current_compiler = compiler
@@ -133,13 +138,13 @@ def plan_block(block: universal.Block, values: map[universal.ValueId, universal.
     if len(current_standard) > 0:
         segments.append(Standard(StandardRegion(current_standard)))
     if len(current_custom) > 0:
-        segments.append(Compiler(build_region(universal.CompiledRegionId(next_region), current_compiler, current_custom, values)))
+        segments.append(Compiler(build_region(model_syntax_symbol_symbol.CompiledRegionId(next_region), current_compiler, current_custom, values)))
         next_region += 1
     return (PlannedBlock(block, segments), next_region)
 
 
-def plan(module: universal.Module, types: universal.TypeContext) -> CompilePlan | CompileError:
-    values: map[universal.ValueId, universal.Value] = {}
+def plan(module: model_hir_module_module.Module, types: universal.TypeContext) -> CompilePlan | CompileError:
+    values: map[model_syntax_symbol_symbol.ValueId, model_mir_value.Value] = {}
     for value in module.values:
         values[value.id] = value
     next_region: u32 = 0

@@ -1,7 +1,9 @@
+import * from "mlir.sev"
 import * from "package:syntax/syntax/src/lib.sev"
 
 
 class BoolPrimitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i1", "integer", 1)
     identity: PrimitiveId = PrimitiveId(DeclarationId(1))
     id: TypeId = TypeId(1)
     name: string = "bool"
@@ -21,6 +23,7 @@ def bool_type_id() -> TypeId:
 
 
 class UnitPrimitive: Primitive
+    mlir: MlirTypeBinding = MlirTypeBinding("", value=false)
     identity: PrimitiveId = PrimitiveId(DeclarationId(2))
     id: TypeId = TypeId(2)
     name: string = "unit"
@@ -40,6 +43,7 @@ def unit_type_id() -> TypeId:
 
 
 class StringPrimitive: Primitive
+    mlir: MlirTypeBinding = MlirTypeBinding("memref<?xi8>", "memref", dimensions=1, elements=0)
     identity: PrimitiveId = PrimitiveId(DeclarationId(3))
     id: TypeId = TypeId(3)
     name: string = "string"
@@ -59,6 +63,7 @@ def string_type_id() -> TypeId:
 
 
 class IndexPrimitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("index", "index")
     identity: PrimitiveId = PrimitiveId(DeclarationId(4))
     id: TypeId = TypeId(4)
     name: string = "index"
@@ -78,6 +83,7 @@ def index_type_id() -> TypeId:
 
 
 class PointerPrimitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("!llvm.ptr", "pointer")
     identity: PrimitiveId = PrimitiveId(DeclarationId(5))
     id: TypeId = TypeId(5)
     name: string = "pointer"
@@ -97,6 +103,7 @@ def pointer_type_id() -> TypeId:
 
 
 class NoneValuePrimitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("!llvm.ptr", "pointer")
     identity: PrimitiveId = PrimitiveId(DeclarationId(6))
     id: TypeId = TypeId(6)
     name: string = "None"
@@ -116,6 +123,7 @@ def none_type_id() -> TypeId:
 
 
 class AbsentPrimitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("!llvm.ptr", "pointer")
     identity: PrimitiveId = PrimitiveId(DeclarationId(7))
     id: TypeId = TypeId(7)
     name: string = "absent"
@@ -135,6 +143,7 @@ def absent_type_id() -> TypeId:
 
 
 class F32Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f32", "ieee_float", 32, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(163))
     id: TypeId = TypeId(163)
     name: string = "f32"
@@ -154,6 +163,7 @@ def f32_type_id() -> TypeId:
 
 
 class F64Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f64", "ieee_float", 64, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(164))
     id: TypeId = TypeId(164)
     name: string = "f64"
@@ -173,6 +183,7 @@ def f64_type_id() -> TypeId:
 
 
 class U8Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i8", "integer", 8, false)
     identity: PrimitiveId = PrimitiveId(DeclarationId(108))
     id: TypeId = TypeId(108)
     name: string = "u8"
@@ -192,6 +203,7 @@ def u8_type_id() -> TypeId:
 
 
 class U16Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i16", "integer", 16, false)
     identity: PrimitiveId = PrimitiveId(DeclarationId(516))
     id: TypeId = TypeId(516)
     name: string = "u16"
@@ -211,6 +223,7 @@ def u16_type_id() -> TypeId:
 
 
 class U32Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i32", "integer", 32, false)
     identity: PrimitiveId = PrimitiveId(DeclarationId(532))
     id: TypeId = TypeId(532)
     name: string = "u32"
@@ -230,6 +243,7 @@ def u32_type_id() -> TypeId:
 
 
 class U64Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i64", "integer", 64, false)
     identity: PrimitiveId = PrimitiveId(DeclarationId(564))
     id: TypeId = TypeId(564)
     name: string = "u64"
@@ -249,6 +263,7 @@ def u64_type_id() -> TypeId:
 
 
 class CharPrimitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i32", "integer", 32, false)
     identity: PrimitiveId = PrimitiveId(DeclarationId(132))
     id: TypeId = TypeId(132)
     name: string = "char"
@@ -268,6 +283,7 @@ def char_type_id() -> TypeId:
 
 
 class I8Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i8", "integer", 8, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(8))
     id: TypeId = TypeId(8)
     name: string = "i8"
@@ -287,6 +303,7 @@ def i8_type_id() -> TypeId:
 
 
 class I16Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i16", "integer", 16, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(16))
     id: TypeId = TypeId(16)
     name: string = "i16"
@@ -306,6 +323,7 @@ def i16_type_id() -> TypeId:
 
 
 class I32Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i32", "integer", 32, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(32))
     id: TypeId = TypeId(32)
     name: string = "i32"
@@ -325,6 +343,7 @@ def i32_type_id() -> TypeId:
 
 
 class I64Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i64", "integer", 64, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(64))
     id: TypeId = TypeId(64)
     name: string = "i64"
@@ -344,6 +363,7 @@ def i64_type_id() -> TypeId:
 
 
 class I128Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i128", "integer", 128, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(128))
     id: TypeId = TypeId(128)
     name: string = "i128"
@@ -363,6 +383,7 @@ def i128_type_id() -> TypeId:
 
 
 class U128Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i128", "integer", 128, false)
     identity: PrimitiveId = PrimitiveId(DeclarationId(628))
     id: TypeId = TypeId(628)
     name: string = "u128"
@@ -382,6 +403,7 @@ def u128_type_id() -> TypeId:
 
 
 class F16Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f16", "ieee_float", 16, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(162))
     id: TypeId = TypeId(162)
     name: string = "f16"
@@ -401,6 +423,7 @@ def f16_type_id() -> TypeId:
 
 
 class F128Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f128", "ieee_float", 128, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(168))
     id: TypeId = TypeId(168)
     name: string = "f128"
@@ -420,6 +443,7 @@ def f128_type_id() -> TypeId:
 
 
 class F8E4M3FnPrimitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f8E4M3FN", "f8e4m3fn", 8, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(180))
     id: TypeId = TypeId(180)
     name: string = "f8e4m3fn"
@@ -439,6 +463,7 @@ def f8e4m3fn_type_id() -> TypeId:
 
 
 class F8E5M2Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f8E5M2", "f8e5m2", 8, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(181))
     id: TypeId = TypeId(181)
     name: string = "f8e5m2"
@@ -458,6 +483,7 @@ def f8e5m2_type_id() -> TypeId:
 
 
 class BF16Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("bf16", "brain_float", 16, true)
     identity: PrimitiveId = PrimitiveId(DeclarationId(182))
     id: TypeId = TypeId(182)
     name: string = "bf16"

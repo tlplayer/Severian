@@ -1,1 +1,4 @@
 import * from "../../block/dependencies.sev"
+
+import * from "../../module/module.sev"
+import * from "../../module/hierarchy.sev"

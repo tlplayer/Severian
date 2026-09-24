@@ -14,9 +14,9 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 SKIP = {
-    'universal.Module': {'initializer_cfg', 'cfg_bodies', 'values', 'globals', 'binding_values', 'quality_files', 'quality_exclusions', 'quality_regions', 'debug_files'},
-    'universal.FunctionDeclaration': {'binary_requirements', 'capability_requirements', 'cfg'},
-    'universal.Block': {'operations', 'lowered_operations'},
+    'model_hir_module_module.Module': {'initializer_cfg', 'cfg_bodies', 'values', 'globals', 'binding_values', 'quality_files', 'quality_exclusions', 'quality_regions', 'debug_files'},
+    'model_syntax_function_function.FunctionDeclaration': {'binary_requirements', 'capability_requirements', 'cfg'},
+    'model_syntax_block_block.Block': {'operations', 'lowered_operations'},
 }
 
 def split(text, separator=','):
@@ -62,14 +62,100 @@ def exported_sources(entry):
 
 
 def generate(root=ROOT, mir=False, interface=False, bodies=False):
+    owners = {}
+    model_sources = [
+        'sev_compiler/frontend/modules/graph/model.sev',
+        'sev_compiler/frontend/modules/graph/queries.sev',
+        'sev_compiler/frontend/modules/graph/verify.sev',
+        'sev_compiler/hir/module/hierarchy.sev',
+        'sev_compiler/hir/module/module.sev',
+        'sev_compiler/mir/cfg/availability.sev',
+        'sev_compiler/mir/cfg/block.sev',
+        'sev_compiler/mir/cfg/branch.sev',
+        'sev_compiler/mir/cfg/cfg.sev',
+        'sev_compiler/mir/cfg/control_flow.sev',
+        'sev_compiler/mir/cfg/dominance.sev',
+        'sev_compiler/mir/cfg/effects.sev',
+        'sev_compiler/mir/cfg/lazy.sev',
+        'sev_compiler/mir/value.sev',
+        'sev_compiler/syntax/block/block.sev',
+        'sev_compiler/syntax/constraint/dispatch.sev',
+        'sev_compiler/syntax/constraint/graph.sev',
+        'sev_compiler/syntax/constraint/model.sev',
+        'sev_compiler/syntax/constraint/proof.sev',
+        'sev_compiler/syntax/constraint/refinement.sev',
+        'sev_compiler/syntax/diagnostics/diagnostics/src/lib.sev',
+        'sev_compiler/syntax/function/function.sev',
+        'sev_compiler/syntax/function/lowering.sev',
+        'sev_compiler/syntax/function/syntax.sev',
+        'sev_compiler/syntax/function/trait.sev',
+        'sev_compiler/syntax/grammar/contracts.sev',
+        'sev_compiler/syntax/grammar/grammar.sev',
+        'sev_compiler/syntax/lexeme.sev',
+        'sev_compiler/syntax/literal/bool.sev',
+        'sev_compiler/syntax/literal/lowered.sev',
+        'sev_compiler/syntax/literal/value.sev',
+        'sev_compiler/syntax/lowered.sev',
+        'sev_compiler/syntax/primitive/array/array.sev',
+        'sev_compiler/syntax/primitive/array/storage.sev',
+        'sev_compiler/syntax/primitive/bool/bool.sev',
+        'sev_compiler/syntax/primitive/bytes/bytes.sev',
+        'sev_compiler/syntax/primitive/catalog.sev',
+        'sev_compiler/syntax/primitive/char/char.sev',
+        'sev_compiler/syntax/primitive/char/encoding.sev',
+        'sev_compiler/syntax/primitive/char/units.sev',
+        'sev_compiler/syntax/primitive/char/utf8.sev',
+        'sev_compiler/syntax/primitive/contract.sev',
+        'sev_compiler/syntax/primitive/declarations.sev',
+        'sev_compiler/syntax/primitive/enum/enum.sev',
+        'sev_compiler/syntax/primitive/error/error.sev',
+        'sev_compiler/syntax/primitive/float/float.sev',
+        'sev_compiler/syntax/primitive/int/int.sev',
+        'sev_compiler/syntax/primitive/iterator/iterator.sev',
+        'sev_compiler/syntax/primitive/literal.sev',
+        'sev_compiler/syntax/primitive/mlir.sev',
+        'sev_compiler/syntax/primitive/number.sev',
+        'sev_compiler/syntax/primitive/numeric/power.sev',
+        'sev_compiler/syntax/primitive/pointer/pointer.sev',
+        'sev_compiler/syntax/primitive/string/core.sev',
+        'sev_compiler/syntax/primitive/string/format.sev',
+        'sev_compiler/syntax/primitive/string/intrinsics.sev',
+        'sev_compiler/syntax/primitive/string/methods.sev',
+        'sev_compiler/syntax/primitive/string/storage.sev',
+        'sev_compiler/syntax/primitive/string/string.sev',
+        'sev_compiler/syntax/primitive/tuple/tuple.sev',
+        'sev_compiler/syntax/primitive/units/units.sev',
+        'sev_compiler/syntax/sentence/sentence.sev',
+        'sev_compiler/syntax/source.sev',
+        'sev_compiler/syntax/symbol/symbol.sev',
+        'sev_compiler/syntax/token.sev',
+        'sev_compiler/syntax/type/annotation.sev',
+        'sev_compiler/syntax/type/integer_spelling.sev',
+        'sev_compiler/syntax/type/mlir.sev',
+        'sev_compiler/syntax/type/scalar_conversion.sev',
+        'sev_compiler/syntax/type/slice_bounds.sev',
+        'sev_compiler/syntax/type/storage.sev',
+        'sev_compiler/syntax/type/system.sev',
+        'sev_compiler/syntax/type/tagged.sev',
+        'sev_compiler/syntax/type/type.sev',
+    ]
+    for relative in model_sources:
+        path = root / relative
+        namespace = "model_" + re.sub(r"\W+", "_", str(Path(relative).relative_to("sev_compiler").with_suffix("")))
+        for name in re.findall(r"^(?:class|enum) (\w+)", path.read_text(), re.M):
+            owners[name] = {"path": relative, "namespace": namespace}
+    paths_by_namespace = {}
+    for owner in owners.values():
+        paths_by_namespace[owner['namespace']] = [root / owner['path']]
     models = {}
     inputs = {}
-    for ns, paths in [('universal', exported_sources(root/'sev_compiler/universal/src/lib.sev')),
-                      ('lexer', exported_sources(root/'sev_compiler/frontend/lexer/lexer/src/lib.sev')),
-                      ('source', exported_sources(root/'sev_compiler/frontend/source/source.sev')),
-                      ('syntax', exported_sources(root/'sev_compiler/syntax/syntax/src/lib.sev')),
-                      ('definitions', [root/'sev_compiler/frontend/semantic/semantic/src/definitions.sev']),
-                      ('semantic', [root/'sev_compiler/frontend/semantic/semantic/src/callable.sev'])]:
+    paths_by_namespace.update({
+        'lexer': exported_sources(root/'sev_compiler/frontend/lexer/lexer/src/lib.sev'),
+        'source': [root/'sev_compiler/frontend/source/source.sev'],
+        'definitions': [root/'sev_compiler/frontend/semantic/semantic/src/definitions.sev'],
+        'semantic': [root/'sev_compiler/frontend/semantic/semantic/src/callable.sev'],
+    })
+    for ns, paths in paths_by_namespace.items():
         for path in sorted(paths):
             contents = path.read_text()
             inputs[str(path.relative_to(root))] = contents
@@ -84,7 +170,7 @@ def generate(root=ROOT, mir=False, interface=False, bodies=False):
                 if name and re.match(r'^    \w', line):
                     if models[name][0] == 'class':
                         field = re.match(r'    (\w+): (.+?)(?: = .*)?$', line)
-                        if field and field[1] not in ({'universal.FunctionDeclaration': {'binary_requirements', 'capability_requirements'}, 'universal.Module': {'binding_values'}} if mir else SKIP).get(name, set()):
+                        if field and field[1] not in ({'model_syntax_function_function.FunctionDeclaration': {'binary_requirements', 'capability_requirements'}, 'model_hir_module_module.Module': {'binding_values'}} if mir else SKIP).get(name, set()):
                             if name == 'source.SourceFile' and field[1] in {'characters', 'byte_offsets'}: continue
                             models[name][1].append((field[1], field[2]))
                     else:
@@ -102,7 +188,8 @@ def generate(root=ROOT, mir=False, interface=False, bodies=False):
         if type in ('int', 'bool', 'string', 'float', 'None', 'absent') or re.fullmatch('[uif][0-9]+', type): return type
         if '.' in type: return type
         if ns + '.' + type in models: return ns + '.' + type
-        if 'universal.' + type in models: return 'universal.' + type
+        if type in ('SourceId', 'Span', 'SourceFile'): return 'source.' + type
+        if type in owners: return owners[type]['namespace'] + '.' + type
         if 'lexer.' + type in models: return 'lexer.' + type
         raise ValueError((ns, type))
 
@@ -176,14 +263,13 @@ def generate(root=ROOT, mir=False, interface=False, bodies=False):
                 decode += ['    throw Error("invalid frontend archive variant: '+type+'")']
         functions.append('\n'.join(encode)+'\n\n\n'+'\n'.join(decode))
 
-    contracts = ('universal.Module', 'lexer.SyntaxRegistry', 'list[source.SourceFile]', 'list[string]') if interface else (('universal.Module',) if mir else ('universal.Module', 'lexer.SyntaxRegistry', 'list[source.SourceFile]', 'list[semantic.PreludeAnalysis]'))
+    contracts = ('model_hir_module_module.Module', 'lexer.SyntaxRegistry', 'list[source.SourceFile]', 'list[string]') if interface else (('model_hir_module_module.Module',) if mir else ('model_hir_module_module.Module', 'lexer.SyntaxRegistry', 'list[source.SourceFile]', 'list[semantic.PreludeAnalysis]'))
     if bodies:
-        contracts = ('universal.Block',)
+        contracts = ('model_syntax_block_block.Block',)
     for contract in contracts: ensure(contract)
     body = '\n\n\n'.join(optional_classes + functions)
     schema = hashlib.sha256(body.encode()).hexdigest()
     header = '''# Generated by sev_compiler/build/frontend_codec.py during the package build.
-import universal
 import syntax
 import lexer
 import source
@@ -243,7 +329,7 @@ def archive_unquote(value: string) -> string | Error:
     for name, contents in sorted(inputs.items()):
         identity.update(name.encode() + b'\0' + contents.encode() + b'\0')
     identity.update(b'mir' if mir else b'frontend')
-    build = root / ('sev_compiler/boundaries/interface/package.pkg/build' if interface else 'sev_compiler/boundaries/driver/package.pkg/build')
+    build = root / ('library/package/compile/interface/package.pkg/build' if interface else 'sev_compiler/driver/package.pkg/build')
     if bodies:
         build = root / 'sev_compiler/frontend/semantic/package.pkg/build'
     output = build / identity.hexdigest() / 'staging/frontend_archive.sev'
@@ -251,6 +337,15 @@ def archive_unquote(value: string) -> string | Error:
     semantic = root / 'sev_compiler/frontend/semantic/semantic/src'
     header = header.replace('../../../../frontend/semantic/src',
                             os.path.relpath(semantic, output.parent))
+    def model_imports(directory):
+        lines = []
+        for namespace, paths in sorted(paths_by_namespace.items()):
+            if namespace in ('source', 'lexer', 'semantic', 'definitions'):
+                continue
+            path = next(iter(paths))
+            lines.append('import * from "' + os.path.relpath(path, directory) + '" as ' + namespace)
+        return '\n'.join(lines) + '\n'
+    header = model_imports(output.parent) + header
     chunks, chunk, lines = [], [], 0
     for function in functions:
         count = len(function.splitlines()) + 3
@@ -264,8 +359,8 @@ def archive_unquote(value: string) -> string | Error:
     outputs = {}
     for index, chunk in enumerate(chunks):
         name = f'part_{index:02}.sev'
-        outputs[directory/name] = ('# Generated by sev_compiler/build/frontend_codec.py.\n'
-                                   'import universal\nimport syntax\nimport lexer\nimport source\nimport package\n'
+        outputs[directory/name] = (model_imports(directory) + '# Generated by sev_compiler/build/frontend_codec.py.\n'
+                                   'import syntax\nimport lexer\nimport source\nimport package\n'
                                    f'import * from "package:semantic/semantic/src/callable.sev" as semantic\n'
                                    f'import * from "package:semantic/semantic/src/definitions.sev" as definitions\n'
                                    'import * from "../frontend_archive.sev"\n\n\n' +

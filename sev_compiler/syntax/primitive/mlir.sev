@@ -1,0 +1,24 @@
+import * from "../type/mlir.sev"
+
+# Built-in constructors are declaration data. New dialect types provide their
+# own binding, without extending lowering or the MLIR text printer.
+def scalar_mlir(spelling: string, scalar: string, bits: u16 = 0, signed: bool = false) -> MlirTypeBinding:
+    return MlirTypeBinding(spelling, "scalar", scalar, bits, signed, dimensions=0, elements=0)
+
+def tensor_mlir() -> MlirTypeBinding:
+    return MlirTypeBinding("tensor<{shape}{element}>", "tensor", elements=0)
+
+def unranked_tensor_mlir() -> MlirTypeBinding:
+    return MlirTypeBinding("tensor<*x{element}>", "unranked_tensor", dimensions=0, elements=0, ranked=false)
+
+def memref_mlir() -> MlirTypeBinding:
+    return MlirTypeBinding("memref<{shape}{element}>", "memref", elements=0)
+
+def unranked_memref_mlir() -> MlirTypeBinding:
+    return MlirTypeBinding("memref<*x{element}>", "unranked_memref", dimensions=0, elements=0, ranked=false)
+
+def struct_mlir() -> MlirTypeBinding:
+    return MlirTypeBinding("!llvm.struct<({elements})>", "struct", dimensions=0)
+
+def array_mlir() -> MlirTypeBinding:
+    return MlirTypeBinding("!llvm.array<{dimension0} x {element0}>", "array", dimensions=1, elements=1)

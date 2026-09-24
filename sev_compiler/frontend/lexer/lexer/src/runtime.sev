@@ -1,6 +1,8 @@
+import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import source
 import diagnostics
-import universal
 import * from "rule.sev"
 import * from "identifier.sev"
 
@@ -22,10 +24,10 @@ enum LexicalValue:
 
 class SourceLexicalRule: LexicalRule
     name: string
-    methods: list[universal.FunctionDeclaration]
+    methods: list[model_syntax_function_function.FunctionDeclaration]
     span: source.Span
     priority: int = 0
-    declaration: universal.RecordDeclaration | None = None
+    declaration: model_syntax_function_function.RecordDeclaration | None = None
 
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
         frame = LexicalFrame(self, [10000])
@@ -39,7 +41,7 @@ class SourceLexicalRule: LexicalRule
                 return error(lexical_error("scan must return LexemeMatch", span))
 
 
-def source_lexical_rule(declaration: universal.RecordDeclaration) -> SourceLexicalRule | diagnostics.Diagnostic:
+def source_lexical_rule(declaration: model_syntax_function_function.RecordDeclaration) -> SourceLexicalRule | diagnostics.Diagnostic:
     if len(declaration.type_parameters) != 0:
         return error(lexical_error("rule classes must be concrete", declaration.span))
     priority := 0
@@ -71,7 +73,7 @@ def source_lexical_rule(declaration: universal.RecordDeclaration) -> SourceLexic
             found = true
             if len(method.parameters) != 2:
                 return error(lexical_error("scan requires input: LexemeInput and start: int", declaration.span))
-            if universal.simple_type_name(method.parameters[0].annotation) != "LexemeInput" or universal.simple_type_name(method.parameters[1].annotation) != "int":
+            if model_syntax_type_annotation.simple_type_name(method.parameters[0].annotation) != "LexemeInput" or model_syntax_type_annotation.simple_type_name(method.parameters[1].annotation) != "int":
                 return error(lexical_error("scan requires input: LexemeInput and start: int", declaration.span))
     if not found:
         return error(lexical_error("missing scan implementation", declaration.span))
@@ -148,7 +150,7 @@ def lexical_set(frame: LexicalFrame, name: string, value: LexicalValue):
     frame.values.append(value)
 
 
-def lexical_path(expression: universal.Expression) -> string:
+def lexical_path(expression: model_syntax_function_function.Expression) -> string:
     match expression.kind:
         case Name:
             return name
@@ -279,7 +281,7 @@ def lexical_invoke(parent: LexicalFrame, name: string, arguments: list[LexicalVa
     return error(lexical_error("unknown callable " + name, span))
 
 
-def lexical_call(frame: LexicalFrame, callee: universal.Expression, arguments: list[universal.CallArgument], span: source.Span) -> LexicalValue | diagnostics.Diagnostic:
+def lexical_call(frame: LexicalFrame, callee: model_syntax_function_function.Expression, arguments: list[model_syntax_function_function.CallArgument], span: source.Span) -> LexicalValue | diagnostics.Diagnostic:
     path = lexical_path(callee)
     values: list[LexicalValue] = []
     for argument in arguments:
@@ -398,7 +400,7 @@ def lexical_call(frame: LexicalFrame, callee: universal.Expression, arguments: l
             return lexical_invoke(frame, path, values, span)
 
 
-def lexical_expression(frame: LexicalFrame, expression: universal.Expression) -> LexicalValue | diagnostics.Diagnostic:
+def lexical_expression(frame: LexicalFrame, expression: model_syntax_function_function.Expression) -> LexicalValue | diagnostics.Diagnostic:
     lexical_tick(frame, expression.span)
     span = expression.span
     match expression.kind:
@@ -474,7 +476,7 @@ def lexical_expression(frame: LexicalFrame, expression: universal.Expression) ->
             return error(lexical_error("unsupported expression", span))
 
 
-def lexical_block(frame: LexicalFrame, block: universal.Block) -> LexicalFlow | diagnostics.Diagnostic:
+def lexical_block(frame: LexicalFrame, block: model_syntax_block_block.Block) -> LexicalFlow | diagnostics.Diagnostic:
     for statement in block.statements:
         match statement:
             case BindingStatement:

@@ -3,7 +3,7 @@ import source
 import * from "../../syntax/symbol/symbol.sev"
 import * from "../../syntax/sentence/sentence.sev"
 import * from "../../syntax/function/function.sev"
-import * from "../constraint/model.sev"
+import * from "../../syntax/constraint/model.sev"
 
 
 enum RegionKind:

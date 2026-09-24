@@ -1,5 +1,7 @@
+import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import diagnostics
-import universal
 import * from "callable.sev" as callable
 import * from "definitions.sev" as definitions
 
@@ -18,33 +20,28 @@ class AnalysisContext:
 
 
 def analyze_with_package_functions(
-    module_ast: universal.Module,
+    module_ast: model_hir_module_module.Module,
     types: definitions.SemanticDefinitions,
     context: AnalysisContext,
-    visible: list[universal.FunctionDeclaration],
-    own_ids: list[universal.FunctionId],
-    test_ids: list[universal.FunctionId],
-) -> universal.Program | diagnostics.Diagnostic:
-    include_tests := false
-    match context.mode:
-        case Test:
-            include_tests = true
-        case Build:
-            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/semantic/src/lib.sev)")
+    visible: list[model_syntax_function_function.FunctionDeclaration],
+    own_ids: list[model_syntax_symbol_symbol.FunctionId],
+    test_ids: list[model_syntax_symbol_symbol.FunctionId],
+) -> model_hir_module_module.Program | diagnostics.Diagnostic:
+    include_tests = context.mode == Test
     typed = callable.analyze_registered_callables(module_ast, include_tests, visible, own_ids, test_ids, types)
     typed.path = context.module_name
-    return universal.Program([typed])
+    return model_hir_module_module.Program([typed])
 
 
-def analyze_with_context(module: universal.Module, types: definitions.SemanticDefinitions, context: AnalysisContext) -> universal.Program | diagnostics.Diagnostic:
+def analyze_with_context(module: model_hir_module_module.Module, types: definitions.SemanticDefinitions, context: AnalysisContext) -> model_hir_module_module.Program | diagnostics.Diagnostic:
     return analyze_with_package_functions(module, types, context, [], [], [])
 
 
-def analyze(module: universal.Module) -> universal.Program | diagnostics.Diagnostic:
+def analyze(module: model_hir_module_module.Module) -> model_hir_module_module.Program | diagnostics.Diagnostic:
     return analyze_with_context(module, definitions.SemanticDefinitions(), AnalysisContext(Build, "memory"))
 
 
-def analyze_tests(module: universal.Module) -> universal.Program | diagnostics.Diagnostic:
+def analyze_tests(module: model_hir_module_module.Module) -> model_hir_module_module.Program | diagnostics.Diagnostic:
     return analyze_with_package_functions(module, definitions.SemanticDefinitions(), AnalysisContext(Test, "memory"), [], [], [])
 
 import * from "macros.sev"

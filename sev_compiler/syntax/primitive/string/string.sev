@@ -1,6 +1,6 @@
 import * from "package:primitives/declarations.sev"
 import * from "../primitive.sev"
-import * from "../../primitive_2/slice.sev"
+import * from "../../../../../library/core/collections/list/src/slice.sev"
 import * from "core.sev" as utf8_core
 
 import * from "../../function/trait.sev"
@@ -303,6 +303,7 @@ immutability.
 '''
 class string: String:
     identity: PrimitiveId = StringPrimitive().identity
+    mlir: MlirTypeBinding = StringPrimitive().mlir
     id: TypeId = StringPrimitive().id
     literal: LiteralSyntax | None = StringPrimitive().literal
     literal_family: string = StringPrimitive().literal_family
@@ -1015,7 +1016,7 @@ test "non-empty string is true":
     value := "hello"
 
     if value:
-        throw Error("Unimplemented (sev_compiler/universal/primitive/string.sev)")ror("Unimplemented (sev_compiler/universal/primitive/string.sev)")
+        throw Error("Unimplemented (sev_compiler/universal/primitive/string.sev)")
     else:
         throw Error("non-empty string must be true")
 

@@ -11,43 +11,44 @@
   },
   "dependencies": {
     "interface": {
-      "package": "sev-compiler-interface",
-      "path": "../../boundaries/interface"
+      "path": "../../../library/package/compile/interface",
+      "package": "sev-semantic-interface"
     },
     "semantic": {
-      "package": "sev-compiler-semantic",
-      "path": "../semantic"
+      "path": "../semantic",
+      "package": "sev-compiler-semantic"
     },
     "io": {
       "package": "io",
       "path": "../../../library/system/io"
     },
     "package": {
-      "path": "../../../library/package"
+      "path": "../../../library/package",
+      "package": "package"
     },
     "diagnostics": {
-      "package": "sev-compiler-diagnostics",
-      "path": "../../syntax/diagnostics"
+      "path": "../../syntax/diagnostics",
+      "package": "sev-compiler-diagnostics"
     },
     "lexer": {
-      "package": "sev-compiler-lexer",
-      "path": "../lexer"
+      "path": "../lexer",
+      "package": "sev-compiler-lexer"
     },
     "parser": {
-      "package": "sev-compiler-parser",
-      "path": "../parser"
+      "path": "../parser",
+      "package": "sev-compiler-parser"
     },
     "source": {
       "path": "../source",
       "package": "sev-compiler-source"
     },
-    "universal": {
-      "package": "sev-compiler-universal",
-      "path": "../../universal"
-    },
     "interfaces": {
-      "package": "package.interface",
-      "path": "../../../library/package/interface"
+      "path": "../../../library/package/interface",
+      "package": "package.interface"
+    },
+    "syntax": {
+      "path": "../../syntax",
+      "package": "sev-compiler-syntax"
     }
   }
 }
