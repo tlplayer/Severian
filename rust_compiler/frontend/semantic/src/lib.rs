@@ -2380,6 +2380,12 @@ impl Analyzer<'_> {
             let element = self.resolve_source_type(element)?;
             return self.ensure_set_type(element, annotation.span);
         }
+        // The memory intrinsics use an erased byte address at ABI boundaries.
+        // It shares the structural pointer representation with pointer[u8].
+        if annotation.simple_name() == Some("pointer") {
+            let element = self.types.resolve_name("u8").expect("bootstrap defines u8");
+            return Ok(self.instantiate_pointer_type(element));
+        }
         if let Some(("pointer", [element])) = annotation.named_parts() {
             let element = self.resolve_source_type(element)?;
             return Ok(self.instantiate_pointer_type(element));
@@ -20279,6 +20285,12 @@ fn resolve_type_annotation(
     types: &TypeContext,
     annotation: &TypeAnnotation,
 ) -> Result<TypeId, Diagnostic> {
+    if annotation.simple_name() == Some("pointer") {
+        return Ok(pointer_type_id(types.resolve_name("u8").expect("bootstrap defines u8")));
+    }
+    if let Some(("pointer", [element])) = annotation.named_parts() {
+        return Ok(pointer_type_id(resolve_type_annotation(types, element)?));
+    }
     if matches!(
         annotation.kind,
         severian_ast::TypeAnnotationKind::Function { .. }
@@ -22194,6 +22206,23 @@ def interpolate(text: string) -> string:
         let error = analyze(&ast, &context.types).unwrap_err();
         assert_eq!(error.code, "E000219");
         assert!(error.message.contains("raw allocation"));
+    }
+
+    #[test]
+    fn erased_memory_pointers_and_typed_byte_pointers_share_identity() {
+        let (program, context) = analyze_source(
+            "@c\ndef write_bytes(value: pointer) -> pointer\n\ndef identity(value: pointer[u8]) -> pointer:\n    return write_bytes(value)\n",
+        );
+        let expected = pointer_type_id(context.types.resolve_name("u8").unwrap());
+        let identity = program
+            .modules
+            .iter()
+            .flat_map(|module| &module.functions)
+            .find(|function| function.name == "identity")
+            .unwrap();
+        assert_eq!(identity.parameters[0].contract.ty, expected);
+        assert_eq!(identity.result.ty, expected);
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]

@@ -1,5 +1,33 @@
 # Compiler recovery implementation — build blocked
 
+Pointer/memory boundary pass (2026-09-24):
+
+- Bootstrap semantic resolution accepts bare `pointer` as the existing structural
+  byte-pointer contract. XXI accepts both that spelling and `pointer[T]` through
+  its shared foreign-pointer conversion; pointee types remain in ABI plans.
+- Pointer primitives now import memory's LLVM raw operations instead of declaring
+  conflicting `ptr.*` operations. Their stored address uses the pointer contract.
+- Assertion diagnostics and generated test reports use memory's checked buffer
+  writer. Address extraction takes a view, and the C write occurs while that view
+  remains live. Byte-size allocation delegates directly to the raw allocator,
+  avoiding accidental selection of its own nongeneric overload.
+- `cargo build -p severian-driver --bin sev` passed after all Rust changes.
+  Source rebuilds exposed the allocation overload issue and another bare-pointer
+  lookup in package signature resolution. Both were patched, including package
+  generic type validation. Full compiler recovery remains unverified; the final
+  rebuild reached its 25-second limit without a diagnostic (exit 124), respecting
+  this pass's six-minute budget.
+- The focused memory build stops at the existing missing `index` type in
+  `library/core/memory/src/buffer_intrinsics.sev:4`.
+- Inline Rust regressions compile with
+  `cargo check -p severian-xxi -p severian-semantic --tests`. No tests were run.
+  Run them with:
+  `cargo test -p severian-xxi memory_pointers_share_the_c_pointer_contract` and
+  `cargo test -p severian-semantic erased_memory_pointers_and_typed_byte_pointers_share_identity`.
+- Logs: `/tmp/sev-pointer-bootstrap.log`, `/tmp/sev-pointer-compiler.log`,
+  `/tmp/sev-pointer-final-compiler.log`,
+  `/tmp/sev-pointer-memory.log`, `/tmp/sev-pointer-regression-compile.log`.
+
 Latest five-minute build pass (2026-09-24, 22:58–23:03 UTC):
 
 - `cargo build -p severian-driver --bin sev` passed.

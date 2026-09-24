@@ -1099,6 +1099,13 @@ fn resolve_package_type(
     lists: &[PackageList],
     index: &ProgramIndex,
 ) -> Result<TypeId, Diagnostic> {
+    if annotation.simple_name() == Some("pointer") {
+        return super::resolve_type_annotation(types, annotation);
+    }
+    if let Some(("pointer", [element])) = annotation.named_parts() {
+        let element = resolve_package_type(types, element, module, classes, lists, index)?;
+        return Ok(super::pointer_type_id(element));
+    }
     if let Some(("borrowed" | "owned" | "transferred" | "out" | "inout" | "nullable", [inner])) =
         annotation.named_parts()
     {

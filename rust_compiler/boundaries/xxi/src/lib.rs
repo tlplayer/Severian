@@ -388,8 +388,16 @@ fn resolve_type_ref(
             pointee: Box::new(resolve_type_ref(pointee, foreign, types)?),
             mutable: false,
         }),
-        ("mut_ptr", [pointee]) => Ok(ForeignTypeRef::Pointer {
+        ("pointer" | "mut_ptr", [pointee]) => Ok(ForeignTypeRef::Pointer {
             pointee: Box::new(resolve_type_ref(pointee, foreign, types)?),
+            mutable: true,
+        }),
+        ("pointer", []) => Ok(ForeignTypeRef::Pointer {
+            pointee: Box::new(ForeignTypeRef::Severian(
+                types
+                    .resolve_name("u8")
+                    .ok_or_else(|| XxiError::UnknownType("u8".into()))?,
+            )),
             mutable: true,
         }),
         (_, []) => {
@@ -531,6 +539,32 @@ mod tests {
 
     fn target() -> AbiTarget {
         AbiTarget::derive(&TargetSpec::host())
+    }
+
+    #[test]
+    fn memory_pointers_share_the_c_pointer_contract() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source(
+            "memory-boundary.sev",
+            "@c\ndef erased(value: pointer) -> pointer\n@c\ndef bytes(value: pointer[u8]) -> pointer[u8]\n@c\ndef typed(value: pointer[i32]) -> pointer[i32]\n@c\ndef nested(value: pointer[pointer[u8]]) -> pointer[pointer[u8]]\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let external = resolve(&module, &context.types, &target()).unwrap();
+        assert_eq!(external.plans[0].signature, external.plans[1].signature);
+        for (plan, pointee) in external.plans.iter().zip([
+            AbiType::integer(8, false),
+            AbiType::integer(8, false),
+            AbiType::integer(32, true),
+            AbiType::pointer_to(AbiType::integer(8, false), true),
+        ]) {
+            let pointer = AbiType::pointer_to(pointee, true);
+            assert_eq!(plan.parameters[0].abi_type, pointer);
+            assert_eq!(plan.result_type, pointer);
+            assert_eq!(
+                plan.parameters[0].conversion,
+                severian_ffi::Conversion::Direct
+            );
+        }
     }
 
     #[test]

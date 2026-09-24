@@ -1,12 +1,5 @@
 import * from "../declarations.sev"
-@mlir("ptr.load")
-def __raw_load[T](value: pointer[T]) -> T
-
-@mlir("ptr.store")
-def __raw_store[T](value: T, destination: pointer[T])
-
-@mlir("ptr.ptr_add")
-def __raw_offset[T](base: pointer[T], bytes: int) -> pointer[T]
+import * from "../../../../library/core/memory/src/raw_intrinsics.sev"
 
 trait Pointer[T]: Primitive:
     operator store(self, value: T)
@@ -23,7 +16,7 @@ class pointer[T]: Pointer:
     literal: LiteralSyntax | None = PointerPrimitive().literal
     literal_family: string = PointerPrimitive().literal_family
     literal_bindings: list[LiteralBinding] = PointerPrimitive().literal_bindings
-    __pointer = mlir["!ptr.ptr"]    
-    __address: i64
+    # The address uses the same native pointer contract as memory and @c.
+    __address: pointer
 
     

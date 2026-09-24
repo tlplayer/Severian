@@ -2229,6 +2229,12 @@ fn validate_explicit_type(
 ) -> Result<(), Diagnostic> {
     match &annotation.kind {
         TypeAnnotationKind::Named { name, arguments } => {
+            if name == "pointer" && arguments.len() <= 1 {
+                for argument in arguments {
+                    validate_explicit_type(argument, module, names, index, types)?;
+                }
+                return Ok(());
+            }
             if types.resolve_name(name).is_none()
                 && !(name.starts_with("source.") && types.definitions().any(|definition| definition.path == *name))
                 && !names.contains_key(&format!("$type:{name}"))

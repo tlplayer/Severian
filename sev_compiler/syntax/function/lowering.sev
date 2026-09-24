@@ -7,6 +7,7 @@ import * from "../literal/lowered.sev"
 import * from "../sentence/sentence.sev"
 import * from "function.sev"
 import * from "../type/system.sev"
+import * from "../../../library/core/memory/src/raw_intrinsics.sev"
 
 
 # Operations, registry contracts, and callable lowering metadata.
@@ -113,26 +114,13 @@ def scalar_requirements(function: borrow FunctionDeclaration, requirements: Lowe
 
 # cf.assert terminates the process, but its hosted LLVM lowering prints through
 # buffered stdout. Emit the diagnostic to stderr before handing it the condition.
-@c(symbol="write")
-def __assert_write(descriptor: i32, data: pointer, size: int) -> int
-
-@mlir("memref.extract_aligned_pointer_as_index")
-def __assert_address(value: array[u8]) -> index
-
-@mlir("arith.index_cast")
-def __assert_index(value: index) -> int
-
-@mlir("llvm.inttoptr")
-def __assert_pointer(value: int) -> pointer
-
 def __assert_condition(condition: bool, message: string) -> bool:
     if not condition:
         diagnostic = "assertion failed: " + message + "\n"
-        address = __assert_index(__assert_address(diagnostic.storage.data))
         remaining := size(diagnostic)
         offset := 0
         while remaining > 0:
-            written = __assert_write(2, __assert_pointer(address + offset), remaining)
+            written = __raw_write_bytes(2, diagnostic.storage.data, offset, remaining)
             if written <= 0:
                 break
             offset += written

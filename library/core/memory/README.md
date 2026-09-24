@@ -20,6 +20,14 @@ views, transfers, and destructor callbacks belong to the
 
 ## Source MLIR operations
 
+Raw memory operations are declared in `src/raw_intrinsics.sev` and use the
+`!llvm.ptr` representation shared by the pointer primitive and C boundaries.
+At the bootstrap boundary, bare `pointer` denotes the erased byte-address
+contract (`pointer[u8]`); `pointer[T]` retains its pointee type in C signatures.
+Assertion diagnostics and test reports call `__raw_write_bytes`, which checks
+the byte range and holds a storage view across address extraction and the
+synchronous write. Callers do not extract or retain a detached address.
+
 `zeroed_bytes(count)` returns a zero-initialized `array[u8]`.
 `resized_bytes(view, count)` returns an independent buffer, preserves the common
 prefix and initializes new bytes to zero. `allocate_buffer` and `copy_buffer`

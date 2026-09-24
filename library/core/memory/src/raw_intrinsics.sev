@@ -18,7 +18,7 @@ def __raw_load[T](value: pointer) -> T
 def __raw_store[T](value: T, destination: pointer)
 
 @mlir("memref.extract_aligned_pointer_as_index")
-def __raw_buffer_address[T](value: array[T]) -> index
+def __raw_buffer_address[T](value: view array[T]) -> index
 
 @mlir("arith.index_cast")
 def __raw_index(value: index) -> int
@@ -35,6 +35,24 @@ def __raw_allocate(count: int, width: int) -> pointer:
 def __raw_offset(base: pointer, offset: int) -> pointer:
     return __raw_pointer(__raw_integer(base) + offset)
 
+
+# Hosted byte writes keep the storage loan alive across address extraction and
+# the C call. Callers pass a buffer and a checked byte range, never an integer
+# masquerading as a pointer.
+@c(symbol="write")
+def __raw_write(descriptor: i32, data: pointer, count: int) -> int
+
+def __raw_write_bytes(descriptor: i32, data: view array[u8], offset: int, count: int) -> int:
+    assert(offset >= 0)
+    assert(count >= 0)
+    assert(offset <= len(data))
+    assert(count <= len(data) - offset)
+    if count == 0:
+        return 0
+    unsafe:
+        address = __raw_pointer(__raw_index(__raw_buffer_address(data)))
+        return __raw_write(descriptor, __raw_offset(address, offset), count)
+
 def __raw_byte_offset(size: byte) -> int:
     bytes = size.amount / 8.0
     assert(bytes >= 0.0)
@@ -48,4 +66,4 @@ def __raw_byte_offset(size: byte) -> int:
 # integer element count and applies the element's layout exactly once.
 def allocate(size: byte) -> pointer[u8]:
     unsafe:
-        return allocate[u8](__raw_byte_offset(size))
+        return __raw_allocate(__raw_byte_offset(size), 1)

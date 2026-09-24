@@ -321,10 +321,10 @@ def report(message: string, span: source.Span) -> model_syntax_sentence_sentence
     literal = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue(text)), span)
     storage = model_syntax_function_function.Expression(model_syntax_function_function.Member(literal, "storage"), span)
     data = model_syntax_function_function.Expression(model_syntax_function_function.Member(storage, "data"), span)
-    address = call("__assert_pointer", [call("__assert_index", [call("__assert_address", [data], span)], span)], span)
+    offset = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue("0")), span)
     descriptor = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue("2")), span)
     size = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue(string(len(text.bytes())))), span)
-    return model_syntax_sentence_sentence.ExpressionStatement(call("__assert_write", [descriptor, address, size], span))
+    return model_syntax_sentence_sentence.ExpressionStatement(call("__raw_write_bytes", [descriptor, data, offset, size], span))
 
 
 def reported_tests(module: model_hir_module_module.Module, files: list[source.SourceFile]) -> model_hir_module_module.Module:
