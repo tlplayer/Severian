@@ -1,4 +1,4 @@
-import * from "package:primitives/declarations.sev"
+import * from "../declarations.sev"
 import * from "../primitive.sev"
 
 import * from "../../function/trait.sev"

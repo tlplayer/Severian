@@ -26,19 +26,10 @@ def callable_mlir_type(id: model_syntax_symbol_symbol.TypeId, records: borrow li
             parameters = record.mlir_parameters[:]
             for argument in record.mlir_arguments:
                 parameters.append(MlirTypeParameter(argument[0], type_printer.type_text(callable_mlir_type(argument[1], records))))
-            # Structural operands are supplied by the declaration, not a type-name switch.
-            if len(parameters) > 0:
-                # Resolve generic arguments while preserving structural placeholders
-                # for the terminal renderer.
-                for name in ["shape", "element", "elements"]:
-                    parameters.append(MlirTypeParameter(name, "{" + name + "}"))
-                for index in range(int(len(fields))):
-                    parameters.append(MlirTypeParameter("element" + string(index), "{element" + string(index) + "}"))
-                binding = MlirTypeBinding(binding.render(parameters), binding.category, binding.scalar, binding.bits, binding.signed, binding.dimensions, binding.elements, binding.ranked, binding.value)
             element: MlirScalarType | None = None
             if record.mlir_element.index != 0:
                 element = callable_mlir_type(record.mlir_element, records).scalar
-            return declared_mlir_type(binding, record.mlir_shape, fields, element)
+            return declared_mlir_type(binding, record.mlir_shape, fields, element, parameters)
         throw Error("record has no MLIR binding")
     known ?= scalar.scalar_type(id)
     if known != None:
@@ -428,11 +419,11 @@ def quality_call(builder: MlirOpBuilder, symbol: string, values: list[MlirValue]
 
 
 def callable_storage_type(value: MlirType) -> MlirType:
-    if type_kind_name(value.kind) == "memref":
-        # The standard memref conversion uses this ranked descriptor on the host.
-        return struct_type([pointer_type(), pointer_type(), integer_type(64), array_type(1, integer_type(64)), array_type(1, integer_type(64))])
-    if type_kind_name(value.kind) == "scalar" and scalar_kind_name(value.scalar.kind) == "index":
-        return integer_type(64)
+    binding ?= value.kind.storage
+    if binding == None:
+        return value
+    if binding != None:
+        return declared_mlir_type(binding, value.dimensions, value.elements, parameters=value.parameters)
     return value
 
 

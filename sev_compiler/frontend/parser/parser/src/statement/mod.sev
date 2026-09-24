@@ -1414,7 +1414,9 @@ def parse_primary(parser: Parser) -> model_syntax_function_function.Expression |
                 grouped.span = span
                 grouped.grammar = syntax.definition
                 return grouped
-            callee = model_syntax_function_function.Expression(model_syntax_function_function.SourceSymbol(syntax.grammar_name, syntax.definition), token.span)
+            callee := model_syntax_function_function.Expression(model_syntax_function_function.SourceSymbol(syntax.grammar_name, syntax.definition), token.span)
+            if syntax.constructor != "":
+                callee = model_syntax_function_function.Expression(model_syntax_function_function.Name(syntax.constructor), token.span)
             return model_syntax_function_function.Expression(model_syntax_function_function.Call(callee, arguments), span, grammar=syntax.definition)
     match token.kind:
         case Identifier:

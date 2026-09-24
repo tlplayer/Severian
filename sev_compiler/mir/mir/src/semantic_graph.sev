@@ -1,3 +1,4 @@
+import * from "../../../syntax/function/function.sev" as model_syntax_function_function
 import * from "../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
 import * from "../../../hir/module/hierarchy.sev" as model_hir_module_hierarchy
 import * from "../../../hir/module/module.sev" as model_hir_module_module
@@ -74,7 +75,7 @@ def build(module: model_hir_module_module.Module, owners: list[model_frontend_mo
             if owner.submodule == unit:
                 owner_key = owner.key
                 break
-        key = model_syntax_symbol_symbol.callable_key(declaration, owner_key)
+        key = model_syntax_function_function.callable_key(declaration, owner_key)
         if declaration.semantic_key != "":
             key = declaration.semantic_key
         definition_node = graph.nodes[node.index]

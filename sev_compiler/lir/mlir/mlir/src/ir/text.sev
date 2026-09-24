@@ -12,7 +12,8 @@ def scalar_type_text(type_id: MlirScalarType) -> string:
 
 
 def type_text(type_id: MlirType) -> string:
-    parameters: list[MlirTypeParameter] = []
+    parameters = type_id.parameters[:]
+    parameters.append(MlirTypeParameter("rank", string(len(type_id.dimensions))))
     dimensions: list[string] = []
     index := 0
     for dimension in type_id.dimensions:

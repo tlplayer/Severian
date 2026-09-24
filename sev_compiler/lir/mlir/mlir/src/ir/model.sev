@@ -21,6 +21,7 @@ class MlirType:
     scalar: MlirScalarType
     dimensions: list[int]
     elements: list[MlirType] = []
+    parameters: list[MlirTypeParameter] = []
 
 
 def integer_type(bits: u16, signed: bool = true) -> MlirType:
@@ -44,7 +45,7 @@ def bf16_scalar_type() -> MlirScalarType:
 
 
 def index_type() -> MlirType:
-    return MlirType(scalar_mlir("index", "index"), MlirScalarType("index", 0, false, 0, "index"), [])
+    return MlirType(index_mlir(), MlirScalarType("index", 0, false, 0, "index"), [])
 
 
 def pointer_type(address_space: int = 0) -> MlirType:
@@ -489,6 +490,15 @@ def dimension_identity(dimension: int) -> string:
 def same_type(left: MlirType, right: MlirType) -> bool:
     if left.kind.spelling != right.kind.spelling or type_kind_name(left.kind) != type_kind_name(right.kind):
         return false
+    if len(left.parameters) != len(right.parameters):
+        return false
+    for parameter in left.parameters:
+        found := false
+        for other in right.parameters:
+            if parameter.name == other.name and parameter.value == other.value:
+                found = true
+        if not found:
+            return false
     if len(left.elements) != len(right.elements):
         return false
     element := 0
@@ -537,11 +547,11 @@ class MlirDebugVariable:
     attribute: string
 
 
-def declared_mlir_type(binding: MlirTypeBinding, dimensions: list[int] = [], elements: list[MlirType] = [], element: MlirScalarType | None = None) -> MlirType:
+def declared_mlir_type(binding: MlirTypeBinding, dimensions: list[int] = [], elements: list[MlirType] = [], element: MlirScalarType | None = None, parameters: list[MlirTypeParameter] = []) -> MlirType:
     if not binding.value:
         throw Error("declaration has no MLIR SSA value")
     scalar = MlirScalarType(binding.scalar, binding.bits, binding.signed, 0, binding.spelling)
     supplied ?= element
     if supplied != None:
         scalar = supplied
-    return MlirType(binding, scalar, dimensions, elements)
+    return MlirType(binding, scalar, dimensions, elements, parameters)

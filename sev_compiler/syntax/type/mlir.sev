@@ -21,6 +21,7 @@ class MlirTypeBinding:
     elements: int = -1
     ranked: bool = true
     value: bool = true
+    storage: MlirTypeBinding | None = None
 
     def render(parameters: list[MlirTypeParameter] = []) -> string:
         output := ""

@@ -125,7 +125,7 @@ def register_operator_syntax(registry: SyntaxRegistry, syntax: model_syntax_func
                 if previous.grammar_form != syntax.grammar_form or previous.closing != syntax.closing or previous.separator != syntax.separator or previous.grouping != syntax.grouping:
                     return error(diagnostics.diagnostic_at("E000103", "conflicting delimited grammar " + syntax.symbol, span))
             if previous.definition.declaration.value != 0 and (previous.grammar_form == "Declaration" or syntax.grammar_form == "Declaration"):
-                if previous.grammar_form != syntax.grammar_form or previous.declaration_members != syntax.declaration_members or previous.representation != syntax.representation or previous.definition.module != syntax.definition.module or previous.definition.declaration.value != syntax.definition.declaration.value:
+                if previous.grammar_form != syntax.grammar_form or previous.constructor != syntax.constructor or previous.declaration_members != syntax.declaration_members or previous.representation != syntax.representation or previous.definition.module != syntax.definition.module or previous.definition.declaration.value != syntax.definition.declaration.value:
                     return error(diagnostics.diagnostic_at("E000103", "conflicting declaration grammar " + syntax.symbol, span))
             if previous.definition.declaration.value == 0 or (syntax.domain == model_syntax_function_syntax.OperatorDomain.GrammarOperator and previous.domain != model_syntax_function_syntax.OperatorDomain.GrammarOperator):
                 registry.operators[index] = syntax
@@ -164,6 +164,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
             separator := ""
             grouping := false
             declaration_members := ""
+            constructor := ""
             representation := ""
             fixity := model_syntax_function_syntax.Fixity.Infix
             precedence := 0
@@ -179,6 +180,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                 separator = base_syntax.separator
                 grouping = base_syntax.grouping
                 declaration_members = base_syntax.declaration_members
+                constructor = base_syntax.constructor
                 representation = base_syntax.representation
             fields: list[string] = []
             for property in descriptor.properties:
@@ -219,6 +221,10 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                     if len(property.tokens) != 0 and token_word(property.tokens[0]) == "Body":
                         form = "Body" if property.name == "left" else "ConditionBody"
                         fixity = model_syntax_function_syntax.Fixity.Prefix
+                elif property.name == "constructs":
+                    if len(property.tokens) != 1 or token_word(property.tokens[0]) == "":
+                        return error(diagnostics.diagnostic_at("E000103", "grammar constructor requires a declaration name", descriptor.span))
+                    constructor = token_word(property.tokens[0])
                 elif property.name == "members" or property.name == "representation":
                     contract = "DeclarationMembers" if property.name == "members" else "PrimitiveRepresentation"
                     if len(property.tokens) != 3 or token_word(property.tokens[0]) != contract or not token_is_symbol(property.tokens[1], "."):
@@ -275,7 +281,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                     if (declaration_members == "Callables") != (representation == "TaggedAggregate"):
                         return error(diagnostics.diagnostic_at("E000103", "declaration members do not match the representation", descriptor.span))
                 identity = model_syntax_symbol_symbol.named_definition(descriptor.semantic_owner, "trait", descriptor.name) if descriptor.semantic_owner != "" else model_syntax_symbol_symbol.DefId(0, u128(descriptor.span.source.index) + 2, model_syntax_symbol_symbol.DeclarationId(u128(descriptor.span.start) + 1))
-                syntax = model_syntax_function_syntax.OperatorSyntax(symbol, fixity, u8(precedence), associativity, definition=identity, grammar_name=descriptor.name, grammar_form=form, closing=closing, separator=separator, grouping=grouping, declaration_members=declaration_members, representation=representation)
+                syntax = model_syntax_function_syntax.OperatorSyntax(symbol, fixity, u8(precedence), associativity, definition=identity, grammar_name=descriptor.name, grammar_form=form, closing=closing, separator=separator, grouping=grouping, declaration_members=declaration_members, representation=representation, constructor=constructor)
                 if descriptor.grammar:
                     syntax.domain = model_syntax_function_syntax.OperatorDomain.GrammarOperator
                 register_operator_syntax(registry, syntax, descriptor.span)

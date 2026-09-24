@@ -53,15 +53,17 @@
     "syntax": {
       "package": "sev-compiler-syntax",
       "path": "../../syntax"
-    },
-    "modules": {
-      "path": "../modules",
-      "package": "sev-compiler-modules"
     }
   },
   "build": {
     "generators": [
       "generate_body_codec.py"
     ]
+  },
+  "dev-dependencies": {
+    "modules": {
+      "path": "../modules",
+      "package": "sev-compiler-modules"
+    }
   }
 }

@@ -186,7 +186,13 @@ def generate(root=ROOT, mir=False, interface=False, bodies=False):
             base, rest = type.split('[', 1)
             return base + '[' + ', '.join(resolve(t, ns) for t in split(rest[:-1])) + ']'
         if type in ('int', 'bool', 'string', 'float', 'None', 'absent') or re.fullmatch('[uif][0-9]+', type): return type
-        if '.' in type: return type
+        if '.' in type:
+            if type in models:
+                return type
+            member = type.rsplit('.', 1)[1]
+            if member in owners:
+                return owners[member]['namespace'] + '.' + member
+            raise ValueError(f'unresolved archive model {type} from {ns}')
         if ns + '.' + type in models: return ns + '.' + type
         if type in ('SourceId', 'Span', 'SourceFile'): return 'source.' + type
         if type in owners: return owners[type]['namespace'] + '.' + type
@@ -341,6 +347,8 @@ def archive_unquote(value: string) -> string | Error:
         lines = []
         for namespace, paths in sorted(paths_by_namespace.items()):
             if namespace in ('source', 'lexer', 'semantic', 'definitions'):
+                continue
+            if not any(namespace + '.' in type for type in types):
                 continue
             path = next(iter(paths))
             lines.append('import * from "' + os.path.relpath(path, directory) + '" as ' + namespace)

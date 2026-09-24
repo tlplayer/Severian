@@ -742,12 +742,16 @@ def instantiate_record(definitions: SemanticDefinitions, template: model_syntax_
                         id = model_syntax_primitive_declarations.string_type_id()
     position = len(records)
     record = model_syntax_function_function.RecordDeclaration(name, [], [], template.span, type_id=id, lookup=template.lookup, definition=template.definition, representation=representation, decorators=template.decorators, mlir=template.mlir)
-    record.mlir = model_syntax_function_function.record_mlir_binding(template)
+    record.mlir = model_syntax_function_function.declared_mlir_binding(template.decorators, template.name)
     for argument_index in range(int(len(template.type_parameters))):
         if argument_index < len(actuals):
             record.mlir_arguments.append((template.type_parameters[argument_index], actuals[argument_index].type_id))
     for supplied in values:
-        record.mlir_parameters.append(model_syntax_type_mlir.MlirTypeParameter(supplied.binding, model_syntax_type_annotation.simple_type_name(supplied)))
+        spelling ?= model_syntax_type_annotation.simple_type_name(supplied)
+        if spelling == None:
+            return error(diagnostics.diagnostic_at("E000205", "MLIR value parameter requires a resolved spelling", supplied.span))
+        if spelling != None:
+            record.mlir_parameters.append(model_syntax_type_mlir.MlirTypeParameter(supplied.binding, spelling))
     records.append(record)
     definitions.record_instances.append(RecordInstance(id, template.definition, actuals, constructors, values))
     fields: list[model_syntax_function_function.FunctionParameter] = []
@@ -852,3 +856,39 @@ def record_position(records: list[model_syntax_function_function.RecordDeclarati
             return position
         position += 1
     throw Error("unknown record identity")
+
+
+# Resolve inherited type annotations once in HIR. Lowering only sees the
+# selected binding and concrete type arguments, with no trait-name cases.
+def resolve_record_mlir(definitions: SemanticDefinitions, record: model_syntax_function_function.RecordDeclaration, records: list[model_syntax_function_function.RecordDeclaration]):
+    direct ?= model_syntax_function_function.declared_mlir_binding(record.decorators, record.name)
+    if direct != None:
+        record.mlir = direct
+        return
+    if record.mlir != None:
+        return
+    selected: model_syntax_type_mlir.MlirTypeBinding | None = None
+    selected_key := ""
+    for annotation in record.traits:
+        applied = trait_application(definitions, annotation, record.lookup)
+        for inherited in inherited_traits(definitions, applied):
+            binding ?= model_syntax_function_function.declared_mlir_binding(inherited.decorators, inherited.name)
+            if binding == None:
+                continue
+            if binding != None:
+                spelling := binding.spelling
+                arguments: list[tuple[string, model_syntax_symbol_symbol.TypeId]] = []
+                for index in range(int(len(inherited.type_parameters))):
+                    name = inherited.type_parameters[index]
+                    argument = type_annotation(definitions, inherited.arguments[index], records, inherited.lookup)
+                    key = "trait_" + string(inherited.definition.declaration.value) + "_" + name + "_" + string(argument.index)
+                    spelling = spelling.replace("{" + name + "}", "{" + key + "}")
+                    arguments.append((key, argument))
+                if selected != None and selected_key != spelling:
+                    throw Error("conflicting inherited MLIR type bindings: " + record.name)
+                if selected == None:
+                    selected = model_syntax_type_mlir.MlirTypeBinding(spelling)
+                    selected_key = spelling
+                    for argument in arguments:
+                        record.mlir_arguments.append(argument)
+    record.mlir = selected

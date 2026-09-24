@@ -7,13 +7,13 @@ import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symb
 def operator_key(operation: model_syntax_function_syntax.OperatorDeclaration, owner: string) -> string:
     parts = [owner, "operator", operation.syntax.symbol]
     for parameter in operation.parameters:
-        parts.append(model_syntax_symbol_symbol.annotation_key(parameter.annotation, operation.type_parameters))
+        parts.append(model_syntax_function_function.annotation_key(parameter.annotation, operation.type_parameters))
         parts.append(parameter.mode)
     return model_syntax_symbol_symbol.semantic_key(parts)
 
 
 def stamp_function(function: model_syntax_function_function.FunctionDeclaration, owner: string) -> model_syntax_function_function.FunctionDeclaration:
-    function.semantic_key = model_syntax_symbol_symbol.callable_key(function, owner)
+    function.semantic_key = model_syntax_function_function.callable_key(function, owner)
     function.definition = model_syntax_symbol_symbol.definition_from_key(function.semantic_key)
     return function
 

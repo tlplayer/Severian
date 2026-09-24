@@ -1,5 +1,5 @@
 import * from "mlir.sev"
-import * from "package:syntax/syntax/src/lib.sev"
+import * from "contract.sev"
 
 
 class BoolPrimitive: Primitive
@@ -43,7 +43,7 @@ def unit_type_id() -> TypeId:
 
 
 class StringPrimitive: Primitive
-    mlir: MlirTypeBinding = MlirTypeBinding("memref<?xi8>", "memref", dimensions=1, elements=0)
+    mlir: MlirTypeBinding = byte_view_mlir()
     identity: PrimitiveId = PrimitiveId(DeclarationId(3))
     id: TypeId = TypeId(3)
     name: string = "string"
@@ -63,7 +63,7 @@ def string_type_id() -> TypeId:
 
 
 class IndexPrimitive: Primitive
-    mlir: MlirTypeBinding = scalar_mlir("index", "index")
+    mlir: MlirTypeBinding = index_mlir()
     identity: PrimitiveId = PrimitiveId(DeclarationId(4))
     id: TypeId = TypeId(4)
     name: string = "index"

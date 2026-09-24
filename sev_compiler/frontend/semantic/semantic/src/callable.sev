@@ -598,7 +598,7 @@ def callable_select_pack(state: CallableAnalysis, template: model_syntax_functio
     instance = model_syntax_function_function.FunctionDeclaration(name=instance_name, parameters=concrete, result=template.result, body=packs.pack_body(template, count), span=template.span, lookup=template.lookup, owner_type=template.owner_type, constructor=template.constructor, prelude=template.prelude)
     signature = callable_signature(instance, int(len(state.functions)), state.records, state.declarations)
     signature.pack_specialization = true
-    signature.semantic_key = model_syntax_symbol_symbol.callable_key(instance, template.semantic_key)
+    signature.semantic_key = model_syntax_function_function.callable_key(instance, template.semantic_key)
     signature.definition = model_syntax_symbol_symbol.definition_from_key(signature.semantic_key)
     # Contract checking may call a pack with an enclosing generic's symbolic
     # parameter. Its annotation is meaningful only in that generic environment.
@@ -2910,7 +2910,7 @@ def callable_signature(declaration: model_syntax_function_function.FunctionDecla
         declaration.result_origin = origin
     declaration.id = model_syntax_symbol_symbol.FunctionId(u128(ordinal + 1))
     if declaration.semantic_key == "":
-        declaration.semantic_key = model_syntax_symbol_symbol.callable_key(declaration, "$generated")
+        declaration.semantic_key = model_syntax_function_function.callable_key(declaration, "$generated")
     if declaration.definition.declaration.value == 0:
         declaration.definition = model_syntax_symbol_symbol.definition_from_key(declaration.semantic_key)
     return declaration
@@ -3290,6 +3290,10 @@ def analyze_registered_callables(module: model_hir_module_module.Module, include
             callable_validate_record_arguments(state, record)
             # Function signatures and specializations can introduce outcome and
             # aggregate layouts after the initial declaration pass.
+    metadata_index := 0
+    while metadata_index < len(state.records):
+        definitions.resolve_record_mlir(state.declarations, state.records[metadata_index], state.records)
+        metadata_index += 1
     module.records = state.records
     measured = semantic_stage(measured, "bodies")
     if len(captured) == 0 and len(prepared) == 0:

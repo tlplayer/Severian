@@ -248,6 +248,7 @@ class OperatorSyntax:
     separator: string = ""
     grouping: bool = false
     declaration_members: string = ""
+    constructor: string = ""
     representation: string = ""
 
 

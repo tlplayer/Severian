@@ -9,13 +9,13 @@
     "path": "primitive/src/lib.sev"
   },
   "dependencies": {
-    "syntax": {
-      "path": "..",
-      "package": "sev-compiler-syntax"
-    },
     "profiling": {
       "path": "../../../library/system/profiling",
       "package": "profiling"
+    },
+    "source": {
+      "path": "../../frontend/source",
+      "package": "sev-compiler-source"
     }
   }
 }

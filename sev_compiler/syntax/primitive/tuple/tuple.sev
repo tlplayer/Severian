@@ -1,4 +1,3 @@
-import * from "../../component/services.sev" as compiler
 
 
 trait TupleSyntax: G:
@@ -7,9 +6,8 @@ trait TupleSyntax: G:
     closing: string = ")"
     separator: string = ","
     grouping: bool = true
+    constructs: Y = tuple
 
-    def semantic(values: list[Ex]) -> Ex:
-        return compiler.construct(tuple, values)
 
 
 class tuple[...T]:

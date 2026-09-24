@@ -304,15 +304,13 @@ FunctionDeclaration | Expression | Operation as F
 
 # Functions use @mlir for operation identity; type declarations use it for a
 # type spelling. Both preserve the same parsed decorator/sentence data.
-def record_mlir_binding(record: RecordDeclaration) -> MlirTypeBinding | None:
-    selected ?= record.mlir
-    seen := false
-    for decorator in record.decorators:
+def declared_mlir_binding(decorators: list[Decorator], owner: string) -> MlirTypeBinding | None:
+    selected: MlirTypeBinding | None = None
+    for decorator in decorators:
         if decorator.name != "mlir":
             continue
-        if seen:
-            throw Error("duplicate MLIR type annotation: " + record.name)
-        seen = true
+        if selected != None:
+            throw Error("duplicate MLIR type annotation: " + owner)
         if len(decorator.arguments) != 1:
             throw Error("MLIR type annotation requires one spelling")
         match decorator.arguments[0].value:
@@ -322,20 +320,50 @@ def record_mlir_binding(record: RecordDeclaration) -> MlirTypeBinding | None:
                 selected = MlirTypeBinding(value)
             case _:
                 throw Error("MLIR type annotation requires a string")
-    if selected == None:
-        return MlirTypeBinding("!llvm.struct<({elements})>", "struct", dimensions=0)
     return selected
 
 
+def record_mlir_binding(record: RecordDeclaration) -> MlirTypeBinding | None:
+    selected ?= declared_mlir_binding(record.decorators, record.name)
+    if selected != None:
+        return selected
+    cached ?= record.mlir
+    if cached != None:
+        return cached
+    return MlirTypeBinding("!llvm.struct<({elements})>", "struct", dimensions=0)
 
-class ExpressionConversion:
-    from_type: TypeId
-    to_type: TypeId
-    kind: ExpressionConversionKind
+
+def annotation_key(annotation: TypeAnnotation, parameters: list[string] = []) -> string:
+    match annotation.kind:
+        case Named:
+            index := 0
+            for parameter in parameters:
+                if name == parameter:
+                    return semantic_key(["parameter", string(index)])
+                index += 1
+            parts = ["named", name]
+            for argument in arguments:
+                parts.append(annotation_key(argument, parameters))
+            return semantic_key(parts)
+        case Union:
+            parts = ["union"]
+            for member in members:
+                parts.append(annotation_key(member, parameters))
+            # The source order carries tagged-union ABI meaning.
+            return semantic_key(parts)
 
 
-enum ExpressionConversionKind:
-    NumericWidening
-    UnionInjection
-    Borrow
-    User(function: DefId)
+def callable_key(function: FunctionDeclaration, owner: string) -> string:
+    name := function.name
+    namespace ?= function.lookup
+    if namespace != None:
+        if namespace != "" and name.starts_with(namespace):
+            name = name[len(namespace):]
+    parts = [owner, "callable", name, string(len(function.type_parameters))]
+    for parameter in function.parameters:
+        parts.append(annotation_key(parameter.annotation, function.type_parameters))
+        parts.append("pack" if parameter.variadic else "single")
+        parts.append(parameter.name if parameter.keyword_only else "")
+        for modifier in parameter.modifiers:
+            parts.append(modifier.name)
+    return semantic_key(parts)

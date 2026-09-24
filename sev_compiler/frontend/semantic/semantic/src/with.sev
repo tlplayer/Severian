@@ -207,7 +207,7 @@ def expand_dispatch(module: model_hir_module_module.Module, receiver: bool = fal
             case Function:
                 if has_dispatch(declaration):
                     guarded_keys.append(
-                        model_syntax_symbol_symbol.callable_key(declaration, declaration.name),
+                        model_syntax_function_function.callable_key(declaration, declaration.name),
                     )
             case _:
                 continue
@@ -218,7 +218,7 @@ def expand_dispatch(module: model_hir_module_module.Module, receiver: bool = fal
     for item in module.items:
         match item:
             case Function:
-                key = model_syntax_symbol_symbol.callable_key(declaration, declaration.name)
+                key = model_syntax_function_function.callable_key(declaration, declaration.name)
                 guarded = key in guarded_keys
                 if not guarded:
                     output.append(item)
@@ -230,7 +230,7 @@ def expand_dispatch(module: model_hir_module_module.Module, receiver: bool = fal
                 for candidate_item in module.items:
                     match candidate_item:
                         case Function:
-                            if model_syntax_symbol_symbol.callable_key(
+                            if model_syntax_function_function.callable_key(
                                 declaration,
                                 declaration.name,
                             ) == key:
@@ -329,9 +329,9 @@ def expand_dispatch(module: model_hir_module_module.Module, receiver: bool = fal
                             return error(diagnostics.diagnostic_at("E000219", "dispatch candidates must have the same result", origin))
                         if result != None:
                             if first_result != None:
-                                if model_syntax_symbol_symbol.annotation_key(
+                                if model_syntax_function_function.annotation_key(
                                     result,
-                                ) != model_syntax_symbol_symbol.annotation_key(first_result):
+                                ) != model_syntax_function_function.annotation_key(first_result):
                                     return error(
                                         diagnostics.diagnostic_at(
                                             "E000219",

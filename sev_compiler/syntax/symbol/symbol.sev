@@ -1,5 +1,3 @@
-import * from "../type/annotation.sev"
-import * from "../function/function.sev"
 class SymbolName:
     value: string
 
@@ -209,39 +207,3 @@ def semantic_key(parts: list[string]) -> string:
     for part in parts:
         encoded.append(string(len(part)) + ":" + part)
     return "semantic-2:" + encoded.join("")
-
-
-def annotation_key(annotation: TypeAnnotation, parameters: list[string] = []) -> string:
-    match annotation.kind:
-        case Named:
-            index := 0
-            for parameter in parameters:
-                if name == parameter:
-                    return semantic_key(["parameter", string(index)])
-                index += 1
-            parts = ["named", name]
-            for argument in arguments:
-                parts.append(annotation_key(argument, parameters))
-            return semantic_key(parts)
-        case Union:
-            parts = ["union"]
-            for member in members:
-                parts.append(annotation_key(member, parameters))
-            # The source order carries tagged-union ABI meaning.
-            return semantic_key(parts)
-
-
-def callable_key(function: FunctionDeclaration, owner: string) -> string:
-    name := function.name
-    namespace ?= function.lookup
-    if namespace != None:
-        if namespace != "" and name.starts_with(namespace):
-            name = name[len(namespace):]
-    parts = [owner, "callable", name, string(len(function.type_parameters))]
-    for parameter in function.parameters:
-        parts.append(annotation_key(parameter.annotation, function.type_parameters))
-        parts.append("pack" if parameter.variadic else "single")
-        parts.append(parameter.name if parameter.keyword_only else "")
-        for modifier in parameter.modifiers:
-            parts.append(modifier.name)
-    return semantic_key(parts)
