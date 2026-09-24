@@ -1,0 +1,51 @@
+import universal
+import diagnostics
+
+
+def origin_at(body: universal.CfgBody, block: universal.BasicBlock, position: int) -> universal.OperationOrigin:
+    if position >= 0 and position < len(block.origins):
+        return block.origins[position]
+    terminal ?= block.terminator
+    if terminal != None:
+        return universal.OperationOrigin(terminal.span, body.origin.block, body.origin.callable, body.origin.path)
+    return body.origin
+
+
+def frame(module: universal.Module, origin: universal.CallableOrigin, label: string = "") -> diagnostics.CallFrame:
+    name = origin.name if label == "" else label + ": " + origin.name
+    path := module.path
+    line := 0
+    column := 0
+    span ?= origin.span
+    if span != None:
+        files = module.debug_files[:] + module.quality_files[:]
+        input ?= module.source_file
+        if input != None:
+            files.append(input)
+        for file in files:
+            if file.id.index == span.source.index and span.start <= len(file.characters):
+                path = file.path
+                line = 1
+                column = 1
+                for index in range(int(span.start)):
+                    if file.characters[index] == "\n":
+                        line += 1
+                        column = 1
+                    else:
+                        column += 1
+                break
+    return diagnostics.CallFrame(string(origin.definition.package), name, path, line, column)
+
+
+def memory_diagnostic(module: universal.Module, message: string, origin: universal.OperationOrigin, related: universal.OperationOrigin | None = None) -> diagnostics.Diagnostic:
+    frames: list[diagnostics.CallFrame] = []
+    previous ?= related
+    if previous != None:
+        for call in previous.path:
+            frames.append(frame(module, universal.CallableOrigin(call.definition, call.name, previous.span), "storage origin"))
+    cursor := int(len(origin.path))
+    while cursor > 0:
+        cursor -= 1
+        call = origin.path[cursor]
+        frames.append(frame(module, call, "compiler callable path"))
+    return diagnostics.Diagnostic("E000303", message, origin.span, frames)

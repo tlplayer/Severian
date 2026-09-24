@@ -96,12 +96,35 @@ def operation_kind(operation: universal.Operation) -> string:
             throw Error("noncanonical operation in Agent IR")
 
 
+def origin_json(origin: universal.OperationOrigin, files: list[source.SourceFile]) -> string | Error:
+    location := "null"
+    span ?= origin.span
+    if span != None:
+        location = span_json(span, files)
+    block := "null"
+    source_block ?= origin.block
+    if source_block != None:
+        block = string(source_block.index)
+    frames: list[string] = []
+    for frame in origin.path:
+        callsite := "null"
+        span ?= frame.span
+        if span != None:
+            callsite = span_json(span, files)
+        frames.append("{\"definition\":" + identity(frame.definition) + ",\"name\":" + quoted(frame.name) + ",\"source\":" + callsite + "}")
+    return "{\"block\":" + block + ",\"source\":" + location + ",\"callable_path\":[" + frames.join(",") + "]}"
+
+
 def body_json(definition: universal.DefId, body: universal.CfgBody, files: list[source.SourceFile], module: universal.Module) -> string | Error:
     blocks: list[string] = []
     for block in body.blocks:
         operations: list[string] = []
+        origins: list[string] = []
+        position := 0
         for operation in block.operations:
             operations.append(operation_json(operation, module))
+            origins.append(origin_json(block.origins[position], files))
+            position += 1
         terminal ?= block.terminator
         if terminal != None:
             kind := "Unreachable"
@@ -130,7 +153,7 @@ def body_json(definition: universal.DefId, body: universal.CfgBody, files: list[
             for edge in cfg.successors(terminal.exit):
                 edges.append("{\"target\":" + quoted(string(edge.target)) + ",\"arguments\":" + values_json(edge.arguments) + "}")
             terminator = "{\"kind\":" + quoted(kind) + payload + ",\"grammar\":" + identity(terminal.grammar) + ",\"source\":" + span_json(terminal.span, files) + ",\"successors\":[" + edges.join(",") + "]}"
-            blocks.append("{\"id\":" + quoted(string(block.id)) + ",\"parameters\":" + values_json(block.parameters) + ",\"operations\":[" + operations.join(",") + "],\"terminator\":" + terminator + "}")
+            blocks.append("{\"id\":" + quoted(string(block.id)) + ",\"parameters\":" + values_json(block.parameters) + ",\"operations\":[" + operations.join(",") + "],\"origins\":[" + origins.join(",") + "],\"terminator\":" + terminator + "}")
     return "{\"definition\":" + identity(definition) + ",\"entry\":" + quoted(string(body.entry)) + ",\"blocks\":[" + blocks.join(",") + "]}"
 
 
@@ -185,14 +208,18 @@ def emit(module: universal.Module, files: list[source.SourceFile], graph: univer
     dependencies: list[string] = []
     for edge in graph.dependencies:
         kind = "call" if edge.kind == universal.DependencyKind.Invocation else "inherits"
-        dependencies.append("{\"from\":" + identity(graph.nodes[edge.dependent.index].definition) + ",\"to\":" + identity(graph.nodes[edge.requirement.index].definition) + ",\"kind\":" + quoted(kind) + "}")
+        origin := "null"
+        location ?= edge.origin
+        if location != None:
+            origin = origin_json(location, files)
+        dependencies.append("{\"from\":" + identity(graph.nodes[edge.dependent.index].definition) + ",\"to\":" + identity(graph.nodes[edge.requirement.index].definition) + ",\"kind\":" + quoted(kind) + ",\"origin\":" + origin + "}")
     components: list[string] = []
     for component in graph_queries.dependency_components(graph):
         members: list[string] = []
         for member in component.members:
             members.append(identity(graph.nodes[member.index].definition))
         components.append("[" + members.join(",") + "]")
-    return "{\"semantic_hierarchy\":" + hierarchy_ir.emit(module, graph) + ",\"schema_version\":2,\"stage\":\"cfg\",\"source_coordinates\":\"utf8-bytes\",\"package_graph\":" + package_graph + ",\"definitions\":[" + definitions.join(",") + "],\"functions\":[" + functions.join(",") + "],\"values\":[" + values.join(",") + "],\"dependencies\":[" + dependencies.join(",") + "],\"dependency_components\":[" + components.join(",") + "]}"
+    return "{\"semantic_hierarchy\":" + hierarchy_ir.emit(module, graph, files) + ",\"schema_version\":2,\"stage\":\"cfg\",\"source_coordinates\":\"utf8-bytes\",\"package_graph\":" + package_graph + ",\"definitions\":[" + definitions.join(",") + "],\"functions\":[" + functions.join(",") + "],\"values\":[" + values.join(",") + "],\"dependencies\":[" + dependencies.join(",") + "],\"dependency_components\":[" + components.join(",") + "]}"
 
 
 

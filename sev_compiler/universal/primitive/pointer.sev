@@ -1,3 +1,4 @@
+import * from "package:primitives/declarations.sev"
 @mlir("ptr.load")
 def __raw_load[T](value: pointer[T]) -> T
 
@@ -16,6 +17,9 @@ trait Pointer[T]: Primitive:
 
 
 class pointer[T]: Pointer:
+    identity: PrimitiveId = PointerPrimitive().identity
+    id: TypeId = PointerPrimitive().id
+    literal: LiteralSyntax | None = PointerPrimitive().literal
     __pointer = mlir["!ptr.ptr"]    
     __address: i64
 

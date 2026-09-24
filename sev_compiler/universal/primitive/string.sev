@@ -1,3 +1,4 @@
+import * from "package:primitives/declarations.sev"
 import * from "primitive.sev"
 import * from "slice.sev"
 import * from "string/core.sev" as utf8_core
@@ -302,6 +303,9 @@ The raw memory handle is hidden. Public operations preserve UTF-8 validity and
 immutability.
 '''
 class string: String:
+    identity: PrimitiveId = StringPrimitive().identity
+    id: TypeId = StringPrimitive().id
+    literal: LiteralSyntax | None = StringPrimitive().literal
 
     __memory: *[u8]
     byte_length: usize

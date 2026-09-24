@@ -98,7 +98,7 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[un
             return error(diagnostics.Diagnostic("E000206", "match arm after wildcard is unreachable", arm.span))
         selected: list[int] = []
         body = universal.empty_block()
-        condition := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.TypeId(1))
+        condition := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.bool_type_id())
         pattern ?= arm.pattern
         annotation ?= arm.annotation
         if annotation != None:
@@ -188,7 +188,7 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[un
                 cursor := len(selected) - 1
                 while cursor > 0:
                     cursor -= 1
-                    condition = universal.Expression(universal.Conditional(tag_test(reference(subject_id, subject_type, span), selected[cursor], span), universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.TypeId(1)), condition), span, type_id=universal.TypeId(1))
+                    condition = universal.Expression(universal.Conditional(tag_test(reference(subject_id, subject_type, span), selected[cursor], span), universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.bool_type_id()), condition), span, type_id=universal.bool_type_id())
         for statement in arm.body.statements:
             body.statements.append(statement)
         output.append(ResolvedArm(condition, body))
@@ -226,7 +226,7 @@ def projection(subject: universal.Expression, type_id: universal.TypeId, index: 
 
 
 def tag_test(subject: universal.Expression, index: int, span: source.Span) -> universal.Expression:
-    return universal.Expression(universal.OutcomeTest(clone(subject), index), span, type_id=universal.TypeId(1))
+    return universal.Expression(universal.OutcomeTest(clone(subject), index), span, type_id=universal.bool_type_id())
 
 
 def reference(binding: universal.BindingId, type_id: universal.TypeId, span: source.Span) -> universal.Expression:

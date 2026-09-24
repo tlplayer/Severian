@@ -1,0 +1,38 @@
+import * from "../id/compiler.sev"
+import * from "scalar.sev"
+
+
+enum OperatorDomain:
+    ValueOperator
+    GrammarOperator
+
+
+enum Fixity:
+    Prefix
+    Infix
+    Postfix
+
+
+enum Associativity:
+    Left
+    Right
+    None
+
+
+# Parsed operators carry syntax data. Trait implementations describe source
+# operators; AST storage does not require an erased runtime trait object.
+class OperatorSyntax:
+    symbol: string
+    fixity: Fixity
+    precedence: u8
+    associativity: Associativity
+    domain: OperatorDomain = ValueOperator
+    definition: DefId = DefId(0, 0, DeclarationId(0))
+    grammar_name: string = ""
+    grammar_form: string = ""
+    scalar_operation: ScalarOperation | None = None
+    closing: string = ""
+    separator: string = ""
+    grouping: bool = false
+    declaration_members: string = ""
+    representation: string = ""

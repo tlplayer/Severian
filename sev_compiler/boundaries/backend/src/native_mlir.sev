@@ -39,7 +39,7 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
     opt = environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21")
     translate = environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21")
     clang = environment.get("SEVERIAN_CLANG", "clang-21")
-    ownership_pipeline = package.read_text(sysroot + "/sev_compiler/frontend/ownership/mlir.pipeline").strip()
+    ownership_pipeline = package.read_text(sysroot + "/sev_compiler/transforms/mir/ownership/mlir.pipeline").strip()
     owned = package.compiler_step(flow, "ownership", "1", initial, [opt, "{input}", "--verify-each", "--mlir-print-debuginfo", "--mlir-print-op-generic", "--pass-pipeline=" + ownership_pipeline, "-o", "{output}"], ".mlir")
     materialized = package.pipeline_text(flow, debug_values(package.read_text(owned.path)), ".mlir")
     lowering = [opt, "{input}", "--verify-each", "--mlir-print-debuginfo", "--convert-scf-to-cf"]

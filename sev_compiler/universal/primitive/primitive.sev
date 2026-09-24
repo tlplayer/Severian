@@ -1,31 +1,3 @@
-import * from "../type/type.sev"
+# Compatibility export; syntax owns the primitive contract.
+import * from "package:syntax/primitive.sev"
 import * from "error.sev"
-
-enum PrimitiveCategory:
-    Boolean
-    Integer
-    Float
-    Char
-    String 
-    Bytes
-    Absence
-
-
-enum PrimitiveRepresentation:
-    BooleanBit
-    IntegerBits(bits: u16, signed: bool)
-    IeeeFloatBits(bits: u16)
-    BrainFloatBits(bits: u16)
-    FloatBits(bits: u16, exponent_bits: u16, fraction_bits: u16, supports_infinity: bool)
-    PointerBits(bits: u16)
-    RecordAggregate
-    TaggedAggregate
-
-
-trait Primitive: Type
-    property category: PrimitiveCategory
-    property representation: PrimitiveRepresentation
-    property default_literal: bool = false
-
-
-trait PrimitiveAlias[T]: Primitive

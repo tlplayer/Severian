@@ -1,3 +1,4 @@
+import * from "package:syntax/block.sev"
 import source
 import * from "../id/compiler.sev"
 
@@ -37,6 +38,7 @@ class DefinitionDependency:
     dependent: DefinitionIndex
     requirement: DefinitionIndex
     kind: DependencyKind
+    origin: OperationOrigin | None = None
 
 
 # A checked projection of the authoritative declaration and CFG tables. It
@@ -90,7 +92,7 @@ def add_definition(graph: DefinitionGraph, definition: DefId, kind: DefinitionKi
     return DefinitionIndex(u32(index))
 
 
-def add_dependency(graph: DefinitionGraph, dependent: DefinitionIndex, requirement: DefinitionIndex, kind: DependencyKind) -> unit | Error:
+def add_dependency(graph: DefinitionGraph, dependent: DefinitionIndex, requirement: DefinitionIndex, kind: DependencyKind, origin: OperationOrigin | None = None) -> unit | Error:
     if graph.frozen:
         throw Error("cannot mutate a frozen semantic graph")
     if dependent.index >= len(graph.nodes) or requirement.index >= len(graph.nodes):
@@ -98,4 +100,4 @@ def add_dependency(graph: DefinitionGraph, dependent: DefinitionIndex, requireme
     for edge in graph.dependencies:
         if edge.dependent.index == dependent.index and edge.requirement.index == requirement.index and edge.kind == kind:
             return
-    graph.dependencies.append(DefinitionDependency(dependent, requirement, kind))
+    graph.dependencies.append(DefinitionDependency(dependent, requirement, kind, origin))

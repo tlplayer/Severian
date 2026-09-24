@@ -1,0 +1,76 @@
+import diagnostics
+import universal
+
+def validate_expression(expression: universal.Expression, declared: set[universal.BindingId]) -> unit | diagnostics.Diagnostic:
+    match expression.kind:
+        case LiteralValue:
+            return unit
+        case FunctionReference:
+            return unit
+        case BindingReference:
+            if binding in declared:
+                return unit
+            return error(diagnostics.Diagnostic("E000301", "value used before it is available", expression.span))
+        case ResolvedCall:
+            for argument in arguments:
+                validate_expression(argument.value, declared)
+        case Convert:
+            validate_expression(operand, declared)
+        case Unary:
+            validate_expression(operand, declared)
+        case Binary:
+            validate_expression(left, declared)
+            validate_expression(right, declared)
+    return unit
+
+
+def validate_statement(statement: universal.Statement, bindings: map[universal.BindingId, universal.Binding], declared: set[universal.BindingId]) -> unit | diagnostics.Diagnostic:
+    match statement:
+        case BindingStatement:
+            validate_expression(binding.value, declared)
+            declared.add(binding.id)
+        case ExpressionStatement:
+            validate_expression(expression, declared)
+        case Return:
+            if value != None:
+                validate_expression(value, declared)
+        case Assert:
+            validate_expression(condition, declared)
+            if message != None:
+                validate_expression(message, declared)
+        case If:
+            validate_expression(condition, declared)
+            then_declared = declared.copy()
+            for nested in then_block.statements:
+                validate_statement(nested, bindings, then_declared)
+            else_declared = declared.copy()
+            for nested in else_block.statements:
+                validate_statement(nested, bindings, else_declared)
+        case Match:
+            validate_expression(subject, declared)
+            for arm in arms:
+                arm_declared = declared.copy()
+                if arm.binding != None:
+                    arm_declared.add(arm.binding)
+                for nested in arm.body.statements:
+                    validate_statement(nested, bindings, arm_declared)
+    return unit
+
+
+def validate_module(module: universal.Module) -> unit | diagnostics.Diagnostic:
+    bindings: map[universal.BindingId, universal.Binding] = {}
+    for binding in module.bindings:
+        bindings[binding.id] = binding
+    declared: set[universal.BindingId] = set()
+    for statement in module.initializer.statements:
+        validate_statement(statement, bindings, declared)
+    globals = declared.copy()
+    for function in module.functions:
+        if function.body == None:
+            continue
+        declared = globals.copy()
+        for parameter in function.parameters:
+            declared.add(parameter.binding)
+        for statement in function.body.statements:
+            validate_statement(statement, bindings, declared)
+    return unit

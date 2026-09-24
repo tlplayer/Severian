@@ -1,0 +1,25 @@
+import * from "../source.sev"
+
+class TypeAnnotation:
+    kind: TypeAnnotationKind
+    span: Span
+    binding: string = ""
+
+
+enum TypeAnnotationKind:
+    Named(name: string, arguments: list[TypeAnnotation])
+    Union(members: list[TypeAnnotation])
+
+
+def named_type(name: string, arguments: list[TypeAnnotation], span: Span) -> TypeAnnotation:
+    return TypeAnnotation(Named(name, arguments), span)
+
+
+def simple_type_name(annotation: TypeAnnotation) -> string | None:
+    match annotation.kind:
+        case Named:
+            if len(arguments) == 0:
+                return name
+        case Union:
+            return None
+    return None

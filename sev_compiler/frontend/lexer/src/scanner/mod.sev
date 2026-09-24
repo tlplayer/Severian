@@ -8,9 +8,9 @@ import * from "../indentation.sev"
 import * from "../syntax/mod.sev"
 
 
-def make_token(input: LexemeInput, kind: TokenKind, start: int, end: int) -> Token:
+def make_token(input: LexemeInput, kind: TokenKind, start: int, end: int, value: string | None = None) -> Token:
     matched = Lexeme(input.characters[start:end].join(""), lexeme_span(input, start, end))
-    return token_from_lexeme(kind, matched)
+    return token_from_lexeme(kind, matched, value)
 
 
 def scan_bootstrap(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
@@ -107,9 +107,8 @@ def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: 
                         metadata = syntaxes
                     case _:
                         throw diagnostics.diagnostic("E000102", "unimplemented (sev_compiler/frontend/lexer/src/scanner/mod.sev)")
-                token = make_token(input, kind, start, cursor)
+                token = make_token(input, kind, start, cursor, result.value)
                 token.syntaxes = metadata
-                token.value = result.value
                 tokens.append(token)
                 if kind == TokenKind.Newline:
                     line_start = character == "\n"

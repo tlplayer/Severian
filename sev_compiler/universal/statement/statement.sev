@@ -1,3 +1,4 @@
+import * from "package:syntax/block.sev"
 import source
 import * from "../id/compiler.sev"
 import * from "../type/annotation.sev"
@@ -23,6 +24,8 @@ class Block:
     statements: list[Statement]
     operations: list[Operation] = []
     lowered_operations: list[LoweredOperation] = []
+    span: source.Span | None = None
+    layout: BlockLayout | None = None
 
 
 class MatchArm:

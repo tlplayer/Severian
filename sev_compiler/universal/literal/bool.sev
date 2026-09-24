@@ -1,3 +1,2 @@
-enum BoolLiteral:
-    True {"true"}
-    False {"false"}
+# Compatibility export; syntax owns this contract.
+import * from "package:syntax/literal/bool.sev"

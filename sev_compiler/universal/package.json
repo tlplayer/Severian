@@ -24,6 +24,14 @@
     "diagnostics": {
       "path": "../diagnostics",
       "package": "sev-compiler-diagnostics"
+    },
+    "syntax": {
+      "package": "sev-compiler-syntax",
+      "path": "../syntax"
+    },
+    "primitives": {
+      "package": "sev-compiler-primitives",
+      "path": "../primitives"
     }
   }
 }

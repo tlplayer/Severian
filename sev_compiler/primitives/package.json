@@ -1,0 +1,20 @@
+{
+  "package": {
+    "name": "sev-compiler-primitives",
+    "version": "0.1.0",
+    "edition": "2026",
+    "publish": true
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "syntax": {
+      "package": "sev-compiler-syntax",
+      "path": "../syntax"
+    },
+    "profiling": {
+      "path": "../../library/system/profiling"
+    }
+  }
+}

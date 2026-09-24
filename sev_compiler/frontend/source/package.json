@@ -12,6 +12,10 @@
   "dependencies": {
     "file": {
       "path": "../../../library/system/file"
+    },
+    "syntax": {
+      "package": "sev-compiler-syntax",
+      "path": "../../syntax"
     }
   }
 }

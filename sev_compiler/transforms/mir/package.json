@@ -10,15 +10,25 @@
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "source": {"package": "sev-compiler-source", "path": "../../frontend/source"},
-    "diagnostics": {"package": "sev-compiler-diagnostics", "path": "../../diagnostics"},
+    "source": {
+      "package": "sev-compiler-source",
+      "path": "../../frontend/source"
+    },
+    "diagnostics": {
+      "package": "sev-compiler-diagnostics",
+      "path": "../../diagnostics"
+    },
     "universal": {
       "package": "sev-compiler-universal",
       "path": "../../universal"
     },
     "ownership": {
-      "package": "sev-compiler-ownership",
-      "path": "../../frontend/ownership"
+      "package": "sev-compiler-mir-ownership",
+      "path": "ownership"
+    },
+    "cfg_builder": {
+      "package": "sev-compiler-cfg-builder",
+      "path": "../cfg"
     }
   }
 }

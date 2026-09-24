@@ -23,14 +23,17 @@ def grammar_parent(module: universal.Module, declaration: universal.TraitDeclara
 def body_dependencies(graph: universal.DefinitionGraph, module: universal.Module, definition: universal.DefId, body: universal.CfgBody) -> unit | Error:
     owner = universal.definition_index(graph, definition)
     for block in body.blocks:
+        position := 0
         for operation in block.operations:
+            origin = block.origins[position]
+            position += 1
             match operation:
                 case Call:
                     target = universal.definition_index(graph, callable_definition(module, function))
-                    universal.add_dependency(graph, owner, target, universal.DependencyKind.Invocation)
+                    universal.add_dependency(graph, owner, target, universal.DependencyKind.Invocation, origin)
                 case CallFields:
                     target = universal.definition_index(graph, callable_definition(module, function))
-                    universal.add_dependency(graph, owner, target, universal.DependencyKind.Invocation)
+                    universal.add_dependency(graph, owner, target, universal.DependencyKind.Invocation, origin)
                 case _:
                     continue
 
@@ -47,9 +50,6 @@ def source_owner(owners: list[universal.SourceUnit], span: source.Span | None, f
 
 def build(module: universal.Module, owners: list[universal.SourceUnit], root: int) -> universal.DefinitionGraph | Error:
     graph = universal.DefinitionGraph()
-    hierarchy = module.hierarchy
-    hierarchy.regions = []
-    hierarchy.sentences = []
     module.obligations = []
     for declaration in module.traits:
         kind = universal.DefinitionKind.GrammarDefinition if declaration.grammar else universal.DefinitionKind.TraitDefinition
@@ -75,7 +75,10 @@ def build(module: universal.Module, owners: list[universal.SourceUnit], root: in
         graph.nodes[node.index] = definition_node
         body ?= declaration.body
         if body != None:
-            region = universal.hierarchy_region(module.hierarchy, declaration.definition, body, origin=declaration.span)
+            layout ?= body.layout
+            if layout == None:
+                throw Error("callable has no source block layout")
+            region = universal.RegionId(layout.id.index)
             for attachment in declaration.attachments:
                 module.obligations.append(universal.ConstraintObligation(declaration.definition, attachment.role, attachment.condition, region=region))
     initializer = universal.DefId(0, 0, universal.DeclarationId(0))

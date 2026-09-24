@@ -1,0 +1,38 @@
+import * from "source.sev"
+import * from "id/compiler.sev"
+
+class SourceBlockId:
+    index: u32
+
+class SentenceId:
+    index: u32
+
+enum BlockKind:
+    Global
+    Callable
+    Class
+    Trait
+    Test
+    Lexical
+    Main
+
+class BlockLayout:
+    id: SourceBlockId
+    kind: BlockKind
+    owner: DefId
+    span: Span | None
+    parent: SourceBlockId | None = None
+    introduced_by: SentenceId | None = None
+    children: list[SourceBlockId] = []
+
+# Source ancestry and compiler call paths are distinct from runtime stack frames.
+class CallableOrigin:
+    definition: DefId
+    name: string
+    span: Span | None
+
+class OperationOrigin:
+    span: Span | None = None
+    block: SourceBlockId | None = None
+    callable: DefId | None = None
+    path: list[CallableOrigin] = []

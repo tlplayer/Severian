@@ -1,0 +1,24 @@
+import diagnostics
+import source
+
+
+# A negative field selects the whole value. Allocation capacity never changes
+# this state: construction and explicit writes initialize individual places.
+def initialized(missing: borrow list[tuple[int, int]], owner: int, field: int = -1) -> bool:
+    for place in missing:
+        if place[0] == owner and (field < 0 or place[1] == field):
+            return false
+    return true
+
+
+def require_initialized(missing: borrow list[tuple[int, int]], owner: int, field: int, message: string, span: source.Span) -> unit | diagnostics.Diagnostic:
+    if not initialized(missing, owner, field):
+        return error(diagnostics.Diagnostic("E000303", message, span))
+
+
+def initialize(missing: borrow list[tuple[int, int]], owner: int, field: int) -> list[tuple[int, int]]:
+    remaining: list[tuple[int, int]] = []
+    for place in missing:
+        if place[0] != owner or (field >= 0 and place[1] != field):
+            remaining.append(place)
+    return remaining

@@ -128,7 +128,7 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
                         if record.storage_element.index == element.index:
                             return record.type_id
                     id = universal.TypeId(u32(1000 + len(records)))
-                    fields = [universal.FunctionParameter("data", universal.named_type("string", [], annotation.span), None, annotation.span, type_id=universal.TypeId(3)), universal.FunctionParameter("ends", universal.named_type("list", [universal.named_type("int", [], annotation.span)], annotation.span), None, annotation.span, type_id=universal.TypeId(264))]
+                    fields = [universal.FunctionParameter("data", universal.named_type("string", [], annotation.span), None, annotation.span, type_id=universal.string_type_id()), universal.FunctionParameter("ends", universal.named_type("list", [universal.named_type("int", [], annotation.span)], annotation.span), None, annotation.span, type_id=universal.TypeId(264))]
                     records.append(universal.RecordDeclaration("$buffer$string", fields, [], annotation.span, type_id=id, storage_element=element, representation="OwnedBuffer"))
                     return id
                 if not storage_types.copy_storage(element, records):
@@ -218,7 +218,7 @@ def type_annotation(definitions: SemanticDefinitions, annotation: universal.Type
             for record in records:
                 if record.name == key:
                     return record.type_id
-            fields = [universal.FunctionParameter("$tag", universal.named_type("int", [], annotation.span), None, annotation.span, type_id=universal.TypeId(64))]
+            fields = [universal.FunctionParameter("$tag", universal.named_type("int", [], annotation.span), None, annotation.span, type_id=universal.i64_type_id())]
             index := 0
             for variant in variants:
                 fields.append(universal.FunctionParameter("$variant" + string(index), universal.named_type(type_name(variant, records), [], annotation.span), None, annotation.span, type_id=variant))
@@ -732,7 +732,7 @@ def instantiate_record(definitions: SemanticDefinitions, template: universal.Rec
             if actuals[0].type_id.index == 108:
                 for default in template.type_defaults:
                     if default.binding == values[0].binding and universal.simple_type_name(default) == universal.simple_type_name(values[0]):
-                        id = universal.TypeId(3)
+                        id = universal.string_type_id()
     position = len(records)
     record = universal.RecordDeclaration(name, [], [], template.span, type_id=id, lookup=template.lookup, definition=template.definition, representation=representation)
     records.append(record)

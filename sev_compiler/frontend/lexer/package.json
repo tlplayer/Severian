@@ -24,6 +24,14 @@
     "universal": {
       "path": "../../universal",
       "package": "sev-compiler-universal"
+    },
+    "syntax": {
+      "package": "sev-compiler-syntax",
+      "path": "../../syntax"
+    },
+    "primitives": {
+      "package": "sev-compiler-primitives",
+      "path": "../../primitives"
     }
   }
 }

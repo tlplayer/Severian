@@ -2,36 +2,22 @@ import source
 import universal
 import * from "../lexeme.sev"
 
-enum TokenKind:
-    Identifier
-    Integer
-    Float
-    Character
-    String
-    FormattedString
-    Symbol
-    Newline
-    Indent
-    Dedent
-    Eof
-
+import * from "package:syntax/token.sev"
+import primitives
+import syntax
 
 # To is the classified lexical object handed to the parser. Its original
 # spelling remains available even when its literal payload is normalized.
-trait TokenTerm:
-    property lexeme: Lexeme
-    property span: source.Span
-
-
 class Token: TokenTerm
     kind: TokenKind
     span: source.Span
     lexeme: Lexeme
-    syntaxes: list[universal.OperatorSyntax] = []
+    syntaxes: list[syntax.OperatorSyntax] = []
     descriptor: bool = false
     grammar: bool = false
     value: string | None = None
     lexical_rules: list[universal.RecordDeclaration] = []
+    literal: syntax.LiteralConstruction | None = None
 
     operator <=>(self) -> string:
         # Only decoded text and macro replacements need an override. Ordinary
@@ -55,30 +41,42 @@ def checked_token[To: TokenTerm](token: To) -> To:
 
 
 def token_from_lexeme(kind: TokenKind, lexeme: Lexeme, value: string | None = None) -> Token:
-    return checked_token(Token(kind, lexeme.span, lexeme, value=value))
+    token = checked_token(Token(kind, lexeme.span, lexeme, value=value))
+    literal_syntax: syntax.LiteralSyntax | None := None
+    match kind:
+        case Integer:
+            literal_syntax = syntax.LiteralSyntax.Integer
+        case Float:
+            literal_syntax = syntax.LiteralSyntax.Float
+        case Character:
+            literal_syntax = syntax.LiteralSyntax.Character
+        case String:
+            literal_syntax = syntax.LiteralSyntax.String
+        case Identifier:
+            spelling = string(token)
+            if spelling == "true" or spelling == "false":
+                literal_syntax = syntax.LiteralSyntax.Boolean
+            elif spelling == "None":
+                literal_syntax = syntax.LiteralSyntax.NoneValue
+            elif spelling == "absent":
+                literal_syntax = syntax.LiteralSyntax.Absent
+        case _:
+            return token
+    selected ?= literal_syntax
+    if selected != None:
+        token.literal = primitives.literal_construction(selected, string(token), token.span)
+    return token
+
+
+def token_literal(token: Token) -> syntax.LiteralConstruction:
+    literal ?= token.literal
+    if literal != None:
+        return literal
+    throw Error("literal token has no primitive construction descriptor")
 
 
 def token_number(token: Token) -> string:
-    # Numeric spelling becomes a literal payload at the parser boundary.
-    spelling := string(token).replace("_", "")
-    if spelling.starts_with("0x") or spelling.starts_with("0X"):
-        value := 0
-        for character in spelling[2:].upper().characters():
-            digit := 0
-            for candidate in "0123456789ABCDEF".characters():
-                if candidate == character:
-                    break
-                digit += 1
-            if value > (9223372036854775807 - digit) / 16:
-                throw Error("hexadecimal literal is outside signed integer storage")
-            value = value * 16 + digit
-        return string(value)
-    if token.kind == TokenKind.Float:
-        if spelling.starts_with("."):
-            spelling = "0" + spelling
-        if "." not in spelling:
-            spelling = spelling.replace("e", ".0e").replace("E", ".0E")
-    return spelling
+    return token_literal(token).spelling
 
 
 def token_is_symbol(token: Token, spelling: string) -> bool:

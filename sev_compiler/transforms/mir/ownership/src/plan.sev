@@ -1,0 +1,201 @@
+import universal
+import diagnostics
+import * from "cfg.sev" as cfg
+import * from "provenance.sev" as provenance
+
+
+class ValueAlias:
+    source: universal.ValueId
+    target: universal.ValueId
+
+
+class StorageOrigin:
+    value: universal.ValueId
+    origin: universal.OperationOrigin
+
+
+class OwnershipPlan:
+    views: list[universal.ValueId] = []
+    storage: list[universal.ValueId] = []
+    aliases: list[ValueAlias] = []
+    origins: list[StorageOrigin] = []
+
+
+# MIR is the executable ownership boundary. Source effects remain attached to
+# typed bodies, while availability, initialization and stack escapes are checked
+# on the completed graph and repeated after transformations before emission.
+def analyze_ownership(module: universal.Module, body: universal.CfgBody, parameters: list[universal.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
+    try:
+        cfg.verify_availability(body, parameters)
+    catch failure: diagnostics.Diagnostic:
+        origin = universal.OperationOrigin(failure.span, body.origin.block, body.origin.callable, body.origin.path)
+        annotated = provenance.memory_diagnostic(module, failure.message, origin)
+        annotated.code = failure.code
+        return error(annotated)
+    report = OwnershipPlan(views=parameters[:])
+    for block in body.blocks:
+        if len(block.origins) != len(block.operations):
+            return error(provenance.memory_diagnostic(module, "MIR operation lost its source provenance", body.origin))
+        position := 0
+        for operation in block.operations:
+            origin = provenance.origin_at(body, block, position)
+            position += 1
+            match operation:
+                case Allocate:
+                    report.storage.append(result)
+                    report.origins.append(StorageOrigin(result, origin))
+                case Alias:
+                    report.aliases.append(ValueAlias(value, result))
+                case FieldAddress:
+                    report.aliases.append(ValueAlias(object, result))
+                case _:
+                    continue
+        terminal ?= block.terminator
+        if terminal != None:
+            for edge in cfg.successors(terminal.exit):
+                index := 0
+                for argument in edge.arguments:
+                    report.aliases.append(ValueAlias(argument, body.blocks[edge.target].parameters[index]))
+                    index += 1
+    verify_initialization(module, body, report)
+    verify_escapes(module, body, report)
+    return report
+
+
+def storage_origin(plan: borrow OwnershipPlan, value: universal.ValueId) -> universal.OperationOrigin | None:
+    reachable: list[int] = [int(value.index)]
+    cursor := 0
+    while cursor < len(reachable):
+        current = reachable[cursor]
+        cursor += 1
+        for storage in borrow plan.origins:
+            if int(storage.value.index) == current:
+                return storage.origin
+        for alias in borrow plan.aliases:
+            if int(alias.target.index) == current and int(alias.source.index) not in reachable:
+                reachable.append(int(alias.source.index))
+    return None
+
+
+def stack_owner(plan: borrow OwnershipPlan, value: universal.ValueId) -> bool:
+    return storage_origin(plan, value) != None
+
+
+def verify_escapes(module: universal.Module, body: borrow universal.CfgBody, plan: borrow OwnershipPlan) -> unit | diagnostics.Diagnostic:
+    reachable = cfg.reachable_blocks(body)
+    for block in borrow body.blocks:
+        if block.id not in reachable:
+            continue
+        terminal ?= block.terminator
+        if terminal != None:
+            returned_values: list[universal.ValueId] := []
+            match terminal.exit:
+                case Finish:
+                    returned ?= value
+                    if returned != None:
+                        returned_values.append(returned)
+                case FinishFields:
+                    returned_values = values[:]
+                case _:
+                    continue
+            for value in returned_values:
+                owner ?= storage_origin(plan, value)
+                if owner != None:
+                    return error(provenance.memory_diagnostic(module, "returned view outlives its local storage owner", provenance.origin_at(body, block, int(len(block.operations))), owner))
+
+
+# A forward must-analysis: a scalar slot is readable only when every reachable
+# predecessor has initialized it. The fixed point includes loop backedges.
+# Field-sensitive initialization remains represented by the source place checks;
+# aggregate addresses are not incorrectly treated as one initialized scalar.
+def initialized_after(block: universal.BasicBlock, incoming: list[int], slots: list[int]) -> list[int]:
+    initialized = incoming[:]
+    for operation in block.operations:
+        match operation:
+            case Allocate:
+                if int(result.index) in slots:
+                    retained: list[int] = []
+                    for value in initialized:
+                        if value != int(result.index):
+                            retained.append(value)
+                    initialized = retained
+            case Store:
+                if int(address.index) in slots and int(address.index) not in initialized:
+                    initialized.append(int(address.index))
+            case _:
+                continue
+    return initialized
+
+
+def same_values(left: list[int], right: list[int]) -> bool:
+    if len(left) != len(right):
+        return false
+    for value in left:
+        if value not in right:
+            return false
+    return true
+
+
+def incoming_values(body: universal.CfgBody, target: int, outgoing: list[list[int]], reachable: list[int], slots: list[int]) -> list[int]:
+    if target == body.entry:
+        return []
+    incoming = slots[:]
+    for block in body.blocks:
+        if block.id not in reachable:
+            continue
+        terminal ?= block.terminator
+        if terminal != None:
+            for edge in cfg.successors(terminal.exit):
+                if edge.target == target:
+                    retained: list[int] = []
+                    for value in incoming:
+                        if value in outgoing[block.id]:
+                            retained.append(value)
+                    incoming = retained
+    return incoming
+
+
+def verify_initialization(module: universal.Module, body: universal.CfgBody, plan: OwnershipPlan) -> unit | diagnostics.Diagnostic:
+    slots: list[int] = []
+    for block in body.blocks:
+        for operation in block.operations:
+            match operation:
+                case Allocate:
+                    descriptor ?= universal.primitive_descriptor(type_id)
+                    if descriptor != None:
+                        slots.append(int(result.index))
+                case _:
+                    continue
+    reachable = cfg.reachable_blocks(body)
+    outgoing: list[list[int]] = []
+    for block in body.blocks:
+        outgoing.append(slots[:])
+    changed := true
+    while changed:
+        changed = false
+        for block in body.blocks:
+            if block.id not in reachable:
+                continue
+            incoming = incoming_values(body, block.id, outgoing, reachable, slots)
+            result = initialized_after(block, incoming, slots)
+            if not same_values(result, outgoing[block.id]):
+                outgoing[block.id] = result
+                changed = true
+    for block in body.blocks:
+        if block.id not in reachable:
+            continue
+        initialized = incoming_values(body, block.id, outgoing, reachable, slots)
+        position := 0
+        for operation in block.operations:
+            match operation:
+                case Load:
+                    if int(address.index) in slots and int(address.index) not in initialized:
+                        return error(provenance.memory_diagnostic(module, "read of storage that is not initialized on every incoming path", provenance.origin_at(body, block, position), storage_origin(plan, address)))
+                case _:
+                    single = universal.BasicBlock(block.id, operations=[operation])
+                    initialized = initialized_after(single, initialized, slots)
+            position += 1
+
+
+def authorize_lowering(module: borrow universal.Module, body: borrow universal.CfgBody, parameters: borrow list[universal.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
+    return analyze_ownership(module, body, parameters)

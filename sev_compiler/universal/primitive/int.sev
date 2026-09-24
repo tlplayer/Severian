@@ -1,3 +1,4 @@
+import * from "package:primitives/declarations.sev"
 import * from "primitive.sev"
 
 import * from "../operator/trait/arithmetic.sev"
@@ -151,6 +152,9 @@ Only representation metadata differs between the concrete types. Behavior is
 specified once by the `Integer` contracts and generated conversion relations below.
 '''
 class i8: SignedInteger :
+    identity: PrimitiveId = I8Primitive().identity
+    id: TypeId = I8Primitive().id
+    literal: LiteralSyntax | None = I8Primitive().literal
     name: string = "i8"
     size: byte = 1B
     alignment: byte = 1B
@@ -160,10 +164,13 @@ class i8: SignedInteger :
     max: i8 = 127
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, true)
-    default_literal: bool = true
+    default_literal: bool = I8Primitive().default_literal
 
 
 class i16: SignedInteger :
+    identity: PrimitiveId = I16Primitive().identity
+    id: TypeId = I16Primitive().id
+    literal: LiteralSyntax | None = I16Primitive().literal
     name: string = "i16"
     size: byte = 2B
     alignment: byte = 2B
@@ -173,10 +180,13 @@ class i16: SignedInteger :
     max: i16 = 32767
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, true)
-    default_literal: bool = true
+    default_literal: bool = I16Primitive().default_literal
 
 
 class i32: SignedInteger :
+    identity: PrimitiveId = I32Primitive().identity
+    id: TypeId = I32Primitive().id
+    literal: LiteralSyntax | None = I32Primitive().literal
     name: string = "i32"
     size: byte = 4B
     alignment: byte = 4B
@@ -186,10 +196,13 @@ class i32: SignedInteger :
     max: i32 = 2147483647
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, true)
-    default_literal: bool = true
+    default_literal: bool = I32Primitive().default_literal
 
 
 class i64: SignedInteger :
+    identity: PrimitiveId = I64Primitive().identity
+    id: TypeId = I64Primitive().id
+    literal: LiteralSyntax | None = I64Primitive().literal
     name: string = "i64"
     size: byte = 8B
     alignment: byte = 8B
@@ -199,10 +212,13 @@ class i64: SignedInteger :
     max: i64 = 9223372036854775807
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
-    default_literal: bool = true
+    default_literal: bool = I64Primitive().default_literal
 
 
 class i128: SignedInteger :
+    identity: PrimitiveId = I128Primitive().identity
+    id: TypeId = I128Primitive().id
+    literal: LiteralSyntax | None = I128Primitive().literal
     name: string = "i128"
     size: byte = 16B
     alignment: byte = 16B
@@ -212,10 +228,13 @@ class i128: SignedInteger :
     max: i128 = (2 ** 127) - 1
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, true)
-    default_literal: bool = true
+    default_literal: bool = I128Primitive().default_literal
 
 
 class isize: SignedInteger :
+    identity: PrimitiveId = I64Primitive().identity
+    id: TypeId = I64Primitive().id
+    literal: LiteralSyntax | None = I64Primitive().literal
     name: string = "isize"
     size: byte = target.pointer_size
     alignment: byte = target.pointer_alignment
@@ -225,10 +244,13 @@ class isize: SignedInteger :
     max: isize = (2 ** (bits - 1)) - 1
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(bits, true)
-    default_literal: bool = true
+    default_literal: bool = I64Primitive().default_literal
 
 
 class u8: UnsignedInteger :
+    identity: PrimitiveId = U8Primitive().identity
+    id: TypeId = U8Primitive().id
+    literal: LiteralSyntax | None = U8Primitive().literal
     name: string = "u8"
     size: byte = 1B
     alignment: byte = 1B
@@ -238,10 +260,13 @@ class u8: UnsignedInteger :
     max: u8 = 255
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, false)
-    default_literal: bool = true
+    default_literal: bool = U8Primitive().default_literal
 
 
 class u16: UnsignedInteger :
+    identity: PrimitiveId = U16Primitive().identity
+    id: TypeId = U16Primitive().id
+    literal: LiteralSyntax | None = U16Primitive().literal
     name: string = "u16"
     size: byte = 2B
     alignment: byte = 2B
@@ -251,10 +276,13 @@ class u16: UnsignedInteger :
     max: u16 = 65535
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, false)
-    default_literal: bool = true
+    default_literal: bool = U16Primitive().default_literal
 
 
 class u32: UnsignedInteger :
+    identity: PrimitiveId = U32Primitive().identity
+    id: TypeId = U32Primitive().id
+    literal: LiteralSyntax | None = U32Primitive().literal
     name: string = "u32"
     size: byte = 4B
     alignment: byte = 4B
@@ -264,10 +292,13 @@ class u32: UnsignedInteger :
     max: u32 = 4294967295
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, false)
-    default_literal: bool = true
+    default_literal: bool = U32Primitive().default_literal
 
 
 class u64: UnsignedInteger :
+    identity: PrimitiveId = U64Primitive().identity
+    id: TypeId = U64Primitive().id
+    literal: LiteralSyntax | None = U64Primitive().literal
     name: string = "u64"
     size: byte = 8B
     alignment: byte = 8B
@@ -277,10 +308,13 @@ class u64: UnsignedInteger :
     max: u64 = 18446744073709551615
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, false)
-    default_literal: bool = true
+    default_literal: bool = U64Primitive().default_literal
 
 
 class u128: UnsignedInteger :
+    identity: PrimitiveId = U128Primitive().identity
+    id: TypeId = U128Primitive().id
+    literal: LiteralSyntax | None = U128Primitive().literal
     name: string = "u128"
     size: byte = 16B
     alignment: byte = 16B
@@ -290,10 +324,13 @@ class u128: UnsignedInteger :
     max: u128 = (2 ** 128) - 1
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, false)
-    default_literal: bool = true
+    default_literal: bool = U128Primitive().default_literal
 
 
 class usize: UnsignedInteger :
+    identity: PrimitiveId = U64Primitive().identity
+    id: TypeId = U64Primitive().id
+    literal: LiteralSyntax | None = U64Primitive().literal
     name: string = "usize"
     size: byte = target.pointer_size
     alignment: byte = target.pointer_alignment
@@ -303,7 +340,7 @@ class usize: UnsignedInteger :
     max: usize = (2 ** bits) - 1
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(bits, false)
-    default_literal: bool = true
+    default_literal: bool = U64Primitive().default_literal
 
 
 '''
@@ -349,6 +386,9 @@ compiler intrinsics. They remain ordinary Severian/library operations unless
 they have a real MLIR operation to bind to.
 '''
 class int: Integer:
+    identity: PrimitiveId = I64Primitive().identity
+    id: TypeId = I64Primitive().id
+    literal: LiteralSyntax | None = I64Primitive().literal
 
     operator if(self) -> bool:
         return self != 0

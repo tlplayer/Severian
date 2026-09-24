@@ -1,0 +1,75 @@
+import * from "catalog.sev"
+
+
+def default_literal_type(syntax: LiteralSyntax) -> PrimitiveDescriptor:
+    selected: PrimitiveDescriptor | None := None
+    for descriptor in primitive_descriptors():
+        if descriptor.literal == syntax and descriptor.default_literal:
+            if selected != None:
+                throw Error("ambiguous primitive literal default")
+            selected = descriptor
+    value ?= selected
+    if value != None:
+        return value
+    throw Error("no primitive declares this literal syntax")
+
+
+def normalize_literal(syntax: LiteralSyntax, spelling: string) -> string:
+    if syntax != LiteralSyntax.Integer and syntax != LiteralSyntax.Float:
+        return spelling
+    normalized := spelling.replace("_", "")
+    if syntax == LiteralSyntax.Integer and (normalized.starts_with("0x") or normalized.starts_with("0X")):
+        # Convert without a host-width integer so i128/u128 literals survive
+        # lexing intact. Each decimal digit stays below 160 during multiplication.
+        decimal: list[int] = [0]
+        for character in normalized[2:].upper().characters():
+            digit := 0
+            for candidate in "0123456789ABCDEF".characters():
+                if candidate == character:
+                    break
+                digit += 1
+            if digit >= 16:
+                throw Error("invalid hexadecimal literal digit")
+            carry := digit
+            position := 0
+            while position < len(decimal):
+                value = decimal[position] * 16 + carry
+                decimal[position] = value % 10
+                carry = value // 10
+                position += 1
+            while carry > 0:
+                decimal.append(carry % 10)
+                carry = carry // 10
+        digits: list[string] = []
+        position := int(len(decimal))
+        while position > 0:
+            position -= 1
+            digits.append(string(decimal[position]))
+        return digits.join("")
+    if syntax == LiteralSyntax.Float:
+        if normalized.starts_with("."):
+            normalized = "0" + normalized
+        if "." not in normalized:
+            normalized = normalized.replace("e", ".0e").replace("E", ".0E")
+    return normalized
+
+
+def literal_construction(syntax: LiteralSyntax, spelling: string, span: Span) -> LiteralConstruction:
+    descriptor = default_literal_type(syntax)
+    family := descriptor.name
+    if syntax == LiteralSyntax.Integer:
+        family = "int"
+    elif syntax == LiteralSyntax.Float:
+        family = "float"
+    return LiteralConstruction(descriptor.identity, descriptor.id, family, syntax, normalize_literal(syntax, spelling), span)
+
+
+def select_literal_type(literal: LiteralConstruction, expected: TypeId) -> TypeId:
+    candidate ?= primitive_descriptor(expected)
+    if candidate != None:
+        if candidate.literal == literal.syntax:
+            return candidate.id
+        # Numeric construction is declared by the target primitive family.
+        if literal.syntax == LiteralSyntax.Integer and candidate.category == PrimitiveCategory.Float:
+            return candidate.id
+    return literal.type_id

@@ -1,3 +1,4 @@
+import * from "package:syntax/block.sev"
 import * from "../id/compiler.sev"
 import * from "../operation/operation.sev"
 import * from "branch.sev"
@@ -8,5 +9,6 @@ class BasicBlock:
     parameters: list[ValueId] = []
     operations: list[Operation] = []
     terminator: CfgTerminator | None = None
+    origins: list[OperationOrigin] = []
 
 

@@ -1,0 +1,11 @@
+import * from "../id/compiler.sev"
+
+
+# Lowering retains the same open operation identity. These wrappers describe
+# arity only; adding an operation does not add a new lowered variant.
+class UnaryOperation:
+    id: OpId
+
+
+class BinaryOperation:
+    id: OpId

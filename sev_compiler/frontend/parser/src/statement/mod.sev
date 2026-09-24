@@ -920,14 +920,14 @@ def parser_indented_block(parser: Parser, owner: string) -> tuple[universal.Bloc
     parser_expect(parser, Newline, "expected newline after " + owner)
     while parser_take(parser, Newline) != None:
         throw diagnostics.diagnostic("E000113", "unimplemented (sev_compiler/frontend/parser/src/statement/mod.sev)")
-    parser_expect(parser, Indent, "expected indented " + owner + " body")
+    start = parser_expect(parser, Indent, "expected indented " + owner + " body").span
     statements: list[universal.Statement] = []
     parser_separators(parser)
     while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
         statements.append(parser_block_statement(parser))
         parser_separators(parser)
     end = parser_expect(parser, Dedent, "expected end of " + owner + " body").span.end
-    return (universal.Block(statements, [], []), end)
+    return (universal.Block(statements, [], [], source.Span(start.source, start.start, end)), end)
 
 
 class LoopInitializer:
@@ -945,7 +945,7 @@ def parser_initialized_loop(loop: universal.Statement, initializer: LoopInitiali
     binding ?= initializer.binding
     if binding != None:
         # The initializer runs once in a scope enclosing the whole loop.
-        scope = universal.Block([universal.BindingStatement(binding), loop])
+        scope = universal.Block([universal.BindingStatement(binding), loop], span=span)
         taken = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
         return universal.If(taken, scope, universal.empty_block(), span)
     return loop
@@ -1400,26 +1400,26 @@ def parse_primary(parser: Parser) -> universal.Expression | diagnostics.Diagnost
                 raised = parse_expression(parser, 0)
                 return universal.Expression(universal.ThrowValue(raised), source.Span(token.span.source, token.span.start, raised.span.end))
             if value == "true":
-                return universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), token.span)
+                return universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), token.span, literal=lexer.token_literal(token))
             if value == "false":
-                return universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), token.span)
+                return universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), token.span, literal=lexer.token_literal(token))
             if value == "None":
-                return universal.Expression(universal.LiteralValue(universal.LiteralValue.NoneValue), token.span)
+                return universal.Expression(universal.LiteralValue(universal.LiteralValue.NoneValue), token.span, literal=lexer.token_literal(token))
             if value == "absent":
-                return universal.Expression(universal.LiteralValue(universal.LiteralValue.AbsentValue), token.span)
+                return universal.Expression(universal.LiteralValue(universal.LiteralValue.AbsentValue), token.span, literal=lexer.token_literal(token))
             return universal.Expression(universal.Name(value), token.span)
         case Integer:
             value = lexer.token_number(token)
-            return parser_numeric_suffix(parser, token, universal.Expression(universal.LiteralValue(universal.IntegerValue(value)), token.span))
+            return parser_numeric_suffix(parser, token, universal.Expression(universal.LiteralValue(universal.IntegerValue(value)), token.span, literal=lexer.token_literal(token)))
         case Float:
             value = lexer.token_number(token)
-            return parser_numeric_suffix(parser, token, universal.Expression(universal.LiteralValue(universal.FloatValue(value)), token.span))
+            return parser_numeric_suffix(parser, token, universal.Expression(universal.LiteralValue(universal.FloatValue(value)), token.span, literal=lexer.token_literal(token)))
         case Character:
             value = lexer.literal_codepoint(string(token))
-            return universal.Expression(universal.LiteralValue(universal.CharacterValue(value)), token.span)
+            return universal.Expression(universal.LiteralValue(universal.CharacterValue(value)), token.span, literal=lexer.token_literal(token))
         case String:
             value = string(token)
-            return universal.Expression(universal.LiteralValue(universal.StringValue(value)), token.span)
+            return universal.Expression(universal.LiteralValue(universal.StringValue(value)), token.span, literal=lexer.token_literal(token))
         case FormattedString:
             value = string(token)
             return formatted_string_expression(value, token.span, token.syntaxes, token.lexical_rules)

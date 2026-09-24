@@ -3,7 +3,7 @@ import diagnostics
 import * from "../callable.sev" as callable
 
 
-# Both driver entries lower through the same executable CFG builder.
+# Both driver entries construct CFG and obtain MIR ownership authorization.
 def build(program: universal.Program) -> universal.Module | diagnostics.Diagnostic:
     result := universal.empty_module()
     for module in program.modules:

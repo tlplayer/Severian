@@ -10,7 +10,10 @@
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "source": {"package": "sev-compiler-source", "path": "../../frontend/source"},
+    "source": {
+      "package": "sev-compiler-source",
+      "path": "../../frontend/source"
+    },
     "profiling": {
       "path": "../../../library/system/profiling"
     },
@@ -23,8 +26,8 @@
       "path": "../mir"
     },
     "ownership": {
-      "package": "sev-compiler-ownership",
-      "path": "../../frontend/ownership"
+      "package": "sev-compiler-mir-ownership",
+      "path": "../mir/ownership"
     }
   }
 }

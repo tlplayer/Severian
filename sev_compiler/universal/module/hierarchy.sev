@@ -1,11 +1,8 @@
+import * from "package:syntax/block.sev"
 import source
 import * from "../id/compiler.sev"
 import * from "../statement/statement.sev"
 import * from "../constraint/model.sev"
-
-
-class SentenceId:
-    index: u32
 
 
 enum RegionKind:
@@ -50,12 +47,27 @@ class SemanticHierarchy:
     submodules: list[SemanticSubmodule] = []
     regions: list[SemanticRegion] = []
     sentences: list[SemanticSentence] = []
+    blocks: list[BlockLayout] = []
 
 
 def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Block, parent: RegionId | None = None, introduced_by: SentenceId | None = None, origin: source.Span | None = None) -> RegionId:
     region = RegionId(u32(len(hierarchy.regions)))
     kind = RegionKind.Callable if parent == None else RegionKind.Lexical
+    block_origin ?= body.span
+    if block_origin != None:
+        origin = block_origin
+    else:
+        body.span = origin
     hierarchy.regions.append(SemanticRegion(region, definition, kind, parent, introduced_by, origin))
+    parent_block: SourceBlockId | None := None
+    enclosing ?= parent
+    if enclosing != None:
+        parent_block = SourceBlockId(enclosing.index)
+    layout = BlockLayout(SourceBlockId(region.index), BlockKind.Callable if parent == None else BlockKind.Lexical, definition, origin, parent_block, introduced_by)
+    body.layout = layout
+    hierarchy.blocks.append(layout)
+    if enclosing != None:
+        hierarchy.blocks[enclosing.index].children.append(layout.id)
     ordinal := 0
     for statement in body.statements:
         sentence = SentenceId(u32(len(hierarchy.sentences)))
@@ -112,6 +124,19 @@ def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Bloc
 
 
 def verify_hierarchy(hierarchy: SemanticHierarchy) -> unit | Error:
+    if len(hierarchy.blocks) != len(hierarchy.regions):
+        throw Error("semantic blocks and regions disagree")
+    for block in hierarchy.blocks:
+        if block.id.index >= len(hierarchy.regions):
+            throw Error("dangling source block identity")
+        for child in block.children:
+            if child.index >= len(hierarchy.blocks):
+                throw Error("dangling source block child")
+            parent ?= hierarchy.blocks[child.index].parent
+            if parent == None:
+                throw Error("source block child has no parent")
+            if parent != None and parent.index != block.id.index:
+                throw Error("source block child belongs to another parent")
     for module in hierarchy.modules:
         if module.library < 0 or module.library >= len(hierarchy.libraries):
             throw Error("semantic module has no owning library")

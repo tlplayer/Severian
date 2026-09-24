@@ -1,0 +1,204 @@
+import profiling
+import * from "declarations.sev"
+
+class PrimitiveDescriptor: Primitive
+    identity: PrimitiveId
+    id: TypeId
+    name: string
+    size: Size
+    alignment: Size
+    constructors: list[Constructor]
+    category: PrimitiveCategory
+    representation: PrimitiveRepresentation
+    literal: LiteralSyntax | None
+    default_literal: bool
+
+
+def describe_primitive[T: Primitive](value: T) -> PrimitiveDescriptor:
+    return PrimitiveDescriptor(value.identity, value.id, value.name, value.size, value.alignment, value.constructors, value.category, value.representation, value.literal, value.default_literal)
+
+
+PrimitiveCatalog: list[PrimitiveDescriptor] = []
+
+
+def primitive_descriptors() -> list[PrimitiveDescriptor]:
+    if len(PrimitiveCatalog) == 0:
+        PrimitiveCatalog.append(describe_primitive(BoolPrimitive()))
+        PrimitiveCatalog.append(describe_primitive(UnitPrimitive()))
+        PrimitiveCatalog.append(describe_primitive(StringPrimitive()))
+        PrimitiveCatalog.append(describe_primitive(IndexPrimitive()))
+        PrimitiveCatalog.append(describe_primitive(PointerPrimitive()))
+        PrimitiveCatalog.append(describe_primitive(NoneValuePrimitive()))
+        PrimitiveCatalog.append(describe_primitive(AbsentPrimitive()))
+        PrimitiveCatalog.append(describe_primitive(F32Primitive()))
+        PrimitiveCatalog.append(describe_primitive(F64Primitive()))
+        PrimitiveCatalog.append(describe_primitive(U8Primitive()))
+        PrimitiveCatalog.append(describe_primitive(U16Primitive()))
+        PrimitiveCatalog.append(describe_primitive(U32Primitive()))
+        PrimitiveCatalog.append(describe_primitive(U64Primitive()))
+        PrimitiveCatalog.append(describe_primitive(CharPrimitive()))
+        PrimitiveCatalog.append(describe_primitive(I8Primitive()))
+        PrimitiveCatalog.append(describe_primitive(I16Primitive()))
+        PrimitiveCatalog.append(describe_primitive(I32Primitive()))
+        PrimitiveCatalog.append(describe_primitive(I64Primitive()))
+        PrimitiveCatalog.append(describe_primitive(I128Primitive()))
+        PrimitiveCatalog.append(describe_primitive(U128Primitive()))
+        PrimitiveCatalog.append(describe_primitive(F16Primitive()))
+        PrimitiveCatalog.append(describe_primitive(F128Primitive()))
+        PrimitiveCatalog.append(describe_primitive(F8E4M3FnPrimitive()))
+        PrimitiveCatalog.append(describe_primitive(F8E5M2Primitive()))
+        PrimitiveCatalog.append(describe_primitive(BF16Primitive()))
+    return PrimitiveCatalog
+
+
+def primitive_descriptor(id: TypeId) -> PrimitiveDescriptor | None:
+    for descriptor in primitive_descriptors():
+        if descriptor.id.index == id.index:
+            return descriptor
+    return None
+
+
+# Compatibility projection for existing scalar lowering consumers. It contains
+# no independent identity, representation or literal-default decisions.
+class ScalarType:
+    id: TypeId
+    name: string
+    bits: u16
+    boolean: bool
+    representation: string = "integer"
+    signed: bool = true
+
+
+def scalar_from_primitive(value: PrimitiveDescriptor) -> ScalarType:
+    result = ScalarType(value.id, value.name, 0, value.category == PrimitiveCategory.Boolean)
+    match value.representation:
+        case BooleanBit:
+            result.bits = 1
+        case IntegerBits:
+            result.bits = bits
+            result.signed = signed
+        case IeeeFloatBits:
+            result.bits = bits
+            result.representation = "float"
+        case BrainFloatBits:
+            result.bits = bits
+            result.representation = "float"
+        case FloatBits:
+            result.bits = bits
+            result.representation = "float"
+        case PointerBits:
+            result.bits = bits
+            result.representation = "pointer"
+        case RecordAggregate:
+            if value.category == PrimitiveCategory.String:
+                result.bits = 8
+                result.representation = "utf8"
+        case TaggedAggregate:
+            result.representation = "aggregate"
+    if value.id.index == index_type_id().index:
+        result.representation = "index"
+    return result
+
+
+def scalar_identities() -> list[int]:
+    result: list[int] = []
+    for descriptor in primitive_descriptors():
+        result.append(int(descriptor.id.index))
+    return result
+
+
+def scalar_types() -> list[ScalarType]:
+    result: list[ScalarType] = []
+    for descriptor in primitive_descriptors():
+        result.append(scalar_from_primitive(descriptor))
+    return result
+
+
+@record_calls
+def make_scalar_descriptor(id: TypeId, name: string = "") -> ScalarType | None:
+    for descriptor in primitive_descriptors():
+        if (id.index == 0 or descriptor.id.index == id.index) and (name == "" or descriptor.name == name):
+            return scalar_from_primitive(descriptor)
+    return None
+
+
+class ScalarSlot:
+    value: ScalarType | None
+
+
+ScalarCatalog: list[ScalarSlot] = []
+
+
+# Legacy buffer handles remain an archive ABI adapter until structural buffer
+# identities are migrated. No caller may infer primitive facts from this offset.
+def initialize_scalar_catalog():
+    for index in range(1000):
+        ScalarCatalog.append(ScalarSlot(None))
+    for primitive in primitive_descriptors():
+        descriptor = scalar_from_primitive(primitive)
+        identity = int(descriptor.id.index)
+        if identity >= 800 or ScalarCatalog[identity].value != None or ScalarCatalog[identity + 200].value != None:
+            throw Error("duplicate or out-of-range primitive identity")
+        ScalarCatalog[identity] = ScalarSlot(descriptor)
+        ScalarCatalog[identity + 200] = ScalarSlot(ScalarType(TypeId(u32(identity + 200)), "$buffer$" + descriptor.name, descriptor.bits, false, "buffer"))
+
+
+def scalar_descriptor(id: TypeId, name: string = "") -> ScalarType | None:
+    if len(ScalarCatalog) == 0:
+        initialize_scalar_catalog()
+    if name != "":
+        return make_scalar_descriptor(id, name)
+    if id.index < len(ScalarCatalog):
+        selected ?= ScalarCatalog[id.index].value
+        if selected != None:
+            if selected.representation != "buffer":
+                return selected
+    return None
+
+
+def scalar_type(id: TypeId) -> ScalarType | None:
+    if len(ScalarCatalog) == 0:
+        initialize_scalar_catalog()
+    if id.index < len(ScalarCatalog):
+        return ScalarCatalog[id.index].value
+    return None
+
+
+def scalar_type_name(name: string) -> TypeId | None:
+    if name == "usize":
+        return u64_type_id()
+    if name == "isize" or name == "int":
+        return i64_type_id()
+    if name == "float":
+        return f64_type_id()
+    buffer = name.starts_with("$buffer$")
+    spelling = name[8:] if buffer else name
+    known ?= scalar_descriptor(TypeId(0), spelling)
+    if known != None:
+        return TypeId(known.id.index + 200) if buffer else known.id
+    return None
+
+
+def scalar_representation(id: TypeId) -> string:
+    known ?= scalar_type(id)
+    if known != None:
+        return known.representation
+    return "unknown"
+
+
+def integer_minimum(type: ScalarType) -> string:
+    if not type.signed:
+        return "0"
+    if type.bits == 128:
+        return "-170141183460469231731687303715884105728"
+    if type.bits == 64:
+        return "-9223372036854775808"
+    return "-" + string(1 << (int(type.bits) - 1))
+
+
+def integer_maximum(type: ScalarType) -> string:
+    if type.bits == 128:
+        return "170141183460469231731687303715884105727" if type.signed else "340282366920938463463374607431768211455"
+    if type.bits == 64:
+        return "9223372036854775807" if type.signed else "18446744073709551615"
+    return string((1 << (int(type.bits) - (1 if type.signed else 0))) - 1)

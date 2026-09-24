@@ -1,11 +1,2 @@
-import * from "../id/compiler.sev"
-
-
-# A grammar's operations: {T: ScalarOperation} map supplies these descriptors.
-# Symbol, fixity and operand type come from that declaration and its map key.
-class ScalarOperation:
-    mnemonic: string
-    predicate: int = -1
-    identity: int = 0
-    direct: bool = false
-    operand_type: TypeId = TypeId(0)
+# Compatibility export; syntax owns this contract.
+import * from "package:syntax/operator/scalar.sev"

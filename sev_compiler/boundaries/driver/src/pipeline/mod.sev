@@ -6,7 +6,6 @@ import lowering
 import mir
 import mlir
 import modules
-import ownership
 import parser
 import semantic
 import * from "package:semantic/src/definitions.sev" as semantic_definitions
@@ -52,7 +51,6 @@ class Compiler:
         tokens = lexer.scan(source_file)
         module = parser.parse(tokens)
         program = semantic.analyze(module)
-        ownership.validate(program)
         return program
 
     def analyze_file(path: string) -> universal.Program | CompileError:
@@ -66,7 +64,6 @@ class Compiler:
             )
             for module in program.modules:
                 combined.modules.append(module)
-        ownership.validate(combined)
         return combined
 
     def compile_mir_to_mlir(module: universal.Module) -> string | CompileError:
@@ -96,7 +93,7 @@ class Compiler:
         return backend.emit_executable(lowering.lower(plan.resumed_mir(), context.types, target_spec), output)
 
     def check_file(path: string) -> unit | CompileError:
-        analyze_file(path)
+        mir.build(analyze_file(path))
         return unit
 
 

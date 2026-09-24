@@ -107,4 +107,4 @@ def debug_ownership(builder: MlirOpBuilder, module: universal.Module, name: stri
         state = 5
     value = builder_new_value(builder, integer_type(64))
     builder_constant(builder, value, integer_attribute(state, value.type_id))
-    debug_value(builder, module, name + "__ownership", value, universal.TypeId(64), span, 0, scope)
+    debug_value(builder, module, name + "__ownership", value, universal.i64_type_id(), span, 0, scope)

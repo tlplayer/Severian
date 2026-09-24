@@ -1,0 +1,29 @@
+
+enum ConversionKind:
+    Identity
+    Promote
+    Checked
+    Lossy
+
+
+class TypeRef:
+    name: string
+
+
+class Constructor:
+    source: TypeRef
+    kind: ConversionKind
+
+
+trait Conversion:
+    property constructors: list[Constructor]
+
+enum Size:
+    Fixed(bytes: u64)
+    Pointer
+    Dynamic
+
+trait Type: Conversion
+    property name: string
+    property size: Size
+    property alignment: Size

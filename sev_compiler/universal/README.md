@@ -77,7 +77,7 @@ Effect
 | ------ | ------- |
 | `T` | Type |
 | `V` | Value |
-| `S` | Shape |
+| `S` | Sentence |
 | `N` | Number of elements |
 | `E` | Error |
 | `Ex` | Expression |
@@ -99,7 +99,7 @@ This is the canonical compiler-term vocabulary. Symbols describe semantic roles;
 they do not reserve generic parameter names or erase concrete type contracts.
 Statement and instruction terms use `O`; arguments use `V`; type-kind metadata
 uses `T`. Declarations, patterns, and nodes use `X` with their specific contracts.
-`S` always means Shape, `N` always means Number of elements, and `C` always means
+`S` always means Sentence; spell `Shape` out explicitly. `N` always means Number of elements, and `C` always means
 Container in this vocabulary. Constraints belong to `W`.
 
 Modules use `X` with an explicit module role; `M` is reserved for macros.

@@ -1,3 +1,4 @@
+import * from "package:primitives/declarations.sev"
 import * from "primitive.sev"
 
 import * from "../operator/trait/arithmetic.sev"
@@ -127,6 +128,9 @@ has one. The compiler uses this metadata when classifying float-to-float
 conversion edges.
 '''
 class f8e4m3fn: Floating :
+    identity: PrimitiveId = F8E4M3FnPrimitive().identity
+    id: TypeId = F8E4M3FnPrimitive().id
+    literal: LiteralSyntax | None = F8E4M3FnPrimitive().literal
     name: string = "f8e4m3fn"
     size: byte = 1B
     alignment: byte = 1B
@@ -139,10 +143,13 @@ class f8e4m3fn: Floating :
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         8, 4, 3, false
     )
-    default_literal: bool = true
+    default_literal: bool = F8E4M3FnPrimitive().default_literal
 
 
 class f8e5m2: Floating :
+    identity: PrimitiveId = F8E5M2Primitive().identity
+    id: TypeId = F8E5M2Primitive().id
+    literal: LiteralSyntax | None = F8E5M2Primitive().literal
     name: string = "f8e5m2"
     size: byte = 1B
     alignment: byte = 1B
@@ -155,10 +162,13 @@ class f8e5m2: Floating :
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         8, 5, 2, true
     )
-    default_literal: bool = true
+    default_literal: bool = F8E5M2Primitive().default_literal
 
 
 class bf16: Floating :
+    identity: PrimitiveId = BF16Primitive().identity
+    id: TypeId = BF16Primitive().id
+    literal: LiteralSyntax | None = BF16Primitive().literal
     name: string = "bf16"
     size: byte = 2B
     alignment: byte = 2B
@@ -171,10 +181,13 @@ class bf16: Floating :
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         16, 8, 7, true
     )
-    default_literal: bool = true
+    default_literal: bool = BF16Primitive().default_literal
 
 
 class f16: Floating :
+    identity: PrimitiveId = F16Primitive().identity
+    id: TypeId = F16Primitive().id
+    literal: LiteralSyntax | None = F16Primitive().literal
     name: string = "f16"
     size: byte = 2B
     alignment: byte = 2B
@@ -187,10 +200,13 @@ class f16: Floating :
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         16, 5, 10, true
     )
-    default_literal: bool = true
+    default_literal: bool = F16Primitive().default_literal
 
 
 class f32: Floating :
+    identity: PrimitiveId = F32Primitive().identity
+    id: TypeId = F32Primitive().id
+    literal: LiteralSyntax | None = F32Primitive().literal
     name: string = "f32"
     size: byte = 4B
     alignment: byte = 4B
@@ -203,10 +219,13 @@ class f32: Floating :
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         32, 8, 23, true
     )
-    default_literal: bool = true
+    default_literal: bool = F32Primitive().default_literal
 
 
 class f64: Floating :
+    identity: PrimitiveId = F64Primitive().identity
+    id: TypeId = F64Primitive().id
+    literal: LiteralSyntax | None = F64Primitive().literal
     name: string = "f64"
     size: byte = 8B
     alignment: byte = 8B
@@ -219,10 +238,13 @@ class f64: Floating :
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         64, 11, 52, true
     )
-    default_literal: bool = true
+    default_literal: bool = F64Primitive().default_literal
 
 
 class f128: Floating :
+    identity: PrimitiveId = F128Primitive().identity
+    id: TypeId = F128Primitive().id
+    literal: LiteralSyntax | None = F128Primitive().literal
     name: string = "f128"
     size: byte = 16B
     alignment: byte = 16B
@@ -235,7 +257,7 @@ class f128: Floating :
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
         128, 15, 112, true
     )
-    default_literal: bool = true
+    default_literal: bool = F128Primitive().default_literal
 
 
 '''
@@ -271,6 +293,9 @@ single MLIR primitive operations.
 '''
 
 class float: Floating:
+    identity: PrimitiveId = F64Primitive().identity
+    id: TypeId = F64Primitive().id
+    literal: LiteralSyntax | None = F64Primitive().literal
 
     operator if(self) -> bool:
         return mlir(arith.cmpf, "une", self, self(0.0))

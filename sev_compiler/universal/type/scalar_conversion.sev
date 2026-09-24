@@ -1,3 +1,4 @@
+import * from "package:primitives/declarations.sev"
 import * from "scalar.sev"
 
 
@@ -51,13 +52,12 @@ def scalar_common_numeric(left: TypeId, right: TypeId) -> TypeId:
     if not scalar_numeric(left) or not scalar_numeric(right):
         return left
     if scalar_representation(left) == "float" or scalar_representation(right) == "float":
-        if left.index == 168 or right.index == 168:
-            return TypeId(168)
-        if left.index == 164 or right.index == 164:
-            return TypeId(164)
-        return TypeId(163)
-    for index in [8, 16, 32, 64, 516, 532, 564, 128, 628]:
-        candidate = TypeId(u32(index))
+        if left.index == f128_type_id().index or right.index == f128_type_id().index:
+            return f128_type_id()
+        if left.index == f64_type_id().index or right.index == f64_type_id().index:
+            return f64_type_id()
+        return f32_type_id()
+    for candidate in [i8_type_id(), i16_type_id(), i32_type_id(), i64_type_id(), u16_type_id(), u32_type_id(), u64_type_id(), i128_type_id(), u128_type_id()]:
         if scalar_conversion_rank(left, candidate) <= 1 and scalar_conversion_rank(right, candidate) <= 1:
             return candidate
     return TypeId(0)

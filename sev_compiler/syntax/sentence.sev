@@ -1,0 +1,122 @@
+import * from "source.sev"
+
+# Sentence composition sits above local operator parsing. The parser supplies
+# classified terms; the semantic layer supplies constraint dispatch.
+enum TermRole:
+    Symbol
+    Type
+    Value
+    Pattern
+    Expression
+    Container
+    Callable
+    Block
+    Sentence
+
+class Term:
+    role: TermRole
+    spelling: string
+    node: int
+    start: int
+    end: int
+    children: list[int] = []
+    source: SourceId | None = None
+
+enum SentenceField:
+    Literal(spelling: string)
+    Capture(name: string, role: TermRole, constraints: list[string])
+
+class Grammar:
+    fields: list[SentenceField]
+
+class Capture:
+    name: string
+    term: Term
+
+class SemanticObject:
+    interface_id: string
+    captures: list[Capture]
+    start: int
+    end: int
+    source: SourceId | None = None
+
+trait Sentence:
+    def grammar() -> Grammar
+    def resolve(captures: list[Capture]) -> SemanticObject | Error
+
+class SentenceDefinition:
+    package: string
+    name: string
+    grammar: Grammar
+    semantic_interface: string
+
+class SentenceMatch:
+    definition: SentenceDefinition
+    captures: list[Capture]
+    start: int
+    end: int
+    source: SourceId | None = None
+
+# Type/shape filtering precedes every value predicate, as required by SIP-0000.
+# A nested sentence is one classified term with children in the parser's arena.
+def accepts_shape(grammar: Grammar, terms: list[Term]) -> bool:
+    if len(grammar.fields) != len(terms):
+        return false
+    for index in range(int(len(terms))):
+        term = terms[index]
+        match grammar.fields[index]:
+            case Literal:
+                if term.role != TermRole.Symbol or term.spelling != spelling:
+                    return false
+            case Capture:
+                if term.role != role:
+                    return false
+    return true
+
+def match_sentence(definitions: list[SentenceDefinition], terms: list[Term], satisfies: (Term, string) -> bool) -> SentenceMatch | Error:
+    candidates: list[SentenceDefinition] = []
+    for definition in definitions:
+        if accepts_shape(definition.grammar, terms):
+            candidates.append(definition)
+    matches: list[SentenceMatch] = []
+    for definition in candidates:
+        captures: list[Capture] = []
+        accepted := true
+        for index in range(int(len(terms))):
+            match definition.grammar.fields[index]:
+                case Literal:
+                    continue
+                case Capture:
+                    for condition in constraints:
+                        if not satisfies(terms[index], condition):
+                            accepted = false
+                            break
+                    if not accepted:
+                        break
+                    for previous in captures:
+                        if previous.name == name:
+                            throw Error("duplicate sentence capture: " + name)
+                    captures.append(Capture(name, terms[index]))
+        if accepted:
+            matches.append(SentenceMatch(definition, captures, terms[0].start if len(terms) > 0 else 0, terms[-1].end if len(terms) > 0 else 0, terms[0].source if len(terms) > 0 else None))
+    if len(matches) == 0:
+        throw Error("no sentence matches the supplied terms and constraints")
+    if len(matches) != 1:
+        names: list[string] = []
+        for candidate in matches:
+            names.append(candidate.definition.package + "." + candidate.definition.name)
+        throw Error("ambiguous sentence dispatch: " + names.join(", "))
+    return matches[0]
+
+def resolve_sentence(selected: SentenceMatch) -> SemanticObject:
+    return SemanticObject(selected.definition.semantic_interface, selected.captures, selected.start, selected.end, selected.source)
+
+# Package-provided declarations converge on the same semantic interface.
+def iteration_sentences() -> list[SentenceDefinition]:
+    basic: list[SentenceField] = [SentenceField.Literal("for"), SentenceField.Capture("item", TermRole.Pattern, []), SentenceField.Literal("in"), SentenceField.Capture("source", TermRole.Container, ["Iterable"])]
+    extended = basic[:]
+    extended.append(SentenceField.Literal("with"))
+    extended.append(SentenceField.Capture("setup", TermRole.Expression, []))
+    extended.append(SentenceField.Capture("body", TermRole.Block, []))
+    basic.append(SentenceField.Capture("body", TermRole.Block, []))
+    return [SentenceDefinition("severian", "ForBasic", Grammar(basic), "Iteration"), SentenceDefinition("severian", "ForWith", Grammar(extended), "Iteration")]

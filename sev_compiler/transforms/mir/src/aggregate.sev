@@ -25,10 +25,10 @@ def fields(state: AggregateStorage, value: universal.ValueId) -> list[universal.
 
 def allocate(module: universal.Module, context: cfg.ExecutionContext, state: AggregateStorage, type_id: universal.TypeId) -> universal.ValueId | diagnostics.Diagnostic:
     if not storage.owned_record(type_id, module.records):
-        address = cfg.value(module, universal.TypeId(5))
+        address = cfg.value(module, universal.pointer_type_id())
         # A join can receive fields from either predecessor. Its slots must
         # dominate both paths even before the general storage promotion pass.
-        context.body.blocks[context.body.entry].operations.append(universal.Operation.Allocate(type_id, address))
+        cfg.append_at(context, context.body.entry, universal.Operation.Allocate(type_id, address))
         return address
     handle = cfg.value(module, type_id)
     members: list[universal.ValueId] = []
@@ -68,8 +68,8 @@ def initialize(module: universal.Module, context: cfg.ExecutionContext, state: A
 def test_variant(module: universal.Module, context: cfg.ExecutionContext, state: AggregateStorage, value: universal.ValueId, variant: int) -> universal.ValueId | diagnostics.Diagnostic:
     input := value
     if storage.owned_record(module.values[value.index].type_id, module.records):
-        input = load(module, context, fields(state, value)[0], universal.TypeId(64))
-    result = cfg.value(module, universal.TypeId(1))
+        input = load(module, context, fields(state, value)[0], universal.i64_type_id())
+    result = cfg.value(module, universal.bool_type_id())
     cfg.append(context, universal.Operation.IsVariant(input, variant, result))
     return result
 
@@ -124,7 +124,7 @@ def parameter_fields(module: universal.Module, context: cfg.ExecutionContext, st
     if not storage.owned_record(type_id, module.records):
         value = cfg.value(module, type_id)
         context.body.blocks[target].parameters.append(value)
-        context.body.blocks[target].operations.append(universal.Operation.Store(address, value))
+        cfg.append_at(context, target, universal.Operation.Store(address, value))
         return
     members = fields(state, address)
     for record in module.records:

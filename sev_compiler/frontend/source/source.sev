@@ -1,15 +1,6 @@
 import file
 
-# Source identities and ranges are frontend types, owned by frontend/source.
-class SourceId:
-    index: u32
-
-class Span:
-    # Internal coordinates are half-open Unicode scalar indices. Serialized
-    # tooling interfaces use UTF-8 bytes; convert explicitly at that boundary.
-    source: SourceId
-    start: u32
-    end: u32
+import * from "package:syntax/source.sev"
 
 class SourceFile:
     id: SourceId

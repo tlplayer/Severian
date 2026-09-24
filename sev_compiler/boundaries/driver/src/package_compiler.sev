@@ -86,7 +86,7 @@ def record_inputs(files: list[source.SourceFile], resolution: package.Resolution
                 records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location)))
         quality_runtime = package.canonical(sysroot + "/sev_compiler/runtime/native/quality.c")
         records.append(package.toml_quote(quality_runtime) + " = " + package.toml_quote(package.digest(quality_runtime) if os.is_file(quality_runtime) else "missing"))
-        ownership_pipeline = package.canonical(sysroot + "/sev_compiler/frontend/ownership/mlir.pipeline")
+        ownership_pipeline = package.canonical(sysroot + "/sev_compiler/transforms/mir/ownership/mlir.pipeline")
         records.append(package.toml_quote(ownership_pipeline) + " = " + package.toml_quote(package.digest(ownership_pipeline)))
     package.write_text(destination + ".inputs", records.join("\n") + "\n")
 

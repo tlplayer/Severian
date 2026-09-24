@@ -814,7 +814,7 @@ fn emit_mlir_binary(
     )?;
     // The source ownership library defines the same pipeline consumed by sev.
     // Memref ownership must be resolved before conversion erases its aliases.
-    let ownership_pipeline = include_str!("../../../../sev_compiler/frontend/ownership/mlir.pipeline").trim();
+    let ownership_pipeline = include_str!("../../../../sev_compiler/transforms/mir/ownership/mlir.pipeline").trim();
     let owned = run_tool(
         "MLIR ownership",
         tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"),

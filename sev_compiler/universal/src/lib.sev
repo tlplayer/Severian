@@ -62,3 +62,5 @@ import * from "../declaration/scalar.sev" as scalar_declarations
 import * from "../type/slice_bounds.sev" as slice_bounds
 import * from "../type/storage.sev" as storage
 import * from "../type/tagged.sev" as tagged
+
+import * from "package:syntax/block.sev"

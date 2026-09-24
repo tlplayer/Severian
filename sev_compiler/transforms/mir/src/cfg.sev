@@ -1,7 +1,7 @@
 import * from "package:ownership/src/cfg.sev" as ownership_cfg
 from universal import availability
 from universal import dominance as graph
-import * from "package:universal/cfg/cfg.sev"
+import * from "package:cfg_builder/src/lib.sev"
 import universal
 from universal import storage as storage_types
 import source
@@ -32,7 +32,6 @@ def finish(module: universal.Module, context: ExecutionContext, span: source.Spa
     verify(module, context.body)
     prune_unreachable(context.body)
     verify_availability(context.body, parameters)
-    promote_storage(module, context.body)
     return verify(module, context.body)
 
 
@@ -173,7 +172,11 @@ def simplify_storage(module: universal.Module, body: universal.CfgBody):
 
 def simplify_storage_block(block: universal.BasicBlock, slots: list[universal.ValueId], initialized: list[universal.ValueId], direct: list[bool]) -> universal.BasicBlock:
     operations: list[universal.Operation] = []
+    origins: list[universal.OperationOrigin] = []
+    position := 0
     for operation in block.operations:
+        origin = block.origins[position]
+        position += 1
         retained := true
         match operation:
             case Allocate:
@@ -193,13 +196,16 @@ def simplify_storage_block(block: universal.BasicBlock, slots: list[universal.Va
                 for slot in slots:
                     if slot.index == address.index and direct[index]:
                         operations.append(universal.Operation.Alias(initialized[index], result))
+                        origins.append(origin)
                         retained = false
                     index += 1
             case _:
                 throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
         if retained:
             operations.append(operation)
+            origins.append(origin)
     block.operations = operations
+    block.origins = origins
     return block
 
 
@@ -208,8 +214,12 @@ def promote_storage(module: universal.Module, body: universal.CfgBody):
     slots: list[universal.ValueId] = []
     initial: list[universal.ValueId] = []
     prefix: list[universal.Operation] = []
+    prefix_origins: list[universal.OperationOrigin] = []
     for selected in body.blocks:
+        position := 0
         for operation in selected.operations:
+            origin = selected.origins[position]
+            position += 1
             match operation:
                 case Allocate:
                     if type_id.index == 3 or storage_types.buffer_element(type_id, module.records).index != 0:
@@ -217,15 +227,17 @@ def promote_storage(module: universal.Module, body: universal.CfgBody):
                         empty = value(module, type_id)
                         initial.append(empty)
                         prefix.append(universal.Operation.Constant(universal.StringValue("") if type_id.index == 3 else universal.NoneValue(), empty))
+                        prefix_origins.append(origin)
                     else:
                         prefix.append(operation)
+                        prefix_origins.append(origin)
                 case _:
                     throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
     for selected in body.blocks:
-        body.blocks[selected.id] = promote_storage_block(module, selected, body.entry, slots, initial, prefix)
+        body.blocks[selected.id] = promote_storage_block(module, selected, body.entry, slots, initial, prefix, prefix_origins)
 
 
-def promote_storage_block(module: universal.Module, selected: universal.BasicBlock, entry: int, slots: list[universal.ValueId], initial: list[universal.ValueId], prefix: list[universal.Operation]) -> universal.BasicBlock:
+def promote_storage_block(module: universal.Module, selected: universal.BasicBlock, entry: int, slots: list[universal.ValueId], initial: list[universal.ValueId], prefix: list[universal.Operation], prefix_origins: list[universal.OperationOrigin]) -> universal.BasicBlock:
     current := initial[:]
     if selected.id != entry:
         current = []
@@ -234,9 +246,14 @@ def promote_storage_block(module: universal.Module, selected: universal.BasicBlo
             selected.parameters.append(parameter)
             current.append(parameter)
     operations: list[universal.Operation] := []
+    origins: list[universal.OperationOrigin] := []
     if selected.id == entry:
         operations = prefix[:]
+        origins = prefix_origins[:]
+    position := 0
     for operation in selected.operations:
+        origin = selected.origins[position]
+        position += 1
         retained := true
         match operation:
             case Allocate:
@@ -246,6 +263,7 @@ def promote_storage_block(module: universal.Module, selected: universal.BasicBlo
                 for slot in slots:
                     if slot.index == address.index:
                         operations.append(universal.Operation.Alias(current[index], result))
+                        origins.append(origin)
                         retained = false
                     index += 1
             case Store:
@@ -259,7 +277,9 @@ def promote_storage_block(module: universal.Module, selected: universal.BasicBlo
                 throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
         if retained:
             operations.append(operation)
+            origins.append(origin)
     selected.operations = operations
+    selected.origins = origins
     terminal ?= selected.terminator
     if terminal != None:
         for edge in successors(terminal.exit):

@@ -1,3 +1,4 @@
+import primitives
 import diagnostics
 import environment
 import time
@@ -80,7 +81,7 @@ class CallableAnalysis:
     generic_index: callable_index.FunctionIndex = callable_index.FunctionIndex()
     template_index: callable_index.FunctionIndex = callable_index.FunctionIndex()
     registered_methods: list[int] = []
-    return_type: universal.TypeId = universal.TypeId(2)
+    return_type: universal.TypeId = universal.unit_type_id()
     catching_error: bool = false
     mock_functions: list[universal.MockFunction] = []
     attachments: list[universal.WithAttachment] = []
@@ -252,9 +253,9 @@ def callable_pointer_value(state: CallableAnalysis, type_id: universal.TypeId, a
 
 
 def callable_pointer_offset(state: CallableAnalysis, base: universal.Expression, index: universal.Expression, element: universal.TypeId, span: source.Span) -> universal.Expression | diagnostics.Diagnostic:
-    width = universal.Expression(universal.TypeLayout(element, false), span, type_id=universal.TypeId(64))
-    offset = callable_expression(state, universal.Expression(universal.Binary(universal.operator_syntax(universal.Multiply()), index, width), span), universal.TypeId(64))
-    return callable_raw_call(state, "__raw_offset", [base, offset], span, universal.TypeId(5))
+    width = universal.Expression(universal.TypeLayout(element, false), span, type_id=universal.i64_type_id())
+    offset = callable_expression(state, universal.Expression(universal.Binary(universal.operator_syntax(universal.Multiply()), index, width), span), universal.i64_type_id())
+    return callable_raw_call(state, "__raw_offset", [base, offset], span, universal.pointer_type_id())
 
 
 def callable_pointer_index(state: CallableAnalysis, receiver: universal.Expression, index: universal.Expression, element: universal.TypeId, span: source.Span, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
@@ -264,21 +265,21 @@ def callable_pointer_index(state: CallableAnalysis, receiver: universal.Expressi
     bytes := false
     for record in state.records:
         if record.type_id.index == position.type_id.index and record.name == "byte":
-            position = callable_raw_call(state, "__raw_byte_offset", [position], span, universal.TypeId(64))
+            position = callable_raw_call(state, "__raw_byte_offset", [position], span, universal.i64_type_id())
             bytes = true
     if position.type_id.index != 64:
         return error(callable_diagnostic("pointer index requires an int element offset or a byte offset", span))
     container = universal.Expression(universal.UpdateOperand(0), span, type_id=receiver.type_id)
     offset = universal.Expression(universal.UpdateOperand(1), span, type_id=position.type_id)
-    base = universal.Expression(universal.FieldReference(container, 0), span, type_id=universal.TypeId(5))
+    base = universal.Expression(universal.FieldReference(container, 0), span, type_id=universal.pointer_type_id())
     address := base
     if bytes:
-        address = callable_raw_call(state, "__raw_offset", [base, offset], span, universal.TypeId(5))
+        address = callable_raw_call(state, "__raw_offset", [base, offset], span, universal.pointer_type_id())
     else:
         address = callable_pointer_offset(state, base, offset, element, span)
     access = callable_raw_call(state, "__raw_load", [address], span, element)
     value = universal.Expression(universal.UpdateOperand(2), span, type_id=element)
-    storage = callable_raw_call(state, "__raw_store", [value, address], span, universal.TypeId(2))
+    storage = callable_raw_call(state, "__raw_store", [value, address], span, universal.unit_type_id())
     return universal.Expression(universal.IndexReference(receiver, position, access, storage), span, type_id=element)
 
 
@@ -339,11 +340,11 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
         case AddressOf:
             return callable_expression(state, expression, universal.TypeId(0)).type_id
         case TypeLayout:
-            return universal.TypeId(64)
+            return universal.i64_type_id()
         case ComparisonChain:
-            return universal.TypeId(1)
+            return universal.bool_type_id()
         case Stringify:
-            return universal.TypeId(3)
+            return universal.string_type_id()
         case Name:
             index := 0
             for name_value in state.names:
@@ -386,11 +387,11 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
                     if syntax.symbol == name:
                         return callable_expression(state, expression, universal.TypeId(0)).type_id
             if name == "type" or name == "string":
-                return universal.TypeId(3)
+                return universal.string_type_id()
             if name == "len" and len(arguments) == 1:
                 pack = callable_field_pack(state, arguments[0].value)
                 if pack.found:
-                    return universal.TypeId(64)
+                    return universal.i64_type_id()
             target ?= scalar.scalar_type_name(name)
             if target != None:
                 if conversions.scalar_numeric(target):
@@ -434,7 +435,7 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
             return callable_expression(state, expression, universal.TypeId(0)).type_id
         case Binary:
             if grammar_scalar.comparison(state.declarations, operator.symbol):
-                return universal.TypeId(1)
+                return universal.bool_type_id()
             left_type = callable_hint(state, left)
             right_type = callable_hint(state, right)
             # An overload can return a different type from either operand,
@@ -445,11 +446,11 @@ def callable_hint(state: CallableAnalysis, expression: universal.Expression) -> 
         case LiteralValue:
             match value:
                 case FloatValue:
-                    return universal.TypeId(164)
+                    return universal.f64_type_id()
                 case StringValue:
-                    return universal.TypeId(3)
+                    return universal.string_type_id()
                 case CharacterValue:
-                    return universal.TypeId(132)
+                    return universal.char_type_id()
                 case _:
                     throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
         case Conditional:
@@ -518,7 +519,7 @@ def callable_convert(state: CallableAnalysis, operand: universal.Expression, tar
             name = "numeric.convert$" + source_type.name + "$" + target_type.name
             for function in state.functions:
                 if function.name == name:
-                    policy = callable_expression(state, universal.Expression(universal.LiteralValue(universal.BooleanValue(selected == 3)), operand.span), universal.TypeId(1))
+                    policy = callable_expression(state, universal.Expression(universal.LiteralValue(universal.BooleanValue(selected == 3)), operand.span), universal.bool_type_id())
                     arguments = [universal.CallArgument(None, operand, operand.span), universal.CallArgument(None, policy, operand.span)]
                     id = universal.HirId(u32(state.next_id[0]))
                     state.next_id[0] += 1
@@ -738,9 +739,9 @@ def callable_tagged_value(state: CallableAnalysis, selection: tagged.VariantSele
 def callable_slice_bound(state: CallableAnalysis, bound: universal.Expression | None, fallback: string, span: source.Span) -> universal.Expression | diagnostics.Diagnostic:
     supplied ?= bound
     if supplied != None:
-        return callable_expression(state, supplied, universal.TypeId(64))
+        return callable_expression(state, supplied, universal.i64_type_id())
     literal = universal.Expression(universal.LiteralValue(universal.IntegerValue(fallback)), span)
-    return callable_expression(state, literal, universal.TypeId(64))
+    return callable_expression(state, literal, universal.i64_type_id())
 
 
 def callable_expression_inner(state: CallableAnalysis, expression: universal.Expression, expected: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
@@ -851,10 +852,10 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             first = callable_binding(local, universal.Binding("$comparison$" + string(state.next_id[0]), None, operands[0], false, true, expression.span))
             reference = universal.Expression(universal.BindingReference(first.id), expression.span, type_id=first.type_id)
             value = callable_comparison_tail(local, operands, operators, 0, reference, expression.span)
-            return universal.Expression(universal.BlockValue(universal.Block([universal.BindingStatement(first)]), value), expression.span, type_id=universal.TypeId(1))
+            return universal.Expression(universal.BlockValue(universal.Block([universal.BindingStatement(first)]), value), expression.span, type_id=universal.bool_type_id())
         case ThrowValue:
             raised = callable_raised_value(state, value, state.return_type)
-            result_type = expected if expected.index != 0 else universal.TypeId(2)
+            result_type = expected if expected.index != 0 else universal.unit_type_id()
             return universal.Expression(universal.ThrowValue(raised), expression.span, type_id=result_type)
         case UpdateOperand:
             result_type = expression.type_id
@@ -866,7 +867,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     for variant in universal.outcome_variants(record):
                         if int(variant.index) not in [6, 7] and not definitions.error_conformance(state.declarations, state.records, variant):
                             reference = universal.Expression(universal.UpdateOperand(0), expression.span, type_id=receiver.type_id)
-                            test = universal.Expression(universal.OutcomeTest(reference, index), expression.span, type_id=universal.TypeId(1))
+                            test = universal.Expression(universal.OutcomeTest(reference, index), expression.span, type_id=universal.bool_type_id())
                             taken = universal.Expression(universal.FieldReference(reference, index + 1), expression.span, type_id=variant)
                             otherwise = callable_expression(state, alternative, variant)
                             body = universal.Expression(universal.Conditional(test, taken, otherwise), expression.span, type_id=variant)
@@ -886,13 +887,13 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 typed.append(value)
             if element_type.index == 0:
                 return error(callable_diagnostic("empty collection requires an element type", expression.span))
-            count = universal.Expression(universal.UpdateOperand(0), expression.span, type_id=universal.TypeId(64))
+            count = universal.Expression(universal.UpdateOperand(0), expression.span, type_id=universal.i64_type_id())
             exemplar = universal.Expression(universal.UpdateOperand(1), expression.span, type_id=element_type)
             create = callable_protocol(state, "List", "construction", [count, exemplar], expression.span, expected)
             container = universal.Expression(universal.UpdateOperand(0), expression.span, type_id=create.type_id)
-            index = universal.Expression(universal.UpdateOperand(1), expression.span, type_id=universal.TypeId(64))
+            index = universal.Expression(universal.UpdateOperand(1), expression.span, type_id=universal.i64_type_id())
             element = universal.Expression(universal.UpdateOperand(2), expression.span, type_id=element_type)
-            storage = callable_protocol(state, "Index", "storage", [container, index, element], expression.span, universal.TypeId(2))
+            storage = callable_protocol(state, "Index", "storage", [container, index, element], expression.span, universal.unit_type_id())
             return universal.Expression(universal.ListValue(typed, create, storage), expression.span, type_id=create.type_id)
         case Slice:
             receiver = callable_expression(state, object, universal.TypeId(0))
@@ -925,7 +926,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             operands.append(callable_slice_bound(state, step, "1", expression.span))
             for present in [start != None, stop != None]:
                 literal = universal.Expression(universal.LiteralValue(universal.BooleanValue(present)), expression.span)
-                operands.append(callable_expression(state, literal, universal.TypeId(1)))
+                operands.append(callable_expression(state, literal, universal.bool_type_id()))
             return callable_protocol(state, "Slice", "access", operands, expression.span, expected)
         case Subscript:
             pack = callable_field_pack(state, object)
@@ -961,7 +962,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     if expected.index != 0 and expected.index != field_type.index:
                         return error(callable_diagnostic("aggregate element does not match expected type", expression.span))
                     return universal.Expression(universal.FieldReference(receiver, position), expression.span, type_id=field_type)
-            position = callable_expression(state, index, universal.TypeId(64))
+            position = callable_expression(state, index, universal.i64_type_id())
             container = universal.Expression(universal.UpdateOperand(0), expression.span, type_id=receiver.type_id)
             offset = universal.Expression(universal.UpdateOperand(1), expression.span, type_id=position.type_id)
             access = callable_protocol(state, "Index", "access", [container, offset], expression.span, expected)
@@ -971,7 +972,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             selected = callable_operator(state, store_name, [receiver.type_id, position.type_id, access.type_id], expression.span)
             function ?= selected.function
             if function != None:
-                storage = callable_resolved_operator(state, function, [container, offset, element], expression.span, universal.TypeId(2))
+                storage = callable_resolved_operator(state, function, [container, offset, element], expression.span, universal.unit_type_id())
             return universal.Expression(universal.IndexReference(receiver, position, access, storage), expression.span, type_id=access.type_id)
         case AddressOf:
             # The typed form carries a native address; the source form constructs
@@ -987,16 +988,16 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         return error(callable_diagnostic("address requires mutable storage", expression.span))
                     if not storage_types.copy_storage(resolved.type_id, state.records):
                         return error(callable_diagnostic("address requires copyable storage; index the buffer for an element address", expression.span))
-                    address = universal.Expression(universal.AddressOf(resolved), expression.span, type_id=universal.TypeId(5))
+                    address = universal.Expression(universal.AddressOf(resolved), expression.span, type_id=universal.pointer_type_id())
                 case FieldReference:
                     if not storage_types.copy_storage(resolved.type_id, state.records):
                         return error(callable_diagnostic("address requires copyable field storage", expression.span))
-                    address = universal.Expression(universal.AddressOf(resolved), expression.span, type_id=universal.TypeId(5))
+                    address = universal.Expression(universal.AddressOf(resolved), expression.span, type_id=universal.pointer_type_id())
                 case IndexReference:
                     if storage_types.buffer_element(object.type_id, state.records).index != 0:
-                        base = callable_raw_call(state, "__raw_buffer_address", [object], expression.span, universal.TypeId(4))
-                        integer = callable_raw_call(state, "__raw_index", [base], expression.span, universal.TypeId(64))
-                        native = callable_raw_call(state, "__raw_pointer", [integer], expression.span, universal.TypeId(5))
+                        base = callable_raw_call(state, "__raw_buffer_address", [object], expression.span, universal.index_type_id())
+                        integer = callable_raw_call(state, "__raw_index", [base], expression.span, universal.i64_type_id())
+                        native = callable_raw_call(state, "__raw_pointer", [integer], expression.span, universal.pointer_type_id())
                         address = callable_pointer_offset(state, native, index, resolved.type_id, expression.span)
                 case _:
                     throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
@@ -1009,6 +1010,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
         case IndexReference:
             result_type = expression.type_id
         case LiteralValue:
+            construction ?= expression.literal
+            if construction != None and result_type.index == 0:
+                result_type = primitives.select_literal_type(construction, expected)
             if expected.index >= 100000:
                 return error(callable_diagnostic("generic literals require a literal construction capability", expression.span))
             match value:
@@ -1017,7 +1021,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         literal = universal.Expression(universal.LiteralValue(universal.FloatValue(spelling + ".0")), expression.span)
                         return callable_expression(state, literal, expected)
                     if result_type.index == 0:
-                        result_type = universal.TypeId(64)
+                        result_type = universal.i64_type_id()
                     if result_type.index == 1:
                         return error(callable_diagnostic("an integer cannot initialize bool", expression.span))
                     if result_type.index == 2:
@@ -1032,13 +1036,13 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                             if integer_spelling.compare(spelling, scalar.integer_minimum(storage)) < 0 or integer_spelling.compare(spelling, scalar.integer_maximum(storage)) > 0:
                                 return error(callable_diagnostic("integer literal is outside " + storage.name, expression.span))
                 case FloatValue:
-                    result_type = expected if scalar.scalar_representation(expected) == "float" else universal.TypeId(164)
+                    result_type = expected if scalar.scalar_representation(expected) == "float" else primitives.default_literal_type(primitives.LiteralSyntax.Float).id
                 case NoneValue:
-                    result_type = universal.TypeId(6)
+                    result_type = universal.none_type_id()
                 case AbsentValue:
-                    result_type = universal.TypeId(7)
+                    result_type = universal.absent_type_id()
                 case StringValue:
-                    result_type = expected if storage_types.string_element(expected, state.records).index != 0 else universal.TypeId(3)
+                    result_type = expected if storage_types.string_element(expected, state.records).index != 0 else universal.string_type_id()
                 case CharacterValue:
                     if expected.index == 108:
                         if int(value) > 255:
@@ -1047,11 +1051,11 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     elif expected.index == 532:
                         result_type = expected
                     else:
-                        result_type = universal.TypeId(132)
+                        result_type = universal.char_type_id()
                 case BooleanValue:
                     if expected.index != 0 and expected.index != 1:
                         return error(callable_diagnostic("a boolean cannot initialize an integer", expression.span))
-                    result_type = universal.TypeId(1)
+                    result_type = universal.bool_type_id()
                 case _:
                     return error(callable_diagnostic("scalar bootstrap supports integer and boolean literals", expression.span))
         case OutcomeValue:
@@ -1092,7 +1096,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
         case BindingReference:
             result_type = expression.type_id
         case TypeLayout:
-            result_type = universal.TypeId(64)
+            result_type = universal.i64_type_id()
         case FieldReference:
             result_type = expression.type_id
         case Member:
@@ -1128,7 +1132,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             if operand.type_id.index == 3:
                 return operand
             conversion = universal.Expression(universal.Call(universal.Expression(universal.Name("string"), expression.span), [universal.CallArgument(None, operand, operand.span)]), expression.span)
-            return callable_expression(state, conversion, universal.TypeId(3))
+            return callable_expression(state, conversion, universal.string_type_id())
         case Name:
             found := false
             index := 0
@@ -1188,7 +1192,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 return callable_resolved_operator(state, function, [resolved], expression.span, expected)
             return error(callable_diagnostic("unsupported scalar unary operator " + operator.symbol, expression.span))
         case Conditional:
-            test = callable_expression(state, condition, universal.TypeId(1))
+            test = callable_expression(state, condition, universal.bool_type_id())
             branch_type := expected
             if branch_type.index == 0:
                 branch_type = callable_hint(state, then_value)
@@ -1215,7 +1219,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                             index := 0
                             for variant in variants:
                                 if variant.index == 6:
-                                    test = universal.Expression(universal.OutcomeTest(operand, index), expression.span, type_id=universal.TypeId(1))
+                                    test = universal.Expression(universal.OutcomeTest(operand, index), expression.span, type_id=universal.bool_type_id())
                                     if operator.symbol == "!=":
                                         return callable_expression(state, universal.Expression(universal.Unary(universal.operator_syntax(universal.Not()), test), expression.span), expected)
                                     return test
@@ -1247,9 +1251,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         index := 0
                         for variant in universal.outcome_variants(record):
                             if variant.index == tested.index:
-                                return universal.Expression(universal.OutcomeTest(operand, index), expression.span, type_id=universal.TypeId(1))
+                                return universal.Expression(universal.OutcomeTest(operand, index), expression.span, type_id=universal.bool_type_id())
                             index += 1
-                result = universal.Expression(universal.LiteralValue(universal.BooleanValue(operand.type_id.index == tested.index)), expression.span, type_id=universal.TypeId(1))
+                result = universal.Expression(universal.LiteralValue(universal.BooleanValue(operand.type_id.index == tested.index)), expression.span, type_id=universal.bool_type_id())
                 return universal.Expression(universal.Evaluate(operand, result), expression.span, type_id=result.type_id)
             for definition in state.declarations.traits:
                 if definition.grammar and definition.definition.module == operator.definition.module and definition.definition.declaration.value == operator.definition.declaration.value:
@@ -1291,7 +1295,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
             if operator.symbol in ["==", "!=", "<", "<=", ">", ">="] and conversions.scalar_numeric(left_hint) and conversions.scalar_numeric(right_hint):
                 lhs = callable_success(state, callable_operand(state, left, universal.TypeId(0)))
                 rhs = callable_success(state, callable_operand(state, right, universal.TypeId(0)))
-                return universal.Expression(universal.Binary(operator, lhs, rhs), expression.span, type_id=universal.TypeId(1))
+                return universal.Expression(universal.Binary(operator, lhs, rhs), expression.span, type_id=universal.bool_type_id())
             # Resolve heterogeneous operands independently so operator lookup
             # can select signatures such as +(string, char).
             common_type = conversions.scalar_common_numeric(left_hint, right_hint)
@@ -1335,7 +1339,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                             value = callable_expression(state, arguments[0].value, universal.TypeId(0))
                             if callable_pointer_element(state, value.type_id).index == 0:
                                 return error(callable_diagnostic("pointer cast requires a typed pointer", expression.span))
-                            native = universal.Expression(universal.FieldReference(value, 0), expression.span, type_id=universal.TypeId(5))
+                            native = universal.Expression(universal.FieldReference(value, 0), expression.span, type_id=universal.pointer_type_id())
                             return callable_pointer_value(state, target, native, expression.span, expected)
                 case Subscript:
                     query = callable_path(object)
@@ -1348,9 +1352,9 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         if not storage_types.copy_storage(element, state.records):
                             return error(callable_diagnostic("raw allocation requires copyable element storage", expression.span))
                         pointer_type = callable_annotation(universal.named_type("pointer", [element_annotation], expression.span), state.records, state.namespace, state.declarations)
-                        count = callable_expression(state, arguments[0].value, universal.TypeId(64))
-                        width = universal.Expression(universal.TypeLayout(element, false), expression.span, type_id=universal.TypeId(64))
-                        native = callable_raw_call(state, "__raw_allocate", [count, width], expression.span, universal.TypeId(5))
+                        count = callable_expression(state, arguments[0].value, universal.i64_type_id())
+                        width = universal.Expression(universal.TypeLayout(element, false), expression.span, type_id=universal.i64_type_id())
+                        native = callable_raw_call(state, "__raw_allocate", [count, width], expression.span, universal.pointer_type_id())
                         return callable_pointer_value(state, pointer_type, native, expression.span, expected)
                     if query in ["bytes", "alignment"]:
                         if len(arguments) != 0:
@@ -1358,7 +1362,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         subject = callable_annotation(callable_type_expression(index), state.records, state.namespace, state.declarations)
                         if int(subject.index) in [0, 2, 6, 7] or subject.index >= 100000:
                             return error(callable_diagnostic("type layout requires a concrete storage type", expression.span))
-                        layout = universal.Expression(universal.TypeLayout(subject, query == "alignment"), expression.span, type_id=universal.TypeId(64))
+                        layout = universal.Expression(universal.TypeLayout(subject, query == "alignment"), expression.span, type_id=universal.i64_type_id())
                         quantity = universal.Expression(universal.Name("data_size"), expression.span)
                         return callable_expression(state, universal.Expression(universal.Call(quantity, [universal.CallArgument(None, layout, expression.span)]), expression.span), expected)
                 case _:
@@ -1391,7 +1395,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                     return error(callable_diagnostic("free requires a typed pointer", expression.span))
                 root = loans.binding(value)
                 loans.release(state.loans, root, root in state.borrowed_parameters, expression.span)
-                native = universal.Expression(universal.FieldReference(value, 0), expression.span, type_id=universal.TypeId(5))
+                native = universal.Expression(universal.FieldReference(value, 0), expression.span, type_id=universal.pointer_type_id())
                 result = callable_raw_call(state, "__raw_free", [native], expression.span, expected)
                 match value.kind:
                     case BindingReference:
@@ -1409,7 +1413,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 if callable_type_operand(state, arguments[0].value):
                     annotation = callable_type_expression(arguments[0].value)
                     subject = callable_annotation(annotation, state.records, state.namespace, state.declarations)
-                    layout = universal.Expression(universal.TypeLayout(subject, false), expression.span, type_id=universal.TypeId(64))
+                    layout = universal.Expression(universal.TypeLayout(subject, false), expression.span, type_id=universal.i64_type_id())
                     return callable_raw_call(state, "data_size", [layout], expression.span, expected)
                 # Value operands use the ordinary source operator/function
                 # dispatch below, preserving evaluation and ownership effects.
@@ -1624,7 +1628,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                         return error(callable_diagnostic("type name does not match its expected scalar type", expression.span))
                     id = universal.HirId(u32(state.next_id[0]))
                     state.next_id[0] += 1
-                    return universal.Expression(universal.TypeName(typed_value, display), expression.span, id, universal.TypeId(3))
+                    return universal.Expression(universal.TypeName(typed_value, display), expression.span, id, universal.string_type_id())
                 return error(callable_diagnostic("type requires a concrete value", expression.span))
             named_operation = callable_index.has_operator(state.function_index, state.functions, name) or callable_index.has_operator(state.generic_index, state.generics, name)
             if name != "" and "." not in name and name not in state.names and state.owner.index != 0:
@@ -1746,7 +1750,7 @@ def callable_binding(state: CallableAnalysis, binding: universal.Binding) -> uni
 
 
 def callable_assertion(state: CallableAnalysis, condition: universal.Expression, message: universal.Expression | None, span: source.Span, condition_span: source.Span) -> universal.Statement | diagnostics.Diagnostic:
-    resolved = callable_expression(state, condition, universal.TypeId(1))
+    resolved = callable_expression(state, condition, universal.bool_type_id())
     description := "condition is false"
     if int(condition_span.source.index) < len(state.source_files):
         characters = state.source_files[condition_span.source.index].characters
@@ -1760,12 +1764,12 @@ def callable_assertion(state: CallableAnalysis, condition: universal.Expression,
     if location != "":
         suffix = universal.Expression(universal.LiteralValue(universal.StringValue(location)), span)
         diagnostic = universal.Expression(universal.Binary(universal.operator_syntax(universal.Add()), diagnostic, suffix), span)
-    diagnostic = callable_expression(state, diagnostic, universal.TypeId(3))
-    yes = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.TypeId(1))
-    no = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), span, type_id=universal.TypeId(1))
-    failed = callable_raw_call(state, "__assert_condition", [no, diagnostic], span, universal.TypeId(1))
+    diagnostic = callable_expression(state, diagnostic, universal.string_type_id())
+    yes = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.bool_type_id())
+    no = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), span, type_id=universal.bool_type_id())
+    failed = callable_raw_call(state, "__assert_condition", [no, diagnostic], span, universal.bool_type_id())
     # Keep the condition single-evaluation and the diagnostic lazy.
-    checked = universal.Expression(universal.Conditional(resolved, yes, failed), span, type_id=universal.TypeId(1))
+    checked = universal.Expression(universal.Conditional(resolved, yes, failed), span, type_id=universal.bool_type_id())
     return universal.Assert(checked, None, span, condition_span)
 
 
@@ -1773,7 +1777,7 @@ def callable_expression_statement(state: CallableAnalysis, expression: universal
     match expression.kind:
         case MockValue:
             callable_install_mock(state, calls, results, fallback, expression.span)
-            return universal.ExpressionStatement(universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), expression.span, type_id=universal.TypeId(1)))
+            return universal.ExpressionStatement(universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), expression.span, type_id=universal.bool_type_id()))
         case Call:
             match callee.kind:
                 case Name:
@@ -1959,16 +1963,16 @@ def callable_error_expectation(state: CallableAnalysis, expected: universal.Expr
         return error(callable_diagnostic("throws expects an Error value", expected.span))
     left = universal.Expression(universal.UpdateOperand(0), expected.span, type_id=value.type_id)
     right = universal.Expression(universal.UpdateOperand(1), expected.span, type_id=value.type_id)
-    comparison := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), expected.span, type_id=universal.TypeId(1))
-    no = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), expected.span, type_id=universal.TypeId(1))
+    comparison := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), expected.span, type_id=universal.bool_type_id())
+    no = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), expected.span, type_id=universal.bool_type_id())
     for record in state.records:
         if record.type_id.index == value.type_id.index:
             index := 0
             for field in record.fields:
                 a = universal.Expression(universal.FieldReference(left, index), expected.span, type_id=field.type_id)
                 b = universal.Expression(universal.FieldReference(right, index), expected.span, type_id=field.type_id)
-                equal = callable_expression(state, universal.Expression(universal.Binary(universal.operator_syntax(universal.Equal()), a, b), expected.span), universal.TypeId(1))
-                comparison = universal.Expression(universal.Conditional(comparison, equal, no), expected.span, type_id=universal.TypeId(1))
+                equal = callable_expression(state, universal.Expression(universal.Binary(universal.operator_syntax(universal.Equal()), a, b), expected.span), universal.bool_type_id())
+                comparison = universal.Expression(universal.Conditional(comparison, equal, no), expected.span, type_id=universal.bool_type_id())
                 index += 1
     return universal.Expression(universal.ErrorExpectation(value, comparison), expected.span, type_id=value.type_id)
 
@@ -2048,7 +2052,7 @@ def callable_field_access(state: CallableAnalysis, object: universal.Expression,
                                 initial = supplied
                             fields.append(universal.CallArgument(field.name, callable_expression(local, initial, field.type_id), span))
                         storage = universal.Expression(universal.RecordValue(fields), span, type_id=record.type_id)
-                        empty = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), span, type_id=universal.TypeId(1))
+                        empty = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), span, type_id=universal.bool_type_id())
                         receiver = callable_saved_field_operand(local, body, universal.Expression(universal.Evaluate(empty, storage), span, type_id=record.type_id), span)
             case _:
                 throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
@@ -2087,7 +2091,7 @@ def callable_field_access(state: CallableAnalysis, object: universal.Expression,
                 return callable_field_updates(state, local, body, record, subject, keys, values, span, expected)
             source_key = callable_field_key(local, record, keys[0])
             literal = callable_literal_field(source_key)
-            key = callable_saved_field_operand(local, body, callable_expression(local, source_key, universal.TypeId(3)), span)
+            key = callable_saved_field_operand(local, body, callable_expression(local, source_key, universal.string_type_id()), span)
             result_type := expected
             candidates: list[int] = []
             index := 0
@@ -2105,7 +2109,7 @@ def callable_field_access(state: CallableAnalysis, object: universal.Expression,
             for index in candidates:
                 field = record.fields[index]
                 name = universal.Expression(universal.LiteralValue(universal.StringValue(field.name)), span)
-                condition = callable_expression(local, universal.Expression(universal.Binary(universal.operator_syntax(universal.Equal()), key, name), span), universal.TypeId(1))
+                condition = callable_expression(local, universal.Expression(universal.Binary(universal.operator_syntax(universal.Equal()), key, name), span), universal.bool_type_id())
                 value = universal.Expression(universal.FieldReference(subject, index), span, type_id=field.type_id)
                 result = universal.Expression(universal.Conditional(condition, value, result), span, type_id=result_type)
             return FieldAccessResult(universal.Expression(universal.BlockValue(body, result), span, type_id=result_type))
@@ -2122,10 +2126,10 @@ def callable_field_updates(state: CallableAnalysis, local: CallableAnalysis, bod
     for source_key in keys:
         key_expression = callable_field_key(local, record, source_key)
         literal = callable_literal_field(key_expression)
-        key = callable_saved_field_operand(local, body, callable_expression(local, key_expression, universal.TypeId(3)), span)
+        key = callable_saved_field_operand(local, body, callable_expression(local, key_expression, universal.string_type_id()), span)
         value = callable_saved_field_operand(local, body, callable_expression(local, values[position], universal.TypeId(0)), span)
         position += 1
-        valid := callable_field_failure(local, "unknown, read-only, or incompatible field on " + record.name, span, universal.TypeId(1))
+        valid := callable_field_failure(local, "unknown, read-only, or incompatible field on " + record.name, span, universal.bool_type_id())
         found := false
         index := 0
         for field in record.fields:
@@ -2135,11 +2139,11 @@ def callable_field_updates(state: CallableAnalysis, local: CallableAnalysis, bod
                 if field.type_id.index == value.type_id.index:
                     found = true
                     name = universal.Expression(universal.LiteralValue(universal.StringValue(field.name)), span)
-                    condition = callable_expression(local, universal.Expression(universal.Binary(universal.operator_syntax(universal.Equal()), key, name), span), universal.TypeId(1))
+                    condition = callable_expression(local, universal.Expression(universal.Binary(universal.operator_syntax(universal.Equal()), key, name), span), universal.bool_type_id())
                     checked = callable_field_value(local, record, field, value, span)
-                    yes = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.TypeId(1))
-                    validation = universal.Expression(universal.Evaluate(checked, yes), span, type_id=universal.TypeId(1))
-                    valid = universal.Expression(universal.Conditional(condition, validation, valid), span, type_id=universal.TypeId(1))
+                    yes = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.bool_type_id())
+                    validation = universal.Expression(universal.Evaluate(checked, yes), span, type_id=universal.bool_type_id())
+                    valid = universal.Expression(universal.Conditional(condition, validation, valid), span, type_id=universal.bool_type_id())
                     target = universal.Expression(universal.FieldReference(subject, index), span, type_id=field.type_id)
                     update = callable_control(local, "Assign", [target, value], [], span)
                     commits.statements.append(callable_control(local, "If", [condition], [universal.Block([update]), universal.empty_block()], span))
@@ -2177,14 +2181,14 @@ def callable_field_value(state: CallableAnalysis, record: universal.RecordDeclar
     body = universal.Block([universal.BindingStatement(binding)])
     for constraint in field.field_constraints:
         condition := packs.rename_expression(constraint.condition, [field.name], [name])
-        condition = callable_expression(local, condition, universal.TypeId(1))
+        condition = callable_expression(local, condition, universal.bool_type_id())
         failure ?= constraint.failure
         error_value := universal.Expression(universal.Call(universal.Expression(universal.Name("ConstraintError"), span), [universal.CallArgument(None, universal.Expression(universal.LiteralValue(universal.StringValue("constraint failed for field " + record.name + "." + field.name)), span), span)]), span)
         if failure != None:
             error_value = packs.rename_expression(failure, [field.name], [name])
-        raised = callable_expression(local, universal.Expression(universal.ThrowValue(error_value), span), universal.TypeId(1))
-        yes = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.TypeId(1))
-        checked = universal.Expression(universal.Conditional(condition, raised if failure != None else yes, yes if failure != None else raised), span, type_id=universal.TypeId(1))
+        raised = callable_expression(local, universal.Expression(universal.ThrowValue(error_value), span), universal.bool_type_id())
+        yes = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.bool_type_id())
+        checked = universal.Expression(universal.Conditional(condition, raised if failure != None else yes, yes if failure != None else raised), span, type_id=universal.bool_type_id())
         body.statements.append(universal.ExpressionStatement(checked))
     return universal.Expression(universal.BlockValue(body, reference), span, type_id=value.type_id)
 
@@ -2193,13 +2197,13 @@ def callable_comparison_tail(state: CallableAnalysis, operands: list[universal.E
     local = callable_scope(state)
     binding = callable_binding(local, universal.Binding("$comparison$" + string(state.next_id[0]), None, operands[index + 1], false, true, span))
     right = universal.Expression(universal.BindingReference(binding.id), span, type_id=binding.type_id)
-    condition = callable_expression(local, universal.Expression(universal.Binary(operators[index], left, right), span), universal.TypeId(1))
+    condition = callable_expression(local, universal.Expression(universal.Binary(operators[index], left, right), span), universal.bool_type_id())
     result := condition
     if index + 1 < len(operators):
         remainder = callable_comparison_tail(local, operands, operators, index + 1, right, span)
-        no = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), span, type_id=universal.TypeId(1))
-        result = universal.Expression(universal.Conditional(condition, remainder, no), span, type_id=universal.TypeId(1))
-    return universal.Expression(universal.BlockValue(universal.Block([universal.BindingStatement(binding)]), result), span, type_id=universal.TypeId(1))
+        no = universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), span, type_id=universal.bool_type_id())
+        result = universal.Expression(universal.Conditional(condition, remainder, no), span, type_id=universal.bool_type_id())
+    return universal.Expression(universal.BlockValue(universal.Block([universal.BindingStatement(binding)]), result), span, type_id=universal.bool_type_id())
 
 
 def callable_raised_value(state: CallableAnalysis, value: universal.Expression, result_type: universal.TypeId) -> universal.Expression | diagnostics.Diagnostic:
@@ -2300,7 +2304,7 @@ def callable_destroy_fields(state: CallableAnalysis, value: universal.Expression
     # the enclosing destruction operation, after the hook and owned fields.
     for function in state.functions:
         if run_hook and function.name == record.name + ".drop":
-            call = universal.Expression(universal.ResolvedCall(universal.Direct(lazy_bodies.require(state.required_functions, function.definition), universal.Substitution([])), [universal.CallArgument("self", value, span)]), span, type_id=universal.TypeId(2))
+            call = universal.Expression(universal.ResolvedCall(universal.Direct(lazy_bodies.require(state.required_functions, function.definition), universal.Substitution([])), [universal.CallArgument("self", value, span)]), span, type_id=universal.unit_type_id())
             output.statements.append(universal.ExpressionStatement(call))
             return
     cursor := int(len(record.fields))
@@ -2384,8 +2388,9 @@ def callable_contract_checks(state: CallableAnalysis, output: universal.Block, r
             output.statements.append(callable_assertion(state, condition, None, condition.span, condition.span))
 
 
-def callable_block(state: CallableAnalysis, statements: list[universal.Statement], result_type: universal.TypeId, complete: bool = true) -> universal.Block | diagnostics.Diagnostic:
+def callable_block(state: CallableAnalysis, statements: list[universal.Statement], result_type: universal.TypeId, complete: bool = true, origin: source.Span | None = None) -> universal.Block | diagnostics.Diagnostic:
     output = universal.empty_block()
+    output.span = origin
     resource_start = int(len(state.resources))
     defer_start = int(len(state.deferred))
     returned := false
@@ -2405,11 +2410,11 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
             case Unsafe:
                 local = callable_scope(state)
                 local.unsafe_depth += 1
-                typed = callable_block(local, body.statements, result_type, false)
+                typed = callable_block(local, body.statements, result_type, false, origin=body.span)
                 for binding in local.dead:
                     if binding < len(state.names) and binding not in state.dead:
                         state.dead.append(binding)
-                condition = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.TypeId(1))
+                condition = universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span, type_id=universal.bool_type_id())
                 returned = callable_terminates(typed)
                 output.statements.append(callable_control(state, "If", [condition], [typed, universal.empty_block()], span, returned))
             case CompilerCheck:
@@ -2628,7 +2633,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                     resolved_operands.append(callable_expression(state, operand, universal.TypeId(0)))
                 resolved_bodies: list[universal.Block] = []
                 for body in bodies:
-                    resolved_bodies.append(callable_block(callable_scope(state), body.statements, result_type, false))
+                    resolved_bodies.append(callable_block(callable_scope(state), body.statements, result_type, false, origin=body.span))
                 output.statements.append(universal.GrammarApply(syntax, resolved_operands, resolved_bodies, span, exits))
             case If:
                 resolved = callable_truth(state, condition)
@@ -2643,8 +2648,8 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                                 throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
                     case _:
                         throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/src/callable.sev)")
-                then_typed = callable_block(then_state, then_block.statements, result_type, false)
-                else_typed = callable_block(else_state, else_block.statements, result_type, false)
+                then_typed = callable_block(then_state, then_block.statements, result_type, false, origin=then_block.span)
+                else_typed = callable_block(else_state, else_block.statements, result_type, false, origin=else_block.span)
                 callable_join_transitions(state, then_state, else_state)
                 then_exits = callable_terminates(then_typed)
                 else_exits = callable_terminates(else_typed)
@@ -2712,7 +2717,7 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                         tail = arm.body
                     else:
                         tail = universal.Block([universal.If(arm.condition, arm.body, tail, span)])
-                typed = callable_block(local, tail.statements, result_type, false)
+                typed = callable_block(local, tail.statements, result_type, false, origin=tail.span)
                 output.statements.append(universal.BindingStatement(binding))
                 for nested in typed.statements:
                     output.statements.append(nested)
@@ -2732,12 +2737,12 @@ def callable_block(state: CallableAnalysis, statements: list[universal.Statement
                 # A loop may execute repeatedly; discard straight-line state
                 # facts before checking its body and subsequent statements.
                 state.transitions.clear()
-                resolved = callable_expression(state, condition, universal.TypeId(1))
+                resolved = callable_expression(state, condition, universal.bool_type_id())
                 local = callable_scope(state)
                 local.loop_depth += 1
                 local.loop_defer_start = int(len(local.deferred))
                 local.loop_resource_start = int(len(local.resources))
-                typed = callable_block(local, body.statements, result_type, false)
+                typed = callable_block(local, body.statements, result_type, false, origin=body.span)
                 output.statements.append(callable_control(state, "While", [resolved], [typed], span))
             case Break:
                 if state.loop_depth == 0:
@@ -2866,7 +2871,7 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
     declaration.parameters = typed_parameters
     if declaration.extension and len(parameter_types) != 0:
         declaration.owner_type = parameter_types[0]
-    result_type := universal.TypeId(2)
+    result_type := universal.unit_type_id()
     annotation ?= declaration.result
     if annotation != None:
         result_type = callable_annotation(annotation, records, namespace, declarations)
@@ -2904,7 +2909,7 @@ def callable_signature(declaration: universal.FunctionDeclaration, ordinal: int,
 def callable_check_compiler_case(state: CallableAnalysis, block: universal.Block) -> bool | diagnostics.Diagnostic:
     state.test_context = true
     index = int(len(state.functions))
-    callable_block(state, block.statements, universal.TypeId(2))
+    callable_block(state, block.statements, universal.unit_type_id(), origin=block.span)
     cursor := index
     # Pack calls may append signatures. Check their bodies too, without leaking
     # either successful or rejected specializations into the surrounding module.
@@ -3232,7 +3237,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
                         runtime_test.compiler_cases = []
                     if len(runtime_test.source_modes) != 0 or len(runtime_test.compiler_cases) != 0:
                         return error(callable_diagnostic("only ordinary tests are supported by scalar test emission", declaration.span))
-                    test_function = universal.FunctionDeclaration(name="__test_" + string(len(module.tests)), body=runtime_test.body, result_type=universal.TypeId(2), lookup=declaration.lookup, span=declaration.span)
+                    test_function = universal.FunctionDeclaration(name="__test_" + string(len(module.tests)), body=runtime_test.body, result_type=universal.unit_type_id(), lookup=declaration.lookup, span=declaration.span)
                     ordinal = int(len(state.functions)) + 1
                     test_function.id = test_ids[len(module.tests)] if len(module.tests) < len(test_ids) else universal.FunctionId(u128(ordinal))
                     test_function.definition = universal.DefId(0, 0, universal.DeclarationId(test_function.id.value))
@@ -3425,7 +3430,7 @@ def callable_iteration(state: CallableAnalysis, name: string, iterable: universa
     cursor_binding = callable_binding(state, universal.Binding(prefix + "$cursor", None, start, false, false, span, mutable=true))
     output.statements.append(universal.BindingStatement(cursor_binding))
     cursor = universal.Expression(universal.BindingReference(cursor_binding.id), span, type_id=cursor_binding.type_id)
-    condition = callable_protocol(state, "Iteration", "condition", [receiver, cursor], span, universal.TypeId(1))
+    condition = callable_protocol(state, "Iteration", "condition", [receiver, cursor], span, universal.bool_type_id())
     item = callable_protocol(state, "Iteration", "access", [receiver, cursor], span)
     next = callable_protocol(state, "Iteration", "advance", [receiver, cursor], span, cursor.type_id)
     local = callable_scope(state)
@@ -3492,14 +3497,15 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
         if attachment.role != universal.AttachmentRole.Dispatch:
             # Resolve in the parameter scope once. A nested binding with the
             # same spelling cannot retarget a function contract later.
-            condition = callable_expression(callable_scope(local), attachment.condition, universal.TypeId(1))
+            condition = callable_expression(callable_scope(local), attachment.condition, universal.bool_type_id())
             local.attachments.append(universal.WithAttachment(attachment.role, condition, attachment.stage, attachment.interface))
     body ?= function.body
     if body != None:
         entry = universal.empty_block()
+        entry.span = body.span
         callable_contract_checks(local, entry, universal.AttachmentRole.Entry)
         callable_contract_checks(local, entry, universal.AttachmentRole.Fix)
-        resolved = callable_block(local, body.statements, function.result_type)
+        resolved = callable_block(local, body.statements, function.result_type, origin=body.span)
         for statement in resolved.statements:
             entry.statements.append(statement)
         return entry
@@ -3721,7 +3727,7 @@ def callable_requirement_signature(state: CallableAnalysis, function: universal.
         parameters.append(callable_annotation(parameter.annotation, state.records, namespace, state.declarations))
     function.parameter_types = parameters
     annotation ?= function.result
-    function.result_type = universal.TypeId(2)
+    function.result_type = universal.unit_type_id()
     if annotation != None:
         function.result_type = callable_annotation(annotation, state.records, namespace, state.declarations)
     return function
@@ -3834,7 +3840,7 @@ def callable_operator(state: CallableAnalysis, symbol: string, operands: list[un
                     for index in range(int(len(operands))):
                         annotation = universal.named_type(definitions.type_name(operands[index], state.records), [], span)
                         parameters.append(universal.FunctionParameter("operand" + string(index), annotation, None, span, type_id=operands[index]))
-                    result_type = universal.TypeId(1) if operation.predicate >= 0 else operands[0]
+                    result_type = universal.bool_type_id() if operation.predicate >= 0 else operands[0]
                     selected = universal.FunctionDeclaration(parameters=parameters, parameter_types=operands, result_type=result_type, operator_syntax=syntax, definition=syntax.definition)
     return CallableOptionalFunction(selected)
 
@@ -4202,12 +4208,12 @@ def callable_truth(state: CallableAnalysis, expression: universal.Expression) ->
             index := 0
             for variant in universal.outcome_variants(record):
                 if int(variant.index) not in [6, 7] and not definitions.error_conformance(state.declarations, state.records, variant):
-                    return universal.Expression(universal.OutcomeTest(value, index), expression.span, type_id=universal.TypeId(1))
+                    return universal.Expression(universal.OutcomeTest(value, index), expression.span, type_id=universal.bool_type_id())
                 index += 1
     implementation = callable_operator(state, "if", [value.type_id], expression.span)
     function ?= implementation.function
     if function != None:
-        return callable_resolved_operator(state, function, [value], expression.span, universal.TypeId(1))
+        return callable_resolved_operator(state, function, [value], expression.span, universal.bool_type_id())
     return error(callable_diagnostic("condition requires a truth protocol returning bool", expression.span))
 
 
@@ -4411,8 +4417,8 @@ def callable_record_environment(state: CallableAnalysis, owner: universal.TypeId
                     state.constants = state.constants[:]
                 for supplied in instance.values:
                     number = definitions.value_argument(state.declarations, supplied, record.lookup)
-                    value = universal.Expression(universal.LiteralValue(universal.IntegerValue(number)), supplied.span, type_id=universal.TypeId(64))
-                    state.constants.append(universal.Binding(record.lookup + supplied.binding, None, value, false, false, supplied.span, type_id=universal.TypeId(64)))
+                    value = universal.Expression(universal.LiteralValue(universal.IntegerValue(number)), supplied.span, type_id=universal.i64_type_id())
+                    state.constants.append(universal.Binding(record.lookup + supplied.binding, None, value, false, false, supplied.span, type_id=universal.i64_type_id()))
                     target = universal.named_type(number, [], supplied.span)
                     callable_prepend_alias(state.declarations, universal.TypeDeclaration([], record.lookup + supplied.binding, [], [], target, supplied.span, lookup=record.lookup))
                 for template in state.declarations.record_templates:
@@ -4788,7 +4794,7 @@ def callable_pack_iteration(state: CallableAnalysis, name: string, pack: Callabl
         expanded = packs.expand_block(body, "", 0, names, replacements, prefix)
         binding = universal.Binding(replacement, None, value, false, false, span)
         output.statements.append(universal.BindingStatement(callable_binding(state, binding)))
-        typed = callable_block(state, expanded.statements, result_type, false)
+        typed = callable_block(state, expanded.statements, result_type, false, origin=expanded.span)
         for statement in typed.statements:
             output.statements.append(statement)
         index += 1
@@ -4896,7 +4902,7 @@ def callable_match_expression(state: CallableAnalysis, subject: universal.Expres
         statements = arm.body.statements
         if len(statements) == 0:
             return error(callable_diagnostic("match expression arm requires a final value", span))
-        body = callable_block(scoped, statements[:-1], universal.TypeId(2), false)
+        body = callable_block(scoped, statements[:-1], universal.unit_type_id(), false)
         if callable_terminates(body):
             return error(callable_diagnostic("match expression arm must reach its final value", span))
         last := statements[-1]
@@ -4914,7 +4920,7 @@ def callable_match_expression(state: CallableAnalysis, subject: universal.Expres
                 values.append(universal.Expression(universal.BlockValue(body, value), span, type_id=result_type))
             case _:
                 return error(callable_diagnostic("match expression arm requires a final value", span))
-        conditions.append(callable_expression(local, arm.condition, universal.TypeId(1)))
+        conditions.append(callable_expression(local, arm.condition, universal.bool_type_id()))
     result := values[-1]
     cursor := len(values) - 1
     while cursor > 0:

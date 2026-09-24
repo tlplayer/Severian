@@ -1,3 +1,4 @@
+import * from "package:primitives/declarations.sev"
 import * from "primitive.sev"
 
 import * from "../operator/trait/logical.sev"
@@ -171,6 +172,9 @@ metadata from identity and `<=>` edges, preventing a second conversion table fro
 drifting away from the executable relation declarations below.
 '''
 class bool: Boolean :
+    identity: PrimitiveId = BoolPrimitive().identity
+    id: TypeId = BoolPrimitive().id
+    literal: LiteralSyntax | None = BoolPrimitive().literal
     name: string = "bool"
     size: byte = 1B
     alignment: byte = 1B
@@ -178,7 +182,7 @@ class bool: Boolean :
     representation: PrimitiveRepresentation = PrimitiveRepresentation.BooleanBit
     # Capability flag: `true`/`false` are native literals. `Default` still
     # produces the value `false`.
-    default_literal: bool = true
+    default_literal: bool = BoolPrimitive().default_literal
     constructors: list[Constructor] = :conversions
 
     '''

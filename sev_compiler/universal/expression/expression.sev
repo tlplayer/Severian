@@ -1,3 +1,4 @@
+import * from "package:syntax/primitive.sev"
 import source
 import * from "../id/compiler.sev"
 import * from "../literal/value.sev"
@@ -13,6 +14,7 @@ class Expression:
     grammar: DefId | None = None
     loan_root: int = -1
     loan_mode: string = ""
+    literal: LiteralConstruction | None = None
 
 
 class CallArgument:

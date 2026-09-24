@@ -347,7 +347,9 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
             if file.path == subject_path:
                 root_unit = membership.sources[index].unit
             index += 1
-        lowered.hierarchy = universal.SemanticHierarchy()
+        lowered.hierarchy.libraries = []
+        lowered.hierarchy.modules = []
+        lowered.hierarchy.submodules = []
         for unit in membership.units:
             library_key = universal.semantic_key([unit.package.name, unit.package.version, unit.package.source])
             library_index := -1

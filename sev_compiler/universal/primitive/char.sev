@@ -1,3 +1,4 @@
+import * from "package:primitives/declarations.sev"
 import * from "primitive.sev"
 
 import * from "../operator/trait/equatable.sev"
@@ -72,6 +73,9 @@ trait Character:
 
 
 class char[T: char_storage = u32]: Character, PrimitiveAlias[T]:
+    identity: PrimitiveId = CharPrimitive().identity
+    id: TypeId = CharPrimitive().id
+    literal: LiteralSyntax | None = CharPrimitive().literal
 
     storage: Type = T
 

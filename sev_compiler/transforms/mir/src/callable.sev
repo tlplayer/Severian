@@ -33,7 +33,7 @@ def mir_check_expected_error(module: universal.Module, context: cfg.ExecutionCon
                 if variant.index == expected.type_id.index:
                     variant_index = index
                 index += 1
-    matches := mir_value(module, universal.TypeId(1))
+    matches := mir_value(module, universal.bool_type_id())
     if variant_index < 0:
         cfg.append(context, universal.Operation.Constant(universal.BooleanValue(false), matches))
     else:
@@ -65,11 +65,14 @@ def mir_value(module: universal.Module, type_id: universal.TypeId) -> universal.
 
 
 def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
+    previous = context.origin
+    context.origin = cfg.source_origin(context, expression.span)
     lowered = mir_expression_value(module, context, scope, expression)
     if len(module.quality_files) > 0 and expression.type_id.index == 1:
         match expression.kind:
             case LiteralValue:
                 # Constants do not represent a runtime coverage decision.
+                context.origin = previous
                 return lowered
             case _:
                 measured ?= quality.quality_decision(module, expression.span, "Condition", lowered)
@@ -92,7 +95,7 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
         case AddressOf:
             return callable_mir_place(module, context, scope, value)
         case TypeLayout:
-            result = mir_value(module, universal.TypeId(64))
+            result = mir_value(module, universal.i64_type_id())
             cfg.append(context, universal.Operation.TypeLayout(subject, alignment, result))
             return result
         case BlockValue:
@@ -108,7 +111,7 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
             elements_values: list[universal.ValueId] = []
             for element in elements:
                 elements_values.append(mir_expression(module, context, scope, element))
-            count = mir_value(module, universal.TypeId(64))
+            count = mir_value(module, universal.i64_type_id())
             cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(len(elements))), count))
             exemplar := count
             if len(elements_values) != 0:
@@ -120,7 +123,7 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
             result = mir_expression(module, context, local, construction)
             position := 0
             for value in elements_values:
-                index = mir_value(module, universal.TypeId(64))
+                index = mir_value(module, universal.i64_type_id())
                 cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(position)), index))
                 local = CallableMirScope(scope.bindings, scope.loops, [result, index, value], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names, scope.error_targets, scope.error_expectations)
                 mir_expression(module, context, local, storage)
@@ -135,22 +138,22 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
             if storage_types.owned_record(expression.type_id, module.records):
                 handle = aggregate.allocate(module, context, scope.aggregates, expression.type_id)
                 members = aggregate.fields(scope.aggregates, handle)
-                tag = mir_value(module, universal.TypeId(64))
+                tag = mir_value(module, universal.i64_type_id())
                 cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(variant)), tag))
                 cfg.append(context, universal.Operation.Store(members[0], tag))
                 aggregate.store(module, context, scope.aggregates, members[variant + 1], payload)
                 return handle
-            address = mir_value(module, universal.TypeId(5))
+            address = mir_value(module, universal.pointer_type_id())
             cfg.append(context, universal.Operation.Allocate(expression.type_id, address))
             empty = mir_value(module, expression.type_id)
             cfg.append(context, universal.Operation.Constant(universal.NoneValue(), empty))
             cfg.append(context, universal.Operation.Store(address, empty))
-            tag = mir_value(module, universal.TypeId(64))
+            tag = mir_value(module, universal.i64_type_id())
             cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(variant)), tag))
-            tag_address = mir_value(module, universal.TypeId(5))
+            tag_address = mir_value(module, universal.pointer_type_id())
             cfg.append(context, universal.Operation.FieldAddress(address, expression.type_id, 0, tag_address))
             cfg.append(context, universal.Operation.Store(tag_address, tag))
-            payload_address = mir_value(module, universal.TypeId(5))
+            payload_address = mir_value(module, universal.pointer_type_id())
             cfg.append(context, universal.Operation.FieldAddress(address, expression.type_id, variant + 1, payload_address))
             cfg.append(context, universal.Operation.Store(payload_address, payload))
             result = mir_value(module, expression.type_id)
@@ -219,7 +222,7 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
                                     aggregate.store(module, context, scope.aggregates, members[index], value)
                                 index += 1
                 return handle
-            address = mir_value(module, universal.TypeId(5))
+            address = mir_value(module, universal.pointer_type_id())
             cfg.append(context, universal.Operation.Allocate(expression.type_id, address))
             for argument in fields:
                 value = mir_expression(module, context, scope, argument.value)
@@ -228,7 +231,7 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
                         index := 0
                         for field in record.fields:
                             if argument.name == field.name:
-                                target = mir_value(module, universal.TypeId(5))
+                                target = mir_value(module, universal.pointer_type_id())
                                 cfg.append(context, universal.Operation.FieldAddress(address, expression.type_id, index, target))
                                 cfg.append(context, universal.Operation.Store(target, value))
                             index += 1
@@ -325,6 +328,16 @@ def callable_exclusive_signature(function: universal.FunctionDeclaration) -> boo
 
 
 def callable_inline_receiver(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, function: universal.FunctionDeclaration, arguments: list[universal.CallArgument], span: source.Span) -> universal.ValueId | diagnostics.Diagnostic:
+    previous = context.origin
+    path = previous.path[:]
+    path.append(universal.CallableOrigin(function.definition, function.name, span))
+    context.origin = universal.OperationOrigin(span, previous.block, function.definition, path)
+    result = callable_inline_receiver_value(module, context, scope, function, arguments, span)
+    context.origin = previous
+    return result
+
+
+def callable_inline_receiver_value(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, function: universal.FunctionDeclaration, arguments: list[universal.CallArgument], span: source.Span) -> universal.ValueId | diagnostics.Diagnostic:
     identity = int(function.id.value)
     if identity in scope.inline_functions:
         if aggregate.signature(function, module.records):
@@ -361,8 +374,8 @@ def callable_inline_receiver(module: universal.Module, context: cfg.ExecutionCon
                     if storage_types.owned_record(parameter.type_id, module.records):
                         local.borrowed_records.append(index)
                 else:
-                    type_id = universal.TypeId(5) if storage_types.indirect_value(parameter.type_id, module.records) else parameter.type_id
-                    cell = mir_value(module, universal.TypeId(5))
+                    type_id = universal.pointer_type_id() if storage_types.indirect_value(parameter.type_id, module.records) else parameter.type_id
+                    cell = mir_value(module, universal.pointer_type_id())
                     cfg.append(context, universal.Operation.Allocate(type_id, cell))
                     cfg.append(context, universal.Operation.Store(cell, evaluated[argument_index]))
                     local.bindings.append(cell)
@@ -391,11 +404,22 @@ def callable_inline_receiver(module: universal.Module, context: cfg.ExecutionCon
 
 
 def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: universal.Block, scope: CallableMirScope) -> bool | diagnostics.Diagnostic:
+    previous = context.origin
+    layout ?= block.layout
+    if layout != None:
+        context.origin = cfg.source_origin(context, layout.span, layout.id)
+    result = mir_block_contents(module, context, block, scope)
+    context.origin = previous
+    return result
+
+
+def mir_block_contents(module: universal.Module, context: cfg.ExecutionContext, block: universal.Block, scope: CallableMirScope) -> bool | diagnostics.Diagnostic:
     for statement in block.statements:
         if not cfg.open(context):
             return true
         match statement:
             case BindingStatement:
+                context.origin = cfg.source_origin(context, binding.span)
                 if quality.debug_source(module, binding.span):
                     while len(scope.debug_names) <= int(binding.id.index):
                         scope.debug_names.append("")
@@ -433,31 +457,34 @@ def mir_block(module: universal.Module, context: cfg.ExecutionContext, block: un
                         scope.bindings.append(destination)
                     continue
                 if storage_types.indirect_value(binding.type_id, module.records):
-                    address = mir_value(module, universal.TypeId(5))
+                    address = mir_value(module, universal.pointer_type_id())
                     cfg.append(context, universal.Operation.Allocate(binding.type_id, address))
                     cfg.append(context, universal.Operation.Store(address, value))
                     value = address
                 if binding.update:
                     cfg.append(context, universal.Operation.Store(scope.bindings[binding.id.index], value))
                 else:
-                    cell = mir_value(module, universal.TypeId(5))
-                    stored_type = universal.TypeId(5) if storage_types.indirect_value(binding.type_id, module.records) else binding.type_id
+                    cell = mir_value(module, universal.pointer_type_id())
+                    stored_type = universal.pointer_type_id() if storage_types.indirect_value(binding.type_id, module.records) else binding.type_id
                     cfg.append(context, universal.Operation.Allocate(stored_type, cell))
                     cfg.append(context, universal.Operation.Store(cell, value))
                     scope.bindings.append(cell)
                 if quality.debug_source(module, binding.span):
                     cfg.append(context, universal.Operation.DebugValue(binding.name, scope.bindings[binding.id.index], binding.span, 0, binding.value.loan_mode, true, binding.type_id))
             case ExpressionStatement:
+                context.origin = cfg.source_origin(context, expression.span)
                 if quality.debug_source(module, expression.span):
                     cfg.append(context, universal.Operation.DebugLocation(expression.span))
                 quality.quality_hit(module, context, expression.span, "Statement")
                 mir_expression(module, context, scope, expression)
             case Assert:
+                context.origin = cfg.source_origin(context, span)
                 quality.quality_hit(module, context, span, "Statement")
                 value = mir_expression(module, context, scope, condition)
                 origin = universal.AssertionOrigin(span.start, condition_span.start, condition_span.end, None)
                 cfg.append(context, universal.Operation.Assert(value, None, origin))
             case GrammarApply:
+                context.origin = cfg.source_origin(context, span)
                 if quality.debug_source(module, span):
                     cfg.append(context, universal.Operation.DebugLocation(span))
                 quality.quality_hit(module, context, span, "Statement")
@@ -474,29 +501,70 @@ def require_function(required: list[universal.FunctionId], function: universal.F
     required.append(function)
 
 
-def required_calls(body: borrow universal.CfgBody, required: list[universal.FunctionId]):
+class CallableDependencyPath:
+    function: universal.FunctionId
+    path: list[universal.CallableOrigin]
+
+
+def require_call(module: universal.Module, required: list[universal.FunctionId], paths: list[CallableDependencyPath], function: universal.FunctionId, origin: universal.OperationOrigin):
+    require_function(required, function)
+    for known in paths:
+        if known.function.value == function.value:
+            return
+    for declaration in module.functions:
+        if declaration.id.value == function.value:
+            path = origin.path[:]
+            path.append(universal.CallableOrigin(declaration.definition, declaration.name, origin.span))
+            paths.append(CallableDependencyPath(function, path))
+            return
+
+
+def required_calls(module: universal.Module, body: borrow universal.CfgBody, required: list[universal.FunctionId], paths: list[CallableDependencyPath]):
     for block in borrow body.blocks:
+        position := 0
         for operation in borrow block.operations:
+            origin = block.origins[position]
+            position += 1
             match operation:
                 case CallFields:
-                    require_function(required, function)
+                    require_call(module, required, paths, function, origin)
                 case Call:
-                    require_function(required, function)
+                    require_call(module, required, paths, function, origin)
                 case _:
                     continue
 
 
 def build_callables(module: universal.Module, library_sources: list[int] = [], export_names: list[string] = []) -> universal.Module | diagnostics.Diagnostic:
+    module.hierarchy.regions = []
+    module.hierarchy.sentences = []
+    module.hierarchy.blocks = []
+    module.cfg_bodies = []
+    initializer = universal.DefId(0, 0, universal.DeclarationId(0))
+    universal.hierarchy_region(module.hierarchy, initializer, module.initializer, origin=module.initializer.span)
+    module.hierarchy.blocks[0].kind = universal.BlockKind.Global
+    type_blocks: list[tuple[universal.TypeId, universal.RegionId]] = []
+    for record in module.records:
+        region = universal.hierarchy_region(module.hierarchy, record.definition, universal.Block([], span=record.span), origin=record.span)
+        module.hierarchy.blocks[region.index].kind = universal.BlockKind.Class
+        type_blocks.append((record.type_id, region))
+    for trait in module.traits:
+        region = universal.hierarchy_region(module.hierarchy, trait.definition, universal.Block([], span=trait.span), origin=trait.span)
+        module.hierarchy.blocks[region.index].kind = universal.BlockKind.Trait
     scope = CallableMirScope()
-    context := cfg.ExecutionContext(universal.empty_cfg(universal.TypeId(2)))
+    context := cfg.ExecutionContext(universal.empty_cfg(universal.unit_type_id()))
+    context.origin = universal.OperationOrigin(module.initializer.span, universal.SourceBlockId(0), initializer, [universal.CallableOrigin(initializer, "$initializer", module.initializer.span)])
+    context.body.origin = context.origin
     mir_block(module, context, module.initializer, scope)
     cfg.finish(module, context, source.Span(source.SourceId(0), 0, 0))
     ownership.analyze_ownership(module, context.body, [])
+    cfg.promote_storage(module, context.body)
+    ownership.authorize_lowering(module, context.body, [])
     module.cfg_bodies.append(context.body)
     module.globals = scope.bindings
     functions: list[universal.FunctionDeclaration] = []
     required: list[universal.FunctionId] = []
-    required_calls(context.body, required)
+    paths: list[CallableDependencyPath] = []
+    required_calls(module, context.body, required, paths)
     # Runtime entry points are roots even when a generated test has no user
     # source span (for example the summary of a file with no test declarations).
     entry ?= module.entry
@@ -545,13 +613,39 @@ def build_callables(module: universal.Module, library_sources: list[int] = [], e
         local = CallableMirScope()
         for parameter in function.parameters:
             local.debug_names.append(parameter.name)
+        source_body ?= function.body
+        source_block: universal.SourceBlockId | None := None
+        if source_body != None:
+            parent: universal.RegionId | None := None
+            introduced_by: universal.SentenceId | None := None
+            for owner in type_blocks:
+                if function.owner_type.index != 0 and owner[0].index == function.owner_type.index:
+                    parent = owner[1]
+                    sentence = universal.SentenceId(u32(len(module.hierarchy.sentences)))
+                    introduced_by = sentence
+                    module.hierarchy.sentences.append(universal.SemanticSentence(sentence, owner[1], function.span, int(len(module.hierarchy.blocks[owner[1].index].children))))
+                    break
+            region = universal.hierarchy_region(module.hierarchy, function.definition, source_body, parent, introduced_by, function.span)
+            module.hierarchy.blocks[region.index].kind = universal.BlockKind.Callable
+            if function.name == "main":
+                module.hierarchy.blocks[region.index].kind = universal.BlockKind.Main
+            source_block = universal.SourceBlockId(region.index)
+            if function.name.starts_with("__test_") or function.name.starts_with("$case$"):
+                module.hierarchy.blocks[region.index].kind = universal.BlockKind.Test
         context = cfg.ExecutionContext(universal.empty_cfg(function.result_type))
+        path = [universal.CallableOrigin(function.definition, function.name, function.span)]
+        for dependency in paths:
+            if dependency.function.value == function.id.value:
+                path = dependency.path
+                break
+        context.origin = universal.OperationOrigin(function.span, source_block, function.definition, path)
+        context.body.origin = context.origin
         for type_id in function.parameter_types:
             if storage_types.owned_record(type_id, module.records):
                 cell = aggregate.parameter(module, context, local.aggregates, type_id, context.body.entry)
                 local.bindings.append(cell)
                 continue
-            stored_type = universal.TypeId(5) if storage_types.indirect_value(type_id, module.records) and boundary.scalar_boundary(function, "mlir") == "" else type_id
+            stored_type = universal.pointer_type_id() if storage_types.indirect_value(type_id, module.records) and boundary.scalar_boundary(function, "mlir") == "" else type_id
             parameter_value = mir_value(module, stored_type)
             function.values.append(parameter_value)
             if len(module.debug_files) > 0 and len(function.parameters) >= len(function.values):
@@ -562,7 +656,7 @@ def build_callables(module: universal.Module, library_sources: list[int] = [], e
                         mode = modifier.name
                     cfg.append(context, universal.Operation.DebugValue(parameter.name, parameter_value, parameter.span, int(len(function.values)), mode, false, stored_type))
                     cfg.append(context, universal.Operation.DebugOwnership(parameter.name, mode, parameter.span))
-            cell = mir_value(module, universal.TypeId(5))
+            cell = mir_value(module, universal.pointer_type_id())
             cfg.append(context, universal.Operation.Allocate(stored_type, cell))
             cfg.append(context, universal.Operation.Store(cell, parameter_value))
             local.bindings.append(cell)
@@ -600,7 +694,9 @@ def build_callables(module: universal.Module, library_sources: list[int] = [], e
                 span = declared
             cfg.finish(module, context, span, function.values)
             ownership.analyze_ownership(module, context.body, function.values)
-            required_calls(context.body, required)
+            cfg.promote_storage(module, context.body)
+            ownership.authorize_lowering(module, context.body, function.values)
+            required_calls(module, context.body, required, paths)
             function.cfg_index = int(len(module.cfg_bodies))
             module.cfg_bodies.append(context.body)
         functions.append(function)
@@ -616,7 +712,7 @@ def callable_mir_place(module: universal.Module, context: cfg.ExecutionContext, 
             if storage_types.owned_record(expression.type_id, module.records):
                 return scope.bindings[binding.index]
             if storage_types.indirect_value(expression.type_id, module.records):
-                address = mir_value(module, universal.TypeId(5))
+                address = mir_value(module, universal.pointer_type_id())
                 cfg.append(context, universal.Operation.Load(scope.bindings[binding.index], address))
                 return address
             return scope.bindings[binding.index]
@@ -624,14 +720,14 @@ def callable_mir_place(module: universal.Module, context: cfg.ExecutionContext, 
             base = callable_mir_place(module, context, scope, object)
             if storage_types.owned_record(object.type_id, module.records):
                 return aggregate.fields(scope.aggregates, base)[index]
-            result = mir_value(module, universal.TypeId(5))
+            result = mir_value(module, universal.pointer_type_id())
             cfg.append(context, universal.Operation.FieldAddress(base, object.type_id, index, result))
             return result
         case _:
             value = mir_expression(module, context, scope, expression)
             if storage_types.owned_record(expression.type_id, module.records):
                 return value
-            address = mir_value(module, universal.TypeId(5))
+            address = mir_value(module, universal.pointer_type_id())
             cfg.append(context, universal.Operation.Allocate(expression.type_id, address))
             cfg.append(context, universal.Operation.Store(address, value))
             return address
@@ -831,7 +927,7 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                 elif storage_types.owned_record(module.values[raised.index].type_id, module.records):
                     # An unhandled outcome has no return boundary. Terminate
                     # here without letting its lowering-only handle escape.
-                    failed = mir_value(module, universal.TypeId(1))
+                    failed = mir_value(module, universal.bool_type_id())
                     cfg.append(frame.context, universal.Operation.Constant(universal.BooleanValue(false), failed))
                     cfg.append(frame.context, universal.Operation.Assert(failed, None, universal.AssertionOrigin(0, 0, 0, None)))
                     # Keep one return form for the ownership pass. The assert
@@ -858,10 +954,10 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                                 if storage_types.owned_record(type_id, module.records):
                                     field = aggregate.fields(scope.aggregates, input)[index + 1]
                                     return RuntimeValue(aggregate.load(module, frame.context, field, variant))
-                                address = mir_value(module, universal.TypeId(5))
+                                address = mir_value(module, universal.pointer_type_id())
                                 cfg.append(frame.context, universal.Operation.Allocate(type_id, address))
                                 cfg.append(frame.context, universal.Operation.Store(address, input))
-                                field = mir_value(module, universal.TypeId(5))
+                                field = mir_value(module, universal.pointer_type_id())
                                 cfg.append(frame.context, universal.Operation.FieldAddress(address, type_id, index + 1, field))
                                 result = mir_value(module, variant)
                                 cfg.append(frame.context, universal.Operation.Load(field, result))
@@ -1038,7 +1134,7 @@ def callable_string_literal(module: universal.Module, context: cfg.ExecutionCont
     leaves = storage_types.value_fields(type_id, module.records)
     buffer = mir_value(module, leaves[0])
     cfg.append(context, universal.Operation.Constant(universal.StringValue(text), buffer))
-    count = mir_value(module, universal.TypeId(64))
+    count = mir_value(module, universal.i64_type_id())
     size = len(text.characters()) if storage_types.string_element(type_id, module.records).index == 532 else len(text.bytes())
     cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(size)), count))
     result = aggregate.allocate(module, context, scope.aggregates, type_id)

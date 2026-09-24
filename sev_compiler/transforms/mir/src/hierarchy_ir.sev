@@ -1,11 +1,39 @@
 import universal
+import source
 
 
 def quoted(value: string) -> string:
     return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
 
 
-def emit(module: universal.Module, graph: universal.DefinitionGraph) -> string:
+def block_kind(kind: universal.BlockKind) -> string:
+    match kind:
+        case Global:
+            return "global"
+        case Callable:
+            return "callable"
+        case Class:
+            return "class"
+        case Trait:
+            return "trait"
+        case Test:
+            return "test"
+        case Main:
+            return "main"
+        case Lexical:
+            return "lexical"
+
+
+def source_location(origin: source.Span | None, files: list[source.SourceFile]) -> string:
+    span ?= origin
+    if span != None:
+        for file in files:
+            if file.id.index == span.source.index:
+                return "{\"path\":" + quoted(file.path) + ",\"start\":" + string(source.utf8_offset(file, span.start)) + ",\"end\":" + string(source.utf8_offset(file, span.end)) + "}"
+    return "null"
+
+
+def emit(module: universal.Module, graph: universal.DefinitionGraph, files: list[source.SourceFile] = []) -> string:
     dispatch: list[string] = []
     for function in module.functions:
         if len(function.dispatch_candidates) > 0:
@@ -26,6 +54,20 @@ def emit(module: universal.Module, graph: universal.DefinitionGraph) -> string:
     sentences: list[string] = []
     for sentence in module.hierarchy.sentences:
         sentences.append("{\"id\":" + string(sentence.id.index) + ",\"region\":" + string(sentence.region.index) + ",\"ordinal\":" + string(sentence.ordinal) + "}")
+    blocks: list[string] = []
+    for block in module.hierarchy.blocks:
+        parent := "null"
+        ancestor ?= block.parent
+        if ancestor != None:
+            parent = string(ancestor.index)
+        introduced := "null"
+        sentence ?= block.introduced_by
+        if sentence != None:
+            introduced = string(sentence.index)
+        children: list[string] = []
+        for child in block.children:
+            children.append(string(child.index))
+        blocks.append("{\"id\":" + string(block.id.index) + ",\"kind\":" + quoted(block_kind(block.kind)) + ",\"definition\":" + quoted(universal.definition_identity(block.owner)) + ",\"parent\":" + parent + ",\"introduced_by\":" + introduced + ",\"children\":[" + children.join(",") + "],\"source\":" + source_location(block.span, files) + "}")
     obligations: list[string] = []
     for obligation in module.obligations:
         role := "context"
@@ -43,4 +85,4 @@ def emit(module: universal.Module, graph: universal.DefinitionGraph) -> string:
             case Context:
                 role = "context"
         obligations.append("{\"definition\":" + quoted(universal.definition_identity(obligation.owner)) + ",\"role\":" + quoted(role) + ",\"proof\":\"unknown\"}")
-    return "{\"dispatch\":[" + dispatch.join(",") + "],\"keys\":[" + keys.join(",") + "],\"regions\":[" + regions.join(",") + "],\"sentences\":[" + sentences.join(",") + "],\"obligations\":[" + obligations.join(",") + "]}"
+    return "{\"dispatch\":[" + dispatch.join(",") + "],\"keys\":[" + keys.join(",") + "],\"regions\":[" + regions.join(",") + "],\"sentences\":[" + sentences.join(",") + "],\"blocks\":[" + blocks.join(",") + "],\"obligations\":[" + obligations.join(",") + "]}"

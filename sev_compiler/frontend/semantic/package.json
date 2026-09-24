@@ -40,11 +40,19 @@
       "path": "../../universal"
     },
     "ownership": {
-      "package": "sev-compiler-ownership",
-      "path": "../ownership"
+      "package": "sev-compiler-mir-ownership",
+      "path": "../../transforms/mir/ownership"
     },
     "file": {
       "path": "../../../library/system/file"
+    },
+    "primitives": {
+      "package": "sev-compiler-primitives",
+      "path": "../../primitives"
+    },
+    "syntax": {
+      "package": "sev-compiler-syntax",
+      "path": "../../syntax"
     }
   },
   "build": {

@@ -6,21 +6,12 @@
     "publish": true
   },
   "lib": {
-    "name": "ownership",
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "diagnostics": {
-      "package": "sev-compiler-diagnostics",
-      "path": "../../diagnostics"
-    },
-    "universal": {
-      "package": "sev-compiler-universal",
-      "path": "../../universal"
-    },
-    "source": {
-      "path": "../source",
-      "package": "sev-compiler-source"
+    "ownership": {
+      "package": "sev-compiler-mir-ownership",
+      "path": "../../transforms/mir/ownership"
     }
   }
 }

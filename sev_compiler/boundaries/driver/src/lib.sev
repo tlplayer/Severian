@@ -8,7 +8,6 @@ import modules
 import lowering
 import mir
 import mlir
-import ownership
 import parser
 import semantic
 import source

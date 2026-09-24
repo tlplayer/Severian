@@ -1,12 +1,2 @@
-import source
-
-
-# Lx describes matched source, independently of its token classification.
-trait LexemeTerm:
-    property text: string
-    property span: source.Span
-
-
-class Lexeme: LexemeTerm
-    text: string
-    span: source.Span
+# Compatibility export; syntax owns this contract.
+import * from "package:syntax/lexeme.sev"
