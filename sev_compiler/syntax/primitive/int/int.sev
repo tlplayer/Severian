@@ -1,10 +1,7 @@
 import * from "package:primitives/declarations.sev"
 import * from "../primitive.sev"
 
-import * from "../../operator/trait/arithmetic.sev"
-import * from "../../operator/trait/bitwise.sev"
-import * from "../../operator/trait/equatable.sev"
-import * from "../../operator/trait/ordered.sev"
+import * from "../../function/trait.sev"
 
 
 '''
@@ -155,6 +152,8 @@ class i8: SignedInteger :
     identity: PrimitiveId = I8Primitive().identity
     id: TypeId = I8Primitive().id
     literal: LiteralSyntax | None = I8Primitive().literal
+    literal_family: string = I8Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = I8Primitive().literal_bindings
     name: string = "i8"
     size: byte = 1B
     alignment: byte = 1B
@@ -171,6 +170,8 @@ class i16: SignedInteger :
     identity: PrimitiveId = I16Primitive().identity
     id: TypeId = I16Primitive().id
     literal: LiteralSyntax | None = I16Primitive().literal
+    literal_family: string = I16Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = I16Primitive().literal_bindings
     name: string = "i16"
     size: byte = 2B
     alignment: byte = 2B
@@ -187,6 +188,8 @@ class i32: SignedInteger :
     identity: PrimitiveId = I32Primitive().identity
     id: TypeId = I32Primitive().id
     literal: LiteralSyntax | None = I32Primitive().literal
+    literal_family: string = I32Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = I32Primitive().literal_bindings
     name: string = "i32"
     size: byte = 4B
     alignment: byte = 4B
@@ -203,6 +206,8 @@ class i64: SignedInteger :
     identity: PrimitiveId = I64Primitive().identity
     id: TypeId = I64Primitive().id
     literal: LiteralSyntax | None = I64Primitive().literal
+    literal_family: string = I64Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = I64Primitive().literal_bindings
     name: string = "i64"
     size: byte = 8B
     alignment: byte = 8B
@@ -219,6 +224,8 @@ class i128: SignedInteger :
     identity: PrimitiveId = I128Primitive().identity
     id: TypeId = I128Primitive().id
     literal: LiteralSyntax | None = I128Primitive().literal
+    literal_family: string = I128Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = I128Primitive().literal_bindings
     name: string = "i128"
     size: byte = 16B
     alignment: byte = 16B
@@ -235,6 +242,8 @@ class isize: SignedInteger :
     identity: PrimitiveId = I64Primitive().identity
     id: TypeId = I64Primitive().id
     literal: LiteralSyntax | None = I64Primitive().literal
+    literal_family: string = I64Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = I64Primitive().literal_bindings
     name: string = "isize"
     size: byte = target.pointer_size
     alignment: byte = target.pointer_alignment
@@ -251,6 +260,8 @@ class u8: UnsignedInteger :
     identity: PrimitiveId = U8Primitive().identity
     id: TypeId = U8Primitive().id
     literal: LiteralSyntax | None = U8Primitive().literal
+    literal_family: string = U8Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = U8Primitive().literal_bindings
     name: string = "u8"
     size: byte = 1B
     alignment: byte = 1B
@@ -267,6 +278,8 @@ class u16: UnsignedInteger :
     identity: PrimitiveId = U16Primitive().identity
     id: TypeId = U16Primitive().id
     literal: LiteralSyntax | None = U16Primitive().literal
+    literal_family: string = U16Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = U16Primitive().literal_bindings
     name: string = "u16"
     size: byte = 2B
     alignment: byte = 2B
@@ -283,6 +296,8 @@ class u32: UnsignedInteger :
     identity: PrimitiveId = U32Primitive().identity
     id: TypeId = U32Primitive().id
     literal: LiteralSyntax | None = U32Primitive().literal
+    literal_family: string = U32Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = U32Primitive().literal_bindings
     name: string = "u32"
     size: byte = 4B
     alignment: byte = 4B
@@ -299,6 +314,8 @@ class u64: UnsignedInteger :
     identity: PrimitiveId = U64Primitive().identity
     id: TypeId = U64Primitive().id
     literal: LiteralSyntax | None = U64Primitive().literal
+    literal_family: string = U64Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = U64Primitive().literal_bindings
     name: string = "u64"
     size: byte = 8B
     alignment: byte = 8B
@@ -315,6 +332,8 @@ class u128: UnsignedInteger :
     identity: PrimitiveId = U128Primitive().identity
     id: TypeId = U128Primitive().id
     literal: LiteralSyntax | None = U128Primitive().literal
+    literal_family: string = U128Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = U128Primitive().literal_bindings
     name: string = "u128"
     size: byte = 16B
     alignment: byte = 16B
@@ -331,6 +350,8 @@ class usize: UnsignedInteger :
     identity: PrimitiveId = U64Primitive().identity
     id: TypeId = U64Primitive().id
     literal: LiteralSyntax | None = U64Primitive().literal
+    literal_family: string = U64Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = U64Primitive().literal_bindings
     name: string = "usize"
     size: byte = target.pointer_size
     alignment: byte = target.pointer_alignment
@@ -389,6 +410,8 @@ class int: Integer:
     identity: PrimitiveId = I64Primitive().identity
     id: TypeId = I64Primitive().id
     literal: LiteralSyntax | None = I64Primitive().literal
+    literal_family: string = I64Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = I64Primitive().literal_bindings
 
     operator if(self) -> bool:
         return self != 0
@@ -831,8 +854,6 @@ test with compiler "unsigned integers do not define unary negation":
 test with compiler "unsupported conversion has no canonical edge":
     reject:
         value := i32([1, 2, 3])
-
-
 
 
 test with compiler "package level no loss of data for conversion":

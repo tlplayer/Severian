@@ -1,4 +1,0 @@
-trait Logical:
-    operator and(right: Self) -> Self
-    operator or(right: Self) -> Self
-    operator not() -> Self

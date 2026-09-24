@@ -12,10 +12,12 @@ class PrimitiveDescriptor: Primitive
     representation: PrimitiveRepresentation
     literal: LiteralSyntax | None
     default_literal: bool
+    literal_family: string = ""
+    literal_bindings: list[LiteralBinding] = []
 
 
 def describe_primitive[T: Primitive](value: T) -> PrimitiveDescriptor:
-    return PrimitiveDescriptor(value.identity, value.id, value.name, value.size, value.alignment, value.constructors, value.category, value.representation, value.literal, value.default_literal)
+    return PrimitiveDescriptor(value.identity, value.id, value.name, value.size, value.alignment, value.constructors, value.category, value.representation, value.literal, value.default_literal, value.literal_family, value.literal_bindings)
 
 
 PrimitiveCatalog: list[PrimitiveDescriptor] = []

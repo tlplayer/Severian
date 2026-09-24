@@ -1,0 +1,189 @@
+import lexer
+import source
+import diagnostics
+import * from "package:syntax/block/block.sev"
+
+
+# This pass consumes source structure only. Primitive values, callable bodies,
+# imports and prelude providers are resolved after block discovery.
+def classify_block(sentence: BlockSentence, syntaxes: list[BlockSyntax]) -> BlockSyntax | None:
+    selected: BlockSyntax | None := None
+    width := 0
+    for syntax in syntaxes:
+        if len(syntax.prefix) == 0 or len(syntax.prefix) > len(sentence.terms):
+            continue
+        matches := true
+        for index in range(int(len(syntax.prefix))):
+            if sentence.terms[index].spelling != syntax.prefix[index]:
+                matches = false
+        if matches:
+            if len(syntax.prefix) > width:
+                selected = syntax
+                width = len(syntax.prefix)
+            elif len(syntax.prefix) == width:
+                throw Error("ambiguous block syntax prefix")
+    return selected
+
+
+def block_sentence(terms: list[BlockTerm], ordinal: int) -> BlockSentence:
+    return BlockSentence(SentenceId(u32(ordinal)), source.Span(terms[0].span.source, terms[0].span.start, terms[-1].span.end), terms)
+
+
+def append_block_sentence(file: BlockFile, owner: SourceBlockId, terms: list[BlockTerm]) -> BlockSentence:
+    sentence = block_sentence(terms, int(file.next_sentence))
+    file.next_sentence += 1
+    file.blocks[owner.index].sentences.append(sentence)
+    return sentence
+
+
+def open_source_block(file: BlockFile, parent: SourceBlockId, header: BlockSentence, syntaxes: list[BlockSyntax]) -> SourceBlockId:
+    id = SourceBlockId(u32(len(file.blocks)))
+    block = Block([], span=header.span, id=id, parent=parent, header=header)
+    syntax ?= classify_block(header, syntaxes)
+    if syntax != None:
+        block.kind = syntax.kind
+        block.syntax_name = syntax.name
+        if syntax.name_position >= 0 and syntax.name_position < len(header.terms):
+            block.name = header.terms[syntax.name_position].spelling
+    file.blocks.append(block)
+    file.blocks[parent.index].subblocks.append(id)
+    return id
+
+
+
+# Bodyless declarations still introduce blocks. A sentence with an indented
+# body is consumed by open_source_block instead, so it gets exactly one identity.
+def finish_source_header(file: BlockFile, owner: SourceBlockId, header: BlockSentence | None, syntaxes: list[BlockSyntax]):
+    sentence ?= header
+    if sentence != None:
+        syntax ?= classify_block(sentence, syntaxes)
+        if syntax != None and syntax.kind != BlockKind.Lexical:
+            open_source_block(file, owner, sentence, syntaxes)
+
+
+def close_source_block(file: BlockFile, id: SourceBlockId, end: u32):
+    span ?= file.blocks[id.index].span
+    if span != None:
+        file.blocks[id.index].span = source.Span(span.source, span.start, end)
+
+
+def parse_blocks(file: source.SourceFile, syntaxes: list[BlockSyntax], rules: list[lexer.SourceLexicalRule] = []) -> BlockFile | diagnostics.Diagnostic:
+    root = Block([], span=source.Span(file.id, 0, u32(len(file.characters))), kind=BlockKind.Global, syntax_name="file", name=file.path)
+    result = BlockFile(file.path, file.id, [root])
+    owners = [SourceBlockId(0)]
+    # False entries describe indentation inside a continued expression.
+    indentation: list[bool] = []
+    delimiters: list[string] = []
+    terms: list[BlockTerm] = []
+    pending: BlockSentence | None := None
+    for token in lexer.scan_bootstrap(file, rules):
+        if token.kind == lexer.TokenKind.Indent:
+            structural = len(delimiters) == 0
+            indentation.append(structural)
+            if structural:
+                header ?= pending
+                if header == None:
+                    return error(diagnostics.diagnostic_at("E000102", "block indentation has no introducing sentence", token.span))
+                owners.append(open_source_block(result, owners[-1], header, syntaxes))
+                pending = None
+            continue
+        if token.kind == lexer.TokenKind.Dedent:
+            finish_source_header(result, owners[-1], pending, syntaxes)
+            pending = None
+            if len(indentation) == 0:
+                return error(diagnostics.diagnostic_at("E000102", "block dedent has no enclosing indentation", token.span))
+            if indentation.pop():
+                if len(terms) > 0:
+                    tail = append_block_sentence(result, owners[-1], terms)
+                    finish_source_header(result, owners[-1], tail, syntaxes)
+                    terms = []
+                close_source_block(result, owners.pop(), token.span.start)
+                pending = None
+            continue
+        if token.kind == lexer.TokenKind.Newline or token.kind == lexer.TokenKind.Eof:
+            if len(delimiters) != 0:
+                if token.kind == lexer.TokenKind.Eof:
+                    return error(diagnostics.diagnostic_at("E000102", "unclosed delimiter in block sentence", token.span))
+                continue
+            if len(terms) > 0:
+                pending = append_block_sentence(result, owners[-1], terms)
+                terms = []
+            continue
+        if len(terms) == 0:
+            finish_source_header(result, owners[-1], pending, syntaxes)
+            pending = None
+        role := BlockTermRole.Opaque
+        spelling = token.lexeme.text
+        if token.kind == lexer.TokenKind.Identifier:
+            role = BlockTermRole.Name
+        elif token.kind == lexer.TokenKind.Symbol:
+            role = BlockTermRole.Symbol
+            if spelling in ["(", "[", "{"]:
+                delimiters.append(")" if spelling == "(" else "]" if spelling == "[" else "}")
+            elif spelling in [")", "]", "}"]:
+                if len(delimiters) == 0 or delimiters[-1] != spelling:
+                    return error(diagnostics.diagnostic_at("E000102", "mismatched delimiter in block sentence", token.span))
+                delimiters.pop()
+        terms.append(BlockTerm(spelling, token.span, role))
+    finish_source_header(result, owners[-1], pending, syntaxes)
+    while len(owners) > 1:
+        close_source_block(result, owners.pop(), u32(len(file.characters)))
+    return result
+
+
+def format_blocks(file: BlockFile) -> string:
+    lines: list[string] = []
+    for block in file.blocks:
+        depth := 0
+        ancestor := block
+        while true:
+            parent ?= ancestor.parent
+            if parent == None:
+                break
+            depth += 1
+            ancestor = file.blocks[parent.index]
+        indentation := ""
+        for level in range(depth):
+            indentation += "  "
+        kind = block.syntax_name if block.syntax_name != "" else "lexical"
+        name = " " + block.name if block.name != "" else ""
+        span ?= block.span
+        location := ""
+        if span != None:
+            location = " [" + string(span.start) + ":" + string(span.end) + "]"
+        lines.append(indentation + kind + name + location + " sentences=" + string(len(block.sentences)) + " subblocks=" + string(len(block.subblocks)))
+    return lines.join("\n")
+
+
+test "block discovery preserves nesting without constructing primitive values":
+    file = source.virtual_source("blocks.sev", "def outer():\n    while ready:\n        use(\"a:b\")\n    finish()\n")
+    blocks = parse_blocks(file, standard_block_syntax())
+    assert(len(blocks.blocks) == 3)
+    assert(blocks.blocks[1].syntax_name == "function")
+    assert(blocks.blocks[1].name == "outer")
+    assert(blocks.blocks[2].syntax_name == "while")
+    assert(len(blocks.blocks[1].sentences) == 2)
+    assert(len(blocks.blocks[2].sentences) == 1)
+    assert(blocks.blocks[2].sentences[0].terms[2].role == BlockTermRole.Opaque)
+
+
+test "block kinds are supplied by syntax declarations":
+    file = source.virtual_source("custom.sev", "widget Panel:\n    value\n")
+    blocks = parse_blocks(file, [BlockSyntax("widget", ["widget"], BlockKind.Class, 1)])
+    assert(blocks.blocks[1].syntax_name == "widget")
+    assert(blocks.blocks[1].name == "Panel")
+
+
+test "bodyless declarations are indexed as blocks":
+    file = source.virtual_source("external.sev", "def foreign(value: int) -> int")
+    blocks = parse_blocks(file, standard_block_syntax())
+    assert(len(blocks.blocks) == 2)
+    assert(blocks.blocks[1].name == "foreign")
+    assert(len(blocks.blocks[1].sentences) == 0)
+
+
+test "continued expressions do not introduce indentation blocks":
+    file = source.virtual_source("continued.sev", "def outer():\n    use(\n        value,\n    )\n    finish()\n")
+    blocks = parse_blocks(file, standard_block_syntax())
+    assert(len(blocks.blocks) == 2)
+    assert(len(blocks.blocks[1].sentences) == 2)

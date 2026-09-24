@@ -1,10 +1,7 @@
 import * from "package:primitives/declarations.sev"
 import * from "../primitive.sev"
 
-import * from "../../operator/trait/logical.sev"
-import * from "../../operator/trait/equatable.sev"
-import * from "../../operator/trait/bitwise.sev"
-import * from "../../operator/trait/ordered.sev"
+import * from "../../function/trait.sev"
 
 
 '''
@@ -175,6 +172,8 @@ class bool: Boolean :
     identity: PrimitiveId = BoolPrimitive().identity
     id: TypeId = BoolPrimitive().id
     literal: LiteralSyntax | None = BoolPrimitive().literal
+    literal_family: string = BoolPrimitive().literal_family
+    literal_bindings: list[LiteralBinding] = BoolPrimitive().literal_bindings
     name: string = "bool"
     size: byte = 1B
     alignment: byte = 1B
@@ -429,7 +428,6 @@ tests, and compiler accept/reject cases from this file.
 '''
 
 
-
 test "container truth is separate from bool conversion":
     empty := truth_box([])
     populated := truth_box([1])
@@ -474,7 +472,6 @@ test "and and or preserve operands and short circuit":
 
     assert((false and throw Eror("Short circuit failed")) == false)
     assert((true or throw Eror("Short circuit failed")))
-
 
 
 test "bool value traits are stable":

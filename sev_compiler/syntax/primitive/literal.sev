@@ -56,11 +56,7 @@ def normalize_literal(syntax: LiteralSyntax, spelling: string) -> string:
 
 def literal_construction(syntax: LiteralSyntax, spelling: string, span: Span) -> LiteralConstruction:
     descriptor = default_literal_type(syntax)
-    family := descriptor.name
-    if syntax == LiteralSyntax.Integer:
-        family = "int"
-    elif syntax == LiteralSyntax.Float:
-        family = "float"
+    family = descriptor.literal_family if descriptor.literal_family != "" else descriptor.name
     return LiteralConstruction(descriptor.identity, descriptor.id, family, syntax, normalize_literal(syntax, spelling), span)
 
 
@@ -73,3 +69,35 @@ def select_literal_type(literal: LiteralConstruction, expected: TypeId) -> TypeI
         if literal.syntax == LiteralSyntax.Integer and candidate.category == PrimitiveCategory.Float:
             return candidate.id
     return literal.type_id
+
+
+# Only declarations visible in the consuming block participate. An empty list
+# deliberately resolves no literals; callers choose their own prelude providers.
+def literal_from_providers(kind: TokenKind, spelling: string, span: Span, providers: list[PrimitiveDescriptor]) -> LiteralConstruction | None:
+    selected: LiteralConstruction | None := None
+    for descriptor in providers:
+        if not descriptor.default_literal:
+            continue
+        syntax ?= descriptor.literal
+        if syntax == None:
+            continue
+        matched := false
+        for binding in descriptor.literal_bindings:
+            if binding.token == kind and (len(binding.spellings) == 0 or spelling in binding.spellings):
+                matched = true
+        if matched:
+            if selected != None:
+                throw Error("ambiguous literal providers in the consuming block")
+            family = descriptor.literal_family if descriptor.literal_family != "" else descriptor.name
+            selected = LiteralConstruction(descriptor.identity, descriptor.id, family, syntax, normalize_literal(syntax, spelling), span)
+    return selected
+
+
+test "literal construction only consults supplied primitive providers":
+    span = Span(SourceId(0), 0, 3)
+    assert(literal_from_providers(TokenKind.String, "a", span, []) == None)
+    text ?= literal_from_providers(TokenKind.String, "a", span, [describe_primitive(StringPrimitive())])
+    assert(text != None)
+    if text != None:
+        assert(text.family == "string")
+    assert(literal_from_providers(TokenKind.Character, "a", span, [describe_primitive(StringPrimitive())]) == None)

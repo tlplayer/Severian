@@ -1,0 +1,26 @@
+{
+  "package": {
+    "name": "sev-compiler-hir",
+    "version": "0.1.0",
+    "edition": "2026",
+    "publish": true
+  },
+  "lib": {
+    "name": "hir",
+    "path": "hir/src/lib.sev"
+  },
+  "dependencies": {
+    "source": {
+      "package": "sev-compiler-source",
+      "path": "../frontend/source"
+    },
+    "syntax": {
+      "package": "sev-compiler-syntax",
+      "path": "../syntax"
+    },
+    "primitives": {
+      "package": "sev-compiler-primitives",
+      "path": "../syntax/primitive"
+    }
+  }
+}

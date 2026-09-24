@@ -1,5 +1,5 @@
 import source
-import universal
+import * from "package:syntax/function/function.sev" as callable
 import * from "../../../../../syntax/lexeme.sev"
 
 import * from "package:syntax/token.sev"
@@ -16,7 +16,7 @@ class Token: TokenTerm
     descriptor: bool = false
     grammar: bool = false
     value: string | None = None
-    lexical_rules: list[universal.RecordDeclaration] = []
+    lexical_rules: list[callable.RecordDeclaration] = []
     literal: syntax.LiteralConstruction | None = None
 
     operator <=>(self) -> string:
@@ -40,31 +40,13 @@ def checked_token[To: TokenTerm](token: To) -> To:
     return token
 
 
-def token_from_lexeme(kind: TokenKind, lexeme: Lexeme, value: string | None = None) -> Token:
+def token_from_lexeme(kind: TokenKind, lexeme: Lexeme, value: string | None = None, providers: list[primitives.PrimitiveDescriptor] | None = None) -> Token:
     token = checked_token(Token(kind, lexeme.span, lexeme, value=value))
-    literal_syntax: syntax.LiteralSyntax | None := None
-    match kind:
-        case Integer:
-            literal_syntax = syntax.LiteralSyntax.Integer
-        case Float:
-            literal_syntax = syntax.LiteralSyntax.Float
-        case Character:
-            literal_syntax = syntax.LiteralSyntax.Character
-        case String:
-            literal_syntax = syntax.LiteralSyntax.String
-        case Identifier:
-            spelling = string(token)
-            if spelling == "true" or spelling == "false":
-                literal_syntax = syntax.LiteralSyntax.Boolean
-            elif spelling == "None":
-                literal_syntax = syntax.LiteralSyntax.NoneValue
-            elif spelling == "absent":
-                literal_syntax = syntax.LiteralSyntax.Absent
-        case _:
-            return token
-    selected ?= literal_syntax
-    if selected != None:
-        token.literal = primitives.literal_construction(selected, string(token), token.span)
+    available ?= providers
+    if available != None:
+        token.literal = primitives.literal_from_providers(kind, string(token), token.span, available)
+    else:
+        token.literal = primitives.literal_from_providers(kind, string(token), token.span, primitives.primitive_descriptors())
     return token
 
 

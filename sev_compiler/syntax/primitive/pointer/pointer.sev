@@ -20,6 +20,8 @@ class pointer[T]: Pointer:
     identity: PrimitiveId = PointerPrimitive().identity
     id: TypeId = PointerPrimitive().id
     literal: LiteralSyntax | None = PointerPrimitive().literal
+    literal_family: string = PointerPrimitive().literal_family
+    literal_bindings: list[LiteralBinding] = PointerPrimitive().literal_bindings
     __pointer = mlir["!ptr.ptr"]    
     __address: i64
 

@@ -1,3 +1,5 @@
+import parser
+import diagnostics
 import environment
 import file
 import path
@@ -5,13 +7,13 @@ import process
 import source
 import package
 import os
-import * from "../../boundaries/driver/src/directory_tests.sev" as directory_tests
-import * from "../../boundaries/driver/src/package_command.sev"
-import * from "../../boundaries/driver/src/package_compiler.sev"
-import * from "../../boundaries/driver/src/package_session.sev"
-import * from "../../boundaries/driver/src/pipeline/source.sev" as compiler
+import * from "../../driver/driver/src/directory_tests.sev" as directory_tests
+import * from "../../driver/driver/src/package_command.sev"
+import * from "../../driver/driver/src/package_compiler.sev"
+import * from "../../driver/driver/src/package_session.sev"
+import * from "../../driver/driver/src/pipeline/source.sev" as compiler
 import * from "../../boundaries/backend/src/native_mlir.sev" as backend
-import * from "../../boundaries/driver/src/profiling.sev" as profiling
+import * from "../../driver/driver/src/profiling.sev" as profiling
 
 @c(symbol="exit")
 def exit_status(status: i32)
@@ -55,7 +57,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
             print(package.compiler_build_info())
             return 0
         if argument == "--help" or argument == "-h":
-            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--lint] [--emit mlir|agent-ir|editor|docs|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: init new check build test run lint debug add remove update resolve tree metadata publish install clean options\nprofiling: --profile [calls|memory|time] --profile-output DIR")
+            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--lint] [--emit blocks|mlir|agent-ir|editor|docs|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: init new check build test run lint debug add remove update resolve tree metadata publish install clean options\nprofiling: --profile [calls|memory|time] --profile-output DIR")
             return 0
         if argument == "--":
             application = arguments[cursor + 1:]
@@ -100,7 +102,7 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
         else:
             throw Error("unexpected argument " + argument)
         cursor += 1
-    if emit != "" and emit != "mlir" and emit != "agent-ir" and emit != "plan" and emit != "editor" and emit != "docs":
+    if emit != "" and emit != "blocks" and emit != "mlir" and emit != "agent-ir" and emit != "plan" and emit != "editor" and emit != "docs":
         throw Error("unsupported emission stage " + emit)
     if len(application) > 0 and command != "run":
         throw Error("application arguments require run")
@@ -109,6 +111,17 @@ def execute_native_arguments(arguments: list[string]) -> int | Error:
         throw Error("--coverage requires test")
     if coverage and input.ends_with(".sev"):
         throw Error("--coverage requires a package target")
+    if emit == "blocks" and input.ends_with(".sev"):
+        subject = compiler.load_input(input)
+        discovered ?= parser.parse_blocks(subject, parser.standard_block_syntax())
+        if discovered is diagnostics.Diagnostic:
+            throw Error(diagnostics.render(discovered, [subject]))
+        text = parser.format_blocks(discovered)
+        if output == "":
+            print(text)
+        else:
+            package.write_text(output, text + "\n")
+        return 0
     if command == "test" and os.is_dir(location) and not os.is_file(package.manifest_file(location)):
         return directory_tests.run(location, sysroot, output, profile, platform, binary, emit)
     if not input.ends_with(".sev"):

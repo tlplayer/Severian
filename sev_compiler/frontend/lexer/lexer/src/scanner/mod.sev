@@ -1,27 +1,31 @@
+import primitives
 import source
 import diagnostics
 from diagnostics import Diagnostic
-import universal
+import * from "package:syntax/function/function.sev" as callable
+import * from "package:syntax/function/syntax.sev" as callable_syntax
 import * from "../token/mod.sev"
 import * from "../lexer.sev"
 import * from "../indentation.sev"
 import * from "../syntax/mod.sev"
 
 
-def make_token(input: LexemeInput, kind: TokenKind, start: int, end: int, value: string | None = None) -> Token:
+def make_token(input: LexemeInput, kind: TokenKind, start: int, end: int, value: string | None = None, discovery: bool = false, providers: list[primitives.PrimitiveDescriptor] | None = None) -> Token:
     matched = Lexeme(input.characters[start:end].join(""), lexeme_span(input, start, end))
-    return token_from_lexeme(kind, matched, value)
+    if discovery:
+        return checked_token(Token(kind, matched.span, matched, value=value))
+    return token_from_lexeme(kind, matched, value, providers)
 
 
-def scan_bootstrap(file: source.SourceFile) -> list[Token] | diagnostics.Diagnostic:
-    return scan_with(file, StandardLexemes(lexical_symbols([])), [], true)
+def scan_bootstrap(file: source.SourceFile, rules: list[SourceLexicalRule] = []) -> list[Token] | diagnostics.Diagnostic:
+    return scan_with(file, StandardLexemes(lexical_symbols([]), rules), [], true)
 
 
-def scan_tokens(file: source.SourceFile, syntaxes: list[universal.OperatorSyntax], discovery: bool = false, rules: list[SourceLexicalRule] = []) -> list[Token] | diagnostics.Diagnostic:
+def scan_tokens(file: source.SourceFile, syntaxes: list[callable_syntax.OperatorSyntax], discovery: bool = false, rules: list[SourceLexicalRule] = [], providers: list[primitives.PrimitiveDescriptor] | None = None) -> list[Token] | diagnostics.Diagnostic:
     if discovery:
         return scan_bootstrap(file)
-    tokens = scan_with(file, StandardLexemes(lexical_symbols(syntaxes), rules), syntaxes)
-    declarations: list[universal.RecordDeclaration] = []
+    tokens = scan_with(file, StandardLexemes(lexical_symbols(syntaxes), rules), syntaxes, providers=providers)
+    declarations: list[callable.RecordDeclaration] = []
     for rule in rules:
         declaration ?= rule.declaration
         if declaration != None:
@@ -35,7 +39,7 @@ def scan_tokens(file: source.SourceFile, syntaxes: list[universal.OperatorSyntax
     return tokens
 
 
-def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: list[universal.OperatorSyntax], discovery: bool = false) -> list[Token] | diagnostics.Diagnostic:
+def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: list[callable_syntax.OperatorSyntax], discovery: bool = false, providers: list[primitives.PrimitiveDescriptor] | None = None) -> list[Token] | diagnostics.Diagnostic:
     input = lexeme_input(file)
     characters = input.characters
     cursor := 0
@@ -54,17 +58,17 @@ def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: 
                 while cursor < len(characters) and characters[cursor] != "\n":
                     cursor += 1
                 if cursor < len(characters):
-                    tokens.append(make_token(input, TokenKind.Newline, cursor, cursor + 1))
+                    tokens.append(make_token(input, TokenKind.Newline, cursor, cursor + 1, discovery=discovery, providers=providers))
                     cursor += 1
                 continue
             width = indentation_width(characters[start:cursor].join(""))
             if width > indents[-1]:
                 indents.append(width)
-                tokens.append(make_token(input, TokenKind.Indent, start, cursor))
+                tokens.append(make_token(input, TokenKind.Indent, start, cursor, discovery=discovery, providers=providers))
             elif width < indents[-1]:
                 while width < indents[-1]:
                     indents.pop()
-                    tokens.append(make_token(input, TokenKind.Dedent, start, cursor))
+                    tokens.append(make_token(input, TokenKind.Dedent, start, cursor, discovery=discovery, providers=providers))
                 if width != indents[-1]:
                     return error(diagnostics.Diagnostic("E000102", "inconsistent indentation", lexeme_span(input, start, cursor)))
             line_start = false
@@ -102,12 +106,9 @@ def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: 
                     normalized ?= result.value
                     if normalized != None:
                         metadata = symbol_syntaxes(syntaxes, normalized)
-                match kind:
-                    case FormattedString:
-                        metadata = syntaxes
-                    case _:
-                        throw diagnostics.diagnostic("E000102", "unimplemented (sev_compiler/frontend/lexer/lexer/src/scanner/mod.sev)")
-                token = make_token(input, kind, start, cursor, result.value)
+                if kind == TokenKind.FormattedString:
+                    metadata = syntaxes
+                token = make_token(input, kind, start, cursor, result.value, discovery=discovery, providers=providers)
                 token.syntaxes = metadata
                 tokens.append(token)
                 if kind == TokenKind.Newline:
@@ -115,27 +116,27 @@ def scan_with[Rule: LexicalRule](file: source.SourceFile, rule: Rule, syntaxes: 
             continue
 
         if discovery:
-            tokens.append(make_token(input, TokenKind.Symbol, start, start + 1))
+            tokens.append(make_token(input, TokenKind.Symbol, start, start + 1, discovery=discovery, providers=providers))
             cursor += 1
             continue
         return error(diagnostics.Diagnostic("E000100", "unexpected character " + string(character), lexeme_span(input, start, start + 1)))
 
     while len(indents) > 1:
         indents.pop()
-        tokens.append(make_token(input, TokenKind.Dedent, cursor, cursor))
-    tokens.append(make_token(input, TokenKind.Eof, cursor, cursor))
+        tokens.append(make_token(input, TokenKind.Dedent, cursor, cursor, discovery=discovery, providers=providers))
+    tokens.append(make_token(input, TokenKind.Eof, cursor, cursor, discovery=discovery, providers=providers))
     return tokens
 
 
-def scan(file: source.SourceFile, operators: list[universal.OperatorSyntax] = []) -> list[Token] | diagnostics.Diagnostic:
+def scan(file: source.SourceFile, operators: list[callable_syntax.OperatorSyntax] = []) -> list[Token] | diagnostics.Diagnostic:
     registry = SyntaxRegistry(operators[:])
     discover_operator_descriptors(scan_bootstrap(file), registry)
     resolve_operator_descriptors(registry)
     return scan_registered(file, registry)
 
 
-def scan_registered(file: source.SourceFile, registry: SyntaxRegistry) -> list[Token] | diagnostics.Diagnostic:
-    tokens = scan_tokens(file, registry.operators, rules=registry.rules)
+def scan_registered(file: source.SourceFile, registry: SyntaxRegistry, providers: list[primitives.PrimitiveDescriptor] | None = None) -> list[Token] | diagnostics.Diagnostic:
+    tokens = scan_tokens(file, registry.operators, rules=registry.rules, providers=providers)
     for descriptor in registry.descriptors:
         if descriptor.resolved and descriptor.span.source.index == file.id.index:
             index := 0
@@ -187,11 +188,11 @@ test "lexical classes preserve numeric forms and identifier boundaries":
 
 
 test "one symbol rule matches the longest registered spelling":
-    operators = [universal.operator_syntax(universal.Add()),
-        universal.OperatorSyntax("+=", universal.Fixity.Infix, 1, universal.Associativity.Left),
-        universal.OperatorSyntax("+==", universal.Fixity.Infix, 1, universal.Associativity.Left),
-        universal.OperatorSyntax("|>", universal.Fixity.Infix, 7, universal.Associativity.Left),
-        universal.OperatorSyntax("fuse", universal.Fixity.Infix, 7, universal.Associativity.Left)]
+    operators = [callable_syntax.operator_syntax(callable_syntax.Add()),
+        callable_syntax.OperatorSyntax("+=", callable_syntax.Fixity.Infix, 1, callable_syntax.Associativity.Left),
+        callable_syntax.OperatorSyntax("+==", callable_syntax.Fixity.Infix, 1, callable_syntax.Associativity.Left),
+        callable_syntax.OperatorSyntax("|>", callable_syntax.Fixity.Infix, 7, callable_syntax.Associativity.Left),
+        callable_syntax.OperatorSyntax("fuse", callable_syntax.Fixity.Infix, 7, callable_syntax.Associativity.Left)]
     input = source.virtual_source("symbols.sev", "+== += + |> fuse fuse_count")
     tokens = scan_tokens(input, operators)
     assert(token_is_symbol(tokens[0], "+=="))
@@ -218,7 +219,7 @@ test "bootstrap discovery does not activate value symbols":
 
 test "strings characters and interpolation retain decoding and syntax":
     input = source.virtual_source("strings.sev", "\"hi\\n\" 'λ' f\"{1 + 2}\" \"\"\"\n    block\n    text\n\"\"\"")
-    operators = [universal.operator_syntax(universal.Add())]
+    operators = [callable_syntax.operator_syntax(callable_syntax.Add())]
     tokens = scan_tokens(input, operators)
     assert(tokens[0].kind == TokenKind.String)
     assert(string(tokens[0]) == "hi\n")
@@ -271,7 +272,7 @@ test "committed literal prefixes preserve diagnostics":
 
 test "tokens preserve matched spelling separately from classified payload":
     input = source.virtual_source("tokens.sev", "total += 1_024 .5 \"a\\n\"")
-    operators = [universal.OperatorSyntax("+=", universal.Fixity.Infix, 1, universal.Associativity.Left)]
+    operators = [callable_syntax.OperatorSyntax("+=", callable_syntax.Fixity.Infix, 1, callable_syntax.Associativity.Left)]
     tokens = scan_tokens(input, operators)
     assert(tokens[0].lexeme.text == "total")
     assert(tokens[0].kind == TokenKind.Identifier)

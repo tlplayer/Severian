@@ -1,0 +1,295 @@
+import * from "../source/assertion_origin.sev"
+import source
+import * from "../symbol/symbol.sev"
+import * from "../type/annotation.sev"
+import * from "../lowered.sev"
+import * from "syntax.sev"
+import * from "../sentence/sentence.sev"
+import * from "../../mir/cfg/cfg.sev"
+import * from "../constraint/model.sev"
+import * from "../primitive/contract.sev"
+import * from "../literal/value.sev"
+
+# Callable identity, parameters, bodies, and expression use share one model.
+
+class CompilerCapability:
+    name: string
+
+
+enum CompileRoute:
+    Standard
+    Compiler(compiler: CompilerId)
+
+
+class BoundaryModifier:
+    name: string
+
+
+class FieldConstraint:
+    condition: Expression
+    failure: Expression | None = None
+
+
+class MockFunction:
+    original: string
+    replacement: string
+
+
+class FunctionParameter:
+    name: string
+    annotation: TypeAnnotation
+    default: Expression | absent
+    span: source.Span
+    binding: BindingId = BindingId(0)
+    type_id: TypeId = TypeId(0)
+    modifiers: list[BoundaryModifier] = []
+    variadic: bool = false
+    keyword_only: bool = false
+    pack: string = ""
+    field_constraints: list[FieldConstraint] = []
+
+
+class ExternalCall:
+    interface: InterfaceId
+    symbol: SymbolId
+    provider: ProviderId | None
+    ffi: FfiId
+    abi: AbiId
+
+
+enum CallType:
+    Severian
+    External(call: ExternalCall)
+
+
+enum FunctionLinkage:
+    Internal
+    External(symbol: string)
+
+
+class FunctionDeclaration:
+    decorators: list[Decorator] = []
+    name: string = ""
+    type_parameters: list[string] = []
+    constraints: list[GenericConstraint] = []
+    parameters: list[FunctionParameter] = []
+    result: TypeAnnotation | None = None
+    body: Block | None = None
+    span: source.Span | None = None
+    id: FunctionId = FunctionId(0)
+    definition: DefId = DefId(0, 0, DeclarationId(0))
+    generic_parameters: list[GenericParamId] = []
+    parameter_types: list[TypeId] = []
+    result_type: TypeId = TypeId(0)
+    compile_route: CompileRoute = Standard
+    call_type: CallType = Severian
+    values: list[ValueId] = []
+    lowered_result: LoweredType = Unit
+    linkage: FunctionLinkage = Internal
+    binary_requirements: map[GenericParamId, list[BinaryOperator]] = {}
+    capability_requirements: map[GenericParamId, list[CompilerCapability]] = {}
+    constrained: bool = false
+    constraints_supported: bool = true
+    lookup: string | None = None
+    operator_syntax: OperatorSyntax | None = None
+    owner_type: TypeId = TypeId(0)
+    extension: bool = false
+    template: DefId | None = None
+    type_arguments: list[TypeBinding] = []
+    pack_specialization: bool = false
+    constructor: bool = false
+    cfg_index: int = -1
+    # ABI sentinel for the seed record/list representation; never populated.
+    # Executable bodies are indexed in Module.cfg_bodies.
+    cfg: CfgBody | None = None
+    result_mode: string = ""
+    result_origin: int = -1
+    prelude: bool = false
+    type_defaults: list[TypeAnnotation] = []
+    mock_functions: list[MockFunction] = []
+    attachments: list[WithAttachment] = []
+    semantic_key: string = ""
+    dispatch_candidates: list[string] = []
+    dispatch_predicates: list[Expression] = []
+    # Artifact location only; declaration identity remains definition/semantic_key.
+    lazy_body: string = ""
+
+
+def resolved_function(
+    generic_parameters: list[GenericParamId],
+    constrained: bool,
+    constraints_supported: bool,
+    binary_requirements: map[GenericParamId, list[BinaryOperator]],
+    capability_requirements: map[GenericParamId, list[CompilerCapability]],
+    parameter_types: list[TypeId],
+    result_type: TypeId,
+) -> FunctionDeclaration:
+    function = FunctionDeclaration()
+    function.generic_parameters = generic_parameters
+    function.constrained = constrained
+    function.constraints_supported = constraints_supported
+    function.binary_requirements = binary_requirements
+    function.capability_requirements = capability_requirements
+    function.parameter_types = parameter_types
+    function.result_type = result_type
+    return function
+
+
+class CallableAlternative:
+    name: string
+    fields: list[FunctionParameter]
+    span: source.Span
+    transitions: list[string] = []
+
+
+class RecordDeclaration:
+    name: string
+    fields: list[FunctionParameter]
+    methods: list[FunctionDeclaration]
+    span: source.Span
+    type_id: TypeId = TypeId(0)
+    lookup: string = ""
+    traits: list[TypeAnnotation] = []
+    definition: DefId = DefId(0, 0, DeclarationId(0))
+    operators: list[OperatorDeclaration] = []
+    type_parameters: list[string] = []
+    constraints: list[GenericConstraint] = []
+    extension: bool = false
+    type_pack: string = ""
+    type_defaults: list[TypeAnnotation] = []
+    alternatives: list[CallableAlternative] = []
+    representation: string = ""
+    declaration_grammar: DefId = DefId(0, 0, DeclarationId(0))
+    storage_element: TypeId = TypeId(0)
+    source_name: string = ""
+    extension_target: TypeAnnotation | None = None
+
+
+def union_variants(record: RecordDeclaration) -> list[TypeId]:
+    variants: list[TypeId] = []
+    if record.name.starts_with("$union$"):
+        for field in record.fields[1:]:
+            variants.append(field.type_id)
+    return variants
+
+
+def outcome_variants(record: RecordDeclaration) -> list[TypeId]:
+    variants: list[TypeId] = []
+    if record.name.starts_with("$outcome$"):
+        for field in record.fields[1:]:
+            variants.append(field.type_id)
+    return variants
+
+
+class Expression:
+    kind: ExpressionKind
+    span: source.Span
+    id: HirId = HirId(0)
+    type_id: TypeId = TypeId(0)
+    grammar: DefId | None = None
+    loan_root: int = -1
+    loan_mode: string = ""
+    literal: LiteralConstruction | None = None
+
+
+class CallArgument:
+    name: string | absent
+    value: Expression
+    span: source.Span
+    spread: bool = false
+
+
+enum ResolvedCallee:
+    Direct(function: DefId, substitution: Substitution)
+    FunctionValue(expression: Expression)
+    Method(implementation: DefId, receiver: Expression, substitution: Substitution)
+    Constructor(type_definition: DefId, variant: VariantId | None)
+    Intrinsic(operation: OpId)
+
+
+enum ExpressionKind:
+    MockValue(calls: list[Expression], results: list[Expression], fallback: Expression)
+    Lambda(parameters: list[string], body: Expression)
+    Ownership(mode: string, value: Expression)
+    AddressOf(value: Expression)
+    TypeLayout(subject: TypeId, alignment: bool)
+    SourceSymbol(spelling: string, definition: DefId)
+    CompilerTerm(name: string, arguments: list[TypeAnnotation])
+    TypeApplication(target: Expression, arguments: list[TypeAnnotation])
+    LiteralValue(value: LiteralValue)
+    Name(name: string)
+    Member(object: Expression, name: string)
+    Call(callee: Expression, arguments: list[CallArgument])
+    ListLiteral(elements: list[Expression])
+    MatchExpression(subject: Expression, arms: list[MatchArm])
+    BlockValue(body: Block, value: Expression)
+    Evaluate(value: Expression, body: Expression)
+    Fallback(value: Expression, alternative: Expression)
+    ThrowValue(value: Expression)
+    ErrorExpectation(value: Expression | None, comparison: Expression | None)
+    MapLiteral(keys: list[Expression], values: list[Expression])
+    Subscript(object: Expression, index: Expression)
+    Slice(object: Expression, start: Expression | None, stop: Expression | None, step: Expression | None)
+    ListValue(elements: list[Expression], construction: Expression, storage: Expression)
+    IndexReference(object: Expression, index: Expression, access: Expression, storage: Expression | None)
+    OutcomeValue(value: Expression, variant: int)
+    OutcomeTest(value: Expression, variant: int)
+    OutcomeUnwrap(value: Expression)
+    UpdateOperand(index: int)
+    BindingReference(binding: BindingId)
+    FunctionReference(definition: DefId)
+    ResolvedCall(callee: ResolvedCallee, arguments: list[CallArgument])
+    Convert(operand: Expression, conversion: ExpressionConversion)
+    Unary(operator: OperatorSyntax, operand: Expression)
+    Binary(operator: OperatorSyntax, left: Expression, right: Expression)
+    ComparisonChain(operands: list[Expression], operators: list[OperatorSyntax])
+    Conditional(condition: Expression, then_value: Expression, else_value: Expression)
+    Stringify(value: Expression)
+    TypeName(value: Expression, name: string)
+    RecordValue(fields: list[CallArgument])
+    FieldReference(object: Expression, index: int)
+    RequiredMember(object: Expression, requirement: DefId, name: string)
+
+
+def resolve_expression(expression: Expression, id: HirId, type_id: TypeId, kind: ExpressionKind) -> Expression:
+    expression.id = id
+    expression.type_id = type_id
+    expression.kind = kind
+    return expression
+
+
+class ExpressionConversion:
+    from_type: TypeId
+    to_type: TypeId
+    kind: ExpressionConversionKind
+
+
+enum ExpressionConversionKind:
+    NumericWidening
+    UnionInjection
+    Borrow
+    User(function: DefId)
+
+enum Operation:
+    DebugOwnership(name: string, mode: string, span: source.Span)
+    DebugLocation(span: source.Span)
+    DebugValue(name: string, value: ValueId, span: source.Span, argument: int, ownership: string, address: bool, declared_type: TypeId)
+    TypeLayout(subject: TypeId, alignment: bool, result: ValueId)
+    Coverage(point: CoveragePoint)
+    # Accepts a tagged aggregate or its decomposed integer tag.
+    IsVariant(value: ValueId, variant: int, result: ValueId)
+    Constant(value: LiteralValue, result: ValueId)
+    Unary(operator: OperatorSyntax, operand: ValueId, result: ValueId)
+    Binary(operator: OperatorSyntax, left: ValueId, right: ValueId, result: ValueId)
+    Call(function: FunctionId, arguments: list[ValueId], result: ValueId)
+    CallFields(function: FunctionId, arguments: list[ValueId], outputs: list[ValueId])
+    Assert(condition: ValueId, message: ValueId | None, origin: AssertionOrigin)
+    Allocate(type_id: TypeId, result: ValueId)
+    Alias(value: ValueId, result: ValueId)
+    Load(address: ValueId, result: ValueId)
+    Store(address: ValueId, value: ValueId)
+    FieldAddress(object: ValueId, owner: TypeId, index: int, result: ValueId)
+    CompiledRegionCall(artifact_id: ArtifactId, inputs: list[ValueId], outputs: list[ValueId])
+
+# F groups concrete callable, expression and operation contracts.
+FunctionDeclaration | Expression | Operation as F

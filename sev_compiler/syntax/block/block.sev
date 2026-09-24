@@ -1,0 +1,123 @@
+import * from "../source.sev"
+import * from "../symbol/symbol.sev"
+import source
+import * from "../sentence/sentence.sev"
+import * from "../function/lowering.sev"
+
+class SourceBlockId:
+    index: u32
+
+class SentenceId:
+    index: u32
+
+enum BlockKind:
+    Global
+    Callable
+    Class
+    Trait
+    Test
+    Lexical
+    Main
+
+class BlockLayout:
+    id: SourceBlockId
+    kind: BlockKind
+    owner: DefId
+    span: Span | None
+    parent: SourceBlockId | None = None
+    introduced_by: SentenceId | None = None
+    children: list[SourceBlockId] = []
+
+# Source ancestry and compiler call paths are distinct from runtime stack frames.
+class CallableOrigin:
+    definition: DefId
+    name: string
+    span: Span | None
+
+class OperationOrigin:
+    span: Span | None = None
+    block: SourceBlockId | None = None
+    callable: DefId | None = None
+    path: list[CallableOrigin] = []
+
+
+# B is the source structure shared by discovery and resolved block bodies.
+# Sentence spans remain available before any expression or literal is resolved.
+trait B:
+    property span: source.Span | None
+    property sentences: list[BlockSentence]
+    property subblocks: list[SourceBlockId]
+
+
+enum BlockTermRole:
+    Name
+    Symbol
+    Opaque
+
+
+class BlockTerm:
+    spelling: string
+    span: source.Span
+    role: BlockTermRole
+
+
+class BlockSentence:
+    id: SentenceId
+    span: source.Span
+    terms: list[BlockTerm]
+
+
+class BlockSyntax:
+    name: string
+    prefix: list[string]
+    kind: BlockKind
+    name_position: int = -1
+
+
+class Block: B
+    statements: list[Statement]
+    operations: list[Operation] = []
+    lowered_operations: list[LoweredOperation] = []
+    span: source.Span | None = None
+    layout: BlockLayout | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    id: SourceBlockId = SourceBlockId(0)
+    parent: SourceBlockId | None = None
+    kind: BlockKind = BlockKind.Lexical
+    syntax_name: string = ""
+    name: string = ""
+    header: BlockSentence | None = None
+
+
+def empty_block() -> Block:
+    return Block([], [], [])
+
+
+class BlockFile:
+    path: string
+    source: source.SourceId
+    blocks: list[Block]
+    next_sentence: u32 = 0
+
+
+# Bootstrap declarations, supplied as data to the structural parser. Packages
+# can supply additional BlockSyntax values without adding parser keyword cases.
+def standard_block_syntax() -> list[BlockSyntax]:
+    return [
+        BlockSyntax("function", ["def"], BlockKind.Callable, 1),
+        BlockSyntax("operator", ["operator"], BlockKind.Callable, 1),
+        BlockSyntax("class", ["class"], BlockKind.Class, 1),
+        BlockSyntax("trait", ["trait"], BlockKind.Trait, 1),
+        BlockSyntax("enum", ["enum"], BlockKind.Class, 1),
+        BlockSyntax("extension", ["extend"], BlockKind.Class, 1),
+        BlockSyntax("test", ["test"], BlockKind.Test),
+        BlockSyntax("for", ["for"], BlockKind.Lexical),
+        BlockSyntax("while", ["while"], BlockKind.Lexical),
+        BlockSyntax("if", ["if"], BlockKind.Lexical),
+        BlockSyntax("elif", ["elif"], BlockKind.Lexical),
+        BlockSyntax("else", ["else"], BlockKind.Lexical),
+        BlockSyntax("match", ["match"], BlockKind.Lexical),
+        BlockSyntax("case", ["case"], BlockKind.Lexical),
+        BlockSyntax("with", ["with"], BlockKind.Lexical),
+    ]

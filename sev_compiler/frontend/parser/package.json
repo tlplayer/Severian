@@ -10,10 +10,6 @@
     "path": "parser/src/lib.sev"
   },
   "dependencies": {
-    "sentence": {
-      "package": "sev-compiler-sentence",
-      "path": "../sentence"
-    },
     "diagnostics": {
       "path": "../../syntax/diagnostics",
       "package": "sev-compiler-diagnostics"

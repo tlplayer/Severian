@@ -1,6 +1,6 @@
 import source
-import * from "../declaration/function.sev"
-import * from "../operator/syntax.sev"
+import * from "../function/function.sev"
+import * from "../function/syntax.sev"
 
 
 # Marker shared by grammar declarations; it has no module initializer.

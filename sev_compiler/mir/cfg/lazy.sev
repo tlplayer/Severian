@@ -1,5 +1,5 @@
-import * from "../expression/expression.sev"
-import * from "../statement/statement.sev"
+import * from "../../syntax/function/function.sev"
+import * from "../../syntax/sentence/sentence.sev"
 
 
 # These operands carry typed source without executing it. Only the semantic

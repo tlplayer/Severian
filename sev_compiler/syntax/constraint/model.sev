@@ -1,6 +1,6 @@
 import source
-import * from "../id/compiler.sev"
-import * from "../expression/expression.sev"
+import * from "../symbol/symbol.sev"
+import * from "../function/function.sev"
 
 
 enum ConstraintStage:

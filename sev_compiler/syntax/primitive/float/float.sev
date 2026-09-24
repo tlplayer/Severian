@@ -1,9 +1,7 @@
 import * from "package:primitives/declarations.sev"
 import * from "../primitive.sev"
 
-import * from "../../operator/trait/arithmetic.sev"
-import * from "../../operator/trait/equatable.sev"
-import * from "../../operator/trait/ordered.sev"
+import * from "../../function/trait.sev"
 
 
 '''
@@ -131,6 +129,8 @@ class f8e4m3fn: Floating :
     identity: PrimitiveId = F8E4M3FnPrimitive().identity
     id: TypeId = F8E4M3FnPrimitive().id
     literal: LiteralSyntax | None = F8E4M3FnPrimitive().literal
+    literal_family: string = F8E4M3FnPrimitive().literal_family
+    literal_bindings: list[LiteralBinding] = F8E4M3FnPrimitive().literal_bindings
     name: string = "f8e4m3fn"
     size: byte = 1B
     alignment: byte = 1B
@@ -150,6 +150,8 @@ class f8e5m2: Floating :
     identity: PrimitiveId = F8E5M2Primitive().identity
     id: TypeId = F8E5M2Primitive().id
     literal: LiteralSyntax | None = F8E5M2Primitive().literal
+    literal_family: string = F8E5M2Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = F8E5M2Primitive().literal_bindings
     name: string = "f8e5m2"
     size: byte = 1B
     alignment: byte = 1B
@@ -169,6 +171,8 @@ class bf16: Floating :
     identity: PrimitiveId = BF16Primitive().identity
     id: TypeId = BF16Primitive().id
     literal: LiteralSyntax | None = BF16Primitive().literal
+    literal_family: string = BF16Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = BF16Primitive().literal_bindings
     name: string = "bf16"
     size: byte = 2B
     alignment: byte = 2B
@@ -188,6 +192,8 @@ class f16: Floating :
     identity: PrimitiveId = F16Primitive().identity
     id: TypeId = F16Primitive().id
     literal: LiteralSyntax | None = F16Primitive().literal
+    literal_family: string = F16Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = F16Primitive().literal_bindings
     name: string = "f16"
     size: byte = 2B
     alignment: byte = 2B
@@ -207,6 +213,8 @@ class f32: Floating :
     identity: PrimitiveId = F32Primitive().identity
     id: TypeId = F32Primitive().id
     literal: LiteralSyntax | None = F32Primitive().literal
+    literal_family: string = F32Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = F32Primitive().literal_bindings
     name: string = "f32"
     size: byte = 4B
     alignment: byte = 4B
@@ -226,6 +234,8 @@ class f64: Floating :
     identity: PrimitiveId = F64Primitive().identity
     id: TypeId = F64Primitive().id
     literal: LiteralSyntax | None = F64Primitive().literal
+    literal_family: string = F64Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = F64Primitive().literal_bindings
     name: string = "f64"
     size: byte = 8B
     alignment: byte = 8B
@@ -245,6 +255,8 @@ class f128: Floating :
     identity: PrimitiveId = F128Primitive().identity
     id: TypeId = F128Primitive().id
     literal: LiteralSyntax | None = F128Primitive().literal
+    literal_family: string = F128Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = F128Primitive().literal_bindings
     name: string = "f128"
     size: byte = 16B
     alignment: byte = 16B
@@ -296,6 +308,8 @@ class float: Floating:
     identity: PrimitiveId = F64Primitive().identity
     id: TypeId = F64Primitive().id
     literal: LiteralSyntax | None = F64Primitive().literal
+    literal_family: string = F64Primitive().literal_family
+    literal_bindings: list[LiteralBinding] = F64Primitive().literal_bindings
 
     operator if(self) -> bool:
         return mlir(arith.cmpf, "une", self, self(0.0))

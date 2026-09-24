@@ -1,4 +1,4 @@
-import * from "../declaration/function.sev"
+import * from "../function/function.sev"
 import * from "../primitive/primitive/src/lib.sev"
 
 

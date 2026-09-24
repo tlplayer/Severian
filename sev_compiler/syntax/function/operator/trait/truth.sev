@@ -1,3 +1,0 @@
-trait Truth:
-    operator if(self) -> bool
-    operator else(self) -> bool

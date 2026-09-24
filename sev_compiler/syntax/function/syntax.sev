@@ -1,10 +1,16 @@
 import source
-import * from "../id/compiler.sev"
-import * from "../../annotation.sev"
-import * from "../expression/expression.sev"
+import * from "../symbol/symbol.sev"
+import * from "../type/annotation.sev"
+import * from "function.sev"
+import * from "../sentence/sentence.sev"
 import * from "../operator/kind.sev"
-import * from "../statement/statement.sev"
+import * from "../operator/syntax.sev"
+import * from "../operator/scalar.sev"
+import * from "../operator/lowered.sev"
 
+# Source declaration and operator forms select callable implementations.
+# The descriptor imports below retain pre-existing missing dependencies;
+# regrouping does not synthesize replacement operator definitions.
 
 enum ImportSubject:
     Name(name: string)
@@ -178,3 +184,34 @@ def test_mode_name(mode: TestMode) -> string:
             return "compiler"
         case Integration:
             return "integ"
+
+
+enum TypePattern:
+    # Must be this exact type.
+    Exact(type_id: TypeId)
+
+    # Result or operand must match the left operand type.
+    SameAsLeft
+
+    # Result or operand must match the right operand type.
+    SameAsRight
+
+
+enum TypeConstraint:
+    # Operand must already resolve to this type.
+    Known(type_id: TypeId)
+
+    # Operand may begin as an unresolved literal of this kind.
+    Literal(kind: LiteralKind)
+
+
+class OperatorSignature:
+    # The resolved Y tag is converted to the canonical registry OpId. The
+    # signature never re-enumerates individual operators.
+    kind: Operator
+
+    left: TypePattern
+
+    right: TypePattern
+
+    result: TypePattern

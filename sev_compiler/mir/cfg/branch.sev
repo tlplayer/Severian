@@ -1,5 +1,5 @@
 import source
-import * from "../id/compiler.sev"
+import * from "../../syntax/symbol/symbol.sev"
 
 
 class CfgEdge:
@@ -20,5 +20,3 @@ class CfgTerminator:
     exit: CfgExit
     grammar: DefId
     span: source.Span
-
-

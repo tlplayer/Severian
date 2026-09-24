@@ -96,6 +96,8 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
 
 
 def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = [], prelude_entry: string = "", archive_output: string = "", requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = [], object_outputs: list[string] = [], semantic_outputs: list[string] = []) -> string | diagnostics.Diagnostic:
+    if emit == "blocks":
+        return parser.format_blocks(parser.parse_blocks(input, parser.standard_block_syntax()))
     timings = timing.begin()
     registry := lexer.SyntaxRegistry([])
     working_directory = process.current_directory()

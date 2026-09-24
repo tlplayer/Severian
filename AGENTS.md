@@ -98,13 +98,11 @@ Effect
 | `S` | Sentence |
 | `N` | Number of elements |
 | `E` | Error |
-| `Ex` | Expression |
 | `M` | Macro → operations |
 | `L` | Literal |
-| `O` | Operation |
 | `B` | Block |
 | `R` | Result |
-| `F` | Callable |
+| `F` | Callable | Expression | Operation | |
 | `W` | With-clause operations (including constraints) |
 | `C` | Container |
 | `Y` | Symbol |

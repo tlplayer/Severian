@@ -1,0 +1,295 @@
+import * from "../symbol/symbol.sev"
+import source
+import * from "../literal/value.sev"
+import * from "syntax.sev"
+import * from "../source/assertion_origin.sev"
+import * from "../literal/lowered.sev"
+import * from "../source/assertion.sev"
+import * from "../sentence/sentence.sev"
+import * from "function.sev"
+import * from "../type/system.sev"
+import * from "operator/types/mod.sev"
+
+# Operations, registry contracts, and callable lowering metadata.
+
+enum LoweredOperation:
+    LoweredCoverage(key: string)
+    ConstantValue(value: Constant, result: ValueId)
+    LoweredUnary(operator: UnaryOperation, operand: ValueId, result: ValueId)
+    LoweredBinary(operator: BinaryOperation, left: ValueId, right: ValueId, result: ValueId)
+    LoweredCall(function: FunctionId, arguments: list[ValueId], result: ValueId)
+    RuntimeCall(symbol: string, arguments: list[ValueId], result: ValueId | None)
+    LoweredReturn(value: ValueId | None)
+    LoweredAssert(condition: ValueId, message: ValueId | None, location: AssertionLocation | None)
+    LoweredIf(condition: ValueId, then_block: Block, else_block: Block)
+    ArtifactCall(artifact_id: ArtifactId, inputs: list[ValueId], outputs: list[ValueId])
+
+
+# Source annotations describe the implementation of an F. The scalar compiler
+# recognizes these two boundary forms, never library helper/function names.
+def scalar_boundary(function: FunctionDeclaration, name: string) -> string:
+    for decorator in function.decorators:
+        if decorator.name == name:
+            for argument in decorator.arguments:
+                if argument.name == "" or (name == "c" and argument.name == "symbol"):
+                    match argument.value:
+                        case String:
+                            return value
+                        case _:
+                            throw Error("unimplemented (sev_compiler/universal/declaration/scalar.sev)")
+    return ""
+
+
+def scalar_operand_segments(function: FunctionDeclaration) -> list[int]:
+    for decorator in function.decorators:
+        if decorator.name == "mlir":
+            for argument in decorator.arguments:
+                if argument.name == "operand_segments":
+                    match argument.value:
+                        case String:
+                            segments: list[int] = []
+                            for part in value.split(","):
+                                if part == "":
+                                    throw Error("invalid MLIR operand segment size")
+                                for character in part.characters():
+                                    if character < "0" or character > "9":
+                                        throw Error("invalid MLIR operand segment size")
+                                size = int(part)
+                                if size < 0 or size > 2147483647:
+                                    throw Error("invalid MLIR operand segment size")
+                                segments.append(size)
+                            return segments
+                        case _:
+                            throw Error("unimplemented (sev_compiler/universal/declaration/scalar.sev)")
+    return []
+
+
+# Lowering dependencies belong to the declaration that introduces an operation. The
+# driver collects these from reachable F; the backend never inspects IR text.
+class LoweringRequirements:
+    passes: list[string] = []
+    libraries: list[string] = []
+    quality: bool = false
+
+
+def scalar_requirement_names(text: string) -> list[string]:
+    result: list[string] = []
+    for part in text.split(","):
+        name = part.strip()
+        if name == "":
+            throw Error("empty lowering requirement")
+        for character in name.characters():
+            if not ((character >= "a" and character <= "z") or (character >= "A" and character <= "Z") or (character >= "0" and character <= "9") or character in ["_", "-", "."]):
+                throw Error("invalid lowering requirement: " + name)
+        if name.starts_with("-"):
+            throw Error("invalid lowering requirement: " + name)
+        if name not in result:
+            result.append(name)
+    return result
+
+
+def scalar_requirements(function: borrow FunctionDeclaration, requirements: LoweringRequirements):
+    for decorator in borrow function.decorators:
+        if decorator.name not in ["mlir", "c"]:
+            continue
+        for argument in borrow decorator.arguments:
+            key ?= argument.name
+            if key == None:
+                continue
+            if key != None and key != "lowering" and key != "libraries":
+                continue
+            match argument.value:
+                case String:
+                    for name in scalar_requirement_names(value):
+                        if key == "lowering":
+                            if decorator.name != "mlir":
+                                throw Error("C boundaries cannot request MLIR lowering passes")
+                            if name not in requirements.passes:
+                                requirements.passes.append(name)
+                        elif name not in requirements.libraries:
+                            requirements.libraries.append(name)
+                case _:
+                    throw Error("lowering requirements require string literals")
+
+
+# cf.assert terminates the process, but its hosted LLVM lowering prints through
+# buffered stdout. Emit the diagnostic to stderr before handing it the condition.
+@c(symbol="write")
+def __assert_write(descriptor: i32, data: pointer, size: int) -> int
+
+@mlir("memref.extract_aligned_pointer_as_index")
+def __assert_address(value: array[u8]) -> index
+
+@mlir("arith.index_cast")
+def __assert_index(value: index) -> int
+
+@mlir("llvm.inttoptr")
+def __assert_pointer(value: int) -> pointer
+
+def __assert_condition(condition: bool, message: string) -> bool:
+    if not condition:
+        diagnostic = "assertion failed: " + message + "\n"
+        address = __assert_index(__assert_address(diagnostic.storage.data))
+        remaining := size(diagnostic)
+        offset := 0
+        while remaining > 0:
+            written = __assert_write(2, __assert_pointer(address + offset), remaining)
+            if written <= 0:
+                break
+            offset += written
+            remaining -= written
+    return condition
+
+
+class DialectId: StableId
+    value: u128
+
+
+class OperationId: StableId
+    value: u128
+
+
+class BackendId: StableId
+    value: u128
+
+
+class RuntimeId: StableId
+    value: u128
+
+
+class EffectSet:
+    bits: u16
+
+    def contains(effect: EffectSet) -> bool:
+        return bits & effect.bits == effect.bits
+
+    def union(other: EffectSet) -> EffectSet:
+        return EffectSet(bits | other.bits)
+
+
+enum LoweringCapability:
+    Standard
+    Compiler(compiler: CompilerId)
+    Backend(backend: BackendId)
+    Runtime(runtime: RuntimeId)
+    Provider(provider: ProviderId)
+
+
+class RegisteredOperation:
+    id: OpId
+    operands: list[TypeId]
+    results: list[TypeId]
+    attributes: map[AttributeId, AttrValue]
+
+
+class IrContext:
+    types: TypeContext
+    operations: OperationRegistry
+
+
+class OperationDiagnostic:
+    operation: OpId
+    message: string
+
+
+class CanonicalRewrite:
+    replacement: OpId
+    attributes: map[AttributeId, AttrValue]
+
+
+trait OperationInterface:
+    def infer_types(operands: list[TypeId], attributes: map[AttributeId, AttrValue]) -> list[TypeId] | OperationDiagnostic
+    def verify(operation: RegisteredOperation, context: IrContext) -> unit | OperationDiagnostic
+    def effects(operation: RegisteredOperation) -> EffectSet
+    def canonicalize(operation: RegisteredOperation) -> CanonicalRewrite | None
+    def lowering_capabilities() -> list[LoweringCapability]
+
+
+class OperationRegistry:
+    interfaces: map[OpId, OperationInterface]
+
+    def OperationRegistry():
+        interfaces = {}
+
+    def register(id: OpId, interface: OperationInterface) -> unit | OperationDiagnostic:
+        if interfaces.contains(id):
+            return error(OperationDiagnostic(id, "operation interface is already registered"))
+        interfaces[id] = interface
+        return unit
+
+    def interface(id: OpId) -> OperationInterface | None:
+        return interfaces.get(id)
+
+
+def dialect_id(name: string) -> DialectId:
+    return DialectId(stable_hash(name))
+
+
+def operation_id(name: string) -> OperationId:
+    return OperationId(stable_hash(name))
+
+
+def attribute_id(name: string) -> AttributeId:
+    return AttributeId(stable_hash(name))
+
+
+def backend_id(name: string) -> BackendId:
+    return BackendId(stable_hash(name))
+
+
+def runtime_id(name: string) -> RuntimeId:
+    return RuntimeId(stable_hash(name))
+
+
+def provider_id(name: string) -> ProviderId:
+    return ProviderId(stable_hash(name))
+
+
+def named_operation(dialect: string, operation: string) -> OpId:
+    return OpId(dialect_id(dialect).value, operation_id(operation).value)
+
+
+def no_effects() -> EffectSet:
+    return EffectSet(0)
+
+
+def read_effect() -> EffectSet:
+    return EffectSet(1)
+
+
+def write_effect() -> EffectSet:
+    return EffectSet(2)
+
+
+def allocate_effect() -> EffectSet:
+    return EffectSet(4)
+
+
+def free_effect() -> EffectSet:
+    return EffectSet(8)
+
+
+def throw_effect() -> EffectSet:
+    return EffectSet(16)
+
+
+def io_effect() -> EffectSet:
+    return EffectSet(32)
+
+
+test "operation names have stable independent identities":
+    first = named_operation("arith", "add")
+    repeated = named_operation("arith", "add")
+    different_operation = named_operation("arith", "sub")
+    different_dialect = named_operation("tensor", "add")
+    assert(first == repeated)
+    assert(first != different_operation)
+    assert(first != different_dialect)
+
+
+test "effect sets compose without losing bits":
+    effects = read_effect().union(write_effect()).union(io_effect())
+    assert(effects.contains(read_effect()))
+    assert(effects.contains(write_effect()))
+    assert(effects.contains(io_effect()))
+    assert(not effects.contains(throw_effect()))

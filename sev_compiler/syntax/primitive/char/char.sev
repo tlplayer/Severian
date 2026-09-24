@@ -1,8 +1,7 @@
 import * from "package:primitives/declarations.sev"
 import * from "../primitive.sev"
 
-import * from "../../operator/trait/equatable.sev"
-import * from "../../operator/trait/ordered.sev"
+import * from "../../function/trait.sev"
 
 
 '''
@@ -76,6 +75,8 @@ class char[T: char_storage = u32]: Character, PrimitiveAlias[T]:
     identity: PrimitiveId = CharPrimitive().identity
     id: TypeId = CharPrimitive().id
     literal: LiteralSyntax | None = CharPrimitive().literal
+    literal_family: string = CharPrimitive().literal_family
+    literal_bindings: list[LiteralBinding] = CharPrimitive().literal_bindings
 
     storage: Type = T
 

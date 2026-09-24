@@ -1,8 +1,8 @@
-import * from "package:syntax/block.sev"
+import * from "package:syntax/block/block.sev"
 import source
-import * from "../id/compiler.sev"
-import * from "../statement/statement.sev"
-import * from "../expression/expression.sev"
+import * from "../../syntax/symbol/symbol.sev"
+import * from "../../syntax/sentence/sentence.sev"
+import * from "../../syntax/function/function.sev"
 import * from "../constraint/model.sev"
 
 
@@ -179,6 +179,10 @@ def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Bloc
         parent_block = SourceBlockId(enclosing.index)
     layout = BlockLayout(SourceBlockId(region.index), BlockKind.Callable if parent == None else BlockKind.Lexical, definition, origin, parent_block, introduced_by)
     body.layout = layout
+    body.id = layout.id
+    body.parent = layout.parent
+    body.kind = layout.kind
+    body.sentences = []
     hierarchy.blocks.append(layout)
     if enclosing != None:
         hierarchy.blocks[enclosing.index].children.append(layout.id)
@@ -253,11 +257,15 @@ def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Bloc
             case Continue:
                 location = span
         hierarchy.sentences.append(SemanticSentence(sentence, region, location, ordinal))
+        sentence_span ?= location
+        if sentence_span != None:
+            body.sentences.append(BlockSentence(sentence, sentence_span, []))
         ordinal += 1
         for expression in expressions:
             hierarchy_expression(hierarchy, definition, expression, region, sentence)
         for child in children:
             hierarchy_region(hierarchy, definition, child, region, sentence, location)
+    body.subblocks = hierarchy.blocks[region.index].children[:]
     return region
 
 

@@ -1,0 +1,321 @@
+import primitives
+from syntax import TokenKind
+import * from "../../syntax/block/block.sev"
+import source
+
+
+# A file-local block ID is meaningful only within its owning source unit.
+class BlockAddress:
+    unit: int
+    block: SourceBlockId
+
+
+class BlockUnit:
+    key: string
+    package: string
+    module: string
+    submodule: string
+    file: BlockFile
+
+
+enum BlockBindingKind:
+    Declaration
+    Import
+    Package
+    Prelude
+
+
+class BlockBinding:
+    scope: BlockAddress
+    name: string
+    provider: BlockAddress
+    kind: BlockBindingKind = BlockBindingKind.Declaration
+    # Re-export/import scopes retain lookup provenance without consuming siblings.
+    through: list[BlockAddress] = []
+
+
+class PreludeBlock:
+    name: string
+    provider: BlockAddress
+
+
+class BlockUse:
+    consumer: BlockAddress
+    name: string
+    span: source.Span | None = None
+
+
+class BlockDependency:
+    consumer: BlockAddress
+    provider: BlockAddress
+
+
+class PrimitiveBlock:
+    provider: BlockAddress
+    descriptor: primitives.PrimitiveDescriptor
+    # None means an explicitly installed prelude binding.
+    scope: BlockAddress | None = None
+
+
+class BlockGraph:
+    units: list[BlockUnit] = []
+    bindings: list[BlockBinding] = []
+    uses: list[BlockUse] = []
+    dependencies: list[BlockDependency] = []
+    # Prelude is an explicit set of visible declarations, never a compiler model.
+    prelude: list[PreludeBlock] = []
+    primitives: list[PrimitiveBlock] = []
+
+
+class BlockSelection:
+    bodies: list[BlockAddress] = []
+    scopes: list[BlockAddress] = []
+    units: list[int] = []
+
+
+def same_block(left: BlockAddress, right: BlockAddress) -> bool:
+    return left.unit == right.unit and left.block.index == right.block.index
+
+
+def contains_block(values: list[BlockAddress], value: BlockAddress) -> bool:
+    for existing in values:
+        if same_block(existing, value):
+            return true
+    return false
+
+
+def checked_block(graph: BlockGraph, address: BlockAddress) -> Block:
+    if address.unit < 0 or address.unit >= len(graph.units):
+        throw Error("block dependency refers to an unknown source unit")
+    blocks = graph.units[address.unit].file.blocks
+    if address.block.index >= len(blocks):
+        throw Error("block dependency refers to an unknown block")
+    block = blocks[address.block.index]
+    parent ?= block.parent
+    if parent != None and parent.index >= address.block.index:
+        throw Error("block parent must precede its child")
+    return block
+
+
+def index_block_file(graph: BlockGraph, unit: BlockUnit) -> int:
+    for existing in graph.units:
+        if existing.key == unit.key:
+            throw Error("duplicate block source unit: " + unit.key)
+    index = int(len(graph.units))
+    for ordinal in range(int(len(unit.file.blocks))):
+        block = unit.file.blocks[ordinal]
+        if block.id.index != ordinal:
+            throw Error("block source unit has inconsistent block identities")
+        parent ?= block.parent
+        if parent != None and parent.index >= ordinal:
+            throw Error("block parent must precede its child")
+    graph.units.append(unit)
+    for block in unit.file.blocks:
+        parent ?= block.parent
+        if parent != None and block.name != "":
+            bind_block(graph, BlockBinding(BlockAddress(index, parent), block.name, BlockAddress(index, block.id)))
+    return index
+
+
+def bind_block(graph: BlockGraph, binding: BlockBinding):
+    checked_block(graph, binding.scope)
+    checked_block(graph, binding.provider)
+    for scope in binding.through:
+        checked_block(graph, scope)
+    for existing in graph.bindings:
+        if same_block(existing.scope, binding.scope) and existing.name == binding.name and same_block(existing.provider, binding.provider):
+            return
+    graph.bindings.append(binding)
+
+
+def use_block_name(graph: BlockGraph, consumer: BlockAddress, name: string, span: source.Span | None = None):
+    checked_block(graph, consumer)
+    graph.uses.append(BlockUse(consumer, name, span))
+
+
+def require_block(graph: BlockGraph, consumer: BlockAddress, provider: BlockAddress):
+    checked_block(graph, consumer)
+    checked_block(graph, provider)
+    for edge in graph.dependencies:
+        if same_block(edge.consumer, consumer) and same_block(edge.provider, provider):
+            return
+    graph.dependencies.append(BlockDependency(consumer, provider))
+
+
+def resolve_block_name(graph: BlockGraph, consumer: BlockAddress, name: string) -> list[BlockBinding]:
+    scope := consumer
+    while true:
+        matches: list[BlockBinding] = []
+        for binding in graph.bindings:
+            if same_block(binding.scope, scope) and binding.name == name:
+                matches.append(binding)
+        if len(matches) > 0:
+            # An overload family is retained until callable/value dispatch picks
+            # its members. Scope lookup does not guess an implementation.
+            return matches
+        parent ?= checked_block(graph, scope).parent
+        if parent == None:
+            break
+        scope = BlockAddress(scope.unit, parent)
+    matches: list[BlockBinding] = []
+    for binding in graph.prelude:
+        if binding.name == name:
+            checked_block(graph, binding.provider)
+            matches.append(BlockBinding(consumer, name, binding.provider, BlockBindingKind.Prelude))
+    if len(matches) == 0:
+        throw Error("unresolved consumed block name: " + name)
+    return matches
+
+
+def retain_block_scope(graph: BlockGraph, selection: BlockSelection, address: BlockAddress):
+    current := address
+    while not contains_block(selection.scopes, current):
+        block = checked_block(graph, current)
+        selection.scopes.append(current)
+        if current.unit not in selection.units:
+            selection.units.append(current.unit)
+        parent ?= block.parent
+        if parent == None:
+            return
+        current = BlockAddress(current.unit, parent)
+
+
+trait BlockResolver:
+    def resolve(graph: BlockGraph, address: BlockAddress) -> unit
+
+
+# Already-indexed HIR uses need no further body loading.
+class IndexedBlockResolver: BlockResolver
+    def resolve(graph: BlockGraph, address: BlockAddress) -> unit:
+        return unit
+
+
+# Edges come from HIR name/primitive/call resolution, not a scan of identifier
+# spellings. This preserves shadowing, literal opacity and import selection.
+# Cycles are legal; each consumed body is visited once.
+def consume_blocks_with[R: BlockResolver](graph: BlockGraph, roots: list[BlockAddress], resolver: R) -> BlockSelection:
+    selection = BlockSelection()
+    pending = roots[:]
+    cursor := 0
+    while cursor < len(pending):
+        consumer = pending[cursor]
+        cursor += 1
+        checked_block(graph, consumer)
+        if contains_block(selection.bodies, consumer):
+            continue
+        selection.bodies.append(consumer)
+        retain_block_scope(graph, selection, consumer)
+        # Resolve/load only the body just reached. The resolver may register
+        # provider units, import bindings and dependencies on demand.
+        resolver.resolve(graph, consumer)
+        for edge in graph.dependencies:
+            if same_block(edge.consumer, consumer):
+                pending.append(edge.provider)
+        for use in graph.uses:
+            if same_block(use.consumer, consumer):
+                for binding in resolve_block_name(graph, consumer, use.name):
+                    require_block(graph, consumer, binding.provider)
+                    pending.append(binding.provider)
+                    for scope in binding.through:
+                        retain_block_scope(graph, selection, scope)
+    return selection
+
+
+def consume_blocks(graph: BlockGraph, roots: list[BlockAddress]) -> BlockSelection:
+    return consume_blocks_with(graph, roots, IndexedBlockResolver())
+
+
+def selected_block_units(graph: BlockGraph, selection: BlockSelection) -> list[BlockUnit]:
+    units: list[BlockUnit] = []
+    for index in selection.units:
+        units.append(graph.units[index])
+    return units
+
+
+
+def bind_block_primitive(graph: BlockGraph, binding: PrimitiveBlock):
+    checked_block(graph, binding.provider)
+    scope ?= binding.scope
+    if scope != None:
+        checked_block(graph, scope)
+    graph.primitives.append(binding)
+
+
+def resolve_block_literal(graph: BlockGraph, consumer: BlockAddress, kind: TokenKind, spelling: string, span: source.Span) -> primitives.LiteralConstruction | None:
+    scope: BlockAddress | None := consumer
+    while true:
+        providers: list[primitives.PrimitiveDescriptor] = []
+        bindings: list[PrimitiveBlock] = []
+        current ?= scope
+        for binding in graph.primitives:
+            owner ?= binding.scope
+            visible := current == None and owner == None
+            if current != None and owner != None:
+                visible = same_block(current, owner)
+            if visible:
+                providers.append(binding.descriptor)
+                bindings.append(binding)
+        literal ?= primitives.literal_from_providers(kind, spelling, span, providers)
+        if literal != None:
+            for binding in bindings:
+                if binding.descriptor.identity.declaration.value == literal.primitive.declaration.value:
+                    require_block(graph, consumer, binding.provider)
+            return literal
+        if current == None:
+            return None
+        parent ?= checked_block(graph, current).parent
+        scope = BlockAddress(current.unit, parent) if parent != None else None
+
+
+test "block reachability follows cycles without consuming sibling bodies":
+    blocks = [Block([], id=SourceBlockId(0)), Block([], id=SourceBlockId(1), parent=SourceBlockId(0), name="entry"), Block([], id=SourceBlockId(2), parent=SourceBlockId(0), name="helper"), Block([], id=SourceBlockId(3), parent=SourceBlockId(0), name="unused")]
+    graph = BlockGraph()
+    unit = index_block_file(graph, BlockUnit("main.sev", "app", "app", "main", BlockFile("main.sev", source.SourceId(0), blocks)))
+    entry = BlockAddress(unit, SourceBlockId(1))
+    helper = BlockAddress(unit, SourceBlockId(2))
+    use_block_name(graph, entry, "helper")
+    use_block_name(graph, helper, "entry")
+    use_block_name(graph, BlockAddress(unit, SourceBlockId(3)), "missing_but_unused")
+    selected = consume_blocks(graph, [entry])
+    assert(len(selected.bodies) == 2)
+    assert(contains_block(selected.scopes, BlockAddress(unit, SourceBlockId(0))))
+    assert(not contains_block(selected.bodies, BlockAddress(unit, SourceBlockId(0))))
+    assert(not contains_block(selected.bodies, BlockAddress(unit, SourceBlockId(3))))
+
+
+test "imported blocks retain provider submodules without loading siblings":
+    graph = BlockGraph()
+    first = index_block_file(graph, BlockUnit("app.sev", "app", "app", "root", BlockFile("app.sev", source.SourceId(0), [Block([], id=SourceBlockId(0))])))
+    second = index_block_file(graph, BlockUnit("library.sev", "library", "library", "helpers", BlockFile("library.sev", source.SourceId(1), [Block([], id=SourceBlockId(0)), Block([], id=SourceBlockId(1), parent=SourceBlockId(0), name="used"), Block([], id=SourceBlockId(2), parent=SourceBlockId(0), name="unused")])))
+    consumer = BlockAddress(first, SourceBlockId(0))
+    provider = BlockAddress(second, SourceBlockId(1))
+    bind_block(graph, BlockBinding(consumer, "imported", provider, BlockBindingKind.Import))
+    use_block_name(graph, consumer, "imported")
+    selected = consume_blocks(graph, [consumer])
+    assert(contains_block(selected.bodies, provider))
+    assert(not contains_block(selected.bodies, BlockAddress(second, SourceBlockId(2))))
+    assert(len(selected.units) == 2)
+
+
+test "local block declarations shadow the prelude":
+    graph = BlockGraph()
+    unit = index_block_file(graph, BlockUnit("scope.sev", "app", "app", "scope", BlockFile("scope.sev", source.SourceId(0), [Block([], id=SourceBlockId(0)), Block([], id=SourceBlockId(1), parent=SourceBlockId(0), name="entry"), Block([], id=SourceBlockId(2), parent=SourceBlockId(0), name="print"), Block([], id=SourceBlockId(3), parent=SourceBlockId(0), name="prelude_print")])))
+    entry = BlockAddress(unit, SourceBlockId(1))
+    local = BlockAddress(unit, SourceBlockId(2))
+    implicit = BlockAddress(unit, SourceBlockId(3))
+    graph.prelude.append(PreludeBlock("print", implicit))
+    use_block_name(graph, entry, "print")
+    selected = consume_blocks(graph, [entry])
+    assert(contains_block(selected.bodies, local))
+    assert(not contains_block(selected.bodies, implicit))
+
+
+test "a literal consumes the block declaring its primitive":
+    graph = BlockGraph()
+    unit = index_block_file(graph, BlockUnit("literal.sev", "app", "app", "literal", BlockFile("literal.sev", source.SourceId(0), [Block([], id=SourceBlockId(0)), Block([], id=SourceBlockId(1), parent=SourceBlockId(0), name="entry"), Block([], id=SourceBlockId(2), parent=SourceBlockId(0), name="string")])))
+    entry = BlockAddress(unit, SourceBlockId(1))
+    provider = BlockAddress(unit, SourceBlockId(2))
+    bind_block_primitive(graph, PrimitiveBlock(provider, primitives.describe_primitive(primitives.StringPrimitive())))
+    literal ?= resolve_block_literal(graph, entry, TokenKind.String, "a", source.Span(source.SourceId(0), 0, 3))
+    assert(literal != None)
+    assert(contains_block(consume_blocks(graph, [entry]).bodies, provider))

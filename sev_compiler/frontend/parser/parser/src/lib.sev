@@ -1,2 +1,3 @@
 import * from "statement/mod.sev"
-from sentence import Sentence, SentenceDefinition, SentenceField, SentenceMatch, Term, TermRole, match_sentence, resolve_sentence
+from syntax import sentence
+import * from "block.sev"

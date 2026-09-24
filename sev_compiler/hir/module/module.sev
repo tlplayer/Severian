@@ -1,9 +1,9 @@
+import * from "../block/dependencies.sev"
 import source
-import * from "../id/compiler.sev"
-import * from "../declaration/language.sev"
-import * from "../declaration/function.sev"
-import * from "../expression/expression.sev"
-import * from "../statement/statement.sev"
+import * from "../../syntax/symbol/symbol.sev"
+import * from "../../syntax/function/syntax.sev"
+import * from "../../syntax/function/function.sev"
+import * from "../../syntax/sentence/sentence.sev"
 import * from "../cfg/cfg.sev"
 import * from "../value/lowered.sev"
 import * from "../grammar/grammar.sev"
@@ -61,6 +61,7 @@ class Module:
 
 class Program:
     modules: list[Module]
+    blocks: BlockGraph = BlockGraph()
 
 
 def empty_module() -> Module:
