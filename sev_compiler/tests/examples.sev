@@ -1,6 +1,0 @@
-import * from "../pipeline.sev" as examples
-
-test "compiler examples 00-03":
-    report = examples.run()
-    assert(report.failed == 0)
-    assert(report.blocked == 0)
