@@ -2,6 +2,7 @@ import universal
 import diagnostics
 import * from "cfg.sev" as cfg
 import * from "provenance.sev" as provenance
+import * from "initialization.sev" as initialization
 
 
 class ValueAlias:
@@ -57,7 +58,7 @@ def analyze_ownership(module: universal.Module, body: universal.CfgBody, paramet
                 for argument in edge.arguments:
                     report.aliases.append(ValueAlias(argument, body.blocks[edge.target].parameters[index]))
                     index += 1
-    verify_initialization(module, body, report)
+    initialization.verify(module, body)
     verify_escapes(module, body, report)
     return report
 
@@ -102,99 +103,6 @@ def verify_escapes(module: universal.Module, body: borrow universal.CfgBody, pla
                 owner ?= storage_origin(plan, value)
                 if owner != None:
                     return error(provenance.memory_diagnostic(module, "returned view outlives its local storage owner", provenance.origin_at(body, block, int(len(block.operations))), owner))
-
-
-# A forward must-analysis: a scalar slot is readable only when every reachable
-# predecessor has initialized it. The fixed point includes loop backedges.
-# Field-sensitive initialization remains represented by the source place checks;
-# aggregate addresses are not incorrectly treated as one initialized scalar.
-def initialized_after(block: universal.BasicBlock, incoming: list[int], slots: list[int]) -> list[int]:
-    initialized = incoming[:]
-    for operation in block.operations:
-        match operation:
-            case Allocate:
-                if int(result.index) in slots:
-                    retained: list[int] = []
-                    for value in initialized:
-                        if value != int(result.index):
-                            retained.append(value)
-                    initialized = retained
-            case Store:
-                if int(address.index) in slots and int(address.index) not in initialized:
-                    initialized.append(int(address.index))
-            case _:
-                continue
-    return initialized
-
-
-def same_values(left: list[int], right: list[int]) -> bool:
-    if len(left) != len(right):
-        return false
-    for value in left:
-        if value not in right:
-            return false
-    return true
-
-
-def incoming_values(body: universal.CfgBody, target: int, outgoing: list[list[int]], reachable: list[int], slots: list[int]) -> list[int]:
-    if target == body.entry:
-        return []
-    incoming = slots[:]
-    for block in body.blocks:
-        if block.id not in reachable:
-            continue
-        terminal ?= block.terminator
-        if terminal != None:
-            for edge in cfg.successors(terminal.exit):
-                if edge.target == target:
-                    retained: list[int] = []
-                    for value in incoming:
-                        if value in outgoing[block.id]:
-                            retained.append(value)
-                    incoming = retained
-    return incoming
-
-
-def verify_initialization(module: universal.Module, body: universal.CfgBody, plan: OwnershipPlan) -> unit | diagnostics.Diagnostic:
-    slots: list[int] = []
-    for block in body.blocks:
-        for operation in block.operations:
-            match operation:
-                case Allocate:
-                    descriptor ?= universal.primitive_descriptor(type_id)
-                    if descriptor != None:
-                        slots.append(int(result.index))
-                case _:
-                    continue
-    reachable = cfg.reachable_blocks(body)
-    outgoing: list[list[int]] = []
-    for block in body.blocks:
-        outgoing.append(slots[:])
-    changed := true
-    while changed:
-        changed = false
-        for block in body.blocks:
-            if block.id not in reachable:
-                continue
-            incoming = incoming_values(body, block.id, outgoing, reachable, slots)
-            result = initialized_after(block, incoming, slots)
-            if not same_values(result, outgoing[block.id]):
-                outgoing[block.id] = result
-                changed = true
-    for block in body.blocks:
-        if block.id not in reachable:
-            continue
-        initialized = incoming_values(body, block.id, outgoing, reachable, slots)
-        position := 0
-        for operation in block.operations:
-            match operation:
-                case Load:
-                    if int(address.index) in slots and int(address.index) not in initialized:
-                        return error(provenance.memory_diagnostic(module, "read of storage that is not initialized on every incoming path", provenance.origin_at(body, block, position), storage_origin(plan, address)))
-                case _:
-                    single = universal.BasicBlock(block.id, operations=[operation])
-                    initialized = initialized_after(single, initialized, slots)
-            position += 1
 
 
 def authorize_lowering(module: borrow universal.Module, body: borrow universal.CfgBody, parameters: borrow list[universal.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:

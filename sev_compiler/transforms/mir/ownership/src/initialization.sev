@@ -1,0 +1,180 @@
+import universal
+import diagnostics
+import * from "cfg.sev" as cfg
+import * from "provenance.sev" as provenance
+
+
+class StoragePlace:
+    root: int
+    fields: list[int] = []
+
+
+def covers(parent: StoragePlace, child: StoragePlace) -> bool:
+    if parent.root != child.root or len(parent.fields) > len(child.fields):
+        return false
+    index := 0
+    for field in parent.fields:
+        if field != child.fields[index]:
+            return false
+        index += 1
+    return true
+
+
+def same_place(left: StoragePlace, right: StoragePlace) -> bool:
+    return len(left.fields) == len(right.fields) and covers(left, right)
+
+
+def add_place(places: list[StoragePlace], place: StoragePlace):
+    for existing in places:
+        if same_place(existing, place):
+            return
+    places.append(place)
+
+
+# Address identity is structural. Different FieldAddress instructions selecting
+# the same field denote the same storage; block parameters retain every possible
+# incoming owner. Unknown/external addresses never become local allocations.
+def address_places(body: universal.CfgBody, address: universal.ValueId, visited: list[int] = []) -> list[StoragePlace]:
+    if int(address.index) in visited:
+        return []
+    path = visited[:] + [int(address.index)]
+    places: list[StoragePlace] = []
+    for block in body.blocks:
+        for operation in block.operations:
+            match operation:
+                case Allocate:
+                    if result.index == address.index:
+                        return [StoragePlace(int(result.index))]
+                case Alias:
+                    if result.index == address.index:
+                        return address_places(body, value, path)
+                case FieldAddress:
+                    if result.index == address.index:
+                        for parent in address_places(body, object, path):
+                            add_place(places, StoragePlace(parent.root, parent.fields[:] + [index]))
+                        return places
+                case _:
+                    continue
+        terminal ?= block.terminator
+        if terminal != None:
+            for edge in cfg.successors(terminal.exit):
+                index := 0
+                for parameter in body.blocks[edge.target].parameters:
+                    if parameter.index == address.index:
+                        for place in address_places(body, edge.arguments[index], path):
+                            add_place(places, place)
+                    index += 1
+    # Keep an external alternative distinct at joins. Otherwise a store through
+    # a local-or-external pointer would incorrectly initialize the local slot.
+    if len(places) == 0:
+        places.append(StoragePlace(-int(address.index) - 1))
+    return places
+
+
+def place_present(places: list[StoragePlace], place: StoragePlace) -> bool:
+    for initialized in places:
+        if covers(initialized, place):
+            return true
+    return false
+
+
+def transfer(body: universal.CfgBody, operation: universal.Operation, incoming: list[StoragePlace]) -> list[StoragePlace]:
+    initialized = incoming[:]
+    match operation:
+        case Allocate:
+            initialized = []
+            for place in incoming:
+                if place.root != int(result.index):
+                    initialized.append(place)
+        case Store:
+            targets = address_places(body, address)
+            # A write through a join initializes its selected target, not every
+            # possible owner. Only an unambiguous place is a must-write.
+            if len(targets) == 1:
+                add_place(initialized, targets[0])
+        case _:
+            return initialized
+    return initialized
+
+
+def incoming_places(body: universal.CfgBody, target: int, outgoing: list[list[StoragePlace]], reachable: list[int], universe: list[StoragePlace]) -> list[StoragePlace]:
+    if target == body.entry:
+        return []
+    incoming = universe[:]
+    for block in body.blocks:
+        if block.id not in reachable:
+            continue
+        terminal ?= block.terminator
+        if terminal != None:
+            for edge in cfg.successors(terminal.exit):
+                if edge.target == target:
+                    retained: list[StoragePlace] = []
+                    for place in incoming:
+                        if place_present(outgoing[block.id], place):
+                            retained.append(place)
+                    incoming = retained
+    return incoming
+
+
+def same_state(left: list[StoragePlace], right: list[StoragePlace]) -> bool:
+    for place in left:
+        if not place_present(right, place):
+            return false
+    for place in right:
+        if not place_present(left, place):
+            return false
+    return true
+
+
+def verify(module: universal.Module, body: universal.CfgBody) -> unit | diagnostics.Diagnostic:
+    reachable = cfg.reachable_blocks(body)
+    universe: list[StoragePlace] = []
+    for block in body.blocks:
+        for operation in block.operations:
+            addresses: list[universal.ValueId] := []
+            match operation:
+                case Allocate:
+                    addresses = [result]
+                case Store:
+                    addresses = [address]
+                case Load:
+                    addresses = [address]
+                case _:
+                    continue
+            for address in addresses:
+                for place in address_places(body, address):
+                    add_place(universe, place)
+    outgoing: list[list[StoragePlace]] = []
+    for block in body.blocks:
+        outgoing.append(universe[:])
+    changed := true
+    while changed:
+        changed = false
+        for block in body.blocks:
+            if block.id not in reachable:
+                continue
+            initialized = incoming_places(body, block.id, outgoing, reachable, universe)
+            for operation in block.operations:
+                initialized = transfer(body, operation, initialized)
+            if not same_state(initialized, outgoing[block.id]):
+                outgoing[block.id] = initialized
+                changed = true
+    for block in body.blocks:
+        if block.id not in reachable:
+            continue
+        initialized = incoming_places(body, block.id, outgoing, reachable, universe)
+        position := 0
+        for operation in block.operations:
+            match operation:
+                case Load:
+                    # Aggregate completeness still needs declared active-variant
+                    # information. Check scalar leaves without rejecting legal
+                    # partially initialized outcome payloads.
+                    descriptor ?= universal.primitive_descriptor(module.values[result.index].type_id)
+                    if descriptor != None:
+                        for place in address_places(body, address):
+                            if place.root >= 0 and not place_present(initialized, place):
+                                return error(provenance.memory_diagnostic(module, "read of storage projection that is not initialized on every incoming path", provenance.origin_at(body, block, position)))
+                case _:
+                    initialized = transfer(body, operation, initialized)
+            position += 1

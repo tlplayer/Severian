@@ -82,6 +82,27 @@ def literal_integer(value: string, span: source.Span) -> universal.Expression:
     )
 
 
+def stable_predicate_inputs(expression: universal.Expression, parameters: list[universal.FunctionParameter]) -> unit | diagnostics.Diagnostic:
+    match expression.kind:
+        case Name:
+            for parameter in parameters:
+                if parameter.name == name:
+                    return
+            return error(diagnostics.diagnostic_at("E000219", "shared dispatch predicates may read only their scalar parameters", expression.span))
+        case Binary:
+            stable_predicate_inputs(left, parameters)
+            stable_predicate_inputs(right, parameters)
+        case Unary:
+            stable_predicate_inputs(operand, parameters)
+        case ComparisonChain:
+            for operand in operands:
+                stable_predicate_inputs(operand, parameters)
+        case LiteralValue:
+            return
+        case _:
+            return error(diagnostics.diagnostic_at("E000219", "dispatch predicate needs stable scalar inputs", expression.span))
+
+
 def named(name: string, span: source.Span) -> universal.Expression:
     return universal.Expression(universal.Name(name), span)
 
@@ -110,14 +131,68 @@ def guard(function: universal.FunctionDeclaration, span: source.Span) -> univers
     for attachment in function.attachments:
         if attachment.role == universal.AttachmentRole.Dispatch:
             predicate_key(attachment.condition)
+            stable_predicate_inputs(attachment.condition, function.parameters)
             condition = binary("and", condition, attachment.condition, span)
     return condition
+
+
+# Each prefix is a reusable node. Its parent must pass before its next predicate
+# runs; two candidates sharing a prefix therefore evaluate it only once.
+def shared_guard(function: universal.FunctionDeclaration, span: source.Span, statements: list[universal.Statement], keys: list[string], names: list[string]) -> universal.Expression | diagnostics.Diagnostic:
+    prefix := universal.Expression(universal.LiteralValue(universal.BooleanValue(true)), span)
+    identity := "true"
+    for attachment in function.attachments:
+        if attachment.role == universal.AttachmentRole.Dispatch:
+            identity = universal.semantic_key([identity, predicate_key(attachment.condition)])
+            selected := -1
+            cursor := 0
+            for key in keys:
+                if key == identity:
+                    selected = cursor
+                    break
+                cursor += 1
+            if selected < 0:
+                selected = int(len(keys))
+                name = "$dispatch$prefix$" + string(selected)
+                # Conditional makes the prerequisite explicit even when a
+                # user-defined boolean operator does not short-circuit.
+                condition = universal.Expression(universal.Conditional(prefix, attachment.condition, universal.Expression(universal.LiteralValue(universal.BooleanValue(false)), span)), span)
+                statements.append(universal.BindingStatement(universal.Binding(name, None, condition, false, false, span)))
+                keys.append(identity)
+                names.append(name)
+            prefix = named(names[selected], span)
+    return prefix
 
 
 # Produce ordinary source-level control flow before callable registration. The
 # selected body is invoked only after every candidate's guard has been checked.
 # Arguments are wrapper parameters, so neither guards nor selection repeat them.
-def expand_dispatch(module: universal.Module) -> universal.Module | diagnostics.Diagnostic:
+def expand_dispatch(module: universal.Module, receiver: bool = false) -> universal.Module | diagnostics.Diagnostic:
+    # Expand method families before registration adds the nominal receiver.
+    # Each record is a separate type-dispatch domain; predicates only distinguish
+    # implementations within that domain and an identical callable signature.
+    for item in module.items:
+        match item:
+            case Record:
+                methods: list[universal.Item] = []
+                for method in declaration.methods:
+                    methods.append(universal.Function(method))
+                expanded = expand_dispatch(universal.Module(methods), true)
+                replacements: list[universal.FunctionDeclaration] = []
+                for method in expanded.items:
+                    match method:
+                        case Function:
+                            replacements.append(declaration)
+                        case _:
+                            continue
+                # Avoid variant payload shadowing the enclosing declaration.
+                match item:
+                    case Record:
+                        declaration.methods = replacements
+                    case _:
+                        continue
+            case _:
+                continue
     guarded_keys: list[string] = []
     for item in module.items:
         match item:
@@ -222,8 +297,12 @@ def expand_dispatch(module: universal.Module) -> universal.Module | diagnostics.
                     predicate_keys: list[string] = []
                     candidate_names: list[string] = []
                     candidate_predicates: list[universal.Expression] = []
+                    prefix_keys: list[string] = []
+                    prefix_names: list[string] = []
                     index := 0
                     for candidate in family:
+                        if candidate.body == None or len(candidate.type_parameters) != 0 or len(candidate.constraints) != 0:
+                            return error(diagnostics.diagnostic_at("E000219", "runtime dispatch requires concrete source implementations", origin))
                         if len(
                             candidate.parameters,
                         ) != len(
@@ -238,6 +317,8 @@ def expand_dispatch(module: universal.Module) -> universal.Module | diagnostics.
                             )
                         result ?= candidate.result
                         first_result ?= first.result
+                        if (result == None) != (first_result == None):
+                            return error(diagnostics.diagnostic_at("E000219", "dispatch candidates must have the same result", origin))
                         if result != None:
                             if first_result != None:
                                 if universal.annotation_key(
@@ -281,6 +362,7 @@ def expand_dispatch(module: universal.Module) -> universal.Module | diagnostics.
                                 ),
                             )
                         predicate_keys.append(predicate_identity)
+                        condition = shared_guard(candidate, origin, statements, prefix_keys, prefix_names)
                         flag = "$dispatch$guard$" + string(index)
                         guards.append(flag)
                         statements.append(
@@ -334,10 +416,13 @@ def expand_dispatch(module: universal.Module) -> universal.Module | diagnostics.
                         candidate.attachments = contracts
                         candidate_names.append(candidate.name)
                         output.append(universal.Function(candidate))
+                        target := named(candidate.name, origin)
+                        if receiver:
+                            target = universal.Expression(universal.Member(named("self", origin), candidate.name), origin)
                         calls.append(
                             universal.Expression(
                                 universal.Call(
-                                    named(candidate.name, origin),
+                                    target,
                                     arguments,
                                 ),
                                 origin,

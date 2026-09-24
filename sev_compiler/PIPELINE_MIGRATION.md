@@ -1,5 +1,38 @@
 # Syntax, primitives, CFG and MIR ownership migration
 
+## September 24 continuation
+
+Seven-minute code-only continuation; no builds, tests, or test additions.
+
+- Replaced scalar-address-only definite initialization with structural storage
+  places. MIR now follows aliases, field projections and incoming block arguments;
+  whole-place writes initialize descendants, while writes through ambiguous
+  pointers do not initialize every possible owner. Scalar projection reads use
+  predecessor intersection and loop fixed points. Aggregate completeness and
+  active-variant checking remain incomplete.
+- Added hierarchy traversal for expression-owned blocks, match arms, lambda
+  bodies and nested expression operands. Inline-only callable expansions receive
+  independent layouts. Nested expression lowering restores source origins, and
+  block-result expressions retain their body's lexical origin. Capture identity
+  and shared declaration ownership still require further review.
+- Added class-method dispatch expansion before receiver registration. Runtime
+  guards share identical progressive prefixes with explicit conditional
+  evaluation; uniqueness is still checked before calling any implementation.
+  This extends the existing scalar predicate subset, not a completed general
+  trait-interface constraint solver. Inherited interface prefixes, general
+  predicates, static overlap proofs and reusable dispatch graph serialization
+  remain required.
+- Changed cleanup record lookup to structural registration instead of subtracting
+  1000. MIR bool/unit/char decisions now use declaration-owned identities at the
+  edited sites. Rust catalog generation and legacy buffer archive encoding are
+  unchanged.
+- Repaired malformed pass-manager declarations and calls; removed the superseded
+  scalar-only initialization helpers after wiring their replacement.
+
+HIR memory checks remain necessary: MIR still lacks complete move/loan events
+and cleanup obligations. The HIR/MIR carrier split and arbitrary sentence
+declarations remain unfinished. All edits in this continuation are uncompiled.
+
 Status: implementation in progress; stopped within the requested time limit. No build
 or tests were run. No tests were added. This is not a claim that the compiler
 builds or that the full architecture migration is complete.

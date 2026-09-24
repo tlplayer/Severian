@@ -2,6 +2,7 @@ import * from "package:syntax/block.sev"
 import source
 import * from "../id/compiler.sev"
 import * from "../statement/statement.sev"
+import * from "../expression/expression.sev"
 import * from "../constraint/model.sev"
 
 
@@ -50,6 +51,119 @@ class SemanticHierarchy:
     blocks: list[BlockLayout] = []
 
 
+def hierarchy_expression(hierarchy: SemanticHierarchy, definition: DefId, expression: Expression, parent: RegionId, sentence: SentenceId):
+    expressions: list[Expression] := []
+    blocks: list[Block] := []
+    match expression.kind:
+        case BlockValue:
+            # The result is evaluated in the body's lexical scope.
+            child = hierarchy_region(hierarchy, definition, body, parent, sentence, expression.span)
+            result_sentence = SentenceId(u32(len(hierarchy.sentences)))
+            hierarchy.sentences.append(SemanticSentence(result_sentence, child, value.span, int(len(body.statements))))
+            hierarchy_expression(hierarchy, definition, value, child, result_sentence)
+            return
+        case Lambda:
+            child = hierarchy_region(hierarchy, definition, Block([ExpressionStatement(body)], span=expression.span), parent, sentence, expression.span)
+            hierarchy.blocks[child.index].kind = BlockKind.Callable
+            return
+        case MatchExpression:
+            expressions = [subject]
+            for arm in arms:
+                pattern ?= arm.pattern
+                if pattern != None:
+                    expressions.append(pattern)
+                blocks.append(arm.body)
+        case MockValue:
+            expressions = calls[:] + results[:] + [fallback]
+        case Ownership:
+            expressions = [value]
+        case AddressOf:
+            expressions = [value]
+        case TypeApplication:
+            expressions = [target]
+        case Member:
+            expressions = [object]
+        case RequiredMember:
+            expressions = [object]
+        case Call:
+            expressions = [callee]
+            for argument in arguments:
+                expressions.append(argument.value)
+        case ResolvedCall:
+            match callee:
+                case FunctionValue:
+                    expressions.append(expression)
+                case Method:
+                    expressions.append(receiver)
+                case _:
+                    expressions = []
+            for argument in arguments:
+                expressions.append(argument.value)
+        case ListLiteral:
+            expressions = elements
+        case ListValue:
+            expressions = elements[:] + [construction, storage]
+        case MapLiteral:
+            expressions = keys[:] + values[:]
+        case Evaluate:
+            expressions = [value, body]
+        case Fallback:
+            expressions = [value, alternative]
+        case ThrowValue:
+            expressions = [value]
+        case ErrorExpectation:
+            expected ?= value
+            compared ?= comparison
+            if expected != None:
+                expressions.append(expected)
+            if compared != None:
+                expressions.append(compared)
+        case Subscript:
+            expressions = [object, index]
+        case Slice:
+            expressions = [object]
+            for optional in [start, stop, step]:
+                bound ?= optional
+                if bound != None:
+                    expressions.append(bound)
+        case IndexReference:
+            expressions = [object, index, access]
+            stored ?= storage
+            if stored != None:
+                expressions.append(stored)
+        case OutcomeValue:
+            expressions = [value]
+        case OutcomeTest:
+            expressions = [value]
+        case OutcomeUnwrap:
+            expressions = [value]
+        case Convert:
+            expressions = [operand]
+        case Unary:
+            expressions = [operand]
+        case Binary:
+            expressions = [left, right]
+        case ComparisonChain:
+            expressions = operands
+        case Conditional:
+            expressions = [condition, then_value, else_value]
+        case Stringify:
+            expressions = [value]
+        case TypeName:
+            expressions = [value]
+        case RecordValue:
+            for field in fields:
+                expressions.append(field.value)
+        case FieldReference:
+            expressions = [object]
+        case _:
+            return
+    for nested in expressions:
+        hierarchy_expression(hierarchy, definition, nested, parent, sentence)
+    for body in blocks:
+        hierarchy_region(hierarchy, definition, body, parent, sentence, expression.span)
+
+
 def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Block, parent: RegionId | None = None, introduced_by: SentenceId | None = None, origin: source.Span | None = None) -> RegionId:
     region = RegionId(u32(len(hierarchy.regions)))
     kind = RegionKind.Callable if parent == None else RegionKind.Lexical
@@ -73,20 +187,26 @@ def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Bloc
         sentence = SentenceId(u32(len(hierarchy.sentences)))
         location: source.Span | None := None
         children: list[Block] := []
+        expressions: list[Expression] := []
         match statement:
             case BindingStatement:
                 location = binding.span
+                expressions = [binding.value]
             case ExpressionStatement:
                 location = expression.span
+                expressions = [expression]
             case If:
                 location = span
                 children = [then_block, else_block]
+                expressions = [condition]
             case While:
                 location = span
                 children = [body]
+                expressions = [condition]
             case ForEach:
                 location = span
                 children = [body]
+                expressions = [iterable]
             case Unsafe:
                 location = span
                 children = [body]
@@ -96,28 +216,46 @@ def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Bloc
             case GrammarApply:
                 location = span
                 children = bodies
+                expressions = operands
             case Match:
                 location = span
+                expressions = [subject]
                 for arm in arms:
                     children.append(arm.body)
+                    pattern ?= arm.pattern
+                    if pattern != None:
+                        expressions.append(pattern)
             case Return:
                 location = span
+                returned ?= value
+                if returned != None:
+                    expressions = [returned]
             case Throw:
                 location = span
+                expressions = [value]
             case Assert:
                 location = span
+                expressions = [condition]
+                detail ?= message
+                if detail != None:
+                    expressions.append(detail)
             case FieldSet:
                 location = span
+                expressions = [target, value]
             case Defer:
                 location = span
+                expressions = [value]
             case Drop:
                 location = span
+                expressions = [value]
             case Break:
                 location = span
             case Continue:
                 location = span
         hierarchy.sentences.append(SemanticSentence(sentence, region, location, ordinal))
         ordinal += 1
+        for expression in expressions:
+            hierarchy_expression(hierarchy, definition, expression, region, sentence)
         for child in children:
             hierarchy_region(hierarchy, definition, child, region, sentence, location)
     return region

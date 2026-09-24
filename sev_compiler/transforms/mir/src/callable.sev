@@ -68,7 +68,7 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
     previous = context.origin
     context.origin = cfg.source_origin(context, expression.span)
     lowered = mir_expression_value(module, context, scope, expression)
-    if len(module.quality_files) > 0 and expression.type_id.index == 1:
+    if len(module.quality_files) > 0 and expression.type_id.index == universal.bool_type_id().index:
         match expression.kind:
             case LiteralValue:
                 # Constants do not represent a runtime coverage decision.
@@ -78,6 +78,7 @@ def mir_expression(module: universal.Module, context: cfg.ExecutionContext, scop
                 measured ?= quality.quality_decision(module, expression.span, "Condition", lowered)
                 if measured != None:
                     cfg.append(context, measured)
+    context.origin = previous
     return lowered
 
 def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: universal.Expression) -> universal.ValueId | diagnostics.Diagnostic:
@@ -101,7 +102,13 @@ def mir_expression_value(module: universal.Module, context: cfg.ExecutionContext
         case BlockValue:
             local = CallableMirScope(scope.bindings[:], scope.loops, scope.update_operands, scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names, scope.error_targets, scope.error_expectations)
             mir_block(module, context, body, local)
-            return mir_expression(module, context, local, value)
+            previous = context.origin
+            layout ?= body.layout
+            if layout != None:
+                context.origin = cfg.source_origin(context, value.span, layout.id)
+            result = mir_expression(module, context, local, value)
+            context.origin = previous
+            return result
         case Evaluate:
             evaluated = mir_expression(module, context, scope, value)
             return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [evaluated], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names, scope.error_targets, scope.error_expectations), body)
@@ -347,7 +354,7 @@ def callable_inline_receiver_value(module: universal.Module, context: cfg.Execut
         return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", span))
     continuation = cfg.block(context)
     result := mir_value(module, function.result_type)
-    if function.result_type.index != 2:
+    if function.result_type.index != universal.unit_type_id().index:
         result = aggregate.parameter(module, context, scope.aggregates, function.result_type, continuation)
     local = CallableMirScope(return_target=continuation, inline_functions=scope.inline_functions[:], aggregates=scope.aggregates)
     local.inline_functions.append(identity)
@@ -385,10 +392,14 @@ def callable_inline_receiver_value(module: universal.Module, context: cfg.Execut
     if body == None:
         return error(diagnostics.Diagnostic("E000230", "receiver borrowing requires a source body", span))
     if body != None:
+        # Inline-only callables never pass through standalone body lowering.
+        # Give each expansion its own source layout before emitting operations;
+        # emitted origins retain that identity even if the source is reused.
+        universal.hierarchy_region(module.hierarchy, function.definition, body, origin=function.span)
         mir_block(module, context, body, local)
     origin = cfg.origin(module, "Return", span)
     if cfg.open(context):
-        if function.result_type.index == 2:
+        if function.result_type.index == universal.unit_type_id().index:
             cfg.fallthrough(context, continuation, origin)
         else:
             cfg.terminate(context, universal.CfgExit.Dead, origin)
@@ -891,7 +902,7 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                 return Nothing
             if name == "cfg.branch" and len(inputs) == 3:
                 condition = semantic_runtime(inputs[0], expression.span)
-                if module.values[condition.index].type_id.index != 1:
+                if module.values[condition.index].type_id.index != universal.bool_type_id().index:
                     return error(diagnostics.Diagnostic("E000231", "CFG branch condition requires bool", expression.span))
                 taken = universal.CfgEdge(semantic_block(inputs[1], expression.span))
                 otherwise = universal.CfgEdge(semantic_block(inputs[2], expression.span))
@@ -934,7 +945,7 @@ def semantic_eval(module: universal.Module, scope: CallableMirScope, frame: Sema
                     # always traps, so this continuation cannot execute.
                     if scope.return_target >= 0:
                         cfg.terminate(frame.context, universal.CfgExit.Jump(universal.CfgEdge(scope.return_target, [])), frame.origin)
-                    elif frame.context.body.return_type.index == 2:
+                    elif frame.context.body.return_type.index == universal.unit_type_id().index:
                         cfg.terminate(frame.context, universal.CfgExit.Finish(None), frame.origin)
                     else:
                         return error(diagnostics.Diagnostic("E000230", "CFG error outcome does not match function boundary", expression.span))
@@ -1135,7 +1146,7 @@ def callable_string_literal(module: universal.Module, context: cfg.ExecutionCont
     buffer = mir_value(module, leaves[0])
     cfg.append(context, universal.Operation.Constant(universal.StringValue(text), buffer))
     count = mir_value(module, universal.i64_type_id())
-    size = len(text.characters()) if storage_types.string_element(type_id, module.records).index == 532 else len(text.bytes())
+    size = len(text.characters()) if storage_types.string_element(type_id, module.records).index == universal.char_type_id().index else len(text.bytes())
     cfg.append(context, universal.Operation.Constant(universal.IntegerValue(string(size)), count))
     result = aggregate.allocate(module, context, scope.aggregates, type_id)
     aggregate.write_values(module, context, scope.aggregates, result, [buffer, count], [0])

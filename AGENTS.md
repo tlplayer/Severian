@@ -9,9 +9,8 @@ sev_rust # Rust compiler
 sev # sev_compiler 
 sev update # Updates to latest version  
 
-#See agent IR
-sev build --emit agent-ir
-
+#Build the package
+sev build 
 #test the current package
 sev test
 ```

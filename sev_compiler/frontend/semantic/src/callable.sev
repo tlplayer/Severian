@@ -2222,7 +2222,7 @@ def callable_raised_value(state: CallableAnalysis, value: universal.Expression, 
 
 
 def callable_has_drop(state: CallableAnalysis, type_id: universal.TypeId) -> bool:
-    index = int(type_id.index) - 1000
+    index = definitions.record_position(state.records, type_id)
     if index < 0 or index >= len(state.records):
         return false
     if len(state.drop_cache) != len(state.records):
@@ -2233,7 +2233,7 @@ def callable_has_drop(state: CallableAnalysis, type_id: universal.TypeId) -> boo
 
 
 def callable_needs_drop(state: borrow CallableAnalysis, type_id: universal.TypeId, ancestors: list[int]) -> bool:
-    index = int(type_id.index) - 1000
+    index = definitions.record_position(state.records, type_id)
     if index >= 0 and index < len(state.records) and index not in ancestors:
         for method in borrow state.records[index].methods:
             if method.name == "drop" or method.name.ends_with(".drop"):
