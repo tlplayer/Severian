@@ -1,6 +1,6 @@
 import universal
 import source
-import * from "../src/imports.sev" as imports
+import * from "../modules/src/imports.sev" as imports
 
 
 test "automatic import selection retains function implementation dependencies":

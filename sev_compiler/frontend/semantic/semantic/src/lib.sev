@@ -1,0 +1,55 @@
+import diagnostics
+import universal
+import * from "callable.sev" as callable
+import * from "definitions.sev" as definitions
+
+
+# Both compiler entries use the same declaration environment and typed body
+# analysis. The former TypeContext-based analyzer was disconnected from the
+# executable type model and silently ignored most source declarations.
+enum AnalysisMode:
+    Build
+    Test
+
+
+class AnalysisContext:
+    mode: AnalysisMode
+    module_name: string
+
+
+def analyze_with_package_functions(
+    module_ast: universal.Module,
+    types: definitions.SemanticDefinitions,
+    context: AnalysisContext,
+    visible: list[universal.FunctionDeclaration],
+    own_ids: list[universal.FunctionId],
+    test_ids: list[universal.FunctionId],
+) -> universal.Program | diagnostics.Diagnostic:
+    include_tests := false
+    match context.mode:
+        case Test:
+            include_tests = true
+        case Build:
+            throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/semantic/src/lib.sev)")
+    typed = callable.analyze_registered_callables(module_ast, include_tests, visible, own_ids, test_ids, types)
+    typed.path = context.module_name
+    return universal.Program([typed])
+
+
+def analyze_with_context(module: universal.Module, types: definitions.SemanticDefinitions, context: AnalysisContext) -> universal.Program | diagnostics.Diagnostic:
+    return analyze_with_package_functions(module, types, context, [], [], [])
+
+
+def analyze(module: universal.Module) -> universal.Program | diagnostics.Diagnostic:
+    return analyze_with_context(module, definitions.SemanticDefinitions(), AnalysisContext(Build, "memory"))
+
+
+def analyze_tests(module: universal.Module) -> universal.Program | diagnostics.Diagnostic:
+    return analyze_with_package_functions(module, definitions.SemanticDefinitions(), AnalysisContext(Test, "memory"), [], [], [])
+
+import * from "macros.sev"
+import * from "callable.sev"
+import * from "definitions.sev"
+
+# Public module interfaces.
+import * from "macros.sev" as macros

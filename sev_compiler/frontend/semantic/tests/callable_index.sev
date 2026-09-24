@@ -1,5 +1,5 @@
 import universal
-import * from "../src/callable_index.sev" as lookup
+import * from "../semantic/src/callable_index.sev" as lookup
 
 
 test "lookup preserves overload order and prelude filtering":

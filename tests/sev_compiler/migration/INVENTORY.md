@@ -4,7 +4,7 @@ The V2 implementation status and package/submodule ownership boundary are tracke
 in [V2-STATUS.md](V2-STATUS.md). The retirement ledger remains conditional; no
 old implementation was removed by the graph foundation.
 
-The executable entry is `sev_compiler/src/main.sev`, through
+The executable entry is `sev_compiler/sev_compiler/src/main.sev`, through
 `boundaries/driver/src/pipeline/source.sev`. The Rust seed builds that entry;
 it must never compile acceptance subjects on its behalf.
 

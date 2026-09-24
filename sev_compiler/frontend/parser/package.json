@@ -7,7 +7,7 @@
   },
   "lib": {
     "name": "parser",
-    "path": "src/lib.sev"
+    "path": "parser/src/lib.sev"
   },
   "dependencies": {
     "sentence": {
@@ -15,7 +15,7 @@
       "path": "../sentence"
     },
     "diagnostics": {
-      "path": "../../diagnostics",
+      "path": "../../syntax/diagnostics",
       "package": "sev-compiler-diagnostics"
     },
     "lexer": {
@@ -36,7 +36,7 @@
     },
     "primitives": {
       "package": "sev-compiler-primitives",
-      "path": "../../primitives"
+      "path": "../../syntax/primitive"
     }
   }
 }

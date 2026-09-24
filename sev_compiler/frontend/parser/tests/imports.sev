@@ -1,4 +1,4 @@
-import * from "../src/lib.sev" as parser
+import * from "../parser/src/lib.sev" as parser
 import lexer
 import source
 import universal

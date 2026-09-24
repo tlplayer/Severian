@@ -1,0 +1,5 @@
+import * from "../../../../src/main.sev" as command
+
+# Both source-driver entry points use the same CLI and package implementation.
+def main():
+    command.main()

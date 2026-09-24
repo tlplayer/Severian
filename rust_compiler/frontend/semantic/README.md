@@ -113,7 +113,7 @@ explicitly request it. Compare counts without compiling function bodies:
 
 ```sh
 cargo run -p severian-driver --example import_counts -- \
-  sev_compiler/package.json sev_compiler/src/main.sev
+  sev_compiler/package.json sev_compiler/sev_compiler/src/main.sev
 ```
 
 `SEVERIAN_PROFILE_ACTIVE=1` also reports request, binding and export counts during

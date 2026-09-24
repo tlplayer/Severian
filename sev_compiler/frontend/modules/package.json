@@ -7,7 +7,7 @@
   },
   "lib": {
     "name": "modules",
-    "path": "src/lib.sev"
+    "path": "modules/src/lib.sev"
   },
   "dependencies": {
     "interface": {
@@ -27,7 +27,7 @@
     },
     "diagnostics": {
       "package": "sev-compiler-diagnostics",
-      "path": "../../diagnostics"
+      "path": "../../syntax/diagnostics"
     },
     "lexer": {
       "package": "sev-compiler-lexer",

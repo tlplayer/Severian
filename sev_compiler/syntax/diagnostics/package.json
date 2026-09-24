@@ -7,11 +7,11 @@
   },
   "lib": {
     "name": "diagnostics",
-    "path": "src/lib.sev"
+    "path": "diagnostics/src/lib.sev"
   },
   "dependencies": {
     "source": {
-      "path": "../frontend/source",
+      "path": "../../frontend/source",
       "package": "sev-compiler-source"
     }
   }

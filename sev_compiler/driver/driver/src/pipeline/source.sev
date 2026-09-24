@@ -1,0 +1,436 @@
+from universal import scalar_declarations as boundary
+import * from "package:mir/mir/src/agent_ir.sev" as agent_ir
+import * from "package:mir/mir/src/semantic_graph.sev" as semantic_graph
+import source
+from source import SourceFile
+import process
+import os
+import package
+import lexer
+import parser
+import universal
+import diagnostics
+from diagnostics import Diagnostic
+from semantic import callable as semantic
+import * from "package:mir/mir/src/callable.sev" as mir
+import * from "package:mlir/mlir/src/emit/callable.sev" as mlir
+import * from "package:mlir/mlir/src/ir/text.sev" as text
+import * from "package:modules/modules/src/source.sev"
+import * from "timing.sev" as timing
+import * from "package_interface.sev" as package_interface
+import * from "mir_archive.sev" as mir_archive
+import * from "package:interface/src/semantic_payload.sev" as semantic_payload
+import * from "package:backend/src/native_mlir.sev" as native
+import * from "quality.sev" as quality
+import * from "editor.sev" as editor
+import * from "prelude_package.sev" as prelude_package
+from semantic import definitions
+
+
+class PreludeSnapshot:
+    root: string
+    owner: int
+    module: universal.Module
+    registry: lexer.SyntaxRegistry
+    files: list[source.SourceFile]
+    prepared: list[semantic.PreludeAnalysis] = []
+
+
+PreludeSnapshots: list[PreludeSnapshot] = []
+
+
+def prepare_prelude(sysroot: string) -> unit | Error:
+    files: list[source.SourceFile] = []
+    subject = source.SourceFile(source.SourceId(0), "/__severian_prelude_snapshot__.sev", "")
+    result ?= compile_source(subject, false, sysroot, files, prepare_only=true)
+    if result is Diagnostic:
+        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "prepare_prelude", subject.path))
+        # Indexed preludes retain source identities and paths, not source text.
+        # Fetch only the source needed to render this diagnostic.
+        location ?= framed.span
+        if location != None:
+            if location.source.index < len(files):
+                original = files[location.source.index]
+                if original.text == "" and os.is_file(original.path):
+                    files[location.source.index] = source.SourceFile(
+                        original.id,
+                        original.path,
+                        package.read_text(original.path),
+                    )
+        throw Error(diagnostics.render(framed, files))
+
+
+def prelude_providers(file: source.SourceFile) -> list[universal.ImportDeclaration] | diagnostics.Diagnostic:
+    input = parser.Parser(lexer.scan_bootstrap(file))
+    result: list[universal.ImportDeclaration] = []
+    parser.parser_separators(input)
+    while not parser.parser_at_simple(input, lexer.TokenKind.Eof):
+        if not parser.parser_at_identifier(input, "import"):
+            return error(diagnostics.diagnostic("E000120", "prelude may only declare source imports"))
+        result.append(parser.parser_import_declaration(input))
+        parser.parser_separators(input)
+    return result
+
+
+def load_input(path: string) -> source.SourceFile | Error:
+    # Normalize the source diagnostic before crossing the driver's Error boundary.
+    result ?= read_source(path)
+    if result is SourceFile:
+        return result
+    if result is Diagnostic:
+        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "load_input", path))
+        throw Error(framed.display())
+    throw Error("could not read source file: " + path)
+
+
+def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysroot: string = ".", emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), files: list[source.SourceFile] = [], interface: list[string] = [], quality_maps: list[string] = [], requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = [], object_outputs: list[string] = [], semantic_outputs: list[string] = []) -> string | Error:
+    result ?= compile_source(input, include_tests, sysroot, files, emit, resolution, interface=interface, quality_maps=quality_maps, requirements=requirements, mir_outputs=mir_outputs, object_outputs=object_outputs, semantic_outputs=semantic_outputs)
+    if result is string:
+        return result
+    if result is Diagnostic:
+        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "compile_to_mlir", input.path))
+        throw Error(diagnostics.render(framed, files))
+    if result is Error:
+        throw Error(result.message)
+    throw Error("source compilation returned no MLIR")
+
+
+def compile_source(input: source.SourceFile, include_tests: bool, sysroot: string, files: list[source.SourceFile], emit: string = "mlir", resolution: package.Resolution = package.Resolution([], [], ""), prepare_only: bool = false, interface: list[string] = [], quality_maps: list[string] = [], prelude_entry: string = "", archive_output: string = "", requirements: boundary.LoweringRequirements = boundary.LoweringRequirements(), mir_outputs: list[list[u8]] = [], object_outputs: list[string] = [], semantic_outputs: list[string] = []) -> string | diagnostics.Diagnostic:
+    timings = timing.begin()
+    registry := lexer.SyntaxRegistry([])
+    working_directory = process.current_directory()
+    if working_directory == "":
+        return error(diagnostics.diagnostic("E000120", "could not resolve the current source directory"))
+    root = normalized_path(sysroot if sysroot.starts_with("/") else working_directory + "/" + sysroot)
+    subject_path = normalized_path(input.path if input.path.starts_with("/") else working_directory + "/" + input.path)
+    subject_loaded := false
+    initializer_namespace := ""
+    parsed := universal.empty_module()
+    reused := false
+    prepared: list[semantic.PreludeAnalysis] := []
+    provider_items := 0
+    source_provider := false
+    if subject_path.starts_with(root + "/sev_compiler/") or subject_path.starts_with(root + "/library/"):
+        original_prelude = read_source(root + "/sev_compiler/universal/prelude.sev")
+        for provider in prelude_providers(original_prelude):
+            match provider.subject:
+                case Locator:
+                    source_provider = source_provider or normalized_path(parent_path(original_prelude.path) + "/" + locator) == subject_path
+                case _:
+                    throw diagnostics.diagnostic("E000120", "unimplemented (sev_compiler/boundaries/driver/src/pipeline/source.sev)")
+    if not prepare_only and len(files) == 0:
+        for snapshot in PreludeSnapshots:
+            eligible := snapshot.root == root and snapshot.owner != process.id() and not source_provider
+            for file in snapshot.files:
+                if file.path == subject_path:
+                    eligible = false
+            if eligible:
+                parsed = snapshot.module
+                registry = snapshot.registry
+                prepared = snapshot.prepared
+                try:
+                    excluded = package.prelude_exclusions(resolution, subject_path)
+                    prelude_package.validate_names(excluded, parsed.reserved_functions)
+                    allowed: list[string] = []
+                    for name in parsed.reserved_functions:
+                        if name not in excluded:
+                            allowed.append(name)
+                    parsed.reserved_functions = allowed
+                    parsed.excluded_functions = excluded
+                    if len(excluded) > 0 or emit in ["agent-ir", "editor", "docs"]:
+                        prepared = []
+                catch failure: Error:
+                    return error(diagnostics.diagnostic("E000120", failure.message))
+                for file in snapshot.files:
+                    files.append(file)
+                reused = true
+                break
+        # Each child consumes one snapshot; the parent is untouched by fork.
+        PreludeSnapshots.clear()
+    if not reused and prelude_entry == "" and len(files) == 0 and not source_provider:
+        try:
+            loaded_prelude = prelude_package.read(root)
+            published ?= loaded_prelude.value
+            if published != None:
+                parsed = published.module
+                registry = published.registry
+                prepared = published.prepared
+                for file in published.files:
+                    files.append(file)
+                reused = true
+                excluded = package.prelude_exclusions(resolution, subject_path)
+                allowed: list[string] = []
+                prelude_package.validate_names(excluded, parsed.reserved_functions)
+                for name in parsed.reserved_functions:
+                    if name not in excluded:
+                        allowed.append(name)
+                parsed.reserved_functions = allowed
+                parsed.excluded_functions = excluded
+                if len(excluded) > 0 or emit in ["agent-ir", "editor", "docs"]:
+                    prepared = []
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000120", failure.message))
+    if not reused:
+        prelude = registered_source(read_source(prelude_entry if prelude_entry != "" else root + "/sev_compiler/universal/prelude.sev"), files)
+        policy = registered_source(read_source(parent_path(prelude_entry) + "/prelude.toml" if prelude_entry != "" else root + "/sev_compiler/universal/prelude.toml"), files)
+        policy_entries = package.parse_document(policy.text)
+        reserved = package.string_array(package.setting(policy_entries, "prelude", "functions", "[]"))
+        excluded: list[string] := []
+        try:
+            excluded = package.prelude_exclusions(resolution, subject_path)
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000120", failure.message))
+        parsed.excluded_functions = excluded
+        for name in reserved:
+            if name not in excluded:
+                parsed.reserved_functions.append(name)
+        providers = prelude_providers(prelude)
+        for provider_import in providers:
+            provider_locator := ""
+            namespace := ""
+            match provider_import.subject:
+                case Locator:
+                    provider_locator = locator
+                case _:
+                    return error(diagnostics.diagnostic("E000120", "prelude providers require relative source imports"))
+            supplied ?= provider_import.alias
+            if supplied != None:
+                namespace = supplied + "."
+            provider_path = import_source(resolution if prelude_entry != "" else package.Resolution([], [], ""), prelude.path, provider_locator, root)
+            selected_name ?= provider_import.source_name
+            if selected_name != None:
+                namespace = "__prelude_" + string(registered_source(read_known_source(provider_path, files), files).id.index) + "."
+            is_subject = provider_path == subject_path
+            if is_subject:
+                initializer_namespace = namespace
+            library = load_source_module(input if is_subject else read_known_source(provider_path, files), namespace, [], is_subject, files, registry, resolution if prelude_entry != "" else package.Resolution([], [], ""), sysroot=root)
+            if selected_name != None:
+                aliases = universal.empty_module()
+                exposed := selected_name
+                if supplied != None:
+                    exposed = supplied
+                append_selected_import(aliases, library, namespace, selected_name, exposed)
+                for item in aliases.items:
+                    library.items.append(item)
+            for item in library.items:
+                match item:
+                    case Function:
+                        provider_function := declaration
+                        if not provider_function.name.contains(".") and provider_function.name not in reserved:
+                            reserved.append(provider_function.name)
+                        provider_function.prelude = true
+                        parsed.items.append(universal.Function(provider_function))
+                        if not provider_function.name.contains(".") and provider_function.name not in excluded and provider_function.name not in parsed.reserved_functions:
+                            parsed.reserved_functions.append(provider_function.name)
+                    case _:
+                        parsed.items.append(item)
+            subject_loaded = subject_loaded or is_subject
+        for name in excluded:
+            if name not in reserved:
+                return error(diagnostics.diagnostic("E000120", "unknown prelude exclusion: " + name))
+        for file in files:
+            parsed.prelude_sources.append(int(file.id.index))
+    for file in files:
+        if file.path.ends_with("/prelude.toml"):
+            policy_entries = package.parse_document(file.text)
+            intrinsics = package.string_array(package.setting(policy_entries, "prelude", "intrinsics", "[]"))
+            for name in parsed.excluded_functions:
+                if name in intrinsics:
+                    return error(diagnostics.diagnostic("E000120", "excluding " + name + " requires extracting compiler intrinsic"))
+    if archive_output != "":
+        try:
+            prelude_package.write(archive_output, parsed, registry, files, resolution, root)
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000120", failure.message))
+    if prepare_only:
+        PreludeSnapshots.clear()
+        PreludeSnapshots.append(PreludeSnapshot(root, process.id(), parsed, registry, files, prepared))
+        timing.finish_stage(timings, "prelude-snapshot")
+        return ""
+    timing.finish_stage(timings, "prelude-reused" if reused else "prelude")
+    provider_items = int(len(parsed.items))
+    # A test subject may itself be a prelude module. Give its declarations a
+    # local scope so tests can exercise them without colliding with the prelude.
+    # A direct provider keeps its original namespace and declaration identity.
+    # Loading it again under a test namespace duplicates scalar extensions and
+    # makes otherwise valid operator implementations ambiguous.
+    if not subject_loaded:
+        initializer_namespace = "__subject." if include_tests else ""
+        application = load_source_module(input, initializer_namespace, [], true, files, registry, resolution, root)
+        for item in application.items:
+            parsed.items.append(item)
+    if emit == "library" and len(resolution.packages) > 0:
+        try:
+            exports = package.string_array(package.setting(resolution.packages[0].manifest.entries, "package", "export", "[]"))
+            semantic_outputs.append(semantic_payload.encode(parsed, registry, files, exports))
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000124", failure.message))
+    # Imported declarations remain available to semantic analysis, but only
+    # the subject, explicit exports and their dependencies are codegen roots.
+    library_sources: list[int] = []
+    if emit != "agent-ir":
+        for file in files:
+            canonical = normalized_path(file.path if file.path.starts_with("/") else working_directory + "/" + file.path)
+            if canonical != subject_path:
+                library_sources.append(int(file.id.index))
+    timing.finish_stage(timings, "subject")
+    captured: list[semantic.PreludeAnalysis] = []
+    if len(prepared) > 0:
+        # Open-world extensions and compile-time test modules require joint
+        # declaration validation. Ordinary consumers extend the prepared state.
+        for item in parsed.items[provider_items:]:
+            match item:
+                case Record:
+                    if declaration.extension:
+                        prepared = []
+                case Test:
+                    if "compiler" in declaration.source_modes:
+                        prepared = []
+                case _:
+                    throw diagnostics.diagnostic("E000120", "unimplemented (sev_compiler/boundaries/driver/src/pipeline/source.sev)")
+    if len(prepared) > 0:
+        parsed.items = parsed.items[provider_items:]
+    typed = semantic.analyze_registered_callables(parsed, include_tests, [], [], [], definitions.SemanticDefinitions(), initializer_namespace, files, prepared, captured)
+    if archive_output != "":
+        try:
+            prelude_package.finish(archive_output, captured)
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000120", failure.message))
+    if emit == "docs":
+        return editor.editor_package_docs(typed, files, resolution)
+    if emit == "editor":
+        return editor.editor_index(typed, files, resolution)
+    debug_enabled := true
+    if len(resolution.packages) > 0:
+        entries = resolution.packages[0].manifest.entries
+        profile = package.text_setting(entries, "build", "profile", "dev")
+        debug_enabled = package.setting(entries, "profile." + profile, "debug-symbols", "false" if profile == "release" else "true") == "true"
+    if debug_enabled:
+        for file in files:
+            selected := file.path == subject_path
+            if len(resolution.packages) > 0:
+                selected = selected or file.path.starts_with(resolution.packages[0].root + "/")
+            if selected:
+                typed.debug_files.append(file)
+    timing.finish_stage(timings, "semantic")
+    export_names: list[string] = []
+    export_symbols: list[string] = []
+    if emit == "library":
+        contract = package_interface.scalar_interface(typed, resolution, export_names, export_symbols)
+        interface.append(contract)
+        if contract == "":
+            export_names.clear()
+            export_symbols.clear()
+        else:
+            for symbol in export_symbols:
+                interface.append(symbol)
+    if include_tests and emit != "agent-ir":
+        quality.prepare_quality(typed, files, resolution)
+    try:
+        mlir.validate_external_contracts(typed)
+    catch failure: Error:
+        return error(diagnostics.diagnostic("E000230", failure.message))
+    lowered = mir.build_callables(typed, library_sources, export_names)
+    graph := universal.DefinitionGraph()
+    planned_objects: list[package.ObjectUnit] = []
+    package_graph := ""
+    try:
+        locations: list[string] = []
+        for file in files:
+            locations.append(file.path)
+        membership = package.semantic_plan(resolution, locations)
+        owners: list[universal.SourceUnit] = []
+        index := 0
+        root_unit := 0
+        for file in files:
+            owners.append(universal.SourceUnit(file.id, membership.sources[index].unit, package.semantic_unit_key(membership.units[membership.sources[index].unit])))
+            if file.path == subject_path:
+                root_unit = membership.sources[index].unit
+            index += 1
+        lowered.hierarchy.libraries = []
+        lowered.hierarchy.modules = []
+        lowered.hierarchy.submodules = []
+        for unit in membership.units:
+            library_key = universal.semantic_key([unit.package.name, unit.package.version, unit.package.source])
+            library_index := -1
+            cursor := 0
+            for library in lowered.hierarchy.libraries:
+                if library.key == library_key:
+                    library_index = cursor
+                cursor += 1
+            if library_index < 0:
+                library_index = int(len(lowered.hierarchy.libraries))
+                lowered.hierarchy.libraries.append(universal.SemanticLibrary(library_key))
+            module_key = universal.semantic_key([library_key, unit.module])
+            module_index := -1
+            cursor = 0
+            for semantic_module in lowered.hierarchy.modules:
+                if semantic_module.key == module_key:
+                    module_index = cursor
+                cursor += 1
+            if module_index < 0:
+                module_index = int(len(lowered.hierarchy.modules))
+                lowered.hierarchy.modules.append(universal.SemanticModule(module_key, library_index))
+            lowered.hierarchy.submodules.append(universal.SemanticSubmodule(package.semantic_unit_key(unit), module_index))
+        graph = semantic_graph.build(lowered, owners, root_unit)
+        planned_objects = package.object_units(membership, root_unit)
+        dependents: list[int] = []
+        required_units: list[int] = []
+        for edge in graph.dependencies:
+            dependents.append(graph.nodes[edge.dependent.index].submodule)
+            required_units.append(graph.nodes[edge.requirement.index].submodule)
+        package_graph = package.semantic_plan_json(membership, dependents, required_units)
+    catch failure: Error:
+        return error(diagnostics.diagnostic("E000230", failure.message))
+    if include_tests and len(typed.quality_files) > 0:
+        quality_maps.append(quality.quality_map(lowered))
+    if emit == "library":
+        mir_outputs.append(mir_archive.encode(lowered))
+    timing.finish_stage(timings, "mir")
+    if emit == "agent-ir":
+        try:
+            result = agent_ir.emit(lowered, files, graph, package_graph)
+            timing.finish_stage(timings, "agent-ir")
+            return result
+        catch failure: Error:
+            return error(diagnostics.diagnostic("E000230", failure.message))
+    for function in borrow lowered.functions:
+        boundary.scalar_requirements(function, requirements)
+    requirements.quality = len(lowered.quality_files) > 0
+    if emit == "library" and len(export_names) > 0:
+        interface[0] = package_interface.scalar_interface(typed, resolution, [], [], requirements.libraries)
+    program = mlir.lower_callables(lowered, emit == "library", export_names, export_symbols)
+    if len(requirements.passes) > 0:
+        program.attributes.append(mlir.MlirNamedAttribute("sev.lowering.passes", mlir.string_array_attribute(requirements.passes)))
+    if len(requirements.libraries) > 0:
+        program.attributes.append(mlir.MlirNamedAttribute("sev.link.libraries", mlir.string_array_attribute(requirements.libraries)))
+    timing.finish_stage(timings, "mlir")
+    layout_query := false
+    for body in lowered.cfg_bodies:
+        for block in body.blocks:
+            for operation in block.operations:
+                match operation:
+                    case TypeLayout:
+                        layout_query = true
+                    case _:
+                        throw diagnostics.diagnostic("E000120", "unimplemented (sev_compiler/boundaries/driver/src/pipeline/source.sev)")
+    if layout_query:
+        layout = native.hosted_layout()
+        program.attributes.append(mlir.MlirNamedAttribute("llvm.data_layout", mlir.string_attribute_value(layout.data_layout)))
+        program.attributes.append(mlir.MlirNamedAttribute("llvm.target_triple", mlir.string_attribute_value(layout.triple)))
+        timing.finish_stage(timings, "target-layout")
+    if emit == "":
+        for object in planned_objects:
+            selected: list[int] = []
+            for function in lowered.functions:
+                for node in graph.nodes:
+                    if universal.same_definition(node.definition, function.definition) and node.submodule in object.submodules:
+                        selected.append(int(function.id.value))
+            if len(selected) == 0 and not object.entry:
+                continue
+            part = mlir.lower_callables(lowered, not object.entry, [], [], selected, true)
+            part.attributes = program.attributes[:]
+            object_outputs.append(text.print_program(part))
+    result = text.print_program(program)
+    timing.finish_stage(timings, "print")
+    return result

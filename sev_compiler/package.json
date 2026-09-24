@@ -19,7 +19,7 @@
   "bin": [
     {
       "name": "sev_compiler",
-      "path": "src/main.sev"
+      "path": "sev_compiler/src/main.sev"
     },
     {
       "name": "compiler-pipeline",
@@ -33,7 +33,7 @@
     },
     "driver": {
       "package": "sev-compiler-driver",
-      "path": "boundaries/driver"
+      "path": "driver"
     },
     "semantic": {
       "package": "sev-compiler-semantic",
@@ -65,7 +65,7 @@
     },
     "diagnostics": {
       "package": "sev-compiler-diagnostics",
-      "path": "diagnostics"
+      "path": "syntax/diagnostics"
     },
     "lexer": {
       "package": "sev-compiler-lexer",

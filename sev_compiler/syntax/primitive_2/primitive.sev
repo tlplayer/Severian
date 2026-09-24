@@ -1,3 +1,0 @@
-# Compatibility export; syntax owns the primitive contract.
-import * from "package:syntax/primitive.sev"
-import * from "error.sev"

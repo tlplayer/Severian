@@ -1,2 +1,0 @@
-# Compatibility export; syntax owns this contract.
-import * from "package:syntax/type/type.sev"

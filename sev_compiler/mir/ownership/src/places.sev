@@ -1,2 +1,0 @@
-# Compatibility export; MIR owns ownership analysis.
-import * from "package:ownership/src/places.sev"

@@ -1,2 +1,0 @@
-# Compatibility import: the ownership library owns the checked plan.
-import * from "package:ownership/src/plan.sev"

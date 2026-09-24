@@ -7,7 +7,7 @@
   },
   "lib": {
     "name": "semantic",
-    "path": "src/lib.sev"
+    "path": "semantic/src/lib.sev"
   },
   "dependencies": {
     "parser": {
@@ -29,7 +29,7 @@
     },
     "diagnostics": {
       "package": "sev-compiler-diagnostics",
-      "path": "../../diagnostics"
+      "path": "../../syntax/diagnostics"
     },
     "source": {
       "path": "../source",
@@ -41,14 +41,14 @@
     },
     "ownership": {
       "package": "sev-compiler-mir-ownership",
-      "path": "../../transforms/mir/ownership"
+      "path": "../../mir/ownership"
     },
     "file": {
       "path": "../../../library/system/file"
     },
     "primitives": {
       "package": "sev-compiler-primitives",
-      "path": "../../primitives"
+      "path": "../../syntax/primitive"
     },
     "syntax": {
       "package": "sev-compiler-syntax",

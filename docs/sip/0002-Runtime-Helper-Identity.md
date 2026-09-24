@@ -151,7 +151,7 @@ unsigned collection ordering or arithmetic overflow.
 
 The source compiler uses source generic specialization and typed buffer operations;
 it has no equivalent symbol-only `runtime_definitions` registry to patch.
-Its [`definitions.sev`](../../sev_compiler/frontend/semantic/src/definitions.sev)
+Its [`definitions.sev`](../../sev_compiler/frontend/semantic/semantic/src/definitions.sev)
 deliberately rejects buffers containing owned values:
 
 ```text

@@ -6,7 +6,7 @@
     "publish": false
   },
   "lib": {
-    "path": "../../../sev_compiler/frontend/semantic/src/callable/semantic_ir_tests.sev"
+    "path": "../../../sev_compiler/frontend/semantic/semantic/src/callable/semantic_ir_tests.sev"
   },
   "dependencies": {
     "diagnostics": {

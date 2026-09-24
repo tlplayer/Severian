@@ -2,7 +2,7 @@ import universal
 import source
 import diagnostics
 import * from "cfg.sev" as cfg
-import * from "ownership.sev" as ownership
+import * from "../../ownership/ownership/src/plan.sev" as ownership
 import * from "aggregate.sev" as aggregate
 from universal import storage as storage_types
 from universal import scalar_declarations as boundary

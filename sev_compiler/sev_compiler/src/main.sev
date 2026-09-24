@@ -1,0 +1,181 @@
+import environment
+import file
+import path
+import process
+import source
+import package
+import os
+import * from "../../boundaries/driver/src/directory_tests.sev" as directory_tests
+import * from "../../boundaries/driver/src/package_command.sev"
+import * from "../../boundaries/driver/src/package_compiler.sev"
+import * from "../../boundaries/driver/src/package_session.sev"
+import * from "../../boundaries/driver/src/pipeline/source.sev" as compiler
+import * from "../../boundaries/backend/src/native_mlir.sev" as backend
+import * from "../../boundaries/driver/src/profiling.sev" as profiling
+
+@c(symbol="exit")
+def exit_status(status: i32)
+
+
+def execute_native_arguments(arguments: list[string]) -> int | Error:
+    if len(arguments) > 1 and arguments[1] == "__precompile-prelude":
+        compile_prelude_package(arguments)
+        return 0
+    if len(arguments) > 1 and arguments[1] == "__compile-unit":
+        compile_package_unit(arguments)
+        return 0
+    if len(arguments) == 3 and arguments[1] == "__verify-mir":
+        module = mir_archive.decode(arguments[2])
+        print("MIR functions:", len(module.functions), "CFG bodies:", len(module.cfg_bodies))
+        return 0
+    command := "run"
+    input := ""
+    output := ""
+    emit := ""
+    binary := ""
+    platform := ""
+    profile := ""
+    alias := ""
+    lint := false
+    coverage := false
+    locked := false
+    library := false
+    development := false
+    sysroot := environment.get("SEVERIAN_SYSROOT", "..")
+    application: list[string] := []
+    cursor := 1
+    if len(arguments) > 1:
+        if arguments[1] in ["build", "run", "test", "check", "lint", "debug", "init", "new", "add", "remove", "update", "resolve", "tree", "metadata", "publish", "install", "clean", "options"]:
+            command = arguments[1]
+            cursor += 1
+    while cursor < len(arguments):
+        argument = arguments[cursor]
+        if argument == "--version":
+            print("sev 0.1.0 (Severian source compiler)")
+            print(package.compiler_build_info())
+            return 0
+        if argument == "--help" or argument == "-h":
+            print("usage: sev_compiler COMMAND [PACKAGE|FILE.sev] [--bin NAME] [--build-profile PROFILE] [--target PLATFORM] [--locked] [--lint] [--emit mlir|agent-ir|editor|docs|plan] [-o OUTPUT] [--sysroot ROOT] [-- ARGS]\ncommands: init new check build test run lint debug add remove update resolve tree metadata publish install clean options\nprofiling: --profile [calls|memory|time] --profile-output DIR")
+            return 0
+        if argument == "--":
+            application = arguments[cursor + 1:]
+            break
+        if argument == "--local":
+            if command != "publish":
+                throw Error("--local requires publish")
+        elif argument == "--lint":
+            lint = true
+        elif argument == "--coverage":
+            coverage = true
+        elif argument == "--locked":
+            locked = true
+        elif argument == "--lib":
+            library = true
+        elif argument == "--dev":
+            development = true
+        elif argument == "--dry-run":
+            emit = "plan"
+        elif argument in ["--emit", "--sysroot", "-o", "--output", "--bin", "--filter", "--target", "--build-profile", "--alias"]:
+            cursor += 1
+            if cursor >= len(arguments):
+                throw Error(argument + " requires a value")
+            if argument == "--emit":
+                emit = arguments[cursor]
+            elif argument == "--sysroot":
+                sysroot = arguments[cursor]
+            elif argument == "--bin" or argument == "--filter":
+                binary = arguments[cursor]
+            elif argument == "--target":
+                platform = arguments[cursor]
+            elif argument == "--build-profile":
+                profile = arguments[cursor]
+            elif argument == "--alias":
+                alias = arguments[cursor]
+            else:
+                output = arguments[cursor]
+        elif argument.starts_with("-"):
+            throw Error("unknown option " + argument)
+        elif input == "":
+            input = argument
+        else:
+            throw Error("unexpected argument " + argument)
+        cursor += 1
+    if emit != "" and emit != "mlir" and emit != "agent-ir" and emit != "plan" and emit != "editor" and emit != "docs":
+        throw Error("unsupported emission stage " + emit)
+    if len(application) > 0 and command != "run":
+        throw Error("application arguments require run")
+    location = input if input != "" else "."
+    if coverage and command != "test":
+        throw Error("--coverage requires test")
+    if coverage and input.ends_with(".sev"):
+        throw Error("--coverage requires a package target")
+    if command == "test" and os.is_dir(location) and not os.is_file(package.manifest_file(location)):
+        return directory_tests.run(location, sysroot, output, profile, platform, binary, emit)
+    if not input.ends_with(".sev"):
+        if command in ["build", "check", "test", "run", "debug", "install"] and emit != "plan":
+            client = process.session_start()
+            if client < 0:
+                throw Error("could not start package compilation session")
+            if client > 0:
+                return serve_package_session(client)
+        status = package_command(command, input, sysroot, binary, platform, profile, emit, output, application, locked, library, alias, development, lint, coverage)
+        if status != 0:
+            return status
+        return 0
+    selected_profile = profile if profile != "" else "dev"
+    selected_platform = platform if platform != "" else "host"
+    emission = "check" if command == "check" and emit == "" else emit
+    print_emission = emit != "" and output == ""
+    if output == "" and emission != "check":
+        name = path.basename(input).replace(".sev", "")
+        if emit != "":
+            output = "package.pkg/build/emitted/" + name + "." + emit
+        elif command == "build":
+            output = "package.pkg/bin/" + name
+        elif command == "test":
+            output = package.temporary("package.pkg/debug/tests", "run-") + "/bin/" + name
+        else:
+            output = package.temporary("package.pkg/cache/run", "run-") + "/bin/" + name
+    unit = package.BuildUnit(0, package.Target(path.basename(input), "binary", input), selected_platform, selected_profile, output, command == "test" or command == "check")
+    package.compile_unit(package.Compiler(process.executable(), sysroot), unit, package.Resolution([], [], ""), emission, source_path=input)
+    if emit != "":
+        if print_emission:
+            print(package.read_text(output))
+        return 0
+    if command == "check":
+        return 0
+
+    if command == "debug":
+        return process.run([environment.get("SEVERIAN_GDB", "gdb"), "--args", output])
+    if command == "build":
+        print("built " + output)
+    else:
+        status = backend.execute_native(output, application)
+        if status != 0:
+            return status
+
+    return 0
+
+
+def main():
+    status := 0
+    try:
+        invocation = profiling.parse(process.arguments())
+        started = profiling.begin(invocation)
+        if invocation.mode == "memory":
+            status = profiling.capture(invocation, started)
+        else:
+            try:
+                status = execute_native_arguments(invocation.arguments)
+            catch failure: Error:
+                process.write_error("error: " + failure.message + "\n")
+                status = 1
+            if process.session_available():
+                # Only the session owner writes the invocation profile.
+                exit_status(i32(status))
+            profiling.finish(invocation, started, status)
+    catch failure: Error:
+        process.write_error("error: " + failure.message + "\n")
+        status = 1
+    if status != 0:
+        exit_status(i32(status))

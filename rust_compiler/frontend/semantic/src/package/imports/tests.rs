@@ -182,9 +182,9 @@ fn export_growth_is_bounded_by_requested_names() {
 #[test]
 fn source_import_loader_and_selection_parse() {
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    for name in ["source.sev", "imports.sev", "../tests/imports.sev"] {
+    for name in ["source.sev", "imports.sev", "../../tests/imports.sev"] {
         let path = repository
-            .join("sev_compiler/frontend/modules/src")
+            .join("sev_compiler/frontend/modules/modules/src")
             .join(name);
         let text = std::fs::read_to_string(&path).unwrap();
         let source = severian_source::SourceFile::virtual_source(&path, text);

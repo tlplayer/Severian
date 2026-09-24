@@ -7,16 +7,16 @@
   },
   "lib": {
     "name": "compile",
-    "path": "src/lib.sev"
+    "path": "compile/src/lib.sev"
   },
   "dependencies": {
     "mir": {
       "package": "sev-compiler-mir",
-      "path": "../transforms/mir"
+      "path": "../mir"
     },
     "mlir": {
       "package": "sev-compiler-mlir",
-      "path": "../transforms/mlir"
+      "path": "../lir/mlir"
     },
     "universal": {
       "package": "sev-compiler-universal",

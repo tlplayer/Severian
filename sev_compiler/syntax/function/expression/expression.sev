@@ -1,9 +1,9 @@
-import * from "package:syntax/primitive.sev"
+import * from "package:syntax/primitive/contract.sev"
 import source
 import * from "../id/compiler.sev"
 import * from "../literal/value.sev"
 import * from "../operator/kind.sev"
-import * from "../type/expression_conversion.sev"
+import * from "../expression_conversion.sev"
 
 
 class Expression:

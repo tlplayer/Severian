@@ -1,0 +1,427 @@
+import * from "package:syntax/syntax/src/lib.sev"
+
+
+class BoolPrimitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(1))
+    id: TypeId = TypeId(1)
+    name: string = "bool"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Boolean
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.BooleanBit
+    literal: LiteralSyntax | None = LiteralSyntax.Boolean
+    default_literal: bool = true
+
+
+def bool_type_id() -> TypeId:
+    return BoolPrimitive().id
+
+
+class UnitPrimitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(2))
+    id: TypeId = TypeId(2)
+    name: string = "unit"
+    size: Size = Size.Fixed(0)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Unit
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.RecordAggregate
+    literal: LiteralSyntax | None = LiteralSyntax.Unit
+    default_literal: bool = true
+
+
+def unit_type_id() -> TypeId:
+    return UnitPrimitive().id
+
+
+class StringPrimitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(3))
+    id: TypeId = TypeId(3)
+    name: string = "string"
+    size: Size = Size.Pointer
+    alignment: Size = Size.Pointer
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.String
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.RecordAggregate
+    literal: LiteralSyntax | None = LiteralSyntax.String
+    default_literal: bool = true
+
+
+def string_type_id() -> TypeId:
+    return StringPrimitive().id
+
+
+class IndexPrimitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(4))
+    id: TypeId = TypeId(4)
+    name: string = "index"
+    size: Size = Size.Pointer
+    alignment: Size = Size.Pointer
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
+    literal: LiteralSyntax | None = LiteralSyntax.Integer
+    default_literal: bool = false
+
+
+def index_type_id() -> TypeId:
+    return IndexPrimitive().id
+
+
+class PointerPrimitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(5))
+    id: TypeId = TypeId(5)
+    name: string = "pointer"
+    size: Size = Size.Pointer
+    alignment: Size = Size.Pointer
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Pointer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
+    literal: LiteralSyntax | None = None
+    default_literal: bool = false
+
+
+def pointer_type_id() -> TypeId:
+    return PointerPrimitive().id
+
+
+class NoneValuePrimitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(6))
+    id: TypeId = TypeId(6)
+    name: string = "None"
+    size: Size = Size.Pointer
+    alignment: Size = Size.Pointer
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Absence
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
+    literal: LiteralSyntax | None = LiteralSyntax.NoneValue
+    default_literal: bool = true
+
+
+def none_type_id() -> TypeId:
+    return NoneValuePrimitive().id
+
+
+class AbsentPrimitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(7))
+    id: TypeId = TypeId(7)
+    name: string = "absent"
+    size: Size = Size.Pointer
+    alignment: Size = Size.Pointer
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Absence
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
+    literal: LiteralSyntax | None = LiteralSyntax.Absent
+    default_literal: bool = true
+
+
+def absent_type_id() -> TypeId:
+    return AbsentPrimitive().id
+
+
+class F32Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(163))
+    id: TypeId = TypeId(163)
+    name: string = "f32"
+    size: Size = Size.Fixed(4)
+    alignment: Size = Size.Fixed(4)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(32)
+    literal: LiteralSyntax | None = LiteralSyntax.Float
+    default_literal: bool = false
+
+
+def f32_type_id() -> TypeId:
+    return F32Primitive().id
+
+
+class F64Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(164))
+    id: TypeId = TypeId(164)
+    name: string = "f64"
+    size: Size = Size.Fixed(8)
+    alignment: Size = Size.Fixed(8)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(64)
+    literal: LiteralSyntax | None = LiteralSyntax.Float
+    default_literal: bool = true
+
+
+def f64_type_id() -> TypeId:
+    return F64Primitive().id
+
+
+class U8Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(108))
+    id: TypeId = TypeId(108)
+    name: string = "u8"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, false)
+    literal: LiteralSyntax | None = LiteralSyntax.Integer
+    default_literal: bool = false
+
+
+def u8_type_id() -> TypeId:
+    return U8Primitive().id
+
+
+class U16Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(516))
+    id: TypeId = TypeId(516)
+    name: string = "u16"
+    size: Size = Size.Fixed(2)
+    alignment: Size = Size.Fixed(2)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, false)
+    literal: LiteralSyntax | None = LiteralSyntax.Integer
+    default_literal: bool = false
+
+
+def u16_type_id() -> TypeId:
+    return U16Primitive().id
+
+
+class U32Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(532))
+    id: TypeId = TypeId(532)
+    name: string = "u32"
+    size: Size = Size.Fixed(4)
+    alignment: Size = Size.Fixed(4)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, false)
+    literal: LiteralSyntax | None = LiteralSyntax.Integer
+    default_literal: bool = false
+
+
+def u32_type_id() -> TypeId:
+    return U32Primitive().id
+
+
+class U64Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(564))
+    id: TypeId = TypeId(564)
+    name: string = "u64"
+    size: Size = Size.Fixed(8)
+    alignment: Size = Size.Fixed(8)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, false)
+    literal: LiteralSyntax | None = LiteralSyntax.Integer
+    default_literal: bool = false
+
+
+def u64_type_id() -> TypeId:
+    return U64Primitive().id
+
+
+class CharPrimitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(132))
+    id: TypeId = TypeId(132)
+    name: string = "char"
+    size: Size = Size.Fixed(4)
+    alignment: Size = Size.Fixed(4)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Char
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, false)
+    literal: LiteralSyntax | None = LiteralSyntax.Character
+    default_literal: bool = true
+
+
+def char_type_id() -> TypeId:
+    return CharPrimitive().id
+
+
+class I8Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(8))
+    id: TypeId = TypeId(8)
+    name: string = "i8"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, true)
+    literal: LiteralSyntax | None = LiteralSyntax.Integer
+    default_literal: bool = false
+
+
+def i8_type_id() -> TypeId:
+    return I8Primitive().id
+
+
+class I16Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(16))
+    id: TypeId = TypeId(16)
+    name: string = "i16"
+    size: Size = Size.Fixed(2)
+    alignment: Size = Size.Fixed(2)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, true)
+    literal: LiteralSyntax | None = LiteralSyntax.Integer
+    default_literal: bool = false
+
+
+def i16_type_id() -> TypeId:
+    return I16Primitive().id
+
+
+class I32Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(32))
+    id: TypeId = TypeId(32)
+    name: string = "i32"
+    size: Size = Size.Fixed(4)
+    alignment: Size = Size.Fixed(4)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, true)
+    literal: LiteralSyntax | None = LiteralSyntax.Integer
+    default_literal: bool = false
+
+
+def i32_type_id() -> TypeId:
+    return I32Primitive().id
+
+
+class I64Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(64))
+    id: TypeId = TypeId(64)
+    name: string = "i64"
+    size: Size = Size.Fixed(8)
+    alignment: Size = Size.Fixed(8)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
+    literal: LiteralSyntax | None = LiteralSyntax.Integer
+    default_literal: bool = true
+
+
+def i64_type_id() -> TypeId:
+    return I64Primitive().id
+
+
+class I128Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(128))
+    id: TypeId = TypeId(128)
+    name: string = "i128"
+    size: Size = Size.Fixed(16)
+    alignment: Size = Size.Fixed(16)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, true)
+    literal: LiteralSyntax | None = LiteralSyntax.Integer
+    default_literal: bool = false
+
+
+def i128_type_id() -> TypeId:
+    return I128Primitive().id
+
+
+class U128Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(628))
+    id: TypeId = TypeId(628)
+    name: string = "u128"
+    size: Size = Size.Fixed(16)
+    alignment: Size = Size.Fixed(16)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, false)
+    literal: LiteralSyntax | None = LiteralSyntax.Integer
+    default_literal: bool = false
+
+
+def u128_type_id() -> TypeId:
+    return U128Primitive().id
+
+
+class F16Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(162))
+    id: TypeId = TypeId(162)
+    name: string = "f16"
+    size: Size = Size.Fixed(2)
+    alignment: Size = Size.Fixed(2)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(16)
+    literal: LiteralSyntax | None = LiteralSyntax.Float
+    default_literal: bool = false
+
+
+def f16_type_id() -> TypeId:
+    return F16Primitive().id
+
+
+class F128Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(168))
+    id: TypeId = TypeId(168)
+    name: string = "f128"
+    size: Size = Size.Fixed(16)
+    alignment: Size = Size.Fixed(16)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(128)
+    literal: LiteralSyntax | None = LiteralSyntax.Float
+    default_literal: bool = false
+
+
+def f128_type_id() -> TypeId:
+    return F128Primitive().id
+
+
+class F8E4M3FnPrimitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(180))
+    id: TypeId = TypeId(180)
+    name: string = "f8e4m3fn"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(8, 4, 3, false)
+    literal: LiteralSyntax | None = LiteralSyntax.Float
+    default_literal: bool = false
+
+
+def f8e4m3fn_type_id() -> TypeId:
+    return F8E4M3FnPrimitive().id
+
+
+class F8E5M2Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(181))
+    id: TypeId = TypeId(181)
+    name: string = "f8e5m2"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(8, 5, 2, true)
+    literal: LiteralSyntax | None = LiteralSyntax.Float
+    default_literal: bool = false
+
+
+def f8e5m2_type_id() -> TypeId:
+    return F8E5M2Primitive().id
+
+
+class BF16Primitive: Primitive
+    identity: PrimitiveId = PrimitiveId(DeclarationId(182))
+    id: TypeId = TypeId(182)
+    name: string = "bf16"
+    size: Size = Size.Fixed(2)
+    alignment: Size = Size.Fixed(2)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.BrainFloatBits(16)
+    literal: LiteralSyntax | None = LiteralSyntax.Float
+    default_literal: bool = false
+
+
+def bf16_type_id() -> TypeId:
+    return BF16Primitive().id
+

@@ -22,7 +22,7 @@ rule: **implement and validate the replacement before removing its predecessor.*
 | Executable CFG already exists | `sev_compiler/universal/cfg/{cfg,block,branch}.sev`, `universal/module/module.sev`, and `transforms/mir/src/callable.sev` store bodies in `Module.cfg_bodies`. Extend these contracts; do not introduce a second executable topology. |
 | MLIR and Agent IR use that path | `sev_compiler/boundaries/driver/src/pipeline/source.sev` calls `mir.build_callables`, then either `agent_ir.emit` or `mlir.lower_callables`. Both inspect the lowered module. Agent IR still needs graph/identity completeness checks. |
 | Universal is shared models, not yet the proposed graph database | `sev_compiler/universal/module/module.sev` has items, functions, types and CFG tables. There is no integrated Library/Submodule/ObjectUnit/constraint graph matching this SIP. |
-| IDs are not yet stable under all proposed moves | `sev_compiler/frontend/semantic/src/definitions.sev::definition_id` uses declaration ordinals; trait registration also uses source index and span start. Merely having `DefId` does not provide file-independent persistent identity. |
+| IDs are not yet stable under all proposed moves | `sev_compiler/frontend/semantic/semantic/src/definitions.sev::definition_id` uses declaration ordinals; trait registration also uses source index and span start. Merely having `DefId` does not provide file-independent persistent identity. |
 | Sentence matching is a partial foundation | `sev_compiler/frontend/sentence/src/lib.sev` has structural filtering and exactly-one matching, but constraint references are strings. Its README explicitly leaves sentence declaration parsing and semantic lowering as integration work. `universal/sentence/sentence.sev` is illustrative syntax, not proof of an active pipeline. |
 | `with` has several existing representations | Generic and field constraints exist in `universal/declaration/{language,function}.sev`; test policies and grammar metadata have other owners. These must converge through typed attachment contracts without changing each construct's meaning. |
 | Scalar descriptor lowering is still active | `frontend/semantic/src/grammar_scalar.sev`, `universal/operator/scalar.sev`, and `transforms/mlir/src/emit/callable.sev` carry `ScalarOperation`. The retirement regex in `tests/sev_compiler/migration.py` does not cover this whole path. |
@@ -251,7 +251,7 @@ duplicate overload keys diagnose; non-ASCII source provenance round-trips.
 `universal/declaration/{language,function}.sev`.
 
 **Add:** `sev_compiler/universal/constraint/model.sev` and
-`sev_compiler/frontend/semantic/src/with.sev`.
+`sev_compiler/frontend/semantic/semantic/src/with.sev`.
 
 Parse an unresolved attachment once, then resolve its interface and typed payload
 in the owning grammar. Replace string-only sentence constraint identities with
@@ -266,12 +266,12 @@ attachments diagnose; ordinary `defer` and test policies retain their semantics.
 
 ### P3 — Constraint solving and ambiguity-preserving dispatch
 
-**Edit:** `sev_compiler/frontend/semantic/src/{callable,definitions}.sev`,
+**Edit:** `sev_compiler/frontend/semantic/semantic/src/{callable,definitions}.sev`,
 `frontend/sentence/src/lib.sev`, `universal/grammar/contracts.sev`,
 `universal/cfg/effects.sev`, `transforms/mir/src/callable.sev`.
 
 **Add:** `sev_compiler/universal/constraint/{graph,proof,dispatch}.sev` and
-`sev_compiler/frontend/semantic/src/constraints.sev`.
+`sev_compiler/frontend/semantic/semantic/src/constraints.sev`.
 
 Start with type/trait facts, integer intervals, static rank and explicit
 prerequisites. Implement three-way proof outcomes and stable candidate-set
@@ -314,7 +314,7 @@ reject. Stage-labelled Agent IR exposes the graph actually used for emission.
 **Edit:** `library/package/interface/src/{model,codec,query,store}.sev`,
 `library/package/metadata/src/{model,codec,validate}.sev`,
 `library/package/src/{interface_metadata,reuse,dependency,pipeline,stages}.sev`,
-`sev_compiler/frontend/modules/src/source.sev`,
+`sev_compiler/frontend/modules/modules/src/source.sev`,
 `sev_compiler/boundaries/interface/src/package_metadata.sev`,
 `sev_compiler/boundaries/driver/src/pipeline/{package_interface,frontend_archive,mir_archive,prelude_package}.sev`,
 `sev_compiler/build/frontend_codec.py`.
@@ -343,7 +343,7 @@ dispatch consumers. Malformed/dangling/version-incompatible interfaces reject.
 `library/package/src/{build,native,cross_native,link,realization,payload}.sev`,
 `sev_compiler/boundaries/driver/src/{package_compiler,package_session}.sev`,
 `sev_compiler/boundaries/driver/src/pipeline/source.sev`,
-`sev_compiler/compile/src/planner.sev`.
+`sev_compiler/compile/compile/src/planner.sev`.
 
 **Add:** `library/package/src/object_units.sev` and
 `sev_compiler/universal/module/realization.sev`.
@@ -401,7 +401,7 @@ tests and provider entry points before removing anything.
 
 | File | Replacement required before purge | Evidence required |
 | --- | --- | --- |
-| `sev_compiler/frontend/semantic/src/grammar_scalar.sev` | General resolved source implementation/constraint selection in P3/P7 | Numeric families, conversions, overflow, comparisons and generic source-body/removal tests pass without its resolver. |
+| `sev_compiler/frontend/semantic/semantic/src/grammar_scalar.sev` | General resolved source implementation/constraint selection in P3/P7 | Numeric families, conversions, overflow, comparisons and generic source-body/removal tests pass without its resolver. |
 | `sev_compiler/universal/operator/scalar.sev` | Typed primitive/backend operation contracts selected by source implementations | No `ScalarOperation` fields, map producers, codecs or backend consumers remain. |
 | `sev_compiler/universal/primitive/numeric/operators.sev` | Real `int`/`float` and family implementations preserving every supported operator | Native primitive, numeric, conversion and generic suites pass; imports/prelude exports moved. Keep neighboring conversion/power files unless separately replaced. |
 | `sev_compiler/boundaries/driver/src/pipeline/mod.sev` | Public Compiler/provider APIs routed to the active source/CFG/ObjectUnit path | All public callers migrated; custom compilation, tests and backend selection preserved. |
@@ -414,12 +414,12 @@ tests and provider entry points before removing anything.
 | Owner | Retire after its replacement gate |
 | --- | --- |
 | `universal/operator/syntax.sev`, `universal/grammar/grammar.sev`, `universal/declaration/language.sev`, `universal/grammar/contracts.sev` under `sev_compiler/` | `scalar_operation`, `scalar_syntax`, `scalar_operations`, descriptor maps/imports and analogous migration-only registrations after P7. Preserve grammar metadata and source implementations. |
-| `sev_compiler/frontend/semantic/src/callable.sev`, `transforms/mlir/src/emit/callable.sev` | Descriptor lookup/emission branches after their source implementation replacement. Both files remain central to the active compiler. |
+| `sev_compiler/frontend/semantic/semantic/src/callable.sev`, `transforms/mlir/src/emit/callable.sev` | Descriptor lookup/emission branches after their source implementation replacement. Both files remain central to the active compiler. |
 | `sev_compiler/universal/module/module.sev::initializer_cfg`, `universal/declaration/function.sev::cfg` | Empty ABI sentinels only after an isolated seed record/list layout regression is fixed and passes without them. Identify the actual Rust layout defect before naming Rust files to delete; the current comments do not locate it. |
 | `sev_compiler/universal/statement/statement.sev::Block.operations` and `Block.lowered_operations` | Old executable storage after planner, ownership, lowering and backend consumers migrate. Keep syntax `Block.statements`. `BasicBlock.operations` is active CFG storage and must remain. |
-| `sev_compiler/compile/src/planner.sev` | Nested-structured-operation walkers, replaced with canonical CFG/provider-region analysis in P6. Keep compile routing and artifact handling. |
+| `sev_compiler/compile/compile/src/planner.sev` | Nested-structured-operation walkers, replaced with canonical CFG/provider-region analysis in P6. Keep compile routing and artifact handling. |
 | `sev_compiler/frontend/ownership/src/{cfg,plan}.sev`, `boundaries/backend/src/lib.sev` | Old block-storage traversal/emission branches after supported ownership/backend behavior moves. Do not delete resource checks or alternate backend support without replacements. |
-| `sev_compiler/frontend/modules/src/source.sev`, `boundaries/driver/src/pipeline/package_interface.sev`, `library/package/src/interface_metadata.sev` | `.sevi`-to-source reconstruction and scalar-only compiler-interface generation after P5 source-free import parity. Keep source loading and foreign ABI adapters that remain necessary. |
+| `sev_compiler/frontend/modules/modules/src/source.sev`, `boundaries/driver/src/pipeline/package_interface.sev`, `library/package/src/interface_metadata.sev` | `.sevi`-to-source reconstruction and scalar-only compiler-interface generation after P5 source-free import parity. Keep source loading and foreign ABI adapters that remain necessary. |
 | `sev_compiler/build/frontend_codec.py`, driver archive modules, `library/package/src/{realization,payload}.sev` | Stale schema fields and legacy reader/writer branches after compatibility gates. Keep archive generation, relocation and cache validation mechanisms. |
 | Generated `package.pkgi/severian/<build-id>/scalar.sev`, `interface.bin`, old frontend/MIR archives and cache receipts | Retire their producers/readers first, then invalidate the corresponding old format namespace. Remove obsolete outputs only from isolated test/build roots for validation; do not blanket-delete user caches or supported historical package formats. |
 

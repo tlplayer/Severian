@@ -1,0 +1,59 @@
+import * from "package:syntax/primitive/contract.sev"
+
+class NumericMatch:
+    end: int
+    syntax: LiteralSyntax
+    matched: bool = true
+    error: string = ""
+
+
+def is_digit(character: string) -> bool:
+    return character in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
+
+# Primitive literal recognition preserves the spelling; semantic selection owns
+# concrete precision and range checking. The lexer supplies source coordinates.
+def scan_number(characters: list[string], start: int) -> NumericMatch:
+    if start < 0 or start >= len(characters):
+        return NumericMatch(start, LiteralSyntax.Integer, false)
+    character = characters[start]
+    cursor := start
+    leading_fraction = character == "." and cursor + 1 < len(characters) and is_digit(characters[cursor + 1])
+    if character == "0" and cursor + 1 < len(characters) and characters[cursor + 1] in ["x", "X"]:
+        cursor += 2
+        digits := 0
+        while cursor < len(characters):
+            digit = characters[cursor]
+            if digit == "_":
+                cursor += 1
+                continue
+            if not is_digit(digit) and digit not in ["a", "b", "c", "d", "e", "f", "A", "B", "C", "D", "E", "F"]:
+                break
+            digits += 1
+            cursor += 1
+        if digits == 0:
+            return NumericMatch(cursor, LiteralSyntax.Integer, true, "hexadecimal literal requires digits")
+        return NumericMatch(cursor, LiteralSyntax.Integer)
+    if is_digit(character) or leading_fraction:
+        cursor += 1
+        while cursor < len(characters) and (is_digit(characters[cursor]) or characters[cursor] == "_"):
+            cursor += 1
+        floating := cursor + 1 < len(characters) and characters[cursor] == "." and is_digit(characters[cursor + 1])
+        if floating:
+            cursor += 1
+            while cursor < len(characters) and (is_digit(characters[cursor]) or characters[cursor] == "_"):
+                cursor += 1
+        if leading_fraction:
+            floating = true
+        if cursor < len(characters) and (characters[cursor] == "e" or characters[cursor] == "E"):
+            floating = true
+            cursor += 1
+            if cursor < len(characters) and (characters[cursor] == "+" or characters[cursor] == "-"):
+                cursor += 1
+            exponent_start = cursor
+            while cursor < len(characters) and is_digit(characters[cursor]):
+                cursor += 1
+            if cursor == exponent_start:
+                return NumericMatch(cursor, LiteralSyntax.Integer, true, "floating exponent requires digits")
+        return NumericMatch(cursor, LiteralSyntax.Float if floating else LiteralSyntax.Integer)
+    return NumericMatch(start, LiteralSyntax.Integer, false)

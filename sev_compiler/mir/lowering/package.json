@@ -7,12 +7,12 @@
   },
   "lib": {
     "name": "lowering",
-    "path": "src/lib.sev"
+    "path": "lowering/src/lib.sev"
   },
   "dependencies": {
     "mir": {
       "package": "sev-compiler-mir",
-      "path": "../mir"
+      "path": ".."
     },
     "universal": {
       "package": "sev-compiler-universal",

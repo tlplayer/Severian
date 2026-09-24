@@ -7,7 +7,7 @@
   },
   "lib": {
     "name": "mlir",
-    "path": "src/lib.sev"
+    "path": "mlir/src/lib.sev"
   },
   "dependencies": {
     "source": {
@@ -23,11 +23,11 @@
     },
     "mir": {
       "package": "sev-compiler-mir",
-      "path": "../mir"
+      "path": "../../mir"
     },
     "ownership": {
       "package": "sev-compiler-mir-ownership",
-      "path": "../mir/ownership"
+      "path": "../../mir/ownership"
     }
   }
 }

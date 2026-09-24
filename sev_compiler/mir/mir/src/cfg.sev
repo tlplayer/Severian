@@ -1,4 +1,4 @@
-import * from "package:ownership/src/cfg.sev" as ownership_cfg
+import * from "package:ownership/ownership/src/cfg.sev" as ownership_cfg
 from universal import availability
 from universal import dominance as graph
 import * from "package:cfg_builder/src/lib.sev"

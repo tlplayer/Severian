@@ -1,7 +1,7 @@
 import * from "package:syntax/block.sev"
 import source
 import * from "../id/compiler.sev"
-import * from "../type/annotation.sev"
+import * from "../annotation.sev"
 import * from "../expression/expression.sev"
 import * from "../operation/operation.sev"
 import * from "../operation/lowered.sev"

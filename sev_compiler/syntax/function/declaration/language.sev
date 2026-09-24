@@ -1,6 +1,6 @@
 import source
 import * from "../id/compiler.sev"
-import * from "../type/annotation.sev"
+import * from "../../annotation.sev"
 import * from "../expression/expression.sev"
 import * from "../operator/kind.sev"
 import * from "../statement/statement.sev"

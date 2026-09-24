@@ -1,0 +1,26 @@
+import * from "../../component/services.sev" as compiler
+
+
+trait TupleSyntax: G:
+    symbol: Y = (
+    form: GrammarForm = GrammarForm.Delimited
+    closing: string = ")"
+    separator: string = ","
+    grouping: bool = true
+
+    def semantic(values: list[Ex]) -> Ex:
+        return compiler.construct(tuple, values)
+
+
+class tuple[...T]:
+    items: ...T
+
+    operator string() -> string:
+        result := "("
+        separator := ""
+        for item in self.items:
+            result = result + separator + string(item)
+            separator = ","
+        if len(self.items) == 1:
+            result = result + ","
+        return result + ")"

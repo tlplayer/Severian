@@ -64,7 +64,7 @@ def main():
         run([SEED, "build"], cwd=ROOT / "sev_compiler")
     string_source = ROOT / "sev_compiler/universal/primitive/string/core.sev"
     io_source = ROOT / "library/system/io/src/text.sev"
-    scalar_tests = ROOT / "sev_compiler/frontend/semantic/src/scalar/tests"
+    scalar_tests = ROOT / "sev_compiler/frontend/semantic/semantic/src/scalar/tests"
     string_import = f'import * from "{os.path.relpath(string_source, ARTIFACTS)}" as utf8\n'
     cases = {
         "generic_identity": "def answer[T](value: T) -> T:\n    return value\nassert(answer(42) == 42)\nassert(answer(2.5) == 2.5)\n",

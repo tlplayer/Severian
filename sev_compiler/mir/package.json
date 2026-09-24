@@ -1,0 +1,34 @@
+{
+  "package": {
+    "name": "sev-compiler-mir",
+    "version": "0.1.0",
+    "edition": "2026",
+    "publish": true
+  },
+  "lib": {
+    "name": "mir",
+    "path": "mir/src/lib.sev"
+  },
+  "dependencies": {
+    "source": {
+      "package": "sev-compiler-source",
+      "path": "../frontend/source"
+    },
+    "diagnostics": {
+      "package": "sev-compiler-diagnostics",
+      "path": "../syntax/diagnostics"
+    },
+    "universal": {
+      "package": "sev-compiler-universal",
+      "path": "../universal"
+    },
+    "ownership": {
+      "package": "sev-compiler-mir-ownership",
+      "path": "ownership"
+    },
+    "cfg_builder": {
+      "package": "sev-compiler-cfg-builder",
+      "path": "cfg"
+    }
+  }
+}

@@ -16,7 +16,7 @@
     },
     "diagnostics": {
       "package": "sev-compiler-diagnostics",
-      "path": "../../diagnostics"
+      "path": "../../syntax/diagnostics"
     }
   }
 }

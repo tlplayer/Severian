@@ -9,7 +9,7 @@ def main():
     if not os.environ.get("SEVERIAN_SKIP_BUILD"):
         run([SEED, "build"], cwd=ROOT / "sev_compiler")
     compiler = ROOT / "sev_compiler/package.pkg/host/dev/bin/sev_compiler"
-    subjects = ROOT / "sev_compiler/frontend/semantic/src/callable/tests"
+    subjects = ROOT / "sev_compiler/frontend/semantic/semantic/src/callable/tests"
     for subject in sorted(subjects.glob("*.sev")):
         if os.environ.get("SEVERIAN_CASE") and subject.stem != os.environ["SEVERIAN_CASE"]:
             continue

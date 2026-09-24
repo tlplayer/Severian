@@ -6,7 +6,7 @@
     "publish": true
   },
   "lib": {
-    "path": "src/lib.sev"
+    "path": "syntax/src/lib.sev"
   },
   "dependencies": {}
 }

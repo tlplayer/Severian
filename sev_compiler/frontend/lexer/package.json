@@ -7,14 +7,14 @@
   },
   "lib": {
     "name": "lexer",
-    "path": "src/lib.sev"
+    "path": "lexer/src/lib.sev"
   },
   "dependencies": {
     "profiling": {
       "path": "../../../library/system/profiling"
     },
     "diagnostics": {
-      "path": "../../diagnostics",
+      "path": "../../syntax/diagnostics",
       "package": "sev-compiler-diagnostics"
     },
     "source": {
@@ -31,7 +31,7 @@
     },
     "primitives": {
       "package": "sev-compiler-primitives",
-      "path": "../../primitives"
+      "path": "../../syntax/primitive"
     }
   }
 }

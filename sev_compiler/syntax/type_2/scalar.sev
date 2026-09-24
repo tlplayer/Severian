@@ -1,2 +1,0 @@
-# Compatibility export; primitives owns the catalog and its identities.
-import * from "package:primitives/src/lib.sev"

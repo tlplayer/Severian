@@ -1,6 +1,6 @@
 import parser
 import lexer
-import * from "../../sev_compiler/frontend/semantic/src/definitions.sev" as definitions
+import * from "../../sev_compiler/frontend/semantic/semantic/src/definitions.sev" as definitions
 import source
 import diagnostics
 from diagnostics import Diagnostic
