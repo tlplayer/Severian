@@ -897,7 +897,7 @@ fn attach_native_location(output: &mut String, start: usize, file: &str, line: u
 }
 
 fn is_ssa_local_type(ty: &LoweredType) -> bool {
-    matches!(ty, LoweredType::Task(_))
+    matches!(ty, LoweredType::Task(_) | LoweredType::Index | LoweredType::MemoryBuffer(_))
 }
 
 fn cfg_local_storage_type(ty: &LoweredType) -> Result<String, MlirError> {
@@ -4060,12 +4060,44 @@ mod tests {
 
     #[test]
     fn memory_buffer_and_index_keep_their_mlir_representations() {
+        use severian_lir::{BasicBlock, BlockId, CfgBody, LocalDecl, LocalId, Place, PlaceBase, Terminator, Value};
         let bytes = LoweredType::MemoryBuffer(Box::new(LoweredType::Integer {
             bits: 8, signed: false,
         }));
-        assert_eq!(mlir_type(&bytes).unwrap(), "memref<?xi8>");
-        assert_eq!(mlir_type(&LoweredType::Index).unwrap(), "index");
-        assert_ne!(mlir_type(&bytes).unwrap(), mlir_type(&LoweredType::Bytes).unwrap());
+        let parameters = vec![bytes.clone(), LoweredType::Index];
+        let module = Module {
+            values: [bytes, LoweredType::Index, LoweredType::Index].into_iter()
+                .enumerate().map(|(id, ty)| Value { id: ValueId(id as u32), ty }).collect(),
+            ..Module::default()
+        };
+        let place = |id| Place { base: PlaceBase::Local(LocalId(id)), projection: Vec::new() };
+        let body = CfgBody {
+            entry: BlockId(0), return_type: LoweredType::Index,
+            locals: parameters.iter().enumerate().map(|(id, ty)| LocalDecl {
+                id: LocalId(id as u32), ty: ty.clone(), mutable: false,
+                argument: true, borrowed: false, span: None,
+            }).collect(),
+            blocks: vec![
+                BasicBlock { id: BlockId(0), execution: None, operations: Vec::new(),
+                    operation_spans: Vec::new(), terminator: Terminator::Goto(BlockId(1)),
+                    terminator_span: None },
+                BasicBlock { id: BlockId(1), execution: None, operations: vec![
+                    Operation::Load { place: place(0), result: ValueId(0) },
+                    Operation::Load { place: place(1), result: ValueId(1) },
+                    Operation::Mlir { mnemonic: "memref.dim".into(), parameters: None,
+                        operands: vec![ValueId(0), ValueId(1)], result: ValueId(2) },
+                ], operation_spans: Vec::new(), terminator: Terminator::Return(Some(ValueId(2))),
+                    terminator_span: None },
+            ],
+        };
+        let mut rendered = "module {\n".to_owned();
+        render_cfg_body_function(&mut rendered, &module, "buffer_length", &parameters, &body).unwrap();
+        rendered.push_str("}\n");
+        assert!(rendered.contains("^bb1(%local0_bb1: memref<?xi8>, %local1_bb1: index)"));
+        assert!(!rendered.contains("llvm.alloca"));
+        verify_artifact(artifact_id(), MlirArtifact {
+            module: rendered, inputs: parameters, outputs: vec![LoweredType::Index],
+        }, &TargetSpec::new("x86_64-unknown-linux")).unwrap();
     }
 
     #[test]

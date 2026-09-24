@@ -1,0 +1,32 @@
+'''
+Storage quantities use bits internally: 1B is eight bits; 0B is zero storage.
+This is a dimensioned size, independent of integer values and element counts.
+This is convenient to avoid pointer[0] which could mean 0 byte offset, or 0 type offset
+- allocate(1024B) requests exactly 1,024 bytes.
+- p[1024B] accesses memory at base + 1024 bytes, regardless of the pointee type.
+- p[10] accesses memory at base + 10 × sizeof(T) for pointer[T].
+For pointer[u32], p[4B] and p[1] therefore address the same location.
+The compiler fix must preserve that distinction by resolving the existing byte primitive
+ and its unit conversions. Treating byte as an alias for u8 or plain int would lose the semantics you intended.
+'''
+class byte:
+    amount: int
+
+    operator string() -> string:
+        return string(self.amount / 8) + "B"
+
+
+    operator ==[G:Equal](other: Self) -> bool:
+        return self.amount == other.amount
+
+
+    operator <[G:Less](other: Self) -> bool:
+        return self.amount < other.amount
+
+
+    operator +[G:Add](other: Self) -> Self:
+        return byte(self.amount + other.amount)
+
+
+    operator /[G:Divide](other: Self) -> int:
+        return self.amount / other.amount
