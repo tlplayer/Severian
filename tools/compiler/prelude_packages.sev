@@ -116,7 +116,7 @@ def stage(root: string, destination: string) -> list[string] | Error:
     for group in groups:
         exports.append("import * from " + package.toml_quote("package:" + group))
     package.write_text(destination + "/prelude/lib.sev", exports.join("\n") + "\n")
-    package.copy_file(root + "/sev_compiler/universal/prelude.toml", destination + "/prelude/prelude.toml")
+    package.copy_file(root + "/library/prelude/prelude.toml", destination + "/prelude/prelude.toml")
     write_manifest(destination, "prelude", version, groups, [])
     graph = package.resolve(package.open(destination + "/prelude"))
     result: list[string] = []

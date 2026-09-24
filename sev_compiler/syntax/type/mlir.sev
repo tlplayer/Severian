@@ -23,7 +23,7 @@ class MlirTypeBinding:
     value: bool = true
     storage: MlirTypeBinding | None = None
 
-    def render(parameters: list[MlirTypeParameter] = []) -> string:
+    def render(parameters: list[MlirTypeParameter] = []) -> string | Error:
         output := ""
         cursor := 0
         characters = spelling.characters()

@@ -1,5 +1,4 @@
 import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import modules
 import * from "../package.sev"
 
 test "program indexes start with stable empty tables":

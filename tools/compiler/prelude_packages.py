@@ -80,7 +80,7 @@ def stage(destination):
     facade = destination/'prelude'
     facade.mkdir(parents=True, exist_ok=True)
     (facade/'lib.sev').write_text(''.join('import * from "package:'+g+'"\n' for g in groups))
-    (facade/'prelude.toml').write_text((ROOT/'sev_compiler/universal/prelude.toml').read_text())
+    (facade/'prelude.toml').write_text((RECIPES/'prelude.toml').read_text())
     dependencies['prelude'] = set(groups)
     for group in dependencies:
         manifest = {

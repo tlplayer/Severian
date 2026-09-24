@@ -3299,6 +3299,30 @@ impl Parser<'_> {
                     span: Span::new(first.span.source, first.span.start, value.span.end),
                     value,
                 })
+            } else if let (ExpressionKind::Member { object, name }, Some(operator)) =
+                (first.kind.clone(), assignment)
+            {
+                // A parsed receiver can include indexing or calls. Preserve it
+                // as an expression instead of restricting targets to name paths.
+                self.next();
+                let right = self.expression(0)?;
+                let value = match operator {
+                    None => right,
+                    Some(operator) => Expression {
+                        span: Span::new(first.span.source, first.span.start, right.span.end),
+                        kind: ExpressionKind::Binary {
+                            operator,
+                            left: Box::new(first.clone()),
+                            right: Box::new(right),
+                        },
+                    },
+                };
+                Ok(Statement::FieldAssignment {
+                    object: *object,
+                    field: name,
+                    span: Span::new(first.span.source, first.span.start, value.span.end),
+                    value,
+                })
             } else if matches!(first.kind, ExpressionKind::Await { .. })
                 && self.take(&TokenKind::Comma).is_some()
             {
@@ -5188,5 +5212,36 @@ fn precedence(operator: BinaryOperator) -> u8 {
         | BinaryOperator::Remainder => 8,
         BinaryOperator::Power => 9,
         _ => 7,
+    }
+}
+
+#[cfg(test)]
+mod assignment_tests {
+    use super::*;
+
+    #[test]
+    fn indexed_receivers_support_field_assignment_and_update() {
+        let source = severian_source::SourceFile::virtual_source(
+            "indexed-fields.sev",
+            "def update():\n    blocks[index].kind = value\n    blocks[index].kind += value\n",
+        );
+        let module = parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &module.items[0] else {
+            panic!("expected a function");
+        };
+        let body = function.body.as_ref().unwrap();
+        assert_eq!(body.len(), 2);
+        for (index, statement) in body.iter().enumerate() {
+            let Statement::FieldAssignment { object, field, value, .. } = statement else {
+                panic!("expected an indexed field assignment");
+            };
+            assert!(matches!(object.kind, ExpressionKind::Index { .. }));
+            assert_eq!(field, "kind");
+            if index == 1 {
+                assert!(matches!(value.kind, ExpressionKind::Binary {
+                    operator: BinaryOperator::Add, ..
+                }));
+            }
+        }
     }
 }

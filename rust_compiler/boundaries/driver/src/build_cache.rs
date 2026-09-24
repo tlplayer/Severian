@@ -109,7 +109,7 @@ fn compile_unit(compiler: &Compiler, source: &Path, output: &Path, root: &Path, 
     let mut roots = declared.into_iter().map(|p| fs::canonicalize(p).map_err(|e| e.to_string())).collect::<Result<BTreeSet<_>, _>>()?;
     if let Some(record) = &previous { roots.extend(record.roots.iter().filter(|p| p.exists()).cloned()); }
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(3).expect("driver repository");
-    for directory in ["rust_compiler/runtime/native", "library/core/memory", "library/system/extern", "sev_compiler/universal"] { roots.insert(repository.join(directory)); }
+    for directory in ["rust_compiler/runtime/native", "library/core/memory", "library/system/extern", "sev_compiler/syntax", "library/prelude"] { roots.insert(repository.join(directory)); }
     let before = snapshot(&configuration, &roots, &output)?;
     let force = std::env::var("SEVERIAN_FORCE_REBUILD").as_deref() == Ok("1");
     if !force && output.is_file() {

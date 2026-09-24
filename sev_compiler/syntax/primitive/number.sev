@@ -1,4 +1,4 @@
-import * from "package:syntax/primitive/contract.sev"
+import * from "contract.sev"
 
 class NumericMatch:
     end: int

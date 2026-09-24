@@ -89,7 +89,7 @@ def emit_native(mlir: string, output: string, optimization: int = 0, debug_symbo
     if memory not in providers:
         providers.append(memory)
     if requirements.quality:
-        provider = sysroot + "/library/package/compile/backend/runtime/quality.c"
+        provider = sysroot + "/library/package/diagnostic/runtime/quality.c"
         if provider not in providers:
             providers.append(provider)
     for index in range(int(len(providers))):
