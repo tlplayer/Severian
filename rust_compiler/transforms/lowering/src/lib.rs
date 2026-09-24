@@ -1136,6 +1136,12 @@ impl CfgLowering<'_> {
     }
 
     fn lower_mir_type(&self, type_id: TypeId) -> Result<LoweredType, LoweringError> {
+        if self.types.resolve_name("index") == Some(type_id) {
+            return Ok(LoweredType::Index);
+        }
+        if let Some(element) = self.types.memory_buffer_element(type_id) {
+            return Ok(LoweredType::MemoryBuffer(Box::new(self.lower_mir_type(element)?)));
+        }
         if severian_universal::is_raw_pointer_type(type_id) {
             return Ok(LoweredType::Bytes);
         }

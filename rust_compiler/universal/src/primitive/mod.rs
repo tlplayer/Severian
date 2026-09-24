@@ -379,6 +379,9 @@ pub fn install_primitives(types: &mut TypeContextBuilder) -> Result<(), TypeErro
 
     install_trait_operators(types, integer, floating, measured);
     install_primitive_operators(types)?;
+    // MLIR indices have their own representation; they are not machine ints.
+    // Append the declaration to preserve the existing primitive identities.
+    types.register_declaration("core.memory.index", "index")?;
     Ok(())
 }
 

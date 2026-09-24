@@ -2271,6 +2271,12 @@ impl Analyzer<'_> {
     }
 
     fn resolve_source_type(&mut self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
+        if let Some(("array", [element])) = annotation.named_parts() {
+            let element = self.resolve_source_type(element)?;
+            return self.types.instantiate_memory_buffer(element).map_err(|error| {
+                Diagnostic::new("E000204", error.to_string(), Some(annotation.span))
+            });
+        }
         if let Some(name) = annotation.simple_name().filter(|name| name.starts_with("source.")) {
             if let Some(definition) = self.types.definitions().find(|definition| definition.path == name) {
                 return Ok(definition.id);
@@ -8474,6 +8480,9 @@ impl Analyzer<'_> {
                     && arguments.len() == 1
                 {
                     let value = self.expression(&arguments[0].value, None)?;
+                    if self.types.memory_buffer_element(value.type_id).is_some() {
+                        return Ok(self.memory_buffer_length(value, ast.span));
+                    }
                     if self.list_elements.contains_key(&value.type_id) {
                         let storage = self.list_storage_expression(value, ast.span);
                         let storage_type = storage.type_id;

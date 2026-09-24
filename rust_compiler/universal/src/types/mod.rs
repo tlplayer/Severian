@@ -76,6 +76,26 @@ pub struct TypeContext {
 }
 
 impl TypeContext {
+    /// Dynamic rank-one storage used by the memory library's MLIR boundary.
+    /// Its identity is separate from lists and fixed-size source arrays.
+    pub fn instantiate_memory_buffer(&mut self, element: TypeId) -> Result<TypeId, TypeError> {
+        let constructor = self.register_source_declaration(
+            "core.memory.buffer", "$buffer", 1,
+        )?;
+        self.instantiate_applied(constructor, vec![element])
+    }
+
+    pub fn memory_buffer_element(&self, ty: TypeId) -> Option<TypeId> {
+        let (constructor, arguments) = self.applied_parts(ty)?;
+        if self.definition(constructor)?.path != "core.memory.buffer" {
+            return None;
+        }
+        match arguments.as_slice() {
+            [element] => Some(*element),
+            _ => None,
+        }
+    }
+
     /// Shared payloads own their fields once; copied handles retain storage.
     pub fn is_storage_glue(&self, function: DefId) -> bool {
         self.destruction.values().chain(self.retention.values()).chain(self.payload_destruction.values()).any(|known| *known == function)

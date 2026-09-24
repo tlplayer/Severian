@@ -1,7 +1,40 @@
 use super::*;
 use severian_ast::DecoratorValue;
+use severian_source::Span;
 
 impl Analyzer<'_> {
+    pub(super) fn memory_buffer_length(&mut self, value: Expression, span: Span) -> Expression {
+        let index = self.types.resolve_name("index").expect("bootstrap defines index");
+        let axis = Expression {
+            id: self.next_id(),
+            type_id: index,
+            kind: ExpressionKind::Literal(LiteralValue::Integer("0".into())),
+            span,
+        };
+        let dimension = self.memory_operation("memref", "dim", vec![value, axis], index, span);
+        let integer = self.types.resolve_name("int").expect("bootstrap defines int");
+        self.memory_operation("arith", "index_cast", vec![dimension], integer, span)
+    }
+
+    fn memory_operation(
+        &mut self, dialect: &str, operation: &str, arguments: Vec<Expression>,
+        result: TypeId, span: Span,
+    ) -> Expression {
+        let attributes = severian_universal::Attrs::from([(
+            severian_universal::MLIR_OPERATION_NAME_ATTRIBUTE,
+            severian_universal::AttrValue::String(format!("{dialect}.{operation}")),
+        )]);
+        Expression {
+            id: self.next_id(), type_id: result, span,
+            kind: ExpressionKind::Call {
+                callee: severian_hir::Callee::Intrinsic {
+                    operation: severian_universal::OpId::named(dialect, operation), attributes,
+                },
+                arguments, evaluation_order: Vec::new(),
+            },
+        }
+    }
+
     /// A typed MLIR declaration is an implementation, not an unresolved
     /// foreign function. Give it a body so ordinary package/object emission
     /// retains the operation under the declaration's stable function identity.
@@ -35,7 +68,20 @@ impl Analyzer<'_> {
                 "" => operation = Some(value.as_str()),
                 "lowering" if value == "convert-vector-to-llvm" => {}
                 "libraries" if value == "mlir_c_runner_utils" => {}
-                "lowering" | "libraries" | "operand_segments" => {
+                "operand_segments" => {
+                    let segments = value.split(',')
+                        .map(|part| part.parse::<i32>().ok().filter(|size| *size >= 0))
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| invalid("MLIR operand segments require nonnegative i32 sizes"))?;
+                    if segments.iter().map(|size| *size as u64).sum::<u64>()
+                        != function.parameters.len() as u64
+                    {
+                        return Err(invalid("MLIR operand segments must cover every parameter"));
+                    }
+                    attributes.push(format!("operandSegmentSizes = array<i32: {}>",
+                        segments.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
+                }
+                "lowering" | "libraries" => {
                     return Err(invalid("unsupported MLIR boundary lowering requirement"));
                 }
                 "callee" => callee = Some(value.clone()),
@@ -129,5 +175,38 @@ impl Analyzer<'_> {
             },
         });
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn memory_allocation_preserves_valid_operand_segments_and_rejects_bad_sizes() {
+        let context = severian_bootstrap::load().unwrap();
+        for (segments, valid) in [
+            ("1,0", true), ("0,1", true), ("2,0", false),
+            ("-1,2", false), ("1,,0", false), ("2147483648", false),
+        ] {
+            let source = severian_source::SourceFile::virtual_source(
+                "allocation.sev",
+                &format!("@mlir(\"memref.alloc\", operand_segments=\"{segments}\")\ndef allocate(count: index) -> array[u8]\n"),
+            );
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            let result = crate::analyze(&ast, &context.types);
+            if !valid {
+                assert!(result.unwrap_err().message.contains("operand segments"));
+                continue;
+            }
+            let program = result.unwrap();
+            let body = program.modules[0].functions[0].body.as_ref().unwrap();
+            let Statement::Return(Some(Expression { kind: ExpressionKind::Call {
+                callee: severian_hir::Callee::Intrinsic { attributes, .. }, ..
+            }, .. })) = &body.statements[0] else { panic!("expected MLIR operation") };
+            let expected = format!("<{{operandSegmentSizes = array<i32: {}>}}>", segments.replace(',', ", "));
+            assert_eq!(attributes.get(&severian_universal::MLIR_OPERATION_PARAMETERS_ATTRIBUTE),
+                Some(&severian_universal::AttrValue::String(expected)));
+        }
     }
 }

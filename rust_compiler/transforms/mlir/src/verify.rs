@@ -784,7 +784,7 @@ fn lowered_type(context: &Context, ty: &LoweredType) -> Result<ffi::MlirType, Ml
                 ffi::mlirTypeParseGet(context.raw, ffi::string_ref("!llvm.ptr"))
             }
             LoweredType::None | LoweredType::Unit => ffi::mlirIntegerTypeGet(context.raw, 8),
-            LoweredType::Tensor { .. } => {
+            LoweredType::Tensor { .. } | LoweredType::Index | LoweredType::MemoryBuffer(_) => {
                 ffi::mlirTypeParseGet(context.raw, ffi::string_ref(&crate::emit::mlir_type(ty)?))
             }
             unsupported => return Err(MlirError::UnsupportedType(unsupported.clone())),

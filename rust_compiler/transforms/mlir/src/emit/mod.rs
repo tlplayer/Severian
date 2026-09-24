@@ -3671,6 +3671,8 @@ fn mlir_float_literal(value: &str) -> String {
 
 pub(crate) fn mlir_type(ty: &LoweredType) -> Result<String, MlirError> {
     Ok(match ty {
+        LoweredType::Index => "index".into(),
+        LoweredType::MemoryBuffer(element) => format!("memref<?x{}>", mlir_type(element)?),
         LoweredType::Integer { bits, .. } => format!("i{bits}"),
         LoweredType::Float {
             format: LoweredFloatFormat::Float8E4M3Fn,
@@ -4054,6 +4056,16 @@ mod tests {
 
     fn artifact_id() -> ArtifactId {
         ArtifactId::for_region(CompiledRegionId::new(0))
+    }
+
+    #[test]
+    fn memory_buffer_and_index_keep_their_mlir_representations() {
+        let bytes = LoweredType::MemoryBuffer(Box::new(LoweredType::Integer {
+            bits: 8, signed: false,
+        }));
+        assert_eq!(mlir_type(&bytes).unwrap(), "memref<?xi8>");
+        assert_eq!(mlir_type(&LoweredType::Index).unwrap(), "index");
+        assert_ne!(mlir_type(&bytes).unwrap(), mlir_type(&LoweredType::Bytes).unwrap());
     }
 
     #[test]

@@ -2229,7 +2229,9 @@ fn validate_explicit_type(
 ) -> Result<(), Diagnostic> {
     match &annotation.kind {
         TypeAnnotationKind::Named { name, arguments } => {
-            if name == "pointer" && arguments.len() <= 1 {
+            if (name == "pointer" && arguments.len() <= 1)
+                || (name == "array" && arguments.len() == 1)
+            {
                 for argument in arguments {
                     validate_explicit_type(argument, module, names, index, types)?;
                 }

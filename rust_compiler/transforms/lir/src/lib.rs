@@ -32,6 +32,8 @@ pub enum LoweredTensorShape {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredType {
+    Index,
+    MemoryBuffer(Box<LoweredType>),
     Integer {
         bits: u16,
         signed: bool,
@@ -55,6 +57,8 @@ pub enum LoweredType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskValueType {
+    Index,
+    MemoryBuffer(Box<LoweredType>),
     Integer {
         bits: u16,
         signed: bool,
@@ -78,6 +82,8 @@ pub enum TaskValueType {
 impl LoweredType {
     pub fn task(self) -> Option<Self> {
         Some(Self::Task(match self {
+            Self::Index => TaskValueType::Index,
+            Self::MemoryBuffer(element) => TaskValueType::MemoryBuffer(element),
             Self::Integer { bits, signed } => TaskValueType::Integer { bits, signed },
             Self::Float { format } => TaskValueType::Float { format },
             Self::Boolean => TaskValueType::Boolean,
@@ -97,6 +103,8 @@ impl LoweredType {
             return None;
         };
         Some(match result {
+            TaskValueType::Index => Self::Index,
+            TaskValueType::MemoryBuffer(element) => Self::MemoryBuffer(element),
             TaskValueType::Integer { bits, signed } => Self::Integer { bits, signed },
             TaskValueType::Float { format } => Self::Float { format },
             TaskValueType::Boolean => Self::Boolean,

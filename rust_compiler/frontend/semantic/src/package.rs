@@ -1099,6 +1099,12 @@ fn resolve_package_type(
     lists: &[PackageList],
     index: &ProgramIndex,
 ) -> Result<TypeId, Diagnostic> {
+    if let Some(("array", [element])) = annotation.named_parts() {
+        let element = resolve_package_type(types, element, module, classes, lists, index)?;
+        return types.instantiate_memory_buffer(element).map_err(|error| {
+            Diagnostic::new("E000204", error.to_string(), Some(annotation.span))
+        });
+    }
     if annotation.simple_name() == Some("pointer") {
         return super::resolve_type_annotation(types, annotation);
     }
@@ -1339,6 +1345,44 @@ fn resolve_package_union_members(
     resolved.sort();
     resolved.dedup();
     Ok((resolved.len() > 1).then_some(resolved))
+}
+
+#[cfg(test)]
+mod memory_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn generic_memory_boundary_resolves_a_view_without_erasing_its_buffer() {
+        let source = severian_source::SourceFile::virtual_source(
+            "memory-boundary.sev",
+            "@mlir(\"memref.extract_aligned_pointer_as_index\")\ndef address[T](value: view array[T]) -> index\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let Item::Function(function) = &ast.items[0] else { panic!("expected boundary") };
+        let mut substitution = GenericSubstitution::new();
+        substitution.insert_type("T".into(), "u8".into());
+        let concrete = specialize_function(function, &substitution);
+        assert!(concrete.parameters[0].immutable_reference);
+        let mut context = severian_bootstrap::load().unwrap();
+        let ty = resolve_package_type(
+            &mut context.types, &concrete.parameters[0].annotation, ModuleId(0),
+            &[], &[], &ProgramIndex::default(),
+        ).unwrap();
+        let byte = context.types.resolve_name("u8").unwrap();
+        assert_eq!(context.types.memory_buffer_element(ty), Some(byte));
+        assert_ne!(ty, crate::list_type_id(byte));
+        assert_ne!(ty, crate::pointer_type_id(byte));
+        let module = severian_ast::Module { items: vec![Item::Function(concrete)] };
+        let (program, types) = crate::analyze_with_context_and_types(
+            &module, &context.types, crate::AnalysisContext {
+                mode: crate::AnalysisMode::Build, module_name: "memory_boundary",
+            },
+        ).unwrap();
+        let parameter = &program.modules[0].functions[0].parameters[0];
+        assert_eq!(types.memory_buffer_element(parameter.contract.ty), Some(byte));
+        assert!(parameter.contract.modifiers.iter().any(|modifier| modifier.name == "view"));
+        severian_mir::build(&program).unwrap();
+    }
 }
 
 fn package_class_for_lookup<'a>(
