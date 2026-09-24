@@ -109,6 +109,8 @@ class FunctionDeclaration:
     semantic_key: string = ""
     dispatch_candidates: list[string] = []
     dispatch_predicates: list[Expression] = []
+    # Artifact location only; declaration identity remains definition/semantic_key.
+    lazy_body: string = ""
 
 
 def resolved_function(

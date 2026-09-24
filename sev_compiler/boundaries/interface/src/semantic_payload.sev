@@ -14,7 +14,9 @@ def item_source(item: universal.Item) -> int:
     match item:
         case Function:
             span ?= declaration.span
-            return int(span.source.index) if span != None else -1
+            if span != None:
+                return int(span.source.index)
+            return -1
         case Trait:
             return int(declaration.span.source.index)
         case Record:

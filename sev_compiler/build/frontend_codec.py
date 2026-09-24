@@ -61,7 +61,7 @@ def exported_sources(entry):
     return seen
 
 
-def generate(root=ROOT, mir=False, interface=False):
+def generate(root=ROOT, mir=False, interface=False, bodies=False):
     models = {}
     inputs = {}
     for ns, paths in [('universal', exported_sources(root/'sev_compiler/universal/src/lib.sev')),
@@ -176,6 +176,8 @@ def generate(root=ROOT, mir=False, interface=False):
         functions.append('\n'.join(encode)+'\n\n\n'+'\n'.join(decode))
 
     contracts = ('universal.Module', 'lexer.SyntaxRegistry', 'list[source.SourceFile]', 'list[string]') if interface else (('universal.Module',) if mir else ('universal.Module', 'lexer.SyntaxRegistry', 'list[source.SourceFile]', 'list[semantic.PreludeAnalysis]'))
+    if bodies:
+        contracts = ('universal.Block',)
     for contract in contracts: ensure(contract)
     body = '\n\n\n'.join(optional_classes + functions)
     schema = hashlib.sha256(body.encode()).hexdigest()
@@ -210,11 +212,38 @@ def archive_count(input: ArchiveInput) -> int | Error:
 
 
 '''
+    if bodies:
+        header += r'''def archive_quote(value: string) -> string:
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r")
+
+
+def archive_unquote(value: string) -> string | Error:
+    output: list[string] = []
+    escaped := false
+    for character in value.characters():
+        part = string(character)
+        if escaped:
+            if part not in ["n", "r", "\\"]:
+                throw Error("invalid body archive escape")
+            output.append("\n" if part == "n" else ("\r" if part == "r" else "\\"))
+            escaped = false
+        elif part == "\\":
+            escaped = true
+        else:
+            output.append(part)
+    if escaped:
+        throw Error("truncated body archive escape")
+    return output.join("")
+
+
+'''
     identity = hashlib.sha256(Path(__file__).read_bytes())
     for name, contents in sorted(inputs.items()):
         identity.update(name.encode() + b'\0' + contents.encode() + b'\0')
     identity.update(b'mir' if mir else b'frontend')
     build = root / ('sev_compiler/boundaries/interface/package.pkg/build' if interface else 'sev_compiler/boundaries/driver/package.pkg/build')
+    if bodies:
+        build = root / 'sev_compiler/frontend/semantic/package.pkg/build'
     output = build / identity.hexdigest() / 'staging/frontend_archive.sev'
     directory = output.with_suffix('')
     semantic = root / 'sev_compiler/frontend/semantic/src'
@@ -251,6 +280,10 @@ def archive_count(input: ArchiveInput) -> int | Error:
         outputs = {Path(str(p).replace('frontend_archive', 'mir_archive')): text.replace('frontend_archive', 'mir_archive') for p, text in outputs.items()}
     if interface:
         outputs = {Path(str(p).replace('frontend_archive', 'semantic_archive')): text.replace('frontend_archive', 'semantic_archive') for p, text in outputs.items()}
+    if bodies:
+        outputs = {Path(str(p).replace('frontend_archive', 'body_archive')): '\n'.join(line for line in text.replace('frontend_archive', 'body_archive').split('\n') if not line.startswith('import * from \"package:semantic/') and line != 'import package') for p, text in outputs.items()}
+    if bodies:
+        outputs = {p: text.replace('package.toml_quote', 'archive_quote').replace('package.unquote', 'archive_unquote') for p, text in outputs.items()}
     build.mkdir(parents=True, exist_ok=True)
     with (build/'frontend_archive.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -268,3 +301,4 @@ if __name__ == '__main__':
     generate()
     generate(mir=True)
     generate(interface=True)
+    generate(bodies=True)

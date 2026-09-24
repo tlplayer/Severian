@@ -10,16 +10,22 @@
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "parser": {"package": "sev-compiler-parser", "path": "../parser"},
-    "lexer": {"package": "sev-compiler-lexer", "path": "../lexer"},
+    "parser": {
+      "package": "sev-compiler-parser",
+      "path": "../parser"
+    },
+    "lexer": {
+      "package": "sev-compiler-lexer",
+      "path": "../lexer"
+    },
     "environment": {
-        "path": "../../../library/system/environment"
+      "path": "../../../library/system/environment"
     },
     "process": {
-        "path": "../../../library/system/process"
+      "path": "../../../library/system/process"
     },
     "time": {
-        "path": "../../../library/core/time"
+      "path": "../../../library/core/time"
     },
     "diagnostics": {
       "package": "sev-compiler-diagnostics",
@@ -36,6 +42,14 @@
     "ownership": {
       "package": "sev-compiler-ownership",
       "path": "../ownership"
+    },
+    "file": {
+      "path": "../../../library/system/file"
     }
+  },
+  "build": {
+    "generators": [
+      "build/body_codec.py"
+    ]
   }
 }

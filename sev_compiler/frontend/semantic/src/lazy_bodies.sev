@@ -1,0 +1,100 @@
+import universal
+import diagnostics
+import file
+import * from "../package.pkg/build/body_archive.sev" as codec
+
+
+class BodyCache:
+    paths: list[string] = []
+    bodies: list[universal.Block] = []
+
+
+def require(required: list[universal.DefId], definition: universal.DefId) -> universal.DefId:
+    for previous in required:
+        if universal.same_definition(previous, definition):
+            return definition
+    required.append(definition)
+    return definition
+
+
+def needed(required: list[universal.DefId], function: universal.FunctionDeclaration) -> bool:
+    if function.lazy_body == "":
+        return true
+    for definition in required:
+        if universal.same_definition(definition, function.definition):
+            return true
+    return false
+
+
+def load(function: universal.FunctionDeclaration, cache: BodyCache) -> universal.FunctionDeclaration | diagnostics.Diagnostic:
+    if function.lazy_body == "":
+        return function
+    index := 0
+    for path in cache.paths:
+        if path == function.lazy_body:
+            function.body = cache.bodies[index]
+            function.lazy_body = ""
+            return function
+        index += 1
+    try:
+        input = codec.ArchiveInput(file.read(function.lazy_body).split("\n"))
+        if codec.take(input) != codec.schema():
+            throw Error("incompatible indexed prelude body")
+        body = codec.get_universal_Block(input)
+        if input.cursor != len(input.lines):
+            throw Error("trailing indexed prelude body data")
+        cache.paths.append(function.lazy_body)
+        cache.bodies.append(body)
+        function.body = body
+        function.lazy_body = ""
+        return function
+    catch failure: Error:
+        return error(diagnostics.Diagnostic("E000124", failure.message, function.span))
+
+
+def store(function: universal.FunctionDeclaration, directory: string, slot: int) -> universal.FunctionDeclaration | Error:
+    body ?= function.body
+    if body == None:
+        return function
+    if body != None:
+        output = [codec.schema()]
+        codec.put_universal_Block(output, body)
+        name = "body-" + string(slot) + ".txt"
+        if file.write(directory + "/" + name, output.join("\n")) != 0:
+            throw Error("could not write indexed prelude body")
+        function.lazy_body = name
+        # An empty body marks a source implementation, not an external symbol.
+        function.body = universal.empty_block()
+    return function
+
+test "unused indexed declarations do not require a body read":
+    function = universal.FunctionDeclaration(
+        name="unused",
+        definition=universal.named_definition("prelude", "function", "unused"),
+        body=universal.empty_block(),
+        lazy_body="/missing-unused-body.txt",
+    )
+    required: list[universal.DefId] = []
+    assert(not lazy.needed(required, function))
+    lazy.require(required, function.definition)
+    assert(lazy.needed(required, function))
+    lazy.require(required, function.definition)
+    assert(len(required) == 1)
+
+
+test "body cache reuses an already decoded declaration":
+    function = universal.FunctionDeclaration(
+        name="cached",
+        body=universal.empty_block(),
+        lazy_body="/missing-cached-body.txt",
+    )
+    cache = lazy.BodyCache([function.lazy_body], [universal.empty_block()])
+    loaded = lazy.load(function, cache)
+    assert(loaded.body != None)
+    assert(loaded.lazy_body == "")
+    assert(len(cache.paths) == 1)
+
+
+test "ordinary application declarations remain semantic roots":
+    function = universal.FunctionDeclaration(name="application")
+    assert(lazy.needed([], function))

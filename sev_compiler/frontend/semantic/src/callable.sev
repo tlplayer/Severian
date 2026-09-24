@@ -26,6 +26,7 @@ import * from "package:ownership/src/effects.sev" as parameter_effects
 import * from "closures.sev" as closures
 import * from "callable_index.sev" as callable_index
 import * from "with.sev" as with_clauses
+import * from "lazy_bodies.sev" as lazy_bodies
 import * from "constraints.sev" as constraints
 
 
@@ -83,6 +84,8 @@ class CallableAnalysis:
     catching_error: bool = false
     mock_functions: list[universal.MockFunction] = []
     attachments: list[universal.WithAttachment] = []
+    required_functions: list[universal.DefId] = []
+    body_cache: lazy_bodies.BodyCache = lazy_bodies.BodyCache()
 
 
 class PreludeAnalysis:
@@ -195,7 +198,7 @@ def callable_closure_call(state: CallableAnalysis, closure: closures.Closure, re
                 parameter.type_id = argument.value.type_id
                 parameter.annotation = universal.named_type(definitions.type_name(parameter.type_id, state.records), [], span)
         parameters.append(parameter)
-    local = CallableAnalysis(functions=state.functions, templates=state.templates, records=state.records, declarations=state.declarations, generics=state.generics, namespace=state.namespace, constants=state.constants, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods)
+    local = CallableAnalysis(functions=state.functions, templates=state.templates, records=state.records, declarations=state.declarations, generics=state.generics, namespace=state.namespace, constants=state.constants, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, required_functions=state.required_functions, body_cache=state.body_cache)
     for parameter in parameters:
         local.names.append(parameter.name)
         local.types.append(parameter.type_id)
@@ -204,7 +207,7 @@ def callable_closure_call(state: CallableAnalysis, closure: closures.Closure, re
     ordinal = len(state.functions) + 1
     function = universal.FunctionDeclaration(name="$lambda$" + string(ordinal), parameters=parameters, parameter_types=local.types, result_type=result.type_id, body=universal.Block([universal.Return(result, span)]), span=span, id=universal.FunctionId(u128(ordinal)), definition=universal.DefId(0, 0, universal.DeclarationId(u128(ordinal))), lookup=state.namespace)
     state.functions.append(function)
-    return universal.Expression(universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution([])), operands), span, type_id=result.type_id)
+    return universal.Expression(universal.ResolvedCall(universal.Direct(lazy_bodies.require(state.required_functions, function.definition), universal.Substitution([])), operands), span, type_id=result.type_id)
 
 
 def callable_require_unsafe(state: CallableAnalysis, span: source.Span) -> unit | diagnostics.Diagnostic:
@@ -519,7 +522,7 @@ def callable_convert(state: CallableAnalysis, operand: universal.Expression, tar
                     arguments = [universal.CallArgument(None, operand, operand.span), universal.CallArgument(None, policy, operand.span)]
                     id = universal.HirId(u32(state.next_id[0]))
                     state.next_id[0] += 1
-                    return universal.Expression(universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution([])), arguments), operand.span, id, target)
+                    return universal.Expression(universal.ResolvedCall(universal.Direct(lazy_bodies.require(state.required_functions, function.definition), universal.Substitution([])), arguments), operand.span, id, target)
     return error(callable_diagnostic("missing generated numeric conversion", operand.span))
 
 
@@ -580,6 +583,7 @@ def callable_select_pack(state: CallableAnalysis, template: universal.FunctionDe
             return CallableSelection(callable_contract_signature(state, function), bound.arguments)
     if callable_specialization_count(state) >= 512:
         return error(callable_diagnostic("bootstrap specialization limit exceeded", template.span))
+    template = lazy_bodies.load(template, state.body_cache)
     instance = universal.FunctionDeclaration(name=instance_name, parameters=concrete, result=template.result, body=packs.pack_body(template, count), span=template.span, lookup=template.lookup, owner_type=template.owner_type, constructor=template.constructor, prelude=template.prelude)
     signature = callable_signature(instance, int(len(state.functions)), state.records, state.declarations)
     signature.pack_specialization = true
@@ -1559,7 +1563,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: universal.Exp
                 resolved = contracted
                 id = universal.HirId(u32(state.next_id[0]))
                 state.next_id[0] += 1
-                kind = universal.ResolvedCall(universal.Direct(method.definition, universal.Substitution(method.type_arguments)), resolved)
+                kind = universal.ResolvedCall(universal.Direct(lazy_bodies.require(state.required_functions, method.definition), universal.Substitution(method.type_arguments)), resolved)
                 result := callable_borrowed_result(method, resolved, universal.Expression(kind, expression.span, id, method.result_type))
                 if expected.index != 0 and expected.index != result.type_id.index:
                     result = callable_success(state, result)
@@ -2296,7 +2300,7 @@ def callable_destroy_fields(state: CallableAnalysis, value: universal.Expression
     # the enclosing destruction operation, after the hook and owned fields.
     for function in state.functions:
         if run_hook and function.name == record.name + ".drop":
-            call = universal.Expression(universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution([])), [universal.CallArgument("self", value, span)]), span, type_id=universal.TypeId(2))
+            call = universal.Expression(universal.ResolvedCall(universal.Direct(lazy_bodies.require(state.required_functions, function.definition), universal.Substitution([])), [universal.CallArgument("self", value, span)]), span, type_id=universal.TypeId(2))
             output.statements.append(universal.ExpressionStatement(call))
             return
     cursor := int(len(record.fields))
@@ -3242,10 +3246,19 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
     record_index := existing_records
     # Conformance can discover provider methods and their specializations.
     # Process those bodies before finalizing the module as well.
-    while index < len(state.functions) or record_index < len(state.records):
+    completed: list[int] = []
+    progress := true
+    while progress:
+        progress = false
+        index = existing_functions
         while index < len(state.functions):
+            position = index
             function := state.functions[index]
             index += 1
+            if position in completed or not lazy_bodies.needed(state.required_functions, function):
+                continue
+            completed.append(position)
+            progress = true
             if function.body != None:
                 function = callable_contract_signature(state, function)
                 function.body = callable_body(state, function)
@@ -3257,6 +3270,7 @@ def analyze_registered_callables(module: universal.Module, include_tests: bool, 
         if record_index < len(state.records):
             record = state.records[record_index]
             record_index += 1
+            progress = true
             callable_record_layout(state.records, record.type_id, [])
             callable_validate_record_arguments(state, record)
             # Function signatures and specializations can introduce outcome and
@@ -3348,7 +3362,7 @@ def callable_owner_method(state: CallableAnalysis, owner: universal.TypeId, memb
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, return_type=state.return_type, catching_error=state.catching_error, mock_functions=state.mock_functions[:], attachments=state.attachments[:])
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, return_type=state.return_type, catching_error=state.catching_error, mock_functions=state.mock_functions[:], attachments=state.attachments[:], required_functions=state.required_functions, body_cache=state.body_cache)
 
 
 def callable_terminates(block: universal.Block) -> bool:
@@ -3434,6 +3448,7 @@ def callable_iteration(state: CallableAnalysis, name: string, iterable: universa
 
 
 def callable_body(state: CallableAnalysis, function: universal.FunctionDeclaration) -> universal.Block | diagnostics.Diagnostic:
+    function = lazy_bodies.load(function, state.body_cache)
     origin ?= function.template
     if origin != None:
         for template in state.generics:
@@ -3443,7 +3458,7 @@ def callable_body(state: CallableAnalysis, function: universal.FunctionDeclarati
                     arguments.append(binding.type_id)
                 state = callable_generic_environment(state, template, arguments)
                 state.contract = None
-    local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods)
+    local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, required_functions=state.required_functions, body_cache=state.body_cache)
     local.destructor = function.name.ends_with(".drop")
     if local.destructor and (function.result_type.index != 2 or len(function.parameters) != 1):
         return error(callable_diagnostic("destructor must take only self and return non-throwing unit", function.span))
@@ -3514,7 +3529,7 @@ def callable_replace_signature(function: universal.FunctionDeclaration, names: l
     annotation ?= function.result
     if annotation != None:
         result = definitions.replace_annotation(annotation, names, replacements)
-    return universal.FunctionDeclaration(decorators=function.decorators, name=function.name, parameters=parameters, result=result, body=function.body, span=function.span, lookup=function.lookup, operator_syntax=function.operator_syntax, owner_type=function.owner_type, definition=function.definition, extension=function.extension, result_mode=function.result_mode, result_origin=function.result_origin, attachments=function.attachments[:], semantic_key=function.semantic_key)
+    return universal.FunctionDeclaration(decorators=function.decorators, name=function.name, parameters=parameters, result=result, body=function.body, span=function.span, lookup=function.lookup, operator_syntax=function.operator_syntax, owner_type=function.owner_type, definition=function.definition, extension=function.extension, result_mode=function.result_mode, result_origin=function.result_origin, attachments=function.attachments[:], semantic_key=function.semantic_key, lazy_body=function.lazy_body, prelude=function.prelude)
 
 
 def callable_register_aliases(state: CallableAnalysis) -> unit | diagnostics.Diagnostic:
@@ -3847,7 +3862,7 @@ def callable_resolved_operator(state: CallableAnalysis, function: universal.Func
         index += 1
     id = universal.HirId(u32(state.next_id[0]))
     state.next_id[0] += 1
-    resolved = universal.Expression(universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution(function.type_arguments)), arguments), span, id, function.result_type)
+    resolved = universal.Expression(universal.ResolvedCall(universal.Direct(lazy_bodies.require(state.required_functions, function.definition), universal.Substitution(function.type_arguments)), arguments), span, id, function.result_type)
     syntax ?= function.operator_syntax
     if syntax != None:
         if syntax.domain == universal.OperatorDomain.GrammarOperator:
@@ -4009,6 +4024,9 @@ def callable_generic_environment(state: CallableAnalysis, function: universal.Fu
 
 def callable_validate_generics(state: CallableAnalysis, module: universal.Module, first: int = 0) -> unit | diagnostics.Diagnostic:
     for function in state.generics[first:]:
+        if function.lazy_body != "":
+            module.generic_functions.append(function)
+            continue
         arguments: list[universal.TypeId] = []
         index := 0
         for name in function.type_parameters:
@@ -5051,7 +5069,7 @@ def callable_regular_call(state: CallableAnalysis, expression: universal.Express
                         contracted.append(universal.CallArgument(parameter.name, value, argument.span))
             resolved = contracted
             result_type = function.result_type
-            kind: universal.ExpressionKind = universal.ResolvedCall(universal.Direct(function.definition, universal.Substitution(function.type_arguments)), resolved)
+            kind: universal.ExpressionKind = universal.ResolvedCall(universal.Direct(lazy_bodies.require(state.required_functions, function.definition), universal.Substitution(function.type_arguments)), resolved)
             id = universal.HirId(u32(state.next_id[0]))
             state.next_id[0] += 1
             if expected.index != 0 and result_type.index != expected.index:

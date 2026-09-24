@@ -4,6 +4,7 @@ import * from "package:mir/src/semantic_graph.sev" as semantic_graph
 import source
 from source import SourceFile
 import process
+import os
 import package
 import lexer
 import parser
@@ -44,6 +45,18 @@ def prepare_prelude(sysroot: string) -> unit | Error:
     result ?= compile_source(subject, false, sysroot, files, prepare_only=true)
     if result is Diagnostic:
         framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "prepare_prelude", subject.path))
+        # Indexed preludes retain source identities and paths, not source text.
+        # Fetch only the source needed to render this diagnostic.
+        location ?= framed.span
+        if location != None:
+            if location.source.index < len(files):
+                original = files[location.source.index]
+                if original.text == "" and os.is_file(original.path):
+                    files[location.source.index] = source.SourceFile(
+                        original.id,
+                        original.path,
+                        package.read_text(original.path),
+                    )
         throw Error(diagnostics.render(framed, files))
 
 
