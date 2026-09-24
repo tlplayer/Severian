@@ -1,6 +1,6 @@
 //! Bootstrap adapter for package.diagnostic.lint's explicit-imports rule.
-//! The package build pipeline calls this before semantic compilation. Wildcard
-//! syntax remains legal; package.json chooses whether/how the lint is enforced.
+//! Optional source-style linting. Successful builds resolve import spelling
+//! afterwards; this lint does not gate semantic compilation.
 use severian_ast::Item;
 use severian_diagnostics::Diagnostic;
 use severian_modules::ModuleGraph;
@@ -16,8 +16,10 @@ pub fn explicit_imports(graph: &ModuleGraph) -> Result<(), Diagnostic> {
         let level=policy.map_or("warning",|p|p.explicit_imports_level.as_str());
         let tokens=severian_lexer::scan(&module.source)?;
         let lines:Vec<_>=module.source.text.lines().collect();
-        for import in module.ast.items.iter().filter_map(|i|if let Item::Import(i)=i {Some(i)} else {None}).filter(|i|i.is_wildcard()) {
+        for import in module.ast.items.iter().filter_map(|i|if let Item::Import(i)=i {Some(i)} else {None}).filter(|i|i.is_wildcard() && i.alias.is_none()) {
             let span=tokens.iter().find(|t| t.span.start>=import.span.start && t.span.end<=import.span.end && matches!(t.kind,severian_lexer::TokenKind::Star)).map_or(import.span,|t|t.span);
+            if tokens.iter().rev().find(|token| token.span.end <= span.start)
+                .is_some_and(|token| matches!(token.kind, severian_lexer::TokenKind::Comma)) { continue; }
             let line=module.source.text[..span.start as usize].bytes().filter(|b|*b==b'\n').count();
             let suppressed=lines.iter().enumerate().any(|(index,text)| {
                 let text=text.trim();

@@ -147,18 +147,6 @@ pub fn resolve_required_imports(
             _ => None,
         }))
         .collect();
-    for module in &graph.modules {
-        if graph
-            .policies
-            .get(&module.package)
-            .is_some_and(|p| !p.narrow_imports)
-        {
-            requirements
-                .entry(module.id)
-                .or_default()
-                .extend(all_names.iter().cloned());
-        }
-    }
     let mut pending = VecDeque::new();
     for (module, names) in &requirements {
         for name in names {
@@ -256,19 +244,6 @@ pub fn resolve_required_imports(
         requests.get_mut(key).unwrap().result = result;
         true
     });
-    let mut namespace_uses = namespace_uses;
-    for module in &graph.modules {
-        if graph
-            .policies
-            .get(&module.package)
-            .is_some_and(|p| !p.narrow_imports)
-        {
-            namespace_uses
-                .entry(module.id)
-                .or_default()
-                .insert("*".to_owned());
-        }
-    }
     let mut plan = ImportPlan {
         namespace_uses,
         requirements,

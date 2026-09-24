@@ -193,7 +193,7 @@ fn source_import_loader_and_selection_parse() {
 }
 
 #[test]
-fn package_opt_out_restores_broad_bindings() {
+fn extensible_import_spelling_still_uses_demand_resolution() {
     let f = Fixture::new(&[
         (
             "package.json",
@@ -210,7 +210,7 @@ fn package_opt_out_restores_broad_bindings() {
     ]);
     let graph = f.graph();
     let (index, _) = narrowed(&graph);
-    assert!(index.modules[&graph.modules.last().unwrap().id]
+    assert!(!index.modules[&graph.modules.last().unwrap().id]
         .scope
         .bindings
         .contains_key("unused"));

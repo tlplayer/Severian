@@ -12,8 +12,8 @@ description = "Require statically verified source types."
 path = "language.explicit-imports"
 group = "Language"
 type = "bool"
-default = "true"
-description = "Automatically narrow wildcard imports to required names before semantic analysis."
+default = "false"
+description = "After successful builds, write used import names without a trailing wildcard; resolution always imports only used names."
 
 [[option]]
 path = "lint.explicit-imports"

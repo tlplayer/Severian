@@ -6,7 +6,7 @@
 mod agent_ir;
 pub mod explicit_imports;
 #[path = "../../../../library/package/diagnostic/lint/bootstrap.rs"]
-mod package_lint;
+pub mod package_lint;
 mod components;
 pub mod config;
 mod pipeline;

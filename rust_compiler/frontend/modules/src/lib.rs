@@ -80,7 +80,7 @@ fn package_policies(packages: &PackageGraph) -> Result<BTreeMap<PackageId, Packa
         let text = std::fs::read_to_string(&path).map_err(|e| Diagnostic::new("E000125", e.to_string(), None))?;
         let value: serde_json::Value = json5::from_str(&text).map_err(|e| Diagnostic::new("E000125", e.to_string(), None))?;
         let narrow_imports = match value.get("language").and_then(|v|v.get("explicit-imports")) {
-            None => true,
+            None => false,
             Some(serde_json::Value::Bool(enabled)) => *enabled,
             _ => return Err(Diagnostic::new("E000125", format!("{}: language.explicit-imports requires a boolean", path.display()), None)),
         };

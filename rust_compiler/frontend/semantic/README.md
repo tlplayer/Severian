@@ -101,11 +101,20 @@ are tracked independently of imported callable stubs.
 Bare enum-variant references retain their enum declaration through the same
 import edges, including reexports.
 
-The package setting `language.explicit-imports` defaults to `true`. Setting it
-to `false` retains broad import visibility for that package. Automatic narrowing
-changes compilation inputs in memory, not source files. The optional
-`sev build --explicit-imports` source edit command consumes the same AST-derived
-requirements. Source wildcard linting is skipped while automatic narrowing is on.
+Wildcard resolution always selects names used by the file, including types,
+constraints, interpolations, test bodies, and downstream re-export requirements.
+After all selected targets build successfully, the Rust CLI writes those names
+back: `import a, b, * from "module.sev"`. The trailing wildcard remains extensible.
+`language.explicit-imports = true` writes `import a, b from "module.sev"` instead;
+the setting defaults to `false` and affects source spelling, not visibility.
+`import * from "module.sev" as namespace` and qualified uses remain unchanged.
+
+The optional `sev build --explicit-imports` command forces the closed form.
+Ordinary `check` and in-process semantic analysis do not rewrite source. Edits
+are limited to the build root, excluding generated files and nested dependency
+packages. Imports with no named uses remain for initialization/extension effects;
+internal comments are preserved. Source edits invalidate the previous byte-based
+cache entry, so the next build may rebuild once with the normalized source.
 
 `import_plan` exposes selections and counts for inspection. `import_index`
 continues to provide the complete public surface for refactoring tools that

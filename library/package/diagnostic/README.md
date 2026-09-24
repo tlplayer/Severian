@@ -46,3 +46,13 @@ from build_flow import
 
 Imports containing internal comments retain their original layout so comments
 are not moved or discarded. Literal text is never formatted as code.
+
+## Resolved import spelling
+
+The Rust bootstrap CLI records used names after a successful build:
+`import a, b, * from "module.sev"`. Set `language.explicit-imports` to `true`
+to write `import a, b from "module.sev"` instead. Both modes resolve only used
+names. Qualified namespace imports (`import * from "module.sev" as helpers`)
+remain unchanged. `sev build --explicit-imports` forces the closed form.
+The self-hosted source loader shares demand-only resolution; automatic source
+rewriting currently runs in the Rust bootstrap CLI.

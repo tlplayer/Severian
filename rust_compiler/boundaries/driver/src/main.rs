@@ -536,6 +536,7 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
     }
     let root = input_root(&input);
     let mut artifacts = Vec::new();
+    let import_sources: Vec<_> = targets.iter().map(|target| target.path().to_path_buf()).collect();
     for target in targets {
         let output = options
             .output
@@ -567,7 +568,31 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
         println!("built {}", output.display());
         artifacts.push(output);
     }
+    record_resolved_imports(&compiler, import_sources, root)?;
     Ok(artifacts)
+}
+
+fn record_resolved_imports(compiler: &Compiler, import_sources: Vec<PathBuf>, root: &Path) -> Result<(), String> {
+    // Rewrite only after every selected target succeeds. Merge target graphs so
+    // shared files retain names required by any target, including test bodies.
+    let mut import_graph = severian_modules::ModuleGraph {
+        modules: Vec::new(), policies: std::collections::BTreeMap::new(),
+    };
+    for source in import_sources {
+        let graph = compiler.resolve_test_graph(&source).map_err(|error| error.to_string())?;
+        import_graph.policies.extend(graph.policies);
+        for module in graph.modules {
+            if !import_graph.modules.iter().any(|known| known.id == module.id) {
+                import_graph.modules.push(module);
+            }
+        }
+    }
+    let imports = severian_driver::explicit_imports::plan_compiled(&import_graph, root)?;
+    severian_driver::explicit_imports::apply(&imports)?;
+    for file in &imports.files {
+        println!("resolved {} imports in {}", file.imports, file.path.display());
+    }
+    Ok(())
 }
 
 fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
@@ -786,9 +811,9 @@ fn run_program(mut options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
         fs::create_dir_all(parent)
             .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
     }
-    compiler(&config, manifest, false)?
-        .compile_file(&binary.path, &output)
-        .map_err(|error| error.to_string())?;
+    let compiler = compiler(&config, manifest, false)?;
+    compiler.compile_file(&binary.path, &output).map_err(|error| error.to_string())?;
+    record_resolved_imports(&compiler, vec![binary.path.clone()], input_root(&input))?;
     let executable = if output.is_absolute() {
         output.clone()
     } else {

@@ -264,13 +264,6 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
         return error(diagnostics.diagnostic("E000124", failure.message))
     required = required_imports[:]
     narrow := import_selection.module_names(parsed, required) and "*" not in required
-    owner := ""
-    configured := true
-    for dependency in resolution.packages:
-        if path.starts_with(dependency.root + "/") and len(dependency.root) > len(owner):
-            owner = dependency.root
-            configured = package.setting(dependency.manifest.entries, "language", "explicit-imports", "true") != "false"
-    narrow = narrow and configured
     if not narrow:
         import_selection.require_name(required, "*")
     result = model_hir_module_module.empty_module()

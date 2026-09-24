@@ -434,7 +434,17 @@ def lint_imports(input: LintSource, entries: list[Entry], output: list[LintDiagn
             elif spelling == "}":
                 grouped -= 1
             elif lexer.token_is_symbol(token, "*"):
-                lint_measure(input, index, 1, 14, entries, output)
+                # Names followed by * are the extensible, resolved import form.
+                # A qualified namespace already identifies its provider.
+                qualified := false
+                following := index + 1
+                while following < len(input.tokens) and input.tokens[following].kind != lexer.TokenKind.Newline:
+                    if string(input.tokens[following]) == "as":
+                        qualified = true
+                    following += 1
+                explicit_members = index > 0 and string(input.tokens[index - 1]) == ","
+                if not qualified and not explicit_members:
+                    lint_measure(input, index, 1, 14, entries, output)
             elif token.kind == lexer.TokenKind.Newline and grouped == 0:
                 # Source-first lists may put the opening brace on the next line.
                 next := index + 1
