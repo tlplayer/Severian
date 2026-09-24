@@ -107,34 +107,6 @@ rendering redesign was made. Existing diagnostic records carry the new context.
    `sentence [...]` declarations are not newly supported by this change. Replacing
    expression/declaration/statement wrappers with the agreed callable/operation/
    sentence contracts remains work.
-6. Finish provenance coverage and presentation. Agent IR includes operation
-   origins, dependency origin records and block layouts/spans; all generated and
-   expression-owned bodies still need to be covered consistently. A dependency edge currently retains
-   its first invocation origin. Compiler callable paths are not runtime stacks.
-7. Review and compile the changed package graph, archive generator and bootstrap
-   integration. No build has validated new contracts or constructor syntax.
-8. Audit tests separately when authorized. No tests were edited or added for this
-   migration, and no test command was run.
-
-## Purge candidates
-
-Do not delete compatibility entries until their remaining import/archive users
-have been migrated and the replacement is known to work.
-
-| Candidate | Replacement / prerequisite |
-| --- | --- |
-| Forwarding files under `universal/id`, `universal/type`, `universal/literal`, `universal/operator` | Syntax and primitive package APIs; migrate remaining import paths first. |
-| `frontend/sentence/src/lib.sev` and its package | `syntax/sentence.sev`; redirect parser and package clients before deletion. |
-| `frontend/ownership` forwarding package and pipeline symlink | `transforms/mir/ownership`; migrate direct source and tooling/test path users first. |
-| `universal/literal/literal.sev` | Incomplete bool-only literal enum; syntax literal payload and primitive construction contracts cover the intended replacement, but audit public callers first. |
-| `universal/sentence/sentence.sev` | Unintegrated sentence sketch; canonical executable composition now lives in syntax. |
-| `FunctionDeclaration.cfg`, `Module.initializer_cfg` | Existing comments identify seed ABI sentinels. Require coordinated bootstrap/archive migration; not safe to delete just because unused. |
-| `Block.operations` / `Block.lowered_operations` | Separate HIR and MIR carriers; migrate legacy lowering/backend users first. |
-| `primitives/catalog.sev` scalar adapter and legacy buffer offsets | Direct descriptor/structural-type consumers plus archive migration. |
-| `transforms/mir/ownership/src/validate/mod.sev` | Older HIR declaration-availability walk; audit remaining direct callers before deletion. |
-| Old semantic ownership state/checks | Complete MIR move/loan/place and cleanup implementation, not just relocation. |
-| `universal/tests/scalar_lookup.sev` | Its expected catalog is stale. Preserve relevant lookup/identity behavior when later revising it. |
-| Success-path `Unimplemented` throws in primitive tests | Manual behavior audit; do not mechanically delete the tests. |
 
 ## Pre-existing source issues observed
 

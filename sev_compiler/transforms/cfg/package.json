@@ -1,25 +1,22 @@
 {
   "package": {
-    "name": "sev-compiler-cfg-builder",
+    "name": "sev-compiler-cfg",
     "version": "0.1.0",
     "edition": "2026",
-    "publish": true
+    "publish": false
   },
   "lib": {
-    "path": "src/lib.sev"
+    "name": "cfg",
+    "path": "cfg.sev"
   },
   "dependencies": {
-    "universal": {
-      "package": "sev-compiler-universal",
-      "path": "../../universal"
+    "source": {
+      "path": "../../frontend/source",
+      "package": "sev-compiler-source"
     },
     "diagnostics": {
       "package": "sev-compiler-diagnostics",
       "path": "../../diagnostics"
-    },
-    "source": {
-      "package": "sev-compiler-source",
-      "path": "../../frontend/source"
     }
   }
 }

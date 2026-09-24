@@ -1,8 +1,0 @@
-import * from "../type/lowered.sev"
-import * from "../id/compiler.sev"
-
-
-class Value:
-    id: ValueId
-    type_id: TypeId = TypeId(0)
-    lowered_type: LoweredType = Unit
