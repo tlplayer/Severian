@@ -1,5 +1,48 @@
 # Compiler recovery implementation — build blocked
 
+Latest graph recovery pass (2026-09-24):
+
+Five-minute follow-up:
+
+- Moved external ABI planning after HIR analysis so XXI receives discovered
+  semantic types instead of the bootstrap's primitive-only context. Boundary
+  diagnostics now identify the source module.
+- Removed duplicate imports in `syntax/function/lowering.sev` and the source
+  parser's `statement/mod.sev`, retaining their existing identical imports.
+- Rebuilt the Rust bootstrap successfully, then reran the compiler build.
+- The latest compiler failure is **E000204: unknown type `LiteralKind`** at
+  `sev_compiler/syntax/function/syntax.sev:202`. That legacy name has no declaration
+  in the source compiler; reconciling it with the existing literal contract is
+  the next source recovery task. The source compiler has not built successfully.
+- The earlier E000701 pointer error is deferred by correct phase ordering, not
+  proven fixed: external ABI validation follows successful HIR analysis now.
+- No tests were run. The current logs remain `/tmp/sev-graph-seed-build.log` and
+  `/tmp/sev-graph-compiler-build.log`.
+
+- Added dependency-free `rust_compiler/graph` infrastructure with generic IDs,
+  requirement-bearing edges, iterative SCC decomposition, a condensed DAG, and
+  fixed-point work queues. Graph construction and semantic facts remain with
+  their respective owners.
+- The Rust module planner now groups mutually dependent packages into resolution
+  units instead of rejecting cross-package declaration cycles. Runtime module
+  initialization cycle checks remain in place.
+- Production HIR name-request resolution uses the shared engine after declaration
+  discovery. The package planner consumes source dependency identities and does
+  not duplicate semantic lookup or body checking.
+- `cargo build -p severian-driver --bin sev` passed.
+- `PATH=/usr/bin:$PATH package.pkg/debug/sev build sev_compiler --bin sev_compiler`
+  passed the former E000128 gate for `syntax <-> primitives`, then failed with
+  `E000701: invalid external interface declaration: UnknownType("pointer")`.
+  Full source compiler recovery is still incomplete. Logs are
+  `/tmp/sev-graph-seed-build.log` and `/tmp/sev-graph-compiler-build.log`.
+- No tests were run in this pass. The shared engine has two inline regressions
+  added before the request to focus exclusively on the compiler build.
+- This pass integrates the Rust bootstrap's semantic and package layers; source
+  compiler block discovery and artifact planning remain separate follow-up work.
+
+The historical checkpoints below describe earlier failures; E000128 is no longer
+the current blocker.
+
 The latest six-minute recovery pass moved the quality provider into
 `library/package/diagnostic/runtime/quality.c`, repaired bootstrap paths, and
 rebuilt the Rust seed successfully. The source compiler remains build blocked;

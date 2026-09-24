@@ -14,7 +14,6 @@ import diagnostics
 from diagnostics import Diagnostic
 import source
 import * from "../../../../../syntax/function/syntax.sev"
-import * from "../../../../../syntax/function/syntax.sev"
 
 def formatted_string_expression(value: string, span: source.Span, syntaxes: list[model_syntax_function_syntax.OperatorSyntax], lexical_rules: list[model_syntax_function_function.RecordDeclaration] = []) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     rules: list[lexer.SourceLexicalRule] = []

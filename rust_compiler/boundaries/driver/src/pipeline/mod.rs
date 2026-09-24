@@ -758,20 +758,9 @@ impl Compiler {
             .map(|module| module.package)
             .expect("a resolved module graph contains its root");
         let mut sources = Vec::new();
-        let mut external = Vec::new();
         for module in &mut graph.modules {
             let source = module.source.clone();
             module.ast = with_core_prelude(&module.ast, &self.context.types)?;
-            external.push(
-                severian_xxi::resolve(
-                    &module.ast,
-                    &self.context.types,
-                    &severian_abi::AbiTarget::derive(&self.target),
-                )
-                .map_err(|error| {
-                    CompileError::Diagnostic(Diagnostic::new("E000701", error.to_string(), None))
-                })?,
-            );
             sources.push(source);
         }
         let mut typed = severian_semantic::analyze_package_with_context(
@@ -784,6 +773,20 @@ impl Compiler {
         .map_err(|diagnostic| {
             CompileError::Diagnostic(diagnostic.with_sources(sources.iter().cloned()))
         })?;
+        // Source declarations and cyclic name requests are resolved before ABI
+        // planning. A boundary consumes semantic types; it cannot discover them
+        // by consulting the bootstrap's primitive-only context.
+        let external = graph.modules.iter().map(|module| {
+            severian_xxi::resolve(
+                &module.ast,
+                &typed.types,
+                &severian_abi::AbiTarget::derive(&self.target),
+            ).map_err(|error| CompileError::Diagnostic(Diagnostic::new(
+                "E000701",
+                format!("{}: {error}", module.path.display()),
+                None,
+            ).with_source(module.source.clone())))
+        }).collect::<Result<Vec<_>, _>>()?;
         for ((module, source_module), resolved) in typed
             .hir
             .modules

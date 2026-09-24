@@ -11,6 +11,7 @@ members = [
 
     # CompileType dispatch and custom compiler integration
     "rust_compiler/compile",
+    "rust_compiler/graph",
     "library/compute/tensor/compiler",
 
     # Language bootstrap
@@ -72,6 +73,7 @@ branches_sharing_code = "warn"
 # authoritative and fail closed for every new production dependency.
 [workspace.metadata.architecture.packages]
 severian-source = "source"
+severian-graph = "semantic"
 severian-diagnostics = "diagnostics"
 severian-lexer = "syntax"
 severian-ast = "syntax"
@@ -105,6 +107,7 @@ severian-tensor-compiler = "library_compiler"
 
 [workspace.metadata.architecture.allow]
 severian-source = []
+severian-graph = []
 severian-diagnostics = ["severian-source"]
 severian-lexer = ["severian-diagnostics", "severian-source"]
 severian-ast = ["severian-source"]
@@ -115,6 +118,7 @@ severian-parser = [
     "severian-source",
 ]
 severian-modules = [
+    "severian-graph",
     "severian-ast",
     "severian-diagnostics",
     "severian-lexer",
@@ -137,6 +141,7 @@ severian-runtime = ["severian-fusion"]
 severian-compile-protocol = []
 severian-hir = ["severian-source", "severian-universal"]
 severian-semantic = [
+    "severian-graph",
     "severian-ast",
     "severian-diagnostics",
     "severian-hir",

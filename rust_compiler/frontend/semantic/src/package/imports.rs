@@ -224,20 +224,19 @@ pub fn resolve_required_imports(
         }
         requests.insert(key, request);
     }
-    let mut dependents: BTreeMap<Key, Vec<Key>> = BTreeMap::new();
-    for (key, request) in &requests {
-        for (dependency, _, _) in &request.dependencies {
-            dependents
-                .entry(dependency.clone())
-                .or_default()
-                .push(key.clone());
-        }
-    }
-    let mut queue: VecDeque<_> = requests.keys().cloned().collect();
-    let mut queued: BTreeSet<_> = queue.iter().cloned().collect();
-    while let Some(key) = queue.pop_front() {
-        queued.remove(&key);
-        let request = &requests[&key];
+    // HIR owns the name-request graph and the join of semantic resolutions.
+    // Package scheduling uses the same engine with package IDs and no symbols.
+    let dependencies = severian_graph::Graph::new(
+        requests.keys().cloned().collect(),
+        requests.iter().flat_map(|(key, request)| request.dependencies.iter().map(move |(target, _, _)| {
+            severian_graph::Dependency {
+                source: key.clone(), target: target.clone(),
+                requirement: severian_graph::Requirement::Symbol,
+            }
+        })).collect(),
+    ).expect("discovery registers every name request before resolution");
+    severian_graph::resolve_graph(&dependencies, |key| {
+        let request = &requests[key];
         let mut merged = ExportMap::new();
         if let Some(base) = &request.base {
             merged.insert(key.1.clone(), base.clone());
@@ -253,16 +252,10 @@ pub fn resolve_required_imports(
             }
         }
         let result = merged.remove(&key.1);
-        if result == request.result {
-            continue;
-        }
-        requests.get_mut(&key).unwrap().result = result;
-        for consumer in dependents.get(&key).into_iter().flatten() {
-            if queued.insert(consumer.clone()) {
-                queue.push_back(consumer.clone());
-            }
-        }
-    }
+        if result == request.result { return false; }
+        requests.get_mut(key).unwrap().result = result;
+        true
+    });
     let mut namespace_uses = namespace_uses;
     for module in &graph.modules {
         if graph

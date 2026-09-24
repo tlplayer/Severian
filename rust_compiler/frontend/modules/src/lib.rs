@@ -37,60 +37,38 @@ pub struct PackagePolicy {
     pub explicit_imports_level: String,
 }
 
-/// Collapse source-import edges to package edges. Distinct files in one package
-/// may form cycles; a path back into another package may not. Checking only
-/// cycles between source files misses A/a -> B/b -> A/c.
-pub fn package_order(graph: &ModuleGraph) -> Result<Vec<PackageId>, Diagnostic> {
-    let modules: BTreeMap<_,_> = graph.modules.iter().map(|m|(m.id,m)).collect();
-    let mut edges: BTreeMap<PackageId, BTreeMap<PackageId, (&ResolvedModule, severian_source::Span)>> = BTreeMap::new();
-    for module in &graph.modules {
-        edges.entry(module.package).or_default();
-        for import in &module.imports {
-            let target = modules[&import.module];
-            if module.package != target.package {
-                edges.entry(module.package).or_default().entry(target.package).or_insert((module,import.span));
-            }
-        }
-    }
-    fn visit<'a>(package: PackageId,
-        edges: &BTreeMap<PackageId, BTreeMap<PackageId, (&'a ResolvedModule, severian_source::Span)>>,
-        active: &mut Vec<PackageId>, done: &mut BTreeSet<PackageId>, order: &mut Vec<PackageId>,
-        graph: &ModuleGraph,
-    ) -> Result<(), Diagnostic> {
-        if done.contains(&package) { return Ok(()); }
-        active.push(package);
-        for (target,(module,span)) in &edges[&package] {
-            if let Some(start) = active.iter().position(|p|p==target) {
-                let names = active[start..].iter().chain(std::iter::once(target)).map(|p| {
-                    graph.policies.get(p).map(|policy|policy.library.display().to_string())
-                        .unwrap_or_else(|| format!("package {}",p.0))
-                }).collect::<Vec<_>>();
-                return Err(Diagnostic::new("E000128",format!("package import cycle: {}; cycles are permitted only between modules of the same package",names.join(" -> ")),Some(*span)).with_source(module.source.clone()));
-            }
-            visit(*target,edges,active,done,order,graph)?;
-        }
-        active.pop(); done.insert(package); order.push(package);
-        Ok(())
-    }
-    let mut order=Vec::new(); let mut done=BTreeSet::new();
-    // Disconnected compiler-provided registries are not the requested root.
-    // Visit them before the root so a stable package sort preserves the root
-    // contract instead of selecting whichever registry has the largest ID.
+/// Package planning groups declaration cycles; semantic analysis resolves the
+/// combined declaration environment before checking bodies or producing MIR.
+pub fn package_resolution_units(graph: &ModuleGraph) -> Result<Vec<Vec<PackageId>>, Diagnostic> {
+    use severian_graph::{Dependency, Graph, Requirement};
+    let modules: BTreeMap<_, _> = graph.modules.iter().map(|module| (module.id, module)).collect();
     let root = graph.modules.last().map(|module| module.package);
-    for package in edges.keys().filter(|package| Some(**package) != root) {
-        visit(*package,&edges,&mut Vec::new(),&mut done,&mut order,graph)?;
+    let mut nodes: Vec<_> = graph.modules.iter().map(|module| module.package).collect::<BTreeSet<_>>().into_iter().collect();
+    nodes.sort_by_key(|package| (Some(*package) == root, *package));
+    let mut edges = Vec::new();
+    for module in &graph.modules {
+        for import in &module.imports {
+            let target = modules.get(&import.module).ok_or_else(|| Diagnostic::new("E000128", "import refers to an undiscovered module", Some(import.span)))?;
+            let edge = Dependency { source: module.package, target: target.package, requirement: Requirement::Declaration };
+            if module.package != target.package && !edges.contains(&edge) { edges.push(edge); }
+        }
     }
-    if let Some(root) = root {
-        visit(root,&edges,&mut Vec::new(),&mut done,&mut order,graph)?;
-    }
-    Ok(order)
+    let dependencies = Graph::new(nodes, edges).map_err(|message| Diagnostic::new("E000128", message, None))?;
+    Ok(dependencies.condensation().0)
+}
+
+/// Compatibility view. Compilation scheduling retains SCC units below.
+pub fn package_order(graph: &ModuleGraph) -> Result<Vec<PackageId>, Diagnostic> {
+    Ok(package_resolution_units(graph)?.into_iter().flatten().collect())
 }
 
 pub fn order_packages(graph: &mut ModuleGraph) -> Result<(), Diagnostic> {
-    let order = package_order(graph)?;
-    let positions: BTreeMap<_,_> = order.into_iter().enumerate().map(|(i,p)|(p,i)).collect();
-    // Stable sort retains each package's existing module initialization order.
-    graph.modules.sort_by_key(|m|positions[&m.package]);
+    let units = package_resolution_units(graph)?;
+    let positions: BTreeMap<_, _> = units.into_iter().enumerate()
+        .flat_map(|(unit, members)| members.into_iter().map(move |member| (member, unit))).collect();
+    // Preserve discovery/initialization order inside a mutually dependent unit,
+    // including the requested root. Never impose an order inside an SCC.
+    graph.modules.sort_by_key(|module| positions[&module.package]);
     Ok(())
 }
 

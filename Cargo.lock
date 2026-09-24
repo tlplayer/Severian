@@ -745,6 +745,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "severian-graph"
+version = "0.1.0"
+
+[[package]]
 name = "severian-health"
 version = "0.1.0"
 dependencies = [
@@ -822,6 +826,7 @@ dependencies = [
  "serde_json",
  "severian-ast",
  "severian-diagnostics",
+ "severian-graph",
  "severian-lexer",
  "severian-parser",
  "severian-source",
@@ -863,6 +868,7 @@ dependencies = [
  "severian-ast",
  "severian-bootstrap",
  "severian-diagnostics",
+ "severian-graph",
  "severian-hir",
  "severian-lexer",
  "severian-mir",
