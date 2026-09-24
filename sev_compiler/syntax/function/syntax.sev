@@ -1,6 +1,7 @@
 import source
 import * from "../symbol/symbol.sev"
 import * from "../type/annotation.sev"
+import LiteralSyntax from "../primitive/contract.sev"
 import * from "function.sev"
 import * from "../sentence/sentence.sev"
 import * from "lowering.sev"
@@ -199,7 +200,7 @@ enum TypeConstraint:
     Known(type_id: TypeId)
 
     # Operand may begin as an unresolved literal of this kind.
-    Literal(kind: LiteralKind)
+    Literal(kind: LiteralSyntax)
 
 
 class OperatorSignature:

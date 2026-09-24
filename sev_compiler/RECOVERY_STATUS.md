@@ -1,5 +1,25 @@
 # Compiler recovery implementation — build blocked
 
+Latest five-minute build pass (2026-09-24, 22:58–23:03 UTC):
+
+- `cargo build -p severian-driver --bin sev` passed.
+- Replaced the undefined `LiteralKind` payload with the existing `LiteralSyntax`
+  contract and imported its owner directly in `syntax/function/syntax.sev`.
+- The full compiler rebuild passed that error and stopped at E000202 in
+  `syntax/primitive/literal.sev`: the optional syntax value was not narrowed
+  after an early `continue`. Literal-provider matching and construction now
+  occur inside the explicit `syntax != None` branch.
+- The smaller primitives package build completed its semantic stage, but was
+  limited to 30 seconds. A complete compiler build after the second change
+  remains unverified. No tests were run.
+- Logs: `/tmp/sev-five-minute-bootstrap.log`,
+  `/tmp/sev-five-minute-compiler-fixed.log`, and
+  `/tmp/sev-five-minute-primitives-build.log`.
+- Retry the full build with
+  `PATH=/usr/bin:$PATH package.pkg/debug/sev build sev_compiler --bin sev_compiler`.
+  To run the existing package tests:
+  `PATH=/usr/bin:$PATH package.pkg/debug/sev test sev_compiler/syntax/primitive`.
+
 Latest graph recovery pass (2026-09-24):
 
 Five-minute follow-up:

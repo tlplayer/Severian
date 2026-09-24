@@ -79,17 +79,16 @@ def literal_from_providers(kind: TokenKind, spelling: string, span: Span, provid
         if not descriptor.default_literal:
             continue
         syntax ?= descriptor.literal
-        if syntax == None:
-            continue
-        matched := false
-        for binding in descriptor.literal_bindings:
-            if binding.token == kind and (len(binding.spellings) == 0 or spelling in binding.spellings):
-                matched = true
-        if matched:
-            if selected != None:
-                throw Error("ambiguous literal providers in the consuming block")
-            family = descriptor.literal_family if descriptor.literal_family != "" else descriptor.name
-            selected = LiteralConstruction(descriptor.identity, descriptor.id, family, syntax, normalize_literal(syntax, spelling), span)
+        if syntax != None:
+            matched := false
+            for binding in descriptor.literal_bindings:
+                if binding.token == kind and (len(binding.spellings) == 0 or spelling in binding.spellings):
+                    matched = true
+            if matched:
+                if selected != None:
+                    throw Error("ambiguous literal providers in the consuming block")
+                family = descriptor.literal_family if descriptor.literal_family != "" else descriptor.name
+                selected = LiteralConstruction(descriptor.identity, descriptor.id, family, syntax, normalize_literal(syntax, spelling), span)
     return selected
 
 
