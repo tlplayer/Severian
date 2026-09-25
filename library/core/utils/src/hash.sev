@@ -1,4 +1,4 @@
-import * from "../../../../sev_compiler/syntax/primitive/string/intrinsics.sev" as text
+import "../../../../sev_compiler/syntax/primitive/string/intrinsics.sev" as text
 
 
 # A hashing strategy is selected by type, independently of the value's type.
@@ -16,9 +16,9 @@ class StableHashFunction: HashFunction
         result: u128 := 0x6c62272e07bb014262b821756295c58d
         prime: u128 = 0x0000000001000000000000000000013b
         position := 0
-        count = text.__text_size(value)
+        count = text._text_size(value)
         while position < count:
-            result = __hash_multiply(result ^ u128(text.__text_load(value, position)), prime)
+            result = __hash_multiply(result ^ u128(text._text_load(value, position)), prime)
             position += 1
         return result
 
@@ -36,7 +36,7 @@ def hash(value: string) -> u128:
 
 class __TestByteCountHashFunction: HashFunction
     def hash(value: string) -> u128:
-        return u128(text.__text_size(value))
+        return u128(text._text_size(value))
 
 
 test "stable hashes preserve the bootstrap FNV-1a 128 bit vectors":

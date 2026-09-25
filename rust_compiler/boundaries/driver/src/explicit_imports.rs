@@ -43,15 +43,15 @@ fn same_binding(index: &ProgramIndex, module: ModuleId, target: ModuleId, name: 
 /// Plans all edits before writing. Dependencies outside `root` are read only;
 /// generated package.pkg sources are owned by their generators.
 pub fn plan(graph: &ModuleGraph, root: &Path) -> Result<Plan, String> {
-    plan_with_mode(graph, root, Some(true))
+    plan_with_mode(graph, root, false)
 }
 
-/// Successful builds use the same concrete import expansion as formatting.
+/// Automatic lint correction covers resolved source dependencies as well.
 pub fn plan_compiled(graph: &ModuleGraph, root: &Path) -> Result<Plan, String> {
-    plan_with_mode(graph, root, None)
+    plan_with_mode(graph, root, true)
 }
 
-fn plan_with_mode(graph: &ModuleGraph, root: &Path, _explicit: Option<bool>) -> Result<Plan, String> {
+fn plan_with_mode(graph: &ModuleGraph, root: &Path, automatic: bool) -> Result<Plan, String> {
     let build_plan = severian_semantic::import_plan(graph).map_err(|e|e.to_string())?;
     let index = severian_semantic::import_index(graph).map_err(|e| e.to_string())?;
     let root = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
@@ -124,7 +124,9 @@ fn plan_with_mode(graph: &ModuleGraph, root: &Path, _explicit: Option<bool>) -> 
         if !changed { break; }
     }
     for module in &graph.modules {
-        if !module.path.starts_with(&root) || module.path.components().any(|c|c.as_os_str()=="package.pkg") { continue; }
+        if (!automatic && !module.path.starts_with(&root)) || module.path.components().any(|c|c.as_os_str()=="package.pkg") { continue; }
+        if automatic && graph.policies.get(&module.package).is_some_and(|policy|
+            !policy.lint_enabled || !policy.explicit_imports || policy.explicit_imports_level == "off") { continue; }
         // Include nested packages owned by this source tree.
         let tokens = &lexed[&module.id];
         let mut edits: Vec<(usize,usize,String)> = Vec::new();

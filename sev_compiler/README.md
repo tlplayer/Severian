@@ -355,8 +355,10 @@ runtime still uses C strings; this slice does not support embedded NUL input.
 Compiler packages require explicit imports (`language.explicit-imports`):
 `import Item from "module.sev"` imports a declaration, and
 `import "module.sev" as model` imports a namespace. The Rust driver's
-`sev fmt sev_compiler --bin sev_compiler` expands wildcard imports using resolved
-references, without running generators or compiling. The editor's “Make Imports
+`sev --lint sev_compiler --bin sev_compiler` expands wildcard imports using resolved
+references, without running generators or compiling. Builds apply the same
+corrections before compilation by default; `lint.enabled: false` disables
+automatic correction. The editor's “Make Imports
 Explicit” action uses that same command. Public facade exports and dependencies
 needed for initialization are retained.
 

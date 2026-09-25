@@ -1909,7 +1909,7 @@ impl Parser<'_> {
             let name = match token.kind {
                 TokenKind::Identifier(name) => name,
                 TokenKind::Star => "*".to_owned(),
-                TokenKind::String(_) => return Err(self.error("file imports require explicit names or `import * from`")),
+                TokenKind::String(_) => return Err(self.error("a namespace locator cannot appear in a named import list")),
                 _ => return Err(self.error("expected an import name or `*`")),
             };
             let mut span = token.span;
@@ -1957,107 +1957,12 @@ impl Parser<'_> {
     }
 
     fn import_declaration(&mut self) -> Result<ImportDeclaration, Diagnostic> {
-        let keyword = self.next();
-        let start = keyword.span;
-        if matches!(&keyword.kind, TokenKind::Identifier(name) if name == "from") {
-            let (source, _) = self.identifier("expected an import source after `from`")?;
-            if !self.at_identifier("import") {
-                return Err(self.error("expected `import` after import source"));
-            }
-            self.next();
-            let subject_token = self.next();
-            let subject = match subject_token.kind {
-                TokenKind::Identifier(name) => ImportSubject::Name(name),
-                TokenKind::String(locator) => ImportSubject::Locator(locator),
-                _ => {
-                    return Err(Diagnostic::new(
-                        "E000118",
-                        "expected an import name or locator string",
-                        Some(subject_token.span),
-                    ))
-                }
-            };
-            let mut end = subject_token.span.end;
-            let alias = if self.at_identifier("as") {
-                self.next();
-                let (alias, span) = self.identifier("expected an import alias")?;
-                end = span.end;
-                Some(alias)
-            } else {
-                None
-            };
-            return Ok(ImportDeclaration {
-                subject,
-                source: Some(source),
-                alias,
-                span: Span::new(start.source, start.start, end),
-            });
+        // Keep single-declaration callers on the module import grammar.
+        let mut imports = self.import_declarations()?;
+        if imports.len() != 1 {
+            return Err(self.error("expected a single import declaration"));
         }
-        let wildcard = self.take(&TokenKind::Star).is_some();
-        if wildcard {
-            if !self.at_identifier("from") {
-                return Err(self.error("expected `from` after `import *`"));
-            }
-            self.next();
-        }
-        let subject_token = self.next();
-        let mut subject = match subject_token.kind {
-            TokenKind::Identifier(name) if !wildcard => ImportSubject::Name(name),
-            TokenKind::String(locator) if wildcard => ImportSubject::Locator(locator),
-            TokenKind::String(locator) => {
-                if !self.at_identifier("as") {
-                    return Err(self.error("file namespace imports require an explicit `as` alias"));
-                }
-                self.next();
-                let (alias, end) = self.identifier("expected a namespace alias")?;
-                return Ok(ImportDeclaration {
-                    subject: ImportSubject::Locator(locator), source: None, alias: Some(alias),
-                    span: Span::new(start.source, start.start, end.end),
-                });
-            }
-            _ => {
-                return Err(Diagnostic::new(
-                    "E000118",
-                    if wildcard {
-                        "expected a locator string after `import * from`"
-                    } else {
-                        "expected an import name or `* from` followed by a locator string"
-                    },
-                    Some(subject_token.span),
-                ))
-            }
-        };
-        let mut end = subject_token.span.end;
-        let source = if !wildcard && self.at_identifier("from") {
-            self.next();
-            let token = self.next();
-            end = token.span.end;
-            match token.kind {
-                TokenKind::Identifier(source) => Some(source),
-                TokenKind::String(locator) => {
-                    let ImportSubject::Name(name) = subject else { unreachable!() };
-                    subject = ImportSubject::Locator(locator);
-                    Some(name)
-                }
-                _ => return Err(self.error("expected a package name or source locator after `from`")),
-            }
-        } else {
-            None
-        };
-        let alias = if self.at_identifier("as") {
-            self.next();
-            let (alias, span) = self.identifier("expected an import alias")?;
-            end = span.end;
-            Some(alias)
-        } else {
-            None
-        };
-        Ok(ImportDeclaration {
-            subject,
-            source,
-            alias,
-            span: Span::new(start.source, start.start, end),
-        })
+        Ok(imports.remove(0))
     }
 
     fn trait_declaration(
@@ -5228,6 +5133,52 @@ fn precedence(operator: BinaryOperator) -> u8 {
         | BinaryOperator::Remainder => 8,
         BinaryOperator::Power => 9,
         _ => 7,
+    }
+}
+
+#[cfg(test)]
+mod namespace_import_tests {
+    use super::*;
+
+    #[test]
+    fn cfg_file_namespace_imports_preserve_paths_aliases_and_spans() {
+        let declarations = [
+            ("block.sev", "cfg_blocks"),
+            ("branch.sev", "_dependency_branch"),
+            ("control_flow.sev", "control_flow"),
+        ];
+        let text = declarations.iter()
+            .map(|(path, alias)| format!("import \"{path}\" as {alias}\n"))
+            .collect::<String>();
+        let source = SourceFile::virtual_source("cfg.sev", &text);
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        assert_eq!(module.items.len(), declarations.len());
+        for (item, (path, alias)) in module.items.iter().zip(declarations) {
+            let Item::Import(import) = item else { panic!("expected import") };
+            assert_eq!(import.subject, ImportSubject::Locator(path.to_owned()));
+            assert_eq!(import.source, None);
+            assert_eq!(import.alias.as_deref(), Some(alias));
+            assert_eq!(import.selected_name(), None);
+            assert_eq!(
+                &text[import.span.start as usize..import.span.end as usize],
+                format!("import \"{path}\" as {alias}"),
+            );
+        }
+    }
+
+    #[test]
+    fn single_import_parser_uses_the_module_import_grammar() {
+        for text in [
+            "import \"block.sev\" as cfg_blocks\n",
+            "from \"block.sev\" import Block as CfgBlock\n",
+        ] {
+            let source = SourceFile::virtual_source("imports.sev", text);
+            let tokens = scan(&source).unwrap();
+            let module = parse(&tokens).unwrap();
+            let Item::Import(expected) = &module.items[0] else { panic!("expected import") };
+            let actual = Parser::new(&tokens).import_declaration().unwrap();
+            assert_eq!(&actual, expected);
+        }
     }
 }
 

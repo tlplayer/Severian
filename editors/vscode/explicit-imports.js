@@ -7,7 +7,7 @@ const execute = promisify(execFile);
 async function makeImportsExplicit(vscode, run, output, invoke = execute) {
   if (!await vscode.workspace.saveAll(false)) return false;
   const executable = vscode.workspace.getConfiguration('severian', run.scope).get('executable', 'sev').trim() || 'sev';
-  const { stdout } = await invoke(executable, ['fmt', run.target, '--explicit-imports=json'],
+  const { stdout } = await invoke(executable, ['--lint=json', run.target],
     { cwd: run.cwd, maxBuffer: 64 * 1024 * 1024 });
   const plan = JSON.parse(stdout);
   const edits = new vscode.WorkspaceEdit();

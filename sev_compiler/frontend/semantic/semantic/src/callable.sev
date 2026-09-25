@@ -1777,7 +1777,7 @@ def callable_assertion(state: CallableAnalysis, condition: model_syntax_function
     diagnostic = callable_expression(state, diagnostic, model_syntax_primitive_declarations.string_type_id())
     yes = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), span, type_id=model_syntax_primitive_declarations.bool_type_id())
     no = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(false)), span, type_id=model_syntax_primitive_declarations.bool_type_id())
-    failed = callable_raw_call(state, "__assert_condition", [no, diagnostic], span, model_syntax_primitive_declarations.bool_type_id())
+    failed = callable_raw_call(state, "_assert_condition", [no, diagnostic], span, model_syntax_primitive_declarations.bool_type_id())
     # Keep the condition single-evaluation and the diagnostic lazy.
     checked = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Conditional(resolved, yes, failed), span, type_id=model_syntax_primitive_declarations.bool_type_id())
     return model_syntax_sentence_sentence.Assert(checked, None, span, condition_span)

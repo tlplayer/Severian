@@ -1,3 +1,3 @@
 # General prelude utilities shared across value types.
-import __assert_condition, diagnostic_io, * from "assert.sev"
-import ByteCountHashFunction, HashFunction, StableHashFunction, __hash_multiply, hash, text, * from "hash.sev"
+import _assert_condition from "assert.sev"
+import HashFunction, StableHashFunction, hash from "hash.sev"

@@ -29,8 +29,9 @@ impl ImportDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportSubject {
     Name(String),
-    /// Explicit `import * from "locator"`, optionally qualified with `as`.
-    /// Also used for external locators selected from an import provider.
+    /// File namespace (`import "locator" as alias`), wildcard, or named import.
+    /// `source` holds a selected member; `alias` qualifies a namespace when
+    /// no member is selected.
     Locator(String),
 }
 

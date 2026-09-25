@@ -6,14 +6,14 @@ import * from "../../../../sev_compiler/syntax/primitive/string/intrinsics.sev" 
 # descriptor; its physical representation belongs to the text implementation.
 # Return the transferred byte count, or -1 if output cannot make progress.
 def write_text(descriptor: i32, value: string) -> int:
-    count = text.__text_size(value)
+    count = text._text_size(value)
     if count == 0:
         return 0
     unsafe:
         data = raw.__raw_allocate(count, 1)
         position := 0
         while position < count:
-            raw.__raw_store(text.__text_load(value, position), raw.__raw_offset(data, position))
+            raw.__raw_store(text._text_load(value, position), raw.__raw_offset(data, position))
             position += 1
         offset := 0
         while offset < count:

@@ -79,15 +79,10 @@ fn run(mut arguments: Vec<String>) -> Result<(), String> {
                 check(options, &catalog)
             }
         }
-        "fmt" => {
-            let mut options = parse_common(arguments)?;
-            options.explicit_imports.get_or_insert(false);
-            make_imports_explicit(options, &catalog)
-        }
         "build" | "compile" => {
             let options = parse_common(arguments)?;
-            if options.explicit_imports.is_some() {
-                make_imports_explicit(options, &catalog)
+            if options.lint == Some(true) {
+                lint_only(options, &catalog)
             } else if options.emit.is_some() {
                 emit_ir(options, &catalog)
             } else {
@@ -96,7 +91,9 @@ fn run(mut arguments: Vec<String>) -> Result<(), String> {
         }
         "run" => {
             let options = parse_common(arguments)?;
-            if options.emit.is_some() {
+            if options.lint.is_some() {
+                lint_only(options, &catalog)
+            } else if options.emit.is_some() {
                 emit_ir(options, &catalog)
             } else {
                 run_program(options, &catalog)
@@ -126,7 +123,6 @@ fn is_command(argument: &str) -> bool {
     matches!(
         argument,
         "check"
-            | "fmt"
             | "build"
             | "compile"
             | "run"
@@ -205,7 +201,7 @@ struct CommonOptions {
     bin: Option<String>,
     output: Option<PathBuf>,
     emit: Option<EmitStage>,
-    explicit_imports: Option<bool>,
+    lint: Option<bool>,
     application_args: Vec<String>,
 }
 
@@ -232,8 +228,8 @@ fn parse_common(arguments: Vec<String>) -> Result<CommonOptions, String> {
             options.application_args = arguments[cursor + 1..].to_vec();
             break;
         }
-        if argument == "--explicit-imports" || argument == "--explicit-imports=json" {
-            options.explicit_imports = Some(argument.ends_with("=json"));
+        if matches!(argument.as_str(), "--lint" | "--lint=json" | "--explicit-imports" | "--explicit-imports=json") {
+            options.lint = Some(argument.ends_with("=json"));
             cursor += 1;
             continue;
         }
@@ -485,7 +481,9 @@ fn check(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
     };
     let config = resolve_config(catalog, manifest, &options)?;
     let compiler = compiler(&config, manifest, false)?;
-    for target in selected_targets(&input, options.bin.as_deref())? {
+    let targets = selected_targets(&input, options.bin.as_deref())?;
+    lint_sources(&compiler, targets.iter().map(|target| target.path().to_owned()).collect(), input_root(&input))?;
+    for target in targets {
         compiler
             .check_file(target.path())
             .map_err(|error| error.to_string())?;
@@ -493,9 +491,9 @@ fn check(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
     Ok(())
 }
 
-fn make_imports_explicit(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
+fn lint_only(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
     if options.emit.is_some() || options.output.is_some() || !options.application_args.is_empty() {
-        return Err("--explicit-imports cannot be combined with --emit, --output, or application arguments".into());
+        return Err("--lint cannot be combined with --emit, --output, or application arguments".into());
     }
     let input = discover(options.path.as_deref(), catalog)?;
     let manifest = match &input { Input::Package(manifest) => Some(manifest.as_ref()), _ => None };
@@ -505,7 +503,7 @@ fn make_imports_explicit(options: CommonOptions, catalog: &Catalog) -> Result<()
     let mut plan = severian_driver::explicit_imports::Plan::default();
     for target in targets {
         let graph = compiler.resolve_test_graph(target.path()).map_err(|e|e.to_string())?;
-        let next = severian_driver::explicit_imports::plan(&graph, input_root(&input))?;
+        let next = severian_driver::package_lint::import_corrections(&graph, input_root(&input), false)?;
         for file in next.files {
             if let Some(previous) = plan.files.iter().find(|f| f.path == file.path) {
                 if previous.after != file.after { return Err("select one target with --bin before rewriting shared imports".into()); }
@@ -514,7 +512,7 @@ fn make_imports_explicit(options: CommonOptions, catalog: &Catalog) -> Result<()
         plan.notes.extend(next.notes);
     }
     plan.notes.sort(); plan.notes.dedup();
-    if options.explicit_imports == Some(true) {
+    if options.lint == Some(true) {
         println!("{}", serde_json::to_string_pretty(&plan).map_err(|e|e.to_string())?);
     } else {
         severian_driver::explicit_imports::apply(&plan)?;
@@ -543,6 +541,7 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
     let root = input_root(&input);
     let mut artifacts = Vec::new();
     let import_sources: Vec<_> = targets.iter().map(|target| target.path().to_path_buf()).collect();
+    lint_sources(&compiler, import_sources, root)?;
     for target in targets {
         let output = options
             .output
@@ -574,13 +573,18 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
         println!("built {}", output.display());
         artifacts.push(output);
     }
-    record_resolved_imports(&compiler, import_sources, root)?;
     Ok(artifacts)
 }
 
-fn record_resolved_imports(compiler: &Compiler, import_sources: Vec<PathBuf>, root: &Path) -> Result<(), String> {
-    // Rewrite only after every selected target succeeds. Merge target graphs so
-    // shared files retain names required by any target, including test bodies.
+fn lint_sources(compiler: &Compiler, import_sources: Vec<PathBuf>, root: &Path) -> Result<(), String> {
+    let manifest = root.join("package.json");
+    if manifest.is_file() {
+        let text = fs::read_to_string(&manifest).map_err(|error| error.to_string())?;
+        let value: serde_json::Value = json5::from_str(&text).map_err(|error| error.to_string())?;
+        if value["lint"]["enabled"].as_bool() == Some(false) { return Ok(()); }
+    }
+    // Correct imports at the end of lint, before policy checks and cache keys.
+    // Merge selected targets so shared files retain every target's requirements.
     let mut import_graph = severian_modules::ModuleGraph {
         modules: Vec::new(), policies: std::collections::BTreeMap::new(),
     };
@@ -593,10 +597,12 @@ fn record_resolved_imports(compiler: &Compiler, import_sources: Vec<PathBuf>, ro
             }
         }
     }
-    let imports = severian_driver::explicit_imports::plan_compiled(&import_graph, root)?;
-    severian_driver::explicit_imports::apply(&imports)?;
+    let imports = severian_driver::package_lint::correct_imports(&import_graph, root)?;
     for file in &imports.files {
         println!("resolved {} imports in {}", file.imports, file.path.display());
+    }
+    for note in &imports.notes {
+        eprintln!("note: {note}");
     }
     Ok(())
 }
@@ -818,8 +824,8 @@ fn run_program(mut options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
             .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
     }
     let compiler = compiler(&config, manifest, false)?;
+    lint_sources(&compiler, vec![binary.path.clone()], input_root(&input))?;
     compiler.compile_file(&binary.path, &output).map_err(|error| error.to_string())?;
-    record_resolved_imports(&compiler, vec![binary.path.clone()], input_root(&input))?;
     let executable = if output.is_absolute() {
         output.clone()
     } else {
@@ -1157,6 +1163,7 @@ fn test(options: CommonOptions, catalog: &Catalog, mutate: bool) -> Result<(), S
         compiler
     };
     if validation.is_none() {
+        lint_sources(&compiler, sources.clone(), &_root)?;
         sources = test_runner::deduplicate_roots(&compiler, sources)?;
     }
     let invocation = SystemTime::now()
@@ -2103,7 +2110,7 @@ build options:\n",
         ));
     }
     output.push_str(
-        "  --bin NAME  Select a package binary.\n  --emit STAGE  Print ast, hir, mir, lir, or mlir, or write agent-ir; do not execute.\n  -o PATH     Write the selected artifact, emitted IR, or Agent IR directory to PATH.\n\ntest options:\n  --mutate    Run mutation testing.\n",
+        "  --lint      Run lint correction without building (automatic before builds; lint.enabled=false disables it).\n  --lint=json Print the correction plan for editor integration.\n  --bin NAME  Select a package binary.\n  --emit STAGE  Print ast, hir, mir, lir, or mlir, or write agent-ir; do not execute.\n  -o PATH     Write the selected artifact, emitted IR, or Agent IR directory to PATH.\n\ntest options:\n  --mutate    Run mutation testing.\n",
     );
     output.push_str(profiling::HELP);
     output
@@ -2112,6 +2119,16 @@ build options:\n",
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lint_flag_supports_correction_and_editor_plans() {
+        for (flag, json) in [("--lint", false), ("--lint=json", true)] {
+            let options = parse_common(vec![flag.into(), "example".into()]).unwrap();
+            assert_eq!(options.lint, Some(json));
+            assert_eq!(options.path, Some(PathBuf::from("example")));
+        }
+        assert!(!is_command("fmt"));
+    }
 
     #[test]
     fn target_selection_is_separate_from_application_arguments() {

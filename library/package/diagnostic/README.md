@@ -49,10 +49,15 @@ are not moved or discarded. Literal text is never formatted as code.
 
 ## Resolved import spelling
 
-The Rust bootstrap CLI records used names after a successful build:
-`import a, b, * from "module.sev"`. Set `language.explicit-imports` to `true`
-to write `import a, b from "module.sev"` instead. Both modes resolve only used
-names. Qualified namespace imports (`import * from "module.sev" as helpers`)
-remain unchanged. `sev build --explicit-imports` forces the closed form.
-The self-hosted source loader shares demand-only resolution; automatic source
+The Rust bootstrap CLI applies import corrections at the end of lint, before
+compilation and build-cache checks. Wildcards become explicit used names;
+qualified wildcards become `import "module.sev" as helpers`. Source dependencies
+are included, while generated `package.pkg` sources remain generator-owned.
+Corrections are enabled by default. Set `"lint": {"enabled": false}` in
+`package.json` to disable automatic lint correction. Per-package
+`lint.explicit-imports: false` or `lint.rules.L0015: "off"` disables that correction.
+
+`sev --lint [path]` runs correction without building. `sev --lint=json [path]`
+returns the edit plan used by the editor. There is no separate `sev fmt` command.
+The self-hosted source loader shares demand-only resolution; automatic import
 rewriting currently runs in the Rust bootstrap CLI.

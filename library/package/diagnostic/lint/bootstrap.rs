@@ -1,9 +1,22 @@
 //! Bootstrap adapter for package.diagnostic.lint's explicit-imports rule.
-//! Optional source-style linting. Successful builds resolve import spelling
-//! afterwards; this lint does not gate semantic compilation.
+//! Source import corrections run as the final lint step before compilation.
 use severian_ast::Item;
 use severian_diagnostics::Diagnostic;
 use severian_modules::ModuleGraph;
+
+/// Final lint step shared by build, run, check and test. Plan before writing;
+/// callers resolve fresh sources for compilation after corrections are applied.
+pub fn correct_imports(graph: &ModuleGraph, root: &std::path::Path) -> Result<crate::explicit_imports::Plan, String> {
+    let plan = import_corrections(graph, root, true)?;
+    crate::explicit_imports::apply(&plan)?;
+    Ok(plan)
+}
+
+/// Explicit lint requests and default build lint share the correction engine.
+pub fn import_corrections(graph: &ModuleGraph, root: &std::path::Path, automatic: bool) -> Result<crate::explicit_imports::Plan, String> {
+    if automatic { crate::explicit_imports::plan_compiled(graph, root) }
+    else { crate::explicit_imports::plan(graph, root) }
+}
 
 pub fn explicit_imports(graph: &ModuleGraph) -> Result<(), Diagnostic> {
     for module in &graph.modules {
@@ -31,10 +44,66 @@ pub fn explicit_imports(graph: &ModuleGraph) -> Result<(), Diagnostic> {
                 text[prefix.len()..].split(',').any(|id|id.trim()=="L0015")
             });
             if suppressed {continue;}
-            let diagnostic=Diagnostic::new("L0015", "wildcard import hides the names used by this module; run sev build --explicit-imports to replace * with the names used",Some(span)).with_source(module.source.clone());
+            let diagnostic=Diagnostic::new("L0015", "wildcard import hides the names used by this module; run sev --lint to replace * with the names used",Some(span)).with_source(module.source.clone());
             if level=="error" {return Err(diagnostic);}
             eprintln!("{level}: {diagnostic}");
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod correction_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn lint_corrects_imports_before_strict_policy_including_source_dependencies() {
+        let root = std::env::temp_dir().join(format!("sev-lint-correction-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let project = root.join("project");
+        let dependency = root.join("dependency");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&dependency).unwrap();
+        let entry = project.join("main.sev");
+        let facade = dependency.join("lib.sev");
+        std::fs::write(dependency.join("leaf.sev"), "def answer() -> int:\n    return 42\n").unwrap();
+        std::fs::write(&facade, "import * from \"leaf.sev\" as leaf\ndef answer() -> int:\n    return leaf.answer()\n").unwrap();
+        std::fs::write(&entry, "import * from \"../dependency/lib.sev\"\ndef main() -> int:\n    return answer()\n").unwrap();
+        let mut graph = severian_modules::resolve(&entry).unwrap();
+        let package = graph.modules.last().unwrap().package;
+        graph.policies.insert(package, severian_modules::PackagePolicy {
+            narrow_imports: true, library: facade.clone(), explicit_imports: true,
+            lint_enabled: true, explicit_imports_level: "error".into(),
+        });
+        assert_eq!(severian_modules::validate_import_policy(&graph).unwrap_err().code, "E000125");
+        let plan = correct_imports(&graph, &project).unwrap();
+        assert_eq!(plan.files.len(), 2);
+        assert!(std::fs::read_to_string(&entry).unwrap().contains("import answer from"));
+        assert!(std::fs::read_to_string(&facade).unwrap().contains("import \"leaf.sev\" as leaf"));
+        let mut corrected = severian_modules::resolve(&entry).unwrap();
+        corrected.policies = graph.policies;
+        severian_modules::validate_import_policy(&corrected).unwrap();
+        assert!(correct_imports(&corrected, &project).unwrap().files.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn disabled_package_lint_preserves_source() {
+        let root = std::env::temp_dir().join(format!("sev-lint-disabled-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&root).unwrap();
+        let entry = root.join("main.sev");
+        let text = "import * from \"lib.sev\"\ndef main() -> int:\n    return answer()\n";
+        std::fs::write(&entry, text).unwrap();
+        std::fs::write(root.join("lib.sev"), "def answer() -> int:\n    return 42\n").unwrap();
+        let mut graph = severian_modules::resolve(&entry).unwrap();
+        let package = graph.modules.last().unwrap().package;
+        graph.policies.insert(package, severian_modules::PackagePolicy {
+            narrow_imports: false, library: root.join("lib.sev"), explicit_imports: true,
+            lint_enabled: false, explicit_imports_level: "warning".into(),
+        });
+        assert!(correct_imports(&graph, &root).unwrap().files.is_empty());
+        assert_eq!(std::fs::read_to_string(&entry).unwrap(), text);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

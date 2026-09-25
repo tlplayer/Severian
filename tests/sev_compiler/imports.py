@@ -28,11 +28,19 @@ class ExplicitImports(MigrationCase):
                 assert(answer() == 7)
         ''')
 
-    def test_implicit_import_requires_migration(self):
-        for suffix in ('', ' as arrays'):
-            with self.subTest(suffix=suffix):
-                self.rejects('import "array.sev"' + suffix + '\n',
-                             'file imports require explicit')
+    def test_file_namespace_import(self):
+        self.native('''
+            import "array.sev" as arrays
+            def answer() -> int:
+                return 7
+            test:
+                assert(arrays.answer() == 42)
+                assert(answer() == 7)
+        ''')
+
+    def test_file_namespace_requires_alias(self):
+        self.rejects('import "array.sev"\n',
+                     'file namespace imports require')
 
     def test_malformed_wildcard(self):
         for declaration, message in [

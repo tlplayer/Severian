@@ -351,45 +351,14 @@ def parser_import_members(parser: Parser) -> list[model_syntax_function_syntax.I
 
 
 def parser_import_declaration(parser: Parser) -> model_syntax_function_syntax.ImportDeclaration | diagnostics.Diagnostic:
-    start = parser_next(parser).span
-    if parser_take_symbol(parser, "*") != None:
-        if not parser_at_identifier(parser, "from"):
-            return error(parser_fail(parser, "expected `from` after `import *`"))
-        parser_next(parser)
-        token = parser_expect(parser, String, "expected a locator string after `import * from`")
-        alias: string | None := None
-        if parser_at_identifier(parser, "as"):
-            parser_next(parser)
-            alias = parser_identifier(parser, "expected an import alias")[0]
-        return model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.Locator(string(token)), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
-    if parser_at_simple(parser, String):
-        locator = parser_next(parser)
-        if not parser_at_identifier(parser, "as"):
-            return error(parser_fail(parser, "file namespace imports require an alias"))
-        parser_next(parser)
-        alias = parser_identifier(parser, "expected an import alias")[0]
-        return model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.Locator(string(locator)), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
-    first = parser_identifier(parser, "expected an import name")
+    imports: list[model_syntax_function_syntax.ImportDeclaration] := []
     if parser_at_identifier(parser, "from"):
-        parser_next(parser)
-        if parser_at_simple(parser, String):
-            locator = parser_next(parser)
-            alias: string | None := None
-            if parser_at_identifier(parser, "as"):
-                parser_next(parser)
-                alias = parser_identifier(parser, "expected an import alias")[0]
-            return model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.Locator(string(locator)), first[0], alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
-        source_name = parser_identifier(parser, "expected an import source")[0]
-        alias: string | None := None
-        if parser_at_identifier(parser, "as"):
-            parser_next(parser)
-            alias = parser_identifier(parser, "expected an import alias")[0]
-        return model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.ImportSubject.Name(first[0]), source_name, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
-    alias: string | None := None
-    if parser_at_identifier(parser, "as"):
-        parser_next(parser)
-        alias = parser_identifier(parser, "expected an import alias")[0]
-    return model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.ImportSubject.Name(first[0]), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
+        imports = parser_selective_imports(parser)
+    else:
+        imports = parser_import_members(parser)
+    if len(imports) != 1:
+        return error(parser_fail(parser, "expected a single import declaration"))
+    return imports[0]
 
 def parser_type_parameters(parser: Parser, pack: list[string] = [], defaults: list[model_syntax_type_annotation.TypeAnnotation] = []) -> tuple[list[string], list[model_syntax_function_syntax.GenericConstraint]] | diagnostics.Diagnostic:
     parameters: list[string] = []
@@ -1806,6 +1775,26 @@ def parser_conditional(parser: Parser) -> model_syntax_sentence_sentence.Stateme
         otherwise = rejected[0]
         end = rejected[1]
     return model_syntax_sentence_sentence.Statement.If(condition, taken[0], otherwise, source.Span(start.source, start.start, end))
+
+
+test "file namespace imports preserve CFG aliases":
+    paths = ["block.sev", "branch.sev", "control_flow.sev"]
+    aliases = ["cfg_blocks", "_dependency_branch", "control_flow"]
+    input = source.virtual_source("cfg.sev", "import \"block.sev\" as cfg_blocks\nimport \"branch.sev\" as _dependency_branch\nimport \"control_flow.sev\" as control_flow\n")
+    parsed = parser_module(Parser(lexer.scan_bootstrap(input)))
+    assert(len(parsed.items) == 3)
+    for index in range(3):
+        match parsed.items[index]:
+            case Import:
+                assert(declaration.alias == aliases[index])
+                assert(declaration.source_name == None)
+                match declaration.subject:
+                    case Locator:
+                        assert(locator == paths[index])
+                    case _:
+                        assert(false)
+            case _:
+                assert(false)
 
 
 test "MLIR type annotations survive class parsing":
