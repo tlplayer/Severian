@@ -2,7 +2,7 @@
 # Canonical amounts use bits, nanoseconds, Celsius, hertz, volts, and watts.
 
 
-import * from "../bytes/bytes.sev"
+import * from "../byte/byte.sev"
 
 
 class Duration:

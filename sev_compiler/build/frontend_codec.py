@@ -99,7 +99,7 @@ def generate(root=ROOT, mir=False, interface=False, bodies=False):
         'sev_compiler/syntax/primitive/array/array.sev',
         'sev_compiler/syntax/primitive/array/storage.sev',
         'sev_compiler/syntax/primitive/bool/bool.sev',
-        'sev_compiler/syntax/primitive/bytes/bytes.sev',
+        'sev_compiler/syntax/primitive/byte/byte.sev',
         'sev_compiler/syntax/primitive/catalog.sev',
         'sev_compiler/syntax/primitive/char/char.sev',
         'sev_compiler/syntax/primitive/char/encoding.sev',

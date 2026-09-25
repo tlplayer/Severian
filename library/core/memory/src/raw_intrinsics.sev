@@ -1,3 +1,5 @@
+import * from "../../../../sev_compiler/syntax/primitive/byte/byte.sev"
+
 # Hosted raw-memory boundaries; typed buffers use the same target memory lowering.
 @c(symbol="__sev_memory_zeroed")
 def __raw_calloc(count: int, width: int) -> pointer
@@ -54,12 +56,11 @@ def __raw_write_bytes(descriptor: i32, data: view array[u8], offset: int, count:
         return __raw_write(descriptor, __raw_offset(address, offset), count)
 
 def __raw_byte_offset(size: byte) -> int:
-    bytes = size.amount / 8.0
-    assert(bytes >= 0.0)
-    assert(bytes < 9223372036854775808.0)
-    result = int(bytes)
-    assert(float(result) == bytes)
-    return result
+    # Quantities store bits; raw memory is byte-addressed. Keep this exact even
+    # beyond the integer precision of f64 and reject partial-byte quantities.
+    assert(size.amount >= 0)
+    assert(size.amount % 8 == 0)
+    return size.amount / 8
 
 
 # A byte quantity requests physical storage; typed allocation still takes an
@@ -67,3 +68,14 @@ def __raw_byte_offset(size: byte) -> int:
 def allocate(size: byte) -> pointer[u8]:
     unsafe:
         return __raw_allocate(__raw_byte_offset(size), 1)
+
+
+test "byte quantities convert to physical offsets without element scaling":
+    assert(__raw_byte_offset(byte(0)) == 0)
+    assert(__raw_byte_offset(0B) == 0)
+    assert(__raw_byte_offset(byte(8192)) == 1024)
+    assert(__raw_byte_offset(byte(32)) == 4)
+
+
+test "byte offsets preserve large integer quantities exactly":
+    assert(__raw_byte_offset(byte(9223372036854775800)) == 1152921504606846975)

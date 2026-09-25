@@ -12,7 +12,7 @@ The compiler fix must preserve that distinction by resolving the existing byte p
 class byte:
     amount: int
 
-    operator string() -> string:
+    operator <=>(self) -> string:
         return string(self.amount / 8) + "B"
 
 
