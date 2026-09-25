@@ -1,0 +1,34 @@
+import * from "../../../core/memory/src/raw_intrinsics.sev" as raw
+import * from "../../../../sev_compiler/syntax/primitive/string/intrinsics.sev" as text
+
+
+# Copy initialized UTF-8 bytes through the text API. A string is not an array
+# descriptor; its physical representation belongs to the text implementation.
+# Return the transferred byte count, or -1 if output cannot make progress.
+def write_text(descriptor: i32, value: string) -> int:
+    count = text.__text_size(value)
+    if count == 0:
+        return 0
+    unsafe:
+        data = raw.__raw_allocate(count, 1)
+        position := 0
+        while position < count:
+            raw.__raw_store(text.__text_load(value, position), raw.__raw_offset(data, position))
+            position += 1
+        offset := 0
+        while offset < count:
+            written = raw.__raw_write(descriptor, raw.__raw_offset(data, offset), count - offset)
+            if written <= 0:
+                raw.__raw_free(data)
+                return -1
+            offset += written
+        raw.__raw_free(data)
+        return offset
+
+
+test "empty diagnostic output does not access the descriptor":
+    assert(write_text(-1, "") == 0)
+
+
+test "diagnostic output reports descriptor failures":
+    assert(write_text(-1, "diagnostic λ") == -1)

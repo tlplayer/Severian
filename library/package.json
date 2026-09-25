@@ -79,7 +79,11 @@
       "testing",
       "package/metadata",
       "package/interface",
-      "package/artifact"
+      "package/artifact",
+      "core/string",
+      "core/string/format",
+      "core/string/regex",
+      "core/util"
     ],
     "metadata": {
       "library": {

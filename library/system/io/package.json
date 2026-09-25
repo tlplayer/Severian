@@ -6,11 +6,15 @@
     "description": "Portable streams, standard handles, and printing",
     "unsafe": {
       "capabilities": [
-        "native-abi"
+        "native-abi",
+        "allocation",
+        "pointers",
+        "unsafe-blocks"
       ],
       "sources": [
         "src/lib.sev",
-        "src/buffer.sev"
+        "src/buffer.sev",
+        "src/diagnostic.sev"
       ]
     },
     "metadata": {

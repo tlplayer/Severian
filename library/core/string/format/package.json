@@ -1,0 +1,20 @@
+{
+  "package": {
+    "name": "core.string.format",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "String conversion, formatting, and structured text rendering",
+    "unsafe": {
+      "capabilities": [
+        "native-abi",
+        "pointers"
+      ],
+      "sources": [
+        "src/lib.sev"
+      ]
+    }
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  }
+}

@@ -24,9 +24,11 @@ Raw memory operations are declared in `src/raw_intrinsics.sev` and use the
 `!llvm.ptr` representation shared by the pointer primitive and C boundaries.
 At the bootstrap boundary, bare `pointer` denotes the erased byte-address
 contract (`pointer[u8]`); `pointer[T]` retains its pointee type in C signatures.
-Assertion diagnostics and test reports call `__raw_write_bytes`, which checks
+Test reports call `__raw_write_bytes`, which checks
 the byte range and holds a storage view across address extraction and the
 synchronous write. Callers do not extract or retain a detached address.
+The IO text writer copies text through its byte-access API into a temporary raw
+allocation, writes it synchronously, and releases it on success or write failure.
 
 `zeroed_bytes(count)` returns a zero-initialized `array[u8]`.
 `resized_bytes(view, count)` returns an independent buffer, preserves the common

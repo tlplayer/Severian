@@ -1,0 +1,18 @@
+{
+  "package": {
+    "name": "core.string",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "String operations and text-processing libraries"
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "format": {
+      "package": "core.string.format",
+      "path": "format",
+      "version": "0.1.0"
+    }
+  }
+}

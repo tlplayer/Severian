@@ -1,6 +1,7 @@
 # Text formatting
 
-`src/format.sev` owns the source formatting implementation used by the native
+`src/format.sev` forwards to the source formatting implementation in
+[`core.string.format`](../string/format/src/lib.sev), used by the native
 prelude. Integer formatting allocates one output buffer and fills its digits in
 place. Float formatting reuses a format buffer and output buffer while finding
 the shortest significant-digit precision that round-trips. Printing iterates

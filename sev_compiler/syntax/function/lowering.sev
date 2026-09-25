@@ -7,7 +7,6 @@ import * from "../literal/lowered.sev"
 import * from "../sentence/sentence.sev"
 import * from "function.sev"
 import * from "../type/system.sev"
-import * from "../../../library/core/memory/src/raw_intrinsics.sev"
 
 
 # Operations, registry contracts, and callable lowering metadata.
@@ -110,22 +109,6 @@ def scalar_requirements(function: borrow FunctionDeclaration, requirements: Lowe
                             requirements.libraries.append(name)
                 case _:
                     throw Error("lowering requirements require string literals")
-
-
-# cf.assert terminates the process, but its hosted LLVM lowering prints through
-# buffered stdout. Emit the diagnostic to stderr before handing it the condition.
-def __assert_condition(condition: bool, message: string) -> bool:
-    if not condition:
-        diagnostic = "assertion failed: " + message + "\n"
-        remaining := size(diagnostic)
-        offset := 0
-        while remaining > 0:
-            written = __raw_write_bytes(2, diagnostic.storage.data, offset, remaining)
-            if written <= 0:
-                break
-            offset += written
-            remaining -= written
-    return condition
 
 
 class DialectId: StableId

@@ -1,5 +1,5 @@
-import * from "../../../../sev_compiler/universal/primitive/string/core.sev" as text
-import * from "../../../../sev_compiler/universal/primitive/string/format.sev" as format
+import * from "../../../../sev_compiler/syntax/primitive/string/core.sev" as text
+import * from "../../../core/string/format/src/lib.sev" as format
 
 # A scalar print is one standard MLIR operation. Keep the variadic source
 # implementation below for separators, endings and value conversions.

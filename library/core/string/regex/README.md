@@ -1,8 +1,4 @@
-# regex compatibility package
-
-The implementation and POSIX provider now live in
-[`core.string.regex`](../string/regex/README.md). This package forwards its source
-API and declares that provider as a dependency for existing `regex` users.
+# core.string.regex
 
 Regular-expression values and matching. The package owns its POSIX provider and
 reaches it through the typed `abi`/`ffi` boundary; compiler lowering contains no

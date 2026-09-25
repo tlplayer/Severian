@@ -1,0 +1,31 @@
+import * from "c:regex-posix" as native
+
+@c(repr = "pointer")
+type Handle
+
+@c(symbol = "sev_abi_v1_regex_matches")
+def matches(text: borrowed[string], pattern: borrowed[string]) -> bool
+
+@c(symbol = "sev_abi_v1_regex_find_all")
+def find_all(text: borrowed[string], pattern: borrowed[string], values: out[Handle]) -> i32
+
+@c(symbol = "sev_abi_v1_regex_split")
+def split(text: borrowed[string], pattern: borrowed[string], values: out[Handle]) -> i32
+
+@c(symbol = "sev_abi_v1_regex_strings_length")
+def strings_length(values: borrowed[Handle]) -> usize
+
+@c(symbol = "sev_abi_v1_regex_strings_at")
+def strings_at(values: borrowed[Handle], index: usize) -> borrowed[string]
+
+@c(symbol = "sev_abi_v1_regex_strings_release")
+def strings_release(values: transferred[Handle])
+
+@c(symbol = "sev_abi_v1_regex_substitute")
+def substitute(text: borrowed[string], pattern: borrowed[string], replacement: borrowed[string], value: out[Handle]) -> i32
+
+@c(symbol = "sev_abi_v1_regex_text_value")
+def text_value(value: borrowed[Handle]) -> borrowed[string]
+
+@c(symbol = "sev_abi_v1_regex_text_release")
+def text_release(value: transferred[Handle])
