@@ -1,0 +1,58 @@
+import * from "../../../../sev_compiler/syntax/primitive/string/intrinsics.sev" as text
+
+
+# A hashing strategy is selected by type, independently of the value's type.
+trait HashFunction:
+    def hash(value: string) -> u128
+
+
+# arith.muli has modular integer semantics: stable IDs wrap at 128 bits.
+@mlir("arith.muli")
+def __hash_multiply(left: u128, right: u128) -> u128
+
+
+class StableHashFunction: HashFunction
+    def hash(value: string) -> u128:
+        result: u128 := 0x6c62272e07bb014262b821756295c58d
+        prime: u128 = 0x0000000001000000000000000000013b
+        position := 0
+        count = text.__text_size(value)
+        while position < count:
+            result = __hash_multiply(result ^ u128(text.__text_load(value, position)), prime)
+            position += 1
+        return result
+
+
+def hash[F: HashFunction = StableHashFunction](value: string) -> u128:
+    function = F()
+    return function.hash(value)
+
+
+# The Rust seed currently parses but discards function type-parameter defaults.
+# Keep the ordinary call equivalent to the explicit default specialization.
+def hash(value: string) -> u128:
+    return hash[StableHashFunction](value)
+
+
+class __TestByteCountHashFunction: HashFunction
+    def hash(value: string) -> u128:
+        return u128(text.__text_size(value))
+
+
+test "stable hashes preserve the bootstrap FNV-1a 128 bit vectors":
+    assert(hash("") == 0x6c62272e07bb014262b821756295c58d)
+    assert(hash("a") == 0xd228cb696f1a8caf78912b704e4a8964)
+    assert(hash("hello") == 0xe3e1efd54283d94f7081314b599d31b3)
+
+
+test "stable hashes consume UTF-8 bytes including embedded zeroes":
+    assert(hash("λ") == 0x088093a58cab1be95aa0733054b79b8e)
+    assert(hash("a\0b") == 0xa68d6315038b5822836dbc79783ec15a)
+    assert(hash("hello") == hash[StableHashFunction]("hello"))
+
+
+test "callers can select an independent hashing strategy":
+    assert(hash[__TestByteCountHashFunction]("λ") == 2)
+    assert(hash[__TestByteCountHashFunction]("") == 0)
+    assert(hash[__TestByteCountHashFunction]("hello") == 5)
+    assert(hash("hello") != hash[__TestByteCountHashFunction]("hello"))

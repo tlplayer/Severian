@@ -3,14 +3,15 @@
     "name": "core.util",
     "version": "0.1.0",
     "edition": "2026",
-    "description": "General prelude utilities and assertion diagnostics"
+    "description": "Compatibility facade for core.utils"
   },
   "lib": {
     "path": "src/lib.sev"
   },
   "dependencies": {
-    "io": {
-      "path": "../../system/io",
+    "utils": {
+      "package": "core.utils",
+      "path": "../utils",
       "version": "0.1.0"
     }
   }

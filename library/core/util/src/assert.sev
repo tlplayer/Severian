@@ -1,17 +1,2 @@
-import * from "../../../system/io/src/diagnostic.sev" as diagnostic_io
-
-
-# cf.assert still owns termination. Report first through unbuffered stderr so
-# the diagnostic survives termination even when stdout has been redirected.
-def __assert_condition(condition: bool, message: string) -> bool:
-    if not condition:
-        diagnostic_io.write_text(2, "assertion failed: " + message + "\n")
-    return condition
-
-
-test "assertion reporting preserves a successful condition":
-    assert(__assert_condition(true, "must not be printed"))
-
-
-test "assertion reporting returns failure without terminating":
-    assert(not __assert_condition(false, "diagnostic λ"))
+# Compatibility import; general utilities are owned by core.utils.
+import * from "../../utils/src/assert.sev"

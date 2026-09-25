@@ -7,6 +7,7 @@ import * from "../literal/lowered.sev"
 import * from "../sentence/sentence.sev"
 import * from "function.sev"
 import * from "../type/system.sev"
+import * from "../../../library/core/utils/src/hash.sev" as hashing
 
 
 # Operations, registry contracts, and callable lowering metadata.
@@ -192,27 +193,27 @@ class OperationRegistry:
 
 
 def dialect_id(name: string) -> DialectId:
-    return DialectId(stable_hash(name))
+    return DialectId(hashing.hash(name))
 
 
 def operation_id(name: string) -> OperationId:
-    return OperationId(stable_hash(name))
+    return OperationId(hashing.hash(name))
 
 
 def attribute_id(name: string) -> AttributeId:
-    return AttributeId(stable_hash(name))
+    return AttributeId(hashing.hash(name))
 
 
 def backend_id(name: string) -> BackendId:
-    return BackendId(stable_hash(name))
+    return BackendId(hashing.hash(name))
 
 
 def runtime_id(name: string) -> RuntimeId:
-    return RuntimeId(stable_hash(name))
+    return RuntimeId(hashing.hash(name))
 
 
 def provider_id(name: string) -> ProviderId:
-    return ProviderId(stable_hash(name))
+    return ProviderId(hashing.hash(name))
 
 
 def named_operation(dialect: string, operation: string) -> OpId:

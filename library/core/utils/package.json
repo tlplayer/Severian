@@ -1,0 +1,12 @@
+{
+  "package": {
+    "name": "core.utils",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "General prelude utilities and extensible hashing"
+  },
+  "lib": { "path": "src/lib.sev" },
+  "dependencies": {
+    "io": { "path": "../../system/io", "version": "0.1.0" }
+  }
+}

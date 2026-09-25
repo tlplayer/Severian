@@ -66,7 +66,7 @@
         "source": "library/core/memory/src/raw_intrinsics.sev"
       },
       {
-        "source": "library/core/util/src/assert.sev",
+        "source": "library/core/utils/src/assert.sev",
         "names": [
           "assert"
         ]
@@ -74,6 +74,12 @@
       {
         "source": "sev_compiler/syntax/primitive/string/methods.sev",
         "alias": "string_methods"
+      },
+      {
+        "source": "library/core/utils/src/hash.sev",
+        "names": [
+          "hash"
+        ]
       }
     ],
     "testing": [

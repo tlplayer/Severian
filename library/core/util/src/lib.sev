@@ -1,2 +1,2 @@
-# General prelude utilities shared across value types.
-import * from "assert.sev"
+# Compatibility facade for the earlier singular package spelling.
+import * from "../../utils/src/lib.sev"
