@@ -66,14 +66,14 @@ def store(function: model_syntax_function_function.FunctionDeclaration, director
             throw Error("could not write indexed prelude body")
         function.lazy_body = name
         # An empty body marks a source implementation, not an external symbol.
-        function.body = model_syntax_block_block.empty_block()
+        function.body = model_syntax_block_block.Block()
     return function
 
 test "unused indexed declarations do not require a body read":
     function = model_syntax_function_function.FunctionDeclaration(
         name="unused",
         definition=model_syntax_symbol_symbol.named_definition("prelude", "function", "unused"),
-        body=model_syntax_block_block.empty_block(),
+        body=model_syntax_block_block.Block(),
         lazy_body="/missing-unused-body.txt",
     )
     required: list[model_syntax_symbol_symbol.DefId] = []
@@ -87,10 +87,10 @@ test "unused indexed declarations do not require a body read":
 test "body cache reuses an already decoded declaration":
     function = model_syntax_function_function.FunctionDeclaration(
         name="cached",
-        body=model_syntax_block_block.empty_block(),
+        body=model_syntax_block_block.Block(),
         lazy_body="/missing-cached-body.txt",
     )
-    cache = lazy.BodyCache([function.lazy_body], [model_syntax_block_block.empty_block()])
+    cache = lazy.BodyCache([function.lazy_body], [model_syntax_block_block.Block()])
     loaded = lazy.load(function, cache)
     assert(loaded.body != None)
     assert(loaded.lazy_body == "")

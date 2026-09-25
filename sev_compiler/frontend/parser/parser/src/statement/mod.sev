@@ -798,12 +798,12 @@ def parser_test_declaration(parser: Parser) -> model_syntax_function_syntax.Test
                 cases.append(model_syntax_function_syntax.CompilerTestCase(Accept, None, model_syntax_block_block.Block(setup[:]), case_start))
             parsed ?= parser_compiler_case(Parser(tokens), expectation, setup, case_start)
             if parsed is Diagnostic:
-                cases.append(model_syntax_function_syntax.CompilerTestCase(expectation, None, model_syntax_block_block.empty_block(), case_start, parse_error=parsed.message))
+                cases.append(model_syntax_function_syntax.CompilerTestCase(expectation, None, model_syntax_block_block.Block(), case_start, parse_error=parsed.message))
             if parsed is CompilerTestCase:
                 cases.append(parsed)
             parser_separators(parser)
         end = parser_expect(parser, Dedent, "expected end of compiler test").span.end
-        return model_syntax_function_syntax.TestDeclaration(name, modes, model_syntax_block_block.empty_block(), cases, source.Span(start.source, start.start, end), mode_arguments=mode_arguments)
+        return model_syntax_function_syntax.TestDeclaration(name, modes, model_syntax_block_block.Block(), cases, source.Span(start.source, start.start, end), mode_arguments=mode_arguments)
     block = parser_indented_block(parser, "test")
     return model_syntax_function_syntax.TestDeclaration(name, modes, block[0], [], source.Span(start.source, start.start, block[1]), mode_arguments=mode_arguments, contracts=contracts)
 
@@ -969,7 +969,7 @@ def parser_initialized_loop(loop: model_syntax_sentence_sentence.Statement, init
         # The initializer runs once in a scope enclosing the whole loop.
         scope = model_syntax_block_block.Block([model_syntax_sentence_sentence.BindingStatement(binding), loop], span=span)
         taken = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), span)
-        return model_syntax_sentence_sentence.Statement.If(taken, scope, model_syntax_block_block.empty_block(), span)
+        return model_syntax_sentence_sentence.Statement.If(taken, scope, model_syntax_block_block.Block(), span)
     return loop
 
 
@@ -1121,7 +1121,7 @@ def parser_simple_statement(parser: Parser) -> model_syntax_sentence_sentence.St
                 parser_separators(parser)
             parser_expect(parser, Dedent, "expected end of call block")
         condition = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), value.span)
-        return model_syntax_sentence_sentence.Statement.If(condition, model_syntax_block_block.Block(statements), model_syntax_block_block.empty_block(), value.span)
+        return model_syntax_sentence_sentence.Statement.If(condition, model_syntax_block_block.Block(statements), model_syntax_block_block.Block(), value.span)
     return model_syntax_sentence_sentence.ExpressionStatement(value)
 
 def parser_looks_like_binding(parser: Parser) -> bool:
@@ -1782,7 +1782,7 @@ def parser_conditional(parser: Parser) -> model_syntax_sentence_sentence.Stateme
     condition = parser_expression(parser, 0)
     parser_expect_symbol(parser, ":", "expected colon after if condition")
     taken = parser_indented_block(parser, "if")
-    otherwise := model_syntax_block_block.empty_block()
+    otherwise := model_syntax_block_block.Block()
     end := taken[1]
     if parser_at_identifier(parser, "elif"):
         otherwise.statements.append(parser_conditional(parser))

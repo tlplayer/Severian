@@ -191,7 +191,7 @@ def macro_condition(expression: model_syntax_function_function.Expression) -> Ma
 
 
 def macro_block(block: model_syntax_block_block.Block) -> model_syntax_block_block.Block:
-    result = model_syntax_block_block.empty_block()
+    result = model_syntax_block_block.Block()
     for statement in block.statements:
         match statement:
             case If:

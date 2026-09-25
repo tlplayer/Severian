@@ -167,7 +167,7 @@ def project(expression: model_syntax_function_function.Expression, names: list[s
 
 
 def project_block(block: model_syntax_block_block.Block, names: list[string], getters: list[string], contexts: list[string], bound: list[string], failures: list[model_syntax_sentence_sentence.Statement], ordinal: list[int], assert_calls: bool = true) -> model_syntax_block_block.Block:
-    result = model_syntax_block_block.empty_block()
+    result = model_syntax_block_block.Block()
     for statement in block.statements:
         projected := statement
         # Parenthesized assert is parsed as an ordinary call so prelude
@@ -211,7 +211,7 @@ def project_block(block: model_syntax_block_block.Block, names: list[string], ge
                 result.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(checked, None, project(condition, names, getters, contexts, bound), false, false, span)))
                 # Evaluate once, restore policy resources on failure, then keep
                 # the ordinary assertion and its source location.
-                result.statements.append(model_syntax_sentence_sentence.Statement.If(name(checked, span), model_syntax_block_block.empty_block(), model_syntax_block_block.Block(failures[:]), span))
+                result.statements.append(model_syntax_sentence_sentence.Statement.If(name(checked, span), model_syntax_block_block.Block(), model_syntax_block_block.Block(failures[:]), span))
                 result.statements.append(model_syntax_sentence_sentence.Assert(name(checked, span), optional(message, names, getters, contexts, bound), span, condition_span))
             case If:
                 result.statements.append(model_syntax_sentence_sentence.Statement.If(project(condition, names, getters, contexts, bound), project_block(then_block, names, getters, contexts, bound[:], failures, ordinal, assert_calls), project_block(else_block, names, getters, contexts, bound[:], failures, ordinal, assert_calls), span))
@@ -282,7 +282,7 @@ def runner_block(declaration: model_syntax_function_syntax.TestDeclaration, body
         child.statements.append(model_syntax_sentence_sentence.ExpressionStatement(call("__test_complete", [], span)))
         result = model_syntax_block_block.Block([
             model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(ticket, None, call("__test_start", values, span), false, false, span)),
-            model_syntax_sentence_sentence.Statement.If(call("__test_is_child", [name(ticket, span)], span), child, model_syntax_block_block.empty_block(), span),
+            model_syntax_sentence_sentence.Statement.If(call("__test_is_child", [name(ticket, span)], span), child, model_syntax_block_block.Block(), span),
             model_syntax_sentence_sentence.ExpressionStatement(call("__test_wait", [name(ticket, span)], span)),
         ])
     if "repeat" in declaration.source_modes:
@@ -371,7 +371,7 @@ def expand(module: model_hir_module_module.Module, enabled: bool, namespace: str
                     table = true
                     ordinal := 0
                     for row in declaration.case_rows:
-                        body = model_syntax_block_block.empty_block()
+                        body = model_syntax_block_block.Block()
                         index := 0
                         for value in row.values:
                             body.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(declaration.case_names[index], None, value, false, false, value.span)))
@@ -439,7 +439,7 @@ def expand(module: model_hir_module_module.Module, enabled: bool, namespace: str
         if not found:
             return error(diagnostics.diagnostic_at("E000215", "no source test policy for " + mode + "; load a trait implementing TestMode with this name", wanted_spans[mode_index]))
         mode_index += 1
-    suite = model_syntax_block_block.empty_block()
+    suite = model_syntax_block_block.Block()
     for selected in policies:
         context = "$mode$" + selected.name
         suite.statements.append(model_syntax_sentence_sentence.BindingStatement(model_syntax_sentence_sentence.Binding(context, None, call(selected.begin, [], selected.span), false, false, selected.span, mutable=true)))

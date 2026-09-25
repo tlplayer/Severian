@@ -46,7 +46,7 @@ def expand_match(subject: model_syntax_function_function.Expression, arms: list[
         else:
             wildcard = true
     name = "$match_subject_" + string(span.start)
-    tail := model_syntax_block_block.empty_block()
+    tail := model_syntax_block_block.Block()
     index := len(arms)
     while index > 0:
         index -= 1
@@ -62,7 +62,7 @@ def expand_match(subject: model_syntax_function_function.Expression, arms: list[
     for statement in tail.statements:
         body.statements.append(statement)
     taken = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), span)
-    return model_syntax_sentence_sentence.Statement.If(taken, body, model_syntax_block_block.empty_block(), span)
+    return model_syntax_sentence_sentence.Statement.If(taken, body, model_syntax_block_block.Block(), span)
 
 
 class ResolvedArm:
@@ -104,7 +104,7 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[mo
         if wildcard:
             return error(diagnostics.Diagnostic("E000206", "match arm after wildcard is unreachable", arm.span))
         selected: list[int] = []
-        body = model_syntax_block_block.empty_block()
+        body = model_syntax_block_block.Block()
         condition := model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), span, type_id=model_syntax_primitive_declarations.bool_type_id())
         pattern ?= arm.pattern
         annotation ?= arm.annotation

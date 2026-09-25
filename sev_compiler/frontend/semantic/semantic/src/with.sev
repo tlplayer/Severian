@@ -404,7 +404,7 @@ def expand_dispatch(module: model_hir_module_module.Module, receiver: bool = fal
                             model_syntax_sentence_sentence.Statement.If(
                                 named(flag, origin),
                                 model_syntax_block_block.Block([increment]),
-                                model_syntax_block_block.empty_block(),
+                                model_syntax_block_block.Block(),
                                 origin,
                             ),
                         )
@@ -458,7 +458,7 @@ def expand_dispatch(module: model_hir_module_module.Module, receiver: bool = fal
                             origin,
                         ),
                     )
-                    tail := model_syntax_block_block.empty_block()
+                    tail := model_syntax_block_block.Block()
                     index = int(len(calls))
                     result ?= first.result
                     is_unit := result == None

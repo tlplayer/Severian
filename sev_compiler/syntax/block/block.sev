@@ -90,10 +90,6 @@ class Block: B
     header: BlockSentence | None = None
 
 
-def empty_block() -> Block:
-    return Block([], [], [])
-
-
 class BlockFile:
     path: string
     source: source.SourceId

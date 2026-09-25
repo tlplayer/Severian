@@ -1893,7 +1893,7 @@ def callable_install_mock(state: CallableAnalysis, calls: list[model_syntax_func
         function.result = model_syntax_type_annotation.named_type(definitions.type_name(function.result_type, state.records), [], span)
         function.lookup = state.namespace
         function.mock_functions = state.mock_functions[:]
-        body = model_syntax_block_block.empty_block()
+        body = model_syntax_block_block.Block()
         exhaustive := false
         rule := 0
         for target in originals:
@@ -1912,7 +1912,7 @@ def callable_install_mock(state: CallableAnalysis, calls: list[model_syntax_func
                         equal = model_syntax_function_function.Expression(model_syntax_function_function.Binary(model_syntax_function_syntax.operator_syntax(model_syntax_function_syntax.Equal()), parameter, argument.value), span)
                         no = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(false)), span)
                         condition = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Conditional(condition, equal, no), span)
-                body.statements.append(model_syntax_sentence_sentence.Statement.If(condition, model_syntax_block_block.Block([model_syntax_sentence_sentence.Statement.Return(results[rule], span)]), model_syntax_block_block.empty_block(), span))
+                body.statements.append(model_syntax_sentence_sentence.Statement.If(condition, model_syntax_block_block.Block([model_syntax_sentence_sentence.Statement.Return(results[rule], span)]), model_syntax_block_block.Block(), span))
             rule += 1
         match fallback.kind:
             case ThrowValue:
@@ -2033,7 +2033,7 @@ def callable_literal_field(value: model_syntax_function_function.Expression) -> 
 
 def callable_field_access(state: CallableAnalysis, object: model_syntax_function_function.Expression, operation: string, arguments: list[model_syntax_function_function.CallArgument], span: source.Span, expected: model_syntax_symbol_symbol.TypeId) -> FieldAccessResult | diagnostics.Diagnostic:
     local = callable_scope(state)
-    body = model_syntax_block_block.empty_block()
+    body = model_syntax_block_block.Block()
     receiver: model_syntax_function_function.Expression | None := None
     # A builder starts with initialized storage, then validates each supplied
     # field through the same set path used for later updates.
@@ -2131,7 +2131,7 @@ def callable_field_updates(state: CallableAnalysis, local: CallableAnalysis, bod
     loans.access(state.loans, root, true, span)
     if root in state.readonly:
         return error(callable_diagnostic("set cannot mutate a shared borrow; use a writable receiver", span))
-    commits = model_syntax_block_block.empty_block()
+    commits = model_syntax_block_block.Block()
     position := 0
     for source_key in keys:
         key_expression = callable_field_key(local, record, source_key)
@@ -2156,7 +2156,7 @@ def callable_field_updates(state: CallableAnalysis, local: CallableAnalysis, bod
                     valid = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Conditional(condition, validation, valid), span, type_id=model_syntax_primitive_declarations.bool_type_id())
                     target = model_syntax_function_function.Expression(model_syntax_function_function.FieldReference(subject, index), span, type_id=field.type_id)
                     update = callable_control(local, "Assign", [target, value], [], span)
-                    commits.statements.append(callable_control(local, "If", [condition], [model_syntax_block_block.Block([update]), model_syntax_block_block.empty_block()], span))
+                    commits.statements.append(callable_control(local, "If", [condition], [model_syntax_block_block.Block([update]), model_syntax_block_block.Block()], span))
             index += 1
         if literal != "" and not found:
             return error(callable_diagnostic("unknown or read-only field " + record.name + "." + literal, span))
@@ -2304,10 +2304,10 @@ def callable_destroy_fields(state: CallableAnalysis, value: model_syntax_functio
         ordinal := 0
         for variant in variants:
             if callable_has_drop(state, variant):
-                cleanup = model_syntax_block_block.empty_block()
+                cleanup = model_syntax_block_block.Block()
                 payload = model_syntax_function_function.Expression(model_syntax_function_function.FieldReference(value, ordinal + 1), span, type_id=variant)
                 callable_destroy_fields(state, payload, cleanup, span)
-                output.statements.append(callable_control(state, "If", [matches.tag_test(value, ordinal, span)], [cleanup, model_syntax_block_block.empty_block()], span))
+                output.statements.append(callable_control(state, "If", [matches.tag_test(value, ordinal, span)], [cleanup, model_syntax_block_block.Block()], span))
             ordinal += 1
         return
     # The cleanup hook borrows valid storage internally. Consumption belongs to
@@ -2399,7 +2399,7 @@ def callable_contract_checks(state: CallableAnalysis, output: model_syntax_block
 
 
 def callable_block(state: CallableAnalysis, statements: list[model_syntax_sentence_sentence.Statement], result_type: model_syntax_symbol_symbol.TypeId, complete: bool = true, origin: source.Span | None = None) -> model_syntax_block_block.Block | diagnostics.Diagnostic:
-    output = model_syntax_block_block.empty_block()
+    output = model_syntax_block_block.Block()
     output.span = origin
     resource_start = int(len(state.resources))
     defer_start = int(len(state.deferred))
@@ -2426,7 +2426,7 @@ def callable_block(state: CallableAnalysis, statements: list[model_syntax_senten
                         state.dead.append(binding)
                 condition = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), span, type_id=model_syntax_primitive_declarations.bool_type_id())
                 returned = callable_terminates(typed)
-                output.statements.append(callable_control(state, "If", [condition], [typed, model_syntax_block_block.empty_block()], span, returned))
+                output.statements.append(callable_control(state, "If", [condition], [typed, model_syntax_block_block.Block()], span, returned))
             case CompilerCheck:
                 if not state.test_context:
                     return error(callable_diagnostic("compiler expectations require a test body", span))
@@ -2710,7 +2710,7 @@ def callable_block(state: CallableAnalysis, statements: list[model_syntax_senten
                 local = callable_scope(state)
                 binding = callable_binding(local, model_syntax_sentence_sentence.Binding("$match_subject_" + string(span.start), None, subject, false, true, span))
                 resolved_arms = matches.resolve_arms(state.declarations, state.records, state.namespace, binding.id, binding.type_id, arms, span, false)
-                tail := model_syntax_block_block.empty_block()
+                tail := model_syntax_block_block.Block()
                 cursor := len(resolved_arms)
                 while cursor > 0:
                     cursor -= 1
@@ -2736,7 +2736,7 @@ def callable_block(state: CallableAnalysis, statements: list[model_syntax_senten
             case ForEach:
                 state.transitions.clear()
                 pack = callable_field_pack(state, iterable)
-                expanded := model_syntax_block_block.empty_block()
+                expanded := model_syntax_block_block.Block()
                 if pack.found:
                     expanded = callable_pack_iteration(state, name, pack, body, span, result_type)
                 else:
@@ -3434,7 +3434,7 @@ def callable_owner(state: CallableAnalysis, function: model_syntax_function_func
 
 
 def callable_iteration(state: CallableAnalysis, name: string, iterable: model_syntax_function_function.Expression, body: model_syntax_block_block.Block, span: source.Span, result_type: model_syntax_symbol_symbol.TypeId) -> model_syntax_block_block.Block | diagnostics.Diagnostic:
-    output = model_syntax_block_block.empty_block()
+    output = model_syntax_block_block.Block()
     prefix = "$iteration$" + string(state.next_id[0])
     state.next_id[0] += 1
     receiver_binding = callable_binding(state, model_syntax_sentence_sentence.Binding(prefix, None, iterable, false, false, span))
@@ -3515,7 +3515,7 @@ def callable_body(state: CallableAnalysis, function: model_syntax_function_funct
             local.attachments.append(model_syntax_constraint_model.WithAttachment(attachment.role, condition, attachment.stage, attachment.interface))
     body ?= function.body
     if body != None:
-        entry = model_syntax_block_block.empty_block()
+        entry = model_syntax_block_block.Block()
         entry.span = body.span
         callable_contract_checks(local, entry, model_syntax_constraint_model.AttachmentRole.Entry)
         callable_contract_checks(local, entry, model_syntax_constraint_model.AttachmentRole.Fix)
@@ -3523,7 +3523,7 @@ def callable_body(state: CallableAnalysis, function: model_syntax_function_funct
         for statement in resolved.statements:
             entry.statements.append(statement)
         return entry
-    return model_syntax_block_block.empty_block()
+    return model_syntax_block_block.Block()
 
 
 def callable_record_layout(records: list[model_syntax_function_function.RecordDeclaration], type_id: model_syntax_symbol_symbol.TypeId, ancestors: list[int]):
@@ -4783,7 +4783,7 @@ def callable_infer_field_pack(state: CallableAnalysis, callee: model_syntax_func
 
 
 def callable_pack_iteration(state: CallableAnalysis, name: string, pack: CallableFieldPack, body: model_syntax_block_block.Block, span: source.Span, result_type: model_syntax_symbol_symbol.TypeId) -> model_syntax_block_block.Block | diagnostics.Diagnostic:
-    output = model_syntax_block_block.empty_block()
+    output = model_syntax_block_block.Block()
     values: list[model_syntax_function_function.Expression] = []
     receiver ?= pack.receiver
     if receiver != None:

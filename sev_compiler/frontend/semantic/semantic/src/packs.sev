@@ -126,7 +126,7 @@ def rename_expression(expression: model_syntax_function_function.Expression, nam
 
 
 def expand_block(block: model_syntax_block_block.Block, pack: string, count: int, names: list[string], replacements: list[string], prefix: string) -> model_syntax_block_block.Block:
-    result = model_syntax_block_block.empty_block()
+    result = model_syntax_block_block.Block()
     for statement in block.statements:
         match statement:
             case ForEach:
