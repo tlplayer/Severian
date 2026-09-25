@@ -6,6 +6,9 @@ mod destruction;
 mod mlir;
 mod package;
 mod queries;
+mod scope;
+
+use scope::LexicalScope;
 
 pub use package::{
     analyze_package, analyze_package_with_context, import_index, import_plan, DefKind, Definition, ExportMap, FunctionDecl,
@@ -229,7 +232,7 @@ pub(crate) fn analyze_with_package_functions(
     let namespace_hooks = collect_trait_namespace_hooks(registry_ast)?;
     let mut analyzer = Analyzer {
         types,
-        names: BTreeMap::new(),
+        names: LexicalScope::default(),
         mutable_variables: BTreeSet::new(),
         value_substitutions: BTreeMap::new(),
         declarations: BTreeSet::new(),
@@ -1419,7 +1422,7 @@ fn compiler_lossless_conversion(ast: &severian_ast::Module) -> bool {
 
 struct Analyzer<'a> {
     types: &'a mut TypeContext,
-    names: BTreeMap<String, (BindingId, severian_hir::VariableId, TypeId)>,
+    names: LexicalScope<(BindingId, severian_hir::VariableId, TypeId)>,
     mutable_variables: BTreeSet<severian_hir::VariableId>,
     value_substitutions: BTreeMap<String, Expression>,
     /// Names declared in the current lexical scope. `names` also contains
@@ -1594,16 +1597,7 @@ fn enum_payload_index(
 }
 
 fn enum_variant_path_matches(path: &str, enum_name: &str, variant_name: &str) -> bool {
-    if path == variant_name || path == format!("{enum_name}.{variant_name}") {
-        return true;
-    }
-    let Some((path_namespace, path_member)) = path.rsplit_once('.') else {
-        return false;
-    };
-    let Some((enum_namespace, _)) = enum_name.rsplit_once('.') else {
-        return false;
-    };
-    path_namespace == enum_namespace && path_member == variant_name
+    path == variant_name || path == format!("{enum_name}.{variant_name}")
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1846,8 +1840,6 @@ impl Analyzer<'_> {
                 ty: integer,
             }];
             for (ordinal, variant) in declaration.variants.iter().enumerate() {
-                self.enum_variants
-                    .insert(variant.name.clone(), (declaration.name.clone(), ordinal));
                 self.enum_variants.insert(
                     format!("{}.{}", declaration.name, variant.name),
                     (declaration.name.clone(), ordinal),
@@ -2257,10 +2249,6 @@ impl Analyzer<'_> {
                     },
                 );
                 for (ordinal, variant) in enumeration.declaration.variants.iter().enumerate() {
-                    if !lookup.contains('.') {
-                        self.enum_variants
-                            .insert(variant.name.clone(), (lookup.clone(), ordinal));
-                    }
                     self.enum_variants.insert(
                         format!("{lookup}.{}", variant.name),
                         (lookup.clone(), ordinal),
@@ -2581,8 +2569,15 @@ impl Analyzer<'_> {
         let inferred_update = !ast_binding.update
             && !ast_binding.mutable
             && ast_binding.annotation.is_none()
-            && self.declarations.contains(&ast_binding.name);
+            && self.names.contains_key(&ast_binding.name);
         let is_update = ast_binding.update || inferred_update;
+        if !is_update && !ast_binding.mutable && ast_binding.annotation.is_none()
+            && self.value_substitutions.contains_key(&ast_binding.name)
+        {
+            return Err(Diagnostic::new("E000203",
+                format!("cannot assign to imported or substituted value `{}` without a mutable storage binding", ast_binding.name),
+                Some(ast_binding.span)));
+        }
         let update_type = if is_update {
             Some(
                 self.names
@@ -4817,6 +4812,21 @@ impl Analyzer<'_> {
         bindings: &mut Vec<Binding>,
         result_type: TypeId,
     ) -> Result<Block, Diagnostic> {
+        let parent_names = self.names.clone();
+        let parent_declarations = std::mem::take(&mut self.declarations);
+        self.names = parent_names.child();
+        let result = self.block_contents(statements, bindings, result_type);
+        self.names = parent_names;
+        self.declarations = parent_declarations;
+        result
+    }
+
+    fn block_contents(
+        &mut self,
+        statements: &[AstStatement],
+        bindings: &mut Vec<Binding>,
+        result_type: TypeId,
+    ) -> Result<Block, Diagnostic> {
         let mut block = Block::default();
         let mut deferred = Vec::new();
         for statement in statements {
@@ -6485,6 +6495,13 @@ impl Analyzer<'_> {
                 })
             }
             AstExpressionKind::Name(name) => {
+                if let Some((binding, _, type_id)) = self.names.get(name).copied() {
+                    let value = self.value_substitutions.get(name).cloned().unwrap_or_else(|| Expression {
+                        id: self.next_id(), type_id, span: ast.span,
+                        kind: ExpressionKind::Binding(binding),
+                    });
+                    return expected.map_or(Ok(value.clone()), |expected| self.coerce(value, expected, false));
+                }
                 if name == "unit" && !self.names.contains_key(name) {
                     return self.expression(&AstExpression {
                         kind: AstExpressionKind::Literal(AstLiteral::Unit),
@@ -6533,7 +6550,7 @@ impl Analyzer<'_> {
                     return Err(Diagnostic::new("E000204",
                         "`absent` requires a union containing None", Some(ast.span)));
                 }
-                if self.enum_variants.contains_key(name) {
+                if self.enum_constructor_candidate(name, expected) {
                     return self.enum_constructor(name, &[], expected, ast.span);
                 }
                 if let Some(value) = self.value_substitutions.get(name).cloned() {
@@ -7218,6 +7235,10 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if matches!(&callee.kind, AstExpressionKind::Name(name) if name != "self" && self.names.contains_key(name)) {
+                    return self.callable_call(callee, arguments, expected, ast.span)?
+                        .ok_or_else(|| Diagnostic::new("E000205", "resolved binding is not callable", Some(callee.span)));
+                }
                 if let Some(call) =
                     self.receiver_sibling_call(callee, arguments, expected, ast.span)?
                 {
@@ -10818,9 +10839,6 @@ impl Analyzer<'_> {
             for (lookup, instance) in scope {
                 self.enums.insert(lookup.clone(), instance.clone());
                 for (ordinal, variant) in instance.variants.iter().enumerate() {
-                    if !lookup.contains('.') {
-                        self.enum_variants.insert(variant.name.clone(), (lookup.clone(), ordinal));
-                    }
                     self.enum_variants.insert(format!("{lookup}.{}", variant.name), (lookup.clone(), ordinal));
                 }
             }
@@ -12125,18 +12143,19 @@ impl Analyzer<'_> {
     }
 
     fn enum_constructor_candidate(&self, path: &str, expected: Option<TypeId>) -> bool {
+        let head = path.split('.').next().unwrap_or(path);
+        if self.names.contains_key(head) || self.value_substitutions.contains_key(path)
+            || self.functions.contains_key(path) || self.source_functions.contains_key(path)
+            || self.classes.contains_key(path)
+            || self.class_instances.contains_key(&(path.to_owned(), Vec::new()))
+            || self.active_type_aliases.contains_key(head)
+        {
+            return false;
+        }
         self.enum_variants.contains_key(path)
-            || expected.is_some_and(|expected| {
-                self.enums.iter().any(|(enum_name, instance)| {
-                    instance.ty == expected
-                        && instance.variants.iter().any(|variant| {
-                            enum_variant_path_matches(path, enum_name, &variant.name)
-                        })
-                })
-            })
-            || (path.contains('.') && self.enums.iter().any(|(enum_name, instance)| {
-                instance.variants.iter().any(|variant| {
-                    enum_variant_path_matches(path, enum_name, &variant.name)
+            || expected.is_some_and(|ty| self.enums.iter().any(|(name, instance)| {
+                instance.ty == ty && instance.variants.iter().any(|variant| {
+                    enum_variant_path_matches(path, name, &variant.name)
                 })
             }))
     }
@@ -21171,6 +21190,26 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn lexical_resolution_keeps_class_and_enum_member_distinct() {
+        analyze_source("enum TermRole:\n    Block\nclass Block:\n    values: list[int] = []\ndef empty() -> Block:\n    return Block()\ndef role() -> TermRole:\n    return TermRole.Block\n");
+    }
+
+    #[test]
+    fn lexical_resolution_prefers_local_binding_to_enum_member() {
+        analyze_source("enum Role:\n    value\ndef read(value: int) -> int:\n    return value\n");
+    }
+
+    #[test]
+    fn nested_assignment_preserves_outer_variable_identity() {
+        let (program, _) = analyze_source("def update() -> int:\n    x := -2\n    if true:\n        x = -1\n        if true:\n            x = 1\n    return x\n");
+        let bindings = &program.modules[0].bindings;
+        let assignments = bindings.iter().filter(|binding| matches!(&binding.value.kind,
+            ExpressionKind::Literal(_) | ExpressionKind::Unary { .. })).collect::<Vec<_>>();
+        assert_eq!(assignments.len(), 3);
+        assert!(assignments.iter().all(|binding| binding.variable == assignments[0].variable));
     }
 
     #[test]

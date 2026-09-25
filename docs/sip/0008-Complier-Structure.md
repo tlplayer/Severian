@@ -62,14 +62,14 @@ not a statement that those gates have passed.
   memory versions and are invalidated by affected writes and calls. Joins must
   be sound; loop widening is used only where convergence requires it.
 - Evaluation stage (static, specialization, runtime) is independent of check
-  site (entry, invariant, exit). `fix` is established on entry and checked after
-  relevant writes/calls, on loop edges, and on region exit. Suspension/re-entry
+  site (prefix, invariant, defer/suffix). `fix` is established on prefix and checked after
+  relevant writes/calls, on loop edges, and on region defer/suffix. Suspension/re-prefix
   needs its own policy before support. It does not continuously poll memory.
   The successful integer increment example requires `0 < x and x < 90` before
   `x += 10` under `fix x < 100`; `x = 95` is a negative test.
-- Ordinary `defer` retains delayed cleanup on scope exit. It is not an alias for
-  `fix`. Cleanup and exit checks execute exactly once on each supported normal,
-  early-return, error and loop-exit path crossing their region. Abort does not
+- Ordinary `defer` retains delayed cleanup on scope defer/suffix. It is not an alias for
+  `fix`. Cleanup and defer/suffix checks execute exactly once on each supported normal,
+  early-return, error and loop-defer/suffix path crossing their region. Abort does not
   promise cleanup. A failed invariant never retries another implementation.
 - Constraint payloads distinguish setup declarations, guards, contracts,
   ownership and execution context. Resolved interfaces do not grant CFG
@@ -96,6 +96,8 @@ Library
           └─ Block
               └─ Sentence
                   └─ Symbol / Operator / Operation
+              └─ Block
+                  └─ ...
 ```
 
 This hierarchy describes containment, not the complete compiler representation.
@@ -206,9 +208,9 @@ For example:
 
 ```sev
 def increment(x, view y) with {
-    entry x > 0
+    prefix x > 0
     fix x < 100
-    exit x >= 10
+    suffix x >= 10
     defer unchanged(y)
 }:
 ```
@@ -216,13 +218,13 @@ def increment(x, view y) with {
 where:
 
 ```text
-entry
+prefix
     checked when entering the region
 
 fix
     invariant maintained across the region
 
-exit
+defer/suffix
     checked when leaving the region
 
 defer
@@ -240,7 +242,7 @@ They become nodes in the constraint graph:
           │               │               │
           ▼               ▼               ▼
       x > 0            x < 100          x >= 10
-       entry              fix             exit
+       prefix              fix             defer/suffix
           │               │               │
           └───────────────┼───────────────┘
                           ▼
@@ -347,8 +349,8 @@ They are not required to correspond to modules, submodules, or object files.
 | `ControlFlow` | graph edge          | Runtime CFG transition.                                                                 |
 | `Implements`  | graph edge          | Implementation satisfies an interface/trait.                                            |
 | `Realizes`    | graph edge          | Semantic entity maps to compiled realization.                                           |
-| `Complexity`  | constraint metadata | Asymptotic or relative evaluation cost.                                                 |
-| `Phase`       | constraint metadata | Static, specialization, runtime, entry, fix, or exit.                                   |
+| `Compldefer/suffixy`  | constraint metadata | Asymptotic or relative evaluation cost.                                                 |
+| `Phase`       | constraint metadata | Static, specialization, runtime, prefix, fix, or defer/suffix.                                   |
 | `.sev`        | source format       | Severian source file.                                                                   |
 | `.sevi`       | interface format    | Serialized package/compiler semantic interface.                                         |
 | `.o`          | artifact            | Relocatable object file.                                                                |
@@ -392,7 +394,7 @@ trait With:
 trait Constraint: Node:
     dependencies: list[Node]
     phase: ConstraintPhase
-    complexity: Complexity
+    compldefer/suffixy: Compldefer/suffixy
     cost: number | unknown
 
 enum ConstraintPhase:
@@ -763,9 +765,9 @@ Sentence If
 
 ```sev
 def increment(x, view y) with {
-    entry x > 0
+    prefix x > 0
     fix x < 100
-    exit x >= 10
+    defer/suffix x >= 10
     defer unchanged(y)
 }:
     x += 10
@@ -781,7 +783,7 @@ Constraint graph:
          │              │              │
          ▼              ▼              ▼
       x > 0          x < 100        x >= 10
-       entry            fix            exit
+       prefix            fix            defer/suffix
                          │
                   unchanged(y)
                        fix
@@ -859,7 +861,7 @@ Each constraint can expose:
 ```text
 phase
 dependencies
-complexity
+compldefer/suffixy
 estimated cost
 ```
 
@@ -1088,9 +1090,9 @@ task = async foo() with self
 
 ```sev
 def foo(x) with {
-    entry x > 0
+    prefix x > 0
     fix x < 10
-    exit x >= 1
+    defer/suffix x >= 1
 }:
 ```
 
@@ -1158,19 +1160,19 @@ candidate B matches
 
 the compiler must diagnose ambiguity rather than select by incidental ordering.
 
-### Entry/fix/exit tests
+### Entry/fix/defer/suffix tests
 
 Verify:
 
 ```text
-entry
-    checked at region entry
+prefix
+    checked at region prefix
 
 fix
     maintained at relevant mutation/control boundaries
 
-exit
-    checked for each valid exit
+defer/suffix
+    checked for each valid defer/suffix
 
 defer
     behaves as fix
@@ -1252,7 +1254,7 @@ Constraints should carry enough metadata to permit ordering by:
 dependency
 phase
 cost
-complexity
+compldefer/suffixy
 selectivity where known
 ```
 

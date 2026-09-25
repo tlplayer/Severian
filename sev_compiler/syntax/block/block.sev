@@ -75,7 +75,7 @@ class BlockSyntax:
 
 
 class Block: B
-    statements: list[Statement]
+    statements: list[Statement] = []
     operations: list[Operation] = []
     lowered_operations: list[LoweredOperation] = []
     span: source.Span | None = None
@@ -117,3 +117,11 @@ def standard_block_syntax() -> list[BlockSyntax]:
         BlockSyntax("case", ["case"], BlockKind.Lexical),
         BlockSyntax("with", ["with"], BlockKind.Lexical),
     ]
+
+
+test "empty block construction uses field defaults":
+    block = empty_block()
+    assert(len(block.statements) == 0)
+    assert(len(block.operations) == 0)
+    assert(len(block.lowered_operations) == 0)
+    assert(block.kind == BlockKind.Lexical)

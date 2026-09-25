@@ -248,6 +248,14 @@ pub fn analyze_package_with_context(
     let mut index = collect_declarations(module_graph)?;
     let plan = imports::resolve_required_imports(module_graph, &index, imports::collect_import_requirements(module_graph));
     imports::apply_import_plan(&mut index, &plan);
+    for module in index.modules.values() {
+        for (name, resolution) in &module.scope.bindings {
+            if matches!(resolution, Resolution::Ambiguous(_)) {
+                return Err(Diagnostic::new("E000203",
+                    format!("name `{name}` has conflicting declarations in the same scope"), None));
+            }
+        }
+    }
     if std::env::var("SEVERIAN_PROFILE_ACTIVE").as_deref() == Ok("1") {
         eprintln!("  Imports: {} name requests, {} imported bindings, {} export entries", plan.requested_names, plan.imported_bindings, index.exports.values().map(|e|e.len()).sum::<usize>());
     }
@@ -1821,7 +1829,46 @@ fn is_injected_prelude_item(item: &Item) -> bool {
     source.0 >= u32::MAX - 3
 }
 
+// Explicit imports introduce names even when no expression uses them. Diagnose
+// conflicts before demand-driven import discovery can discard either binding.
+fn validate_explicit_import_names(module_graph: &ModuleGraph) -> Result<(), Diagnostic> {
+    for module in &module_graph.modules {
+        let mut names = BTreeMap::new();
+        for item in &module.ast.items {
+            let Item::Import(import) = item else { continue; };
+            if import.is_wildcard() && import.alias.is_none() { continue; }
+            let name = import.alias.clone().or_else(|| import.selected_name().map(str::to_owned))
+                .unwrap_or_else(|| match &import.subject {
+                    ImportSubject::Name(name) => name.clone(),
+                    ImportSubject::Locator(path) => std::path::Path::new(path).file_stem()
+                        .and_then(|name| name.to_str()).unwrap_or(path).to_owned(),
+                });
+            if let Some(previous) = names.insert(name.clone(), import.span) {
+                return Err(Diagnostic::new("E000203", format!("name `{name}` is already defined in this scope"), Some(import.span))
+                    .with_label(previous, "previous import introduces this name"));
+            }
+        }
+        for item in &module.ast.items {
+            if is_injected_prelude_item(item) { continue; }
+            let (name, span) = match item {
+                Item::Class(value) => (&value.name, value.span),
+                Item::Enum(value) => (&value.name, value.span),
+                Item::Function(value) => (&value.name, value.span),
+                Item::Trait(value) => (&value.name, value.span),
+                Item::Binding(value) if value.annotation.is_some() || value.mutable => (&value.name, value.span),
+                _ => continue,
+            };
+            if let Some(previous) = names.get(name) {
+                return Err(Diagnostic::new("E000203", format!("name `{name}` is already defined in this scope"), Some(span))
+                    .with_label(*previous, "previous import introduces this name"));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diagnostic> {
+    validate_explicit_import_names(module_graph)?;
     let mut index = ProgramIndex::default();
     for module in &module_graph.modules {
         index
@@ -2250,10 +2297,15 @@ fn insert_binding(
         bindings.insert(name, old);
         return;
     }
+    let has_module = matches!(&old, Resolution::Module(_)) || matches!(&new, Resolution::Module(_));
     let mut ids = resolution_definitions(&old);
     ids.extend(resolution_definitions(&new));
     ids.sort();
     ids.dedup();
+    if has_module {
+        bindings.insert(name, Resolution::Ambiguous(ids));
+        return;
+    }
     if let [id] = ids.as_slice() {
         bindings.insert(name, Resolution::Def(*id));
         return;
@@ -2612,5 +2664,26 @@ fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
             remap_expression_bindings(right, offset);
         }
         ExpressionKind::Literal(_) | ExpressionKind::Function(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod scope_resolution_tests {
+    use super::*;
+
+    #[test]
+    fn conflicting_explicit_imports_are_rejected_even_when_unused() {
+        let root = std::env::temp_dir().join(format!("sev-import-conflict-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("foo.sev"), "x = 1\ny = 2\n").unwrap();
+        std::fs::write(root.join("main.sev"), "import x from \"foo.sev\"\nfrom \"foo.sev\" import y as x\n").unwrap();
+        let graph = severian_modules::resolve(&root.join("main.sev")).unwrap();
+        let result = import_index(&graph);
+        std::fs::remove_dir_all(&root).unwrap();
+        let error = result.unwrap_err();
+        assert_eq!(error.code, "E000203");
+        assert!(error.message.contains("`x`"));
+        assert_eq!(error.labels.len(), 1);
     }
 }

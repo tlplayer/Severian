@@ -86,7 +86,7 @@ impl Analyzer<'_> {
         ast_function: &severian_ast::FunctionDeclaration,
         function: &mut FunctionDeclaration,
         bindings: &mut Vec<Binding>,
-        globals: &BTreeMap<String, (BindingId, severian_hir::VariableId, TypeId)>,
+        globals: &LexicalScope<(BindingId, severian_hir::VariableId, TypeId)>,
         global_values: &BTreeMap<String, Expression>,
         aliases: BTreeMap<String, TypeId>,
         constructor: Option<&ClassInstance>,
@@ -105,7 +105,7 @@ impl Analyzer<'_> {
             return Ok(());
         };
         self.active_constructor = constructor.is_some();
-        self.names = globals.clone();
+        self.names = globals.child();
         self.active_function_name = Some(ast_function.name.clone());
         self.declarations.clear();
         self.active_type_aliases = aliases;
