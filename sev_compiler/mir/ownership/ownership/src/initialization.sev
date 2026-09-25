@@ -106,7 +106,7 @@ def incoming_places(body: model_mir_cfg_cfg.CfgBody, target: int, outgoing: list
         return []
     incoming = universe[:]
     for block in body.blocks:
-        if block.id not in reachable:
+        if block.cfg_index not in reachable:
             continue
         terminal ?= block.terminator
         if terminal != None:
@@ -114,7 +114,7 @@ def incoming_places(body: model_mir_cfg_cfg.CfgBody, target: int, outgoing: list
                 if edge.target == target:
                     retained: list[StoragePlace] = []
                     for place in incoming:
-                        if place_present(outgoing[block.id], place):
+                        if place_present(outgoing[block.cfg_index], place):
                             retained.append(place)
                     incoming = retained
     return incoming
@@ -155,18 +155,18 @@ def verify(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBo
     while changed:
         changed = false
         for block in body.blocks:
-            if block.id not in reachable:
+            if block.cfg_index not in reachable:
                 continue
-            initialized = incoming_places(body, block.id, outgoing, reachable, universe)
+            initialized = incoming_places(body, block.cfg_index, outgoing, reachable, universe)
             for operation in block.operations:
                 initialized = transfer(body, operation, initialized)
-            if not same_state(initialized, outgoing[block.id]):
-                outgoing[block.id] = initialized
+            if not same_state(initialized, outgoing[block.cfg_index]):
+                outgoing[block.cfg_index] = initialized
                 changed = true
     for block in body.blocks:
-        if block.id not in reachable:
+        if block.cfg_index not in reachable:
             continue
-        initialized = incoming_places(body, block.id, outgoing, reachable, universe)
+        initialized = incoming_places(body, block.cfg_index, outgoing, reachable, universe)
         position := 0
         for operation in block.operations:
             match operation:

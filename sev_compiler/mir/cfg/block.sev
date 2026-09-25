@@ -4,9 +4,58 @@ import * from "../../syntax/function/lowering.sev"
 import * from "branch.sev"
 
 
-class BasicBlock:
-    id: int
-    parameters: list[ValueId] = []
-    operations: list[Operation] = []
-    terminator: CfgTerminator | None = None
-    origins: list[OperationOrigin] = []
+def inherit_source(block: Block, source_block: Block):
+    block.id = source_block.id
+    block.parent = source_block.parent
+    block.kind = source_block.kind
+    block.span = source_block.span
+    block.layout = source_block.layout
+    block.sentences = source_block.sentences
+    block.subblocks = source_block.subblocks
+    block.syntax_name = source_block.syntax_name
+    block.name = source_block.name
+    block.header = source_block.header
+    block.origin.block = source_block.id
+    if block.origin.span == None:
+        block.origin.span = source_block.span
+    layout ?= source_block.layout
+    if layout != None:
+        block.id = layout.id
+        block.parent = layout.parent
+        block.kind = layout.kind
+        block.origin.block = layout.id
+
+
+def execution_block(index: int, origin: OperationOrigin = OperationOrigin(), source_block: Block | None = None) -> Block:
+    provenance = OperationOrigin(origin.span, origin.block, origin.callable, origin.path[:])
+    block = Block(cfg_index=index, span=origin.span, origin=provenance)
+    region ?= origin.block
+    if region != None:
+        block.id = region
+    original ?= source_block
+    if original != None:
+        inherit_source(block, original)
+    return block
+
+
+test "execution blocks retain source identity without sharing instruction storage":
+    source_block = Block(id=SourceBlockId(42), parent=SourceBlockId(7), kind=BlockKind.If)
+    lowered = execution_block(3, source_block=source_block)
+    assert(lowered.id.index == 42)
+    assert(lowered.parent == source_block.parent)
+    assert(lowered.kind == BlockKind.If)
+    assert(lowered.cfg_index == 3)
+    lowered.parameters.append(ValueId(9))
+    assert(len(source_block.parameters) == 0)
+    lowered.cfg_index = 1
+    assert(lowered.id.index == 42)
+
+
+test "execution block origin is independent of its caller context":
+    original_id = SourceBlockId(8)
+    origin = OperationOrigin(block=original_id)
+    source_block = Block(id=SourceBlockId(12), kind=BlockKind.Case)
+    lowered = execution_block(2, origin, source_block)
+    assert(origin.block == original_id)
+    assert(lowered.origin.block == source_block.id)
+    assert(lowered.id.index == 12)

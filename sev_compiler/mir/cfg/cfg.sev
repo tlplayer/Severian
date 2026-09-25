@@ -1,4 +1,5 @@
 import * from "../../syntax/block/block.sev"
+import * from "block.sev" as cfg_blocks
 import * from "branch.sev"
 import * from "lazy.sev"
 import * from "effects.sev"
@@ -79,10 +80,21 @@ enum SwitchCase:
 
 class CfgBody:
     entry: int
-    blocks: list[BasicBlock]
+    blocks: list[Block]
     return_type: TypeId
     origin: OperationOrigin = OperationOrigin()
 
 
-def empty_cfg(return_type: TypeId) -> CfgBody:
-    return CfgBody(0, [BasicBlock(0)], return_type)
+def empty_cfg(return_type: TypeId, source_block: Block | None = None) -> CfgBody:
+    return CfgBody(0, [cfg_blocks.execution_block(0, source_block=source_block)], return_type)
+
+
+test "CFG entry uses the shared block defaults":
+    body = empty_cfg(TypeId(2), Block(id=SourceBlockId(12), kind=BlockKind.Callable))
+    assert(body.entry == 0)
+    assert(len(body.blocks) == 1)
+    assert(body.blocks[0].cfg_index == 0)
+    assert(body.blocks[0].id.index == 12)
+    assert(body.blocks[0].kind == BlockKind.Callable)
+    assert(len(body.blocks[0].operations) == 0)
+    assert(body.blocks[0].terminator == None)

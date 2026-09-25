@@ -1,5 +1,5 @@
+import * from "../../../../../syntax/block/block.sev" as model_syntax_block_block
 import * from "../../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../../mir/cfg/block.sev" as model_mir_cfg_block
 import * from "../../../../../mir/cfg/cfg.sev" as model_mir_cfg_cfg
 import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
 import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
@@ -85,7 +85,7 @@ def callable_operation_attributes(function: borrow model_syntax_function_functio
     return attributes
 
 
-def callable_mlir_block(builder: MlirOpBuilder, module: borrow model_hir_module_module.Module, block: borrow model_mir_cfg_block.BasicBlock, location: MlirLocation | None = None):
+def callable_mlir_block(builder: MlirOpBuilder, module: borrow model_hir_module_module.Module, block: borrow model_syntax_block_block.Block, location: MlirLocation | None = None):
     cursor := 0
     for operation in borrow block.operations:
         cursor += 1
@@ -461,7 +461,7 @@ def callable_cfg(builder: MlirOpBuilder, module: borrow model_hir_module_module.
             parameters.append(callable_mlir_value(module, parameter))
         handles.append(builder_create_block(builder, entry.region, parameters))
     for block in borrow body.blocks:
-        builder_set_insertion_point(builder, handles[block.id])
+        builder_set_insertion_point(builder, handles[block.cfg_index])
         callable_mlir_block(builder, module, block, location)
         terminal ?= block.terminator
         if terminal != None:

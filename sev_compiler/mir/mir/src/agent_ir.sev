@@ -159,7 +159,7 @@ def body_json(definition: model_syntax_symbol_symbol.DefId, body: model_mir_cfg_
             for edge in cfg.successors(terminal.exit):
                 edges.append("{\"target\":" + quoted(string(edge.target)) + ",\"arguments\":" + values_json(edge.arguments) + "}")
             terminator = "{\"kind\":" + quoted(kind) + payload + ",\"grammar\":" + identity(terminal.grammar) + ",\"source\":" + span_json(terminal.span, files) + ",\"successors\":[" + edges.join(",") + "]}"
-            blocks.append("{\"id\":" + quoted(string(block.id)) + ",\"parameters\":" + values_json(block.parameters) + ",\"operations\":[" + operations.join(",") + "],\"origins\":[" + origins.join(",") + "],\"terminator\":" + terminator + "}")
+            blocks.append("{\"id\":" + quoted(string(block.cfg_index)) + ",\"kind\":" + quoted(hierarchy_ir.block_kind(block.kind)) + ",\"origin\":" + origin_json(block.origin, files) + ",\"parameters\":" + values_json(block.parameters) + ",\"operations\":[" + operations.join(",") + "],\"origins\":[" + origins.join(",") + "],\"terminator\":" + terminator + "}")
     return "{\"definition\":" + identity(definition) + ",\"entry\":" + quoted(string(body.entry)) + ",\"blocks\":[" + blocks.join(",") + "]}"
 
 

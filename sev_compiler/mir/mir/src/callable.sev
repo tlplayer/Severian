@@ -429,11 +429,14 @@ def callable_inline_receiver_value(module: model_hir_module_module.Module, conte
 
 def mir_block(module: model_hir_module_module.Module, context: cfg.ExecutionContext, block: model_syntax_block_block.Block, scope: CallableMirScope) -> bool | diagnostics.Diagnostic:
     previous = context.origin
+    previous_block = context.source_block
     layout ?= block.layout
     if layout != None:
         context.origin = cfg.source_origin(context, layout.span, layout.id)
+    cfg.bind_source(context, block)
     result = mir_block_contents(module, context, block, scope)
     context.origin = previous
+    context.source_block = previous_block
     return result
 
 
@@ -575,9 +578,10 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
         region = model_hir_module_hierarchy.hierarchy_region(module.hierarchy, trait.definition, model_syntax_block_block.Block([], span=trait.span), origin=trait.span)
         module.hierarchy.blocks[region.index].kind = model_syntax_block_block.BlockKind.Trait
     scope = CallableMirScope()
-    context := cfg.ExecutionContext(model_mir_cfg_cfg.empty_cfg(model_syntax_primitive_declarations.unit_type_id()))
+    context := cfg.ExecutionContext(model_mir_cfg_cfg.empty_cfg(model_syntax_primitive_declarations.unit_type_id(), module.initializer), source_block=module.initializer)
     context.origin = model_syntax_block_block.OperationOrigin(module.initializer.span, model_syntax_block_block.SourceBlockId(0), initializer, [model_syntax_block_block.CallableOrigin(initializer, "$initializer", module.initializer.span)])
     context.body.origin = context.origin
+    context.body.blocks[context.body.entry].origin = context.origin
     mir_block(module, context, module.initializer, scope)
     cfg.finish(module, context, source.Span(source.SourceId(0), 0, 0))
     ownership.analyze_ownership(module, context.body, [])
@@ -656,7 +660,7 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
             source_block = model_syntax_block_block.SourceBlockId(region.index)
             if function.name.starts_with("__test_") or function.name.starts_with("$case$"):
                 module.hierarchy.blocks[region.index].kind = model_syntax_block_block.BlockKind.Test
-        context = cfg.ExecutionContext(model_mir_cfg_cfg.empty_cfg(function.result_type))
+        context = cfg.ExecutionContext(model_mir_cfg_cfg.empty_cfg(function.result_type, source_body), source_block=source_body)
         path = [model_syntax_block_block.CallableOrigin(function.definition, function.name, function.span)]
         for dependency in paths:
             if dependency.function.value == function.id.value:
@@ -664,6 +668,7 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
                 break
         context.origin = model_syntax_block_block.OperationOrigin(function.span, source_block, function.definition, path)
         context.body.origin = context.origin
+        context.body.blocks[context.body.entry].origin = context.origin
         for type_id in function.parameter_types:
             if storage_types.owned_record(type_id, module.records):
                 cell = aggregate.parameter(module, context, local.aggregates, type_id, context.body.entry)

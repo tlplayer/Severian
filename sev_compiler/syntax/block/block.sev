@@ -3,6 +3,7 @@ import * from "../symbol/symbol.sev"
 import source
 import * from "../sentence/sentence.sev"
 import * from "../function/lowering.sev"
+import * from "control_flow.sev"
 
 class SourceBlockId:
     index: u32
@@ -18,6 +19,14 @@ enum BlockKind:
     Test
     Lexical
     Main
+    If
+    Else
+    Match
+    Case
+    Switch
+    For
+    While
+    With
 
 class BlockLayout:
     id: SourceBlockId
@@ -88,6 +97,13 @@ class Block: B
     syntax_name: string = ""
     name: string = ""
     header: BlockSentence | None = None
+    # Executable realizations use the same block contract. CFG compaction may
+    # change cfg_index; source id, layout and containment must remain stable.
+    cfg_index: int = -1
+    parameters: list[ValueId] = []
+    terminator: CfgTerminator | None = None
+    origins: list[OperationOrigin] = []
+    origin: OperationOrigin = OperationOrigin()
 
 
 class BlockFile:
@@ -108,20 +124,23 @@ def standard_block_syntax() -> list[BlockSyntax]:
         BlockSyntax("enum", ["enum"], BlockKind.Class, 1),
         BlockSyntax("extension", ["extend"], BlockKind.Class, 1),
         BlockSyntax("test", ["test"], BlockKind.Test),
-        BlockSyntax("for", ["for"], BlockKind.Lexical),
-        BlockSyntax("while", ["while"], BlockKind.Lexical),
-        BlockSyntax("if", ["if"], BlockKind.Lexical),
-        BlockSyntax("elif", ["elif"], BlockKind.Lexical),
-        BlockSyntax("else", ["else"], BlockKind.Lexical),
-        BlockSyntax("match", ["match"], BlockKind.Lexical),
-        BlockSyntax("case", ["case"], BlockKind.Lexical),
-        BlockSyntax("with", ["with"], BlockKind.Lexical),
+        BlockSyntax("for", ["for"], BlockKind.For),
+        BlockSyntax("while", ["while"], BlockKind.While),
+        BlockSyntax("if", ["if"], BlockKind.If),
+        BlockSyntax("elif", ["elif"], BlockKind.If),
+        BlockSyntax("else", ["else"], BlockKind.Else),
+        BlockSyntax("match", ["match"], BlockKind.Match),
+        BlockSyntax("switch", ["switch"], BlockKind.Switch),
+        BlockSyntax("case", ["case"], BlockKind.Case),
+        BlockSyntax("with", ["with"], BlockKind.With),
     ]
 
 
 test "empty block construction uses field defaults":
-    block = empty_block()
+    block = Block()
     assert(len(block.statements) == 0)
     assert(len(block.operations) == 0)
     assert(len(block.lowered_operations) == 0)
     assert(block.kind == BlockKind.Lexical)
+    assert(block.cfg_index == -1)
+    assert(block.terminator == None)

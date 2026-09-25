@@ -1,8 +1,10 @@
 # Executable compiler CFG
 
-`cfg.sev` exposes the compiler-owned execution context and block construction
-operations. `block.sev` and `branch.sev` define graph storage, typed value IDs,
-successor arguments and terminator provenance. `lazy.sev` carries source operands
+`cfg.sev` defines CFG bodies containing the shared `syntax/block/Block` model;
+`builder.sev` exposes the compiler-owned execution context and block construction
+operations. `block.sev` creates executable realizations of source blocks, while
+`branch.sev` re-exports the shared block model's edges and terminators.
+`lazy.sev` carries source operands
 without executing them; `effects.sev` and `control_flow.sev` provide compiler
 contract vocabulary.
 
@@ -30,3 +32,12 @@ promoted to SSA block parameters before verification and inspection.
 
 MLIR and Agent IR iterate this exact table. The active storage-alias analysis
 also uses it; full resource ownership and cleanup are still migration work.
+
+Each executable block retains its source kind, layout, containment and origin.
+The `cfg_index` addresses the executable table; `id` identifies the source block.
+Compacting the CFG updates `cfg_index` and successor targets without renumbering
+source identities. Multiple executable blocks can realize one source block.
+Operations and SSA parameters are fresh per realization. Source statements and
+containment remain source structure, not CFG successor edges. Conditional and
+match/switch lowering can therefore preserve their source block kinds while
+using the existing jump and conditional exits.

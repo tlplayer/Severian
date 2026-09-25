@@ -1,0 +1,24 @@
+import source
+import * from "../symbol/symbol.sev"
+
+
+# Control-flow relationships belong to the shared block model. The target is
+# an execution-table index, never a source containment identity.
+class CfgEdge:
+    target: int
+    arguments: list[ValueId] = []
+
+
+enum CfgExit:
+    Jump(edge: CfgEdge)
+    Conditional(condition: ValueId, taken: CfgEdge, otherwise: CfgEdge)
+    Raise(value: ValueId)
+    Finish(value: ValueId | None)
+    FinishFields(values: list[ValueId])
+    Dead
+
+
+class CfgTerminator:
+    exit: CfgExit
+    grammar: DefId
+    span: source.Span

@@ -11,12 +11,22 @@ class ExecutionContext:
     body: CfgBody
     cursor: list[int] = [0]
     origin: OperationOrigin = OperationOrigin()
+    source_block: Block | None = None
 
 
 def block(context: ExecutionContext) -> int:
     index = int(len(context.body.blocks))
-    context.body.blocks.append(BasicBlock(index))
+    context.body.blocks.append(execution_block(index, context.origin, context.source_block))
     return index
+
+
+def bind_source(context: ExecutionContext, source_block: Block):
+    context.source_block = source_block
+    selected = context.body.blocks[context.cursor[0]]
+    if len(selected.operations) == 0 and selected.terminator == None:
+        selected.origin = OperationOrigin(context.origin.span, context.origin.block, context.origin.callable, context.origin.path[:])
+        inherit_source(selected, source_block)
+        context.body.blocks[context.cursor[0]] = selected
 
 
 def at(context: ExecutionContext, target: int):
@@ -59,3 +69,26 @@ def append_at(context: ExecutionContext, target: int, operation: Operation):
 
 def source_origin(context: ExecutionContext, span: source.Span | None, block: SourceBlockId | None = None) -> OperationOrigin:
     return OperationOrigin(span, block if block != None else context.origin.block, context.origin.callable, context.origin.path)
+
+
+test "CFG creation inherits the active source block instead of a numeric source identity":
+    original = Block(id=SourceBlockId(17), parent=SourceBlockId(4), kind=BlockKind.While)
+    context = ExecutionContext(empty_cfg(TypeId(2), original), source_block=original)
+    created = block(context)
+    assert(created == 1)
+    assert(context.body.blocks[created].cfg_index == created)
+    assert(context.body.blocks[created].id.index == 17)
+    assert(context.body.blocks[created].parent == original.parent)
+    assert(context.body.blocks[created].kind == BlockKind.While)
+
+
+test "binding a branch source preserves its existing CFG parameters":
+    context = ExecutionContext(empty_cfg(TypeId(2)))
+    context.body.blocks[0].parameters.append(ValueId(3))
+    branch = Block(id=SourceBlockId(23), kind=BlockKind.Else)
+    context.origin = OperationOrigin(block=branch.id)
+    bind_source(context, branch)
+    assert(context.body.blocks[0].id.index == 23)
+    assert(context.body.blocks[0].kind == BlockKind.Else)
+    assert(context.body.blocks[0].cfg_index == 0)
+    assert(context.body.blocks[0].parameters[0].index == 3)

@@ -88,7 +88,7 @@ def stack_owner(plan: borrow OwnershipPlan, value: model_syntax_symbol_symbol.Va
 def verify_escapes(module: model_hir_module_module.Module, body: borrow model_mir_cfg_cfg.CfgBody, plan: borrow OwnershipPlan) -> unit | diagnostics.Diagnostic:
     reachable = cfg.reachable_blocks(body)
     for block in borrow body.blocks:
-        if block.id not in reachable:
+        if block.cfg_index not in reachable:
             continue
         terminal ?= block.terminator
         if terminal != None:

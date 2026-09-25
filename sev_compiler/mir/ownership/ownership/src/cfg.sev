@@ -97,7 +97,7 @@ def dominators(body: model_mir_cfg_cfg.CfgBody) -> list[int]:
         terminal ?= block.terminator
         if terminal != None:
             for edge in successors(terminal.exit):
-                sources.append(block.id)
+                sources.append(block.cfg_index)
                 targets.append(edge.target)
     return graph.tree(int(len(body.blocks)), body.entry, sources, targets)
 
@@ -133,26 +133,26 @@ def verify_availability(body: model_mir_cfg_cfg.CfgBody, parameters: list[model_
             span = terminal.span
         for parameter in block.parameters:
             formal := false
-            if block.id == body.entry:
+            if block.cfg_index == body.entry:
                 for input in parameters:
                     if input.index == parameter.index:
                         formal = true
-            if not formal and not availability.add(definitions, int(parameter.index), block.id, -1):
+            if not formal and not availability.add(definitions, int(parameter.index), block.cfg_index, -1):
                 return error(diagnostics.Diagnostic("E000230", "CFG value has multiple definitions", span))
         position := 0
         for operation in block.operations:
             for result in operation_results(operation):
-                if not availability.add(definitions, int(result.index), block.id, position):
+                if not availability.add(definitions, int(result.index), block.cfg_index, position):
                     return error(diagnostics.Diagnostic("E000230", "CFG value has multiple definitions", span))
             position += 1
     for block in body.blocks:
-        if parents[block.id] < 0:
+        if parents[block.cfg_index] < 0:
             continue
         terminal ?= block.terminator
         if terminal != None:
             position := 0
             for operation in block.operations:
-                verify_ssa_inputs(operation_inputs(operation), definitions, parents, block.id, position, provenance.origin_at(body, block, position).span)
+                verify_ssa_inputs(operation_inputs(operation), definitions, parents, block.cfg_index, position, provenance.origin_at(body, block, position).span)
                 position += 1
             inputs: list[model_syntax_symbol_symbol.ValueId] = []
             match terminal.exit:
@@ -172,5 +172,5 @@ def verify_availability(body: model_mir_cfg_cfg.CfgBody, parameters: list[model_
             for edge in successors(terminal.exit):
                 for argument in edge.arguments:
                     inputs.append(argument)
-            verify_ssa_inputs(inputs, definitions, parents, block.id, position, terminal.span)
+            verify_ssa_inputs(inputs, definitions, parents, block.cfg_index, position, terminal.span)
     return true

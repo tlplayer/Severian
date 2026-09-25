@@ -1,22 +1,2 @@
-import source
-import * from "../../syntax/symbol/symbol.sev"
-
-
-class CfgEdge:
-    target: int
-    arguments: list[ValueId] = []
-
-
-enum CfgExit:
-    Jump(edge: CfgEdge)
-    Conditional(condition: ValueId, taken: CfgEdge, otherwise: CfgEdge)
-    Raise(value: ValueId)
-    Finish(value: ValueId | None)
-    FinishFields(values: list[ValueId])
-    Dead
-
-
-class CfgTerminator:
-    exit: CfgExit
-    grammar: DefId
-    span: source.Span
+# Control-flow relationships are owned by the shared block model.
+import * from "../../syntax/block/control_flow.sev"

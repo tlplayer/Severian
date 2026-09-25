@@ -24,6 +24,22 @@ def block_kind(kind: model_syntax_block_block.BlockKind) -> string:
             return "main"
         case Lexical:
             return "lexical"
+        case If:
+            return "if"
+        case Else:
+            return "else"
+        case Match:
+            return "match"
+        case Case:
+            return "case"
+        case Switch:
+            return "switch"
+        case For:
+            return "for"
+        case While:
+            return "while"
+        case With:
+            return "with"
 
 
 def source_location(origin: source.Span | None, files: list[source.SourceFile]) -> string:

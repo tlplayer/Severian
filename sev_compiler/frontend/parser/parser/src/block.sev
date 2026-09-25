@@ -57,7 +57,7 @@ def finish_source_header(file: BlockFile, owner: SourceBlockId, header: BlockSen
     sentence ?= header
     if sentence != None:
         syntax ?= classify_block(sentence, syntaxes)
-        if syntax != None and syntax.kind != BlockKind.Lexical:
+        if syntax != None and syntax.kind in [BlockKind.Callable, BlockKind.Class, BlockKind.Trait, BlockKind.Test, BlockKind.Main]:
             open_source_block(file, owner, sentence, syntaxes)
 
 
@@ -187,3 +187,21 @@ test "continued expressions do not introduce indentation blocks":
     blocks = parse_blocks(file, standard_block_syntax())
     assert(len(blocks.blocks) == 2)
     assert(len(blocks.blocks[1].sentences) == 2)
+
+
+test "control blocks preserve their kinds and containment":
+    file = source.virtual_source("control.sev", "if ready:\n    match value:\n        case Ready:\n            use(value)\nelse:\n    while waiting:\n        wait()\n")
+    blocks = parse_blocks(file, standard_block_syntax())
+    assert(len(blocks.blocks) == 6)
+    assert(blocks.blocks[1].kind == BlockKind.If)
+    assert(blocks.blocks[2].kind == BlockKind.Match)
+    assert(blocks.blocks[3].kind == BlockKind.Case)
+    assert(blocks.blocks[4].kind == BlockKind.Else)
+    assert(blocks.blocks[5].kind == BlockKind.While)
+    assert(blocks.blocks[2].parent == blocks.blocks[1].id)
+
+
+test "control headers without bodies do not create declaration blocks":
+    file = source.virtual_source("header.sev", "if ready\n")
+    blocks = parse_blocks(file, standard_block_syntax())
+    assert(len(blocks.blocks) == 1)

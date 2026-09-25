@@ -1,16 +1,21 @@
 import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../cfg/block.sev" as model_mir_cfg_block
 import * from "../../../cfg/cfg.sev" as model_mir_cfg_cfg
 import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
+import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import diagnostics
 
 
-def origin_at(body: model_mir_cfg_cfg.CfgBody, block: model_mir_cfg_block.BasicBlock, position: int) -> model_syntax_block_block.OperationOrigin:
+def origin_at(body: model_mir_cfg_cfg.CfgBody, block: model_syntax_block_block.Block, position: int) -> model_syntax_block_block.OperationOrigin:
     if position >= 0 and position < len(block.origins):
         return block.origins[position]
     terminal ?= block.terminator
     if terminal != None:
-        return model_syntax_block_block.OperationOrigin(terminal.span, body.origin.block, body.origin.callable, body.origin.path)
+        origin := block.origin
+        if origin.block == None and origin.callable == None:
+            origin = body.origin
+        return model_syntax_block_block.OperationOrigin(terminal.span, origin.block, origin.callable, origin.path)
+    if block.origin.block != None or block.origin.callable != None:
+        return block.origin
     return body.origin
 
 
@@ -52,3 +57,11 @@ def memory_diagnostic(module: model_hir_module_module.Module, message: string, o
         call = origin.path[cursor]
         frames.append(frame(module, call, "compiler callable path"))
     return diagnostics.Diagnostic("E000303", message, origin.span, frames)
+
+
+test "block provenance takes precedence over the callable fallback":
+    region = model_syntax_block_block.SourceBlockId(27)
+    block = model_syntax_block_block.Block(origin=model_syntax_block_block.OperationOrigin(block=region))
+    body = model_mir_cfg_cfg.CfgBody(0, [block], model_syntax_symbol_symbol.TypeId(2))
+    selected = origin_at(body, block, -1)
+    assert(selected.block == region)

@@ -72,6 +72,7 @@ def hierarchy_expression(hierarchy: SemanticHierarchy, definition: DefId, expres
                 pattern ?= arm.pattern
                 if pattern != None:
                     expressions.append(pattern)
+                arm.body.kind = BlockKind.Case
                 blocks.append(arm.body)
         case MockValue:
             expressions = calls[:] + results[:] + [fallback]
@@ -177,7 +178,10 @@ def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Bloc
     enclosing ?= parent
     if enclosing != None:
         parent_block = SourceBlockId(enclosing.index)
-    layout = BlockLayout(SourceBlockId(region.index), BlockKind.Callable if parent == None else BlockKind.Lexical, definition, origin, parent_block, introduced_by)
+    block_kind := body.kind
+    if parent == None and block_kind == BlockKind.Lexical:
+        block_kind = BlockKind.Callable
+    layout = BlockLayout(SourceBlockId(region.index), block_kind, definition, origin, parent_block, introduced_by)
     body.layout = layout
     body.id = layout.id
     body.parent = layout.parent
@@ -201,14 +205,18 @@ def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Bloc
                 expressions = [expression]
             case If:
                 location = span
+                then_block.kind = BlockKind.If
+                else_block.kind = BlockKind.Else
                 children = [then_block, else_block]
                 expressions = [condition]
             case While:
                 location = span
+                body.kind = BlockKind.While
                 children = [body]
                 expressions = [condition]
             case ForEach:
                 location = span
+                body.kind = BlockKind.For
                 children = [body]
                 expressions = [iterable]
             case Unsafe:
@@ -221,10 +229,20 @@ def hierarchy_region(hierarchy: SemanticHierarchy, definition: DefId, body: Bloc
                 location = span
                 children = bodies
                 expressions = operands
+                position := 0
+                for child in children:
+                    if child.kind == BlockKind.Lexical:
+                        for descriptor in standard_block_syntax():
+                            if len(descriptor.prefix) == 1 and descriptor.prefix[0] == syntax.symbol:
+                                child.kind = descriptor.kind
+                        if syntax.symbol in ["if", "elif"] and position > 0:
+                            child.kind = BlockKind.Else
+                    position += 1
             case Match:
                 location = span
                 expressions = [subject]
                 for arm in arms:
+                    arm.body.kind = BlockKind.Case
                     children.append(arm.body)
                     pattern ?= arm.pattern
                     if pattern != None:
@@ -312,3 +330,15 @@ def verify_hierarchy(hierarchy: SemanticHierarchy) -> unit | Error:
         if sentence.id.index != index or sentence.region.index >= len(hierarchy.regions):
             throw Error("invalid semantic sentence identity or owner")
         index += 1
+
+
+test "semantic hierarchy retains the source control block kind":
+    hierarchy = SemanticHierarchy()
+    definition = DefId(1, 2, DeclarationId(3))
+    body = Block(kind=BlockKind.Switch)
+    region = hierarchy_region(hierarchy, definition, body)
+    assert(body.kind == BlockKind.Switch)
+    assert(hierarchy.blocks[region.index].kind == BlockKind.Switch)
+    assert(body.id.index == region.index)
+    assert(body.cfg_index == -1)
+    verify_hierarchy(hierarchy)

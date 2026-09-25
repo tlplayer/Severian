@@ -1,5 +1,4 @@
 import * from "../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../cfg/block.sev" as model_mir_cfg_block
 import * from "../../cfg/branch.sev" as model_mir_cfg_branch
 import * from "../../cfg/cfg.sev" as model_mir_cfg_cfg
 import * from "../../value.sev" as model_mir_value
@@ -48,8 +47,12 @@ def verify(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBo
         return error(diagnostics.Diagnostic("E000230", "CFG entry block does not exist", None))
     block_index := 0
     for selected in body.blocks:
-        if selected.id != block_index:
+        if selected.cfg_index != block_index:
             return error(diagnostics.Diagnostic("E000230", "CFG block identity mismatch", None))
+        layout ?= selected.layout
+        if layout != None:
+            if selected.id.index != layout.id.index or selected.kind != layout.kind:
+                return error(diagnostics.Diagnostic("E000230", "CFG block lost its source block identity or kind", selected.span))
         block_index += 1
         terminator ?= selected.terminator
         if terminator == None:
@@ -144,7 +147,7 @@ def simplify_storage(module: model_hir_module_module.Module, body: model_mir_cfg
                         if slot.index == address.index:
                             counts[index] += 1
                             initialized[index] = value
-                            definitions[index] = block.id
+                            definitions[index] = block.cfg_index
                             positions[index] = position
                         index += 1
                 case _:
@@ -159,9 +162,9 @@ def simplify_storage(module: model_hir_module_module.Module, body: model_mir_cfg
                     index := 0
                     for slot in slots:
                         if slot.index == address.index:
-                            if counts[index] != 1 or not graph.contains(parents, definitions[index], block.id):
+                            if counts[index] != 1 or not graph.contains(parents, definitions[index], block.cfg_index):
                                 direct[index] = false
-                            elif definitions[index] == block.id and positions[index] >= position:
+                            elif definitions[index] == block.cfg_index and positions[index] >= position:
                                 direct[index] = false
                         index += 1
                 case Store:
@@ -175,10 +178,10 @@ def simplify_storage(module: model_hir_module_module.Module, body: model_mir_cfg
                             index += 1
             position += 1
     for block in body.blocks:
-        body.blocks[block.id] = simplify_storage_block(block, slots, initialized, direct)
+        body.blocks[block.cfg_index] = simplify_storage_block(block, slots, initialized, direct)
 
 
-def simplify_storage_block(block: model_mir_cfg_block.BasicBlock, slots: list[model_syntax_symbol_symbol.ValueId], initialized: list[model_syntax_symbol_symbol.ValueId], direct: list[bool]) -> model_mir_cfg_block.BasicBlock:
+def simplify_storage_block(block: model_syntax_block_block.Block, slots: list[model_syntax_symbol_symbol.ValueId], initialized: list[model_syntax_symbol_symbol.ValueId], direct: list[bool]) -> model_syntax_block_block.Block:
     operations: list[model_syntax_function_function.Operation] = []
     origins: list[model_syntax_block_block.OperationOrigin] = []
     position := 0
@@ -242,12 +245,12 @@ def promote_storage(module: model_hir_module_module.Module, body: model_mir_cfg_
                 case _:
                     throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
     for selected in body.blocks:
-        body.blocks[selected.id] = promote_storage_block(module, selected, body.entry, slots, initial, prefix, prefix_origins)
+        body.blocks[selected.cfg_index] = promote_storage_block(module, selected, body.entry, slots, initial, prefix, prefix_origins)
 
 
-def promote_storage_block(module: model_hir_module_module.Module, selected: model_mir_cfg_block.BasicBlock, entry: int, slots: list[model_syntax_symbol_symbol.ValueId], initial: list[model_syntax_symbol_symbol.ValueId], prefix: list[model_syntax_function_function.Operation], prefix_origins: list[model_syntax_block_block.OperationOrigin]) -> model_mir_cfg_block.BasicBlock:
+def promote_storage_block(module: model_hir_module_module.Module, selected: model_syntax_block_block.Block, entry: int, slots: list[model_syntax_symbol_symbol.ValueId], initial: list[model_syntax_symbol_symbol.ValueId], prefix: list[model_syntax_function_function.Operation], prefix_origins: list[model_syntax_block_block.OperationOrigin]) -> model_syntax_block_block.Block:
     current := initial[:]
-    if selected.id != entry:
+    if selected.cfg_index != entry:
         current = []
         for slot in slots:
             parameter = value(module, module.values[initial[len(current)].index].type_id)
@@ -255,7 +258,7 @@ def promote_storage_block(module: model_hir_module_module.Module, selected: mode
             current.append(parameter)
     operations: list[model_syntax_function_function.Operation] := []
     origins: list[model_syntax_block_block.OperationOrigin] := []
-    if selected.id == entry:
+    if selected.cfg_index == entry:
         operations = prefix[:]
         origins = prefix_origins[:]
     position := 0
@@ -349,7 +352,7 @@ def prune_unreachable(body: model_mir_cfg_cfg.CfgBody):
                         if constant == int(condition.index):
                             edge = taken if booleans[index] else otherwise
                             block.terminator = model_mir_cfg_branch.CfgTerminator(model_mir_cfg_branch.CfgExit.Jump(edge), terminal.grammar, terminal.span)
-                            body.blocks[block.id] = block
+                            body.blocks[block.cfg_index] = block
                         index += 1
                 case _:
                     throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
@@ -365,12 +368,12 @@ def prune_unreachable(body: model_mir_cfg_cfg.CfgBody):
     mapping: list[int] = []
     next := 0
     for block in body.blocks:
-        mapping.append(next if block.id in reachable else -1)
-        if block.id in reachable:
+        mapping.append(next if block.cfg_index in reachable else -1)
+        if block.cfg_index in reachable:
             next += 1
-    retained: list[model_mir_cfg_block.BasicBlock] = []
+    retained: list[model_syntax_block_block.Block] = []
     for block in body.blocks:
-        if block.id not in reachable:
+        if block.cfg_index not in reachable:
             continue
         terminal ?= block.terminator
         if terminal != None:
@@ -385,7 +388,7 @@ def prune_unreachable(body: model_mir_cfg_cfg.CfgBody):
                 case _:
                     throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
             block.terminator = model_mir_cfg_branch.CfgTerminator(exit, terminal.grammar, terminal.span)
-        block.id = mapping[block.id]
+        block.cfg_index = mapping[block.cfg_index]
         retained.append(block)
     body.entry = mapping[body.entry]
     body.blocks.clear()
