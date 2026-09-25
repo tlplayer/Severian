@@ -1,7 +1,7 @@
-import * from "../../../../../../sev_compiler/frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
-import * from "../../../../../../sev_compiler/hir/module/hierarchy.sev" as model_hir_module_hierarchy
-import * from "../../../../../../sev_compiler/hir/module/module.sev" as model_hir_module_module
-import * from "../../../../../../sev_compiler/syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../../../sev_compiler/frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
+import "../../../../../../sev_compiler/hir/module/hierarchy.sev" as model_hir_module_hierarchy
+import "../../../../../../sev_compiler/hir/module/module.sev" as model_hir_module_module
+import "../../../../../../sev_compiler/syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 
 
 # Archive readers must reject references before exposing decoded compiler data.

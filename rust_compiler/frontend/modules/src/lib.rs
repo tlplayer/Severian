@@ -28,6 +28,37 @@ pub struct ModuleGraph {
     pub policies: BTreeMap<PackageId, PackagePolicy>,
 }
 
+impl ModuleGraph {
+    /// Reporting boundary shared by compilation and source tooling. Enrich the
+    /// structured error before any caller converts it to a string.
+    pub fn contextualize(&self, diagnostic: Diagnostic, stage: &str) -> Diagnostic {
+        let mut diagnostic = diagnostic.with_sources(self.modules.iter().map(|module| module.source.clone()));
+        if diagnostic.context.is_none() {
+            let owner = diagnostic.span.and_then(|span| self.modules.iter().find(|module| module.source.id == span.source));
+            if let Some(module) = owner.or_else(|| self.modules.last()) {
+                let mut package = format!("package#{} ({})", module.package.0, module.path.display());
+                for directory in module.path.ancestors().skip(1) {
+                    let manifest = directory.join("package.json");
+                    if !manifest.is_file() { continue; }
+                    if let Some(value) = std::fs::read_to_string(&manifest).ok()
+                        .and_then(|text| json5::from_str::<serde_json::Value>(&text).ok()) {
+                        if let Some(name) = value["package"]["name"].as_str() {
+                            let version = value["package"]["version"].as_str().unwrap_or("unspecified");
+                            package = format!("{name}@{version} ({})", directory.display());
+                        }
+                    }
+                    break;
+                }
+                diagnostic.context = Some(severian_diagnostics::DiagnosticContext::source(package, stage));
+            }
+        }
+        let additional = std::mem::take(&mut diagnostic.additional);
+        diagnostic.additional = Box::new((*additional).into_iter()
+            .map(|additional| self.contextualize(additional, stage)).collect());
+        diagnostic
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PackagePolicy {
     pub narrow_imports: bool,
@@ -99,9 +130,14 @@ fn package_policies(packages: &PackageGraph) -> Result<BTreeMap<PackageId, Packa
 /// Package boundaries are enforced during compilation, after refactoring tools
 /// have had an opportunity to inspect and replace legacy wildcard imports.
 pub fn validate_import_policy(graph: &ModuleGraph) -> Result<(), Diagnostic> {
+    validate_import_policy_impl(graph)
+        .map_err(|diagnostic| graph.contextualize(diagnostic, "import policy"))
+}
+
+fn validate_import_policy_impl(graph: &ModuleGraph) -> Result<(), Diagnostic> {
     package_order(graph)?;
     for module in &graph.modules {
-        let mut bindings = BTreeSet::new();
+        let mut bindings = BTreeMap::new();
         for import in module.ast.items.iter().filter_map(|i|if let Item::Import(i)=i {Some(i)}else{None}) {
             let spelling = module.source.text.get(import.span.start as usize..import.span.end as usize).unwrap_or("");
             let namespace = spelling.trim_start().starts_with("import \"") || spelling.trim_start().starts_with("import '");
@@ -116,7 +152,12 @@ pub fn validate_import_policy(graph: &ModuleGraph) -> Result<(), Diagnostic> {
                 ImportSubject::Locator(_)=>import.source.as_deref(),
             });
             if let Some(name) = binding {
-                if !bindings.insert(name) {return Err(Diagnostic::new("E000203",format!("duplicate import binding `{name}`"),Some(import.span)).with_source(module.source.clone()));}
+                if let Some(previous) = bindings.insert(name, import.span) {
+                    return Err(Diagnostic::new("E000203",format!("duplicate import binding `{name}`"),Some(import.span))
+                        .with_label(previous, "previous import introduces this name")
+                        .with_help(format!("remove one import of `{name}` or give it a distinct `as` alias"))
+                        .with_source(module.source.clone()));
+                }
             }
 
         }

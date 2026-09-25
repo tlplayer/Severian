@@ -1,5 +1,5 @@
 import dependency
-import * from "model.sev"
+import Archive, ArchiveEntry, Artifact, Build, BuildPlan, BuildResult, BuildUnit, Check, Clean, Compiler, DependencyEdge, Entry, Install, PackageIdentity, Project, Publish, Requirements, Resolution, Resolve, ResolvedPackage, Run, Selection, Target, Test, TestReport, TestResult from "model.sev"
 
 # Preserve package identities and alias metadata while indexing the snapshot.
 def dependency_graph(resolution: Resolution) -> dependency.Graph | Error:

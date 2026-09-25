@@ -1,6 +1,6 @@
 import profile
-import * from "model.sev"
-import * from "document.sev"
+import Archive, ArchiveEntry, Artifact, Build, BuildPlan, BuildResult, BuildUnit, Check, Clean, Compiler, Dependency, DependencyEdge, Entry, Install, Manifest, PackageIdentity, Project, Publish, Reference, Requirements, Resolution, Resolve, ResolvedPackage, Run, Selection, Target, Test, TestReport, TestResult from "model.sev"
+import DocumentNode, DocumentReader, document_entries, document_nodes, document_quote, document_render, entries_json, parse_document, parse_json5_document, relative_path, setting, split_fields, string_array, text_setting, toml_quote, unquote, value_json from "document.sev"
 import cache
 from cache import
 {

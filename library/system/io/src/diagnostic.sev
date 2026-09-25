@@ -1,5 +1,5 @@
-import * from "../../../core/memory/src/raw_intrinsics.sev" as raw
-import * from "../../../../sev_compiler/syntax/primitive/string/intrinsics.sev" as text
+import "../../../core/memory/src/raw_intrinsics.sev" as raw
+import "../../../../sev_compiler/syntax/primitive/string/intrinsics.sev" as text
 
 
 # Copy initialized UTF-8 bytes through the text API. A string is not an array

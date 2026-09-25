@@ -1,4 +1,4 @@
-import * from "semantic_dependencies.sev"
+import Build, BuildUnit, Check, Clean, Compiler, Entry, Install, Publish, Resolution, Resolve, Run, SemanticPlan, Target, Test, canonical, capture, copy_file, digest, document_quote, exists, files, inside, manifest_file, mkdir, open, parse_document, prelude_exclusions, read_bytes, read_text, reference, semantic_plan, semantic_plan_json, semantic_source_unit, semantic_unit_key, setting, sorted_strings, string_array, temporary, text_setting, toml_quote, unquote, write_bytes, write_text from "semantic_dependencies.sev"
 
 
 class ObjectUnit:

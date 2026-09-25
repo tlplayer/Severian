@@ -1,6 +1,6 @@
 import os
-import * from "package:syntax/symbol/symbol.sev" as symbols
-import * from "package:syntax/function/lowering.sev" as boundary
+import "package:syntax/symbol/symbol.sev" as symbols
+import "package:syntax/function/lowering.sev" as boundary
 import environment
 import file
 import path

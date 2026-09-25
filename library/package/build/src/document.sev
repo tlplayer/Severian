@@ -1,4 +1,4 @@
-import * from "model.sev"
+import Archive, ArchiveEntry, Artifact, Build, BuildPlan, BuildResult, BuildUnit, Check, Clean, Compiler, Dependency, DependencyEdge, Entry, Install, Manifest, PackageIdentity, Project, Publish, Reference, Requirements, Resolution, Resolve, ResolvedPackage, Run, Selection, Target, Test, TestReport, TestResult from "model.sev"
 
 # Package documents use a flat node arena: parent indexes avoid recursive values.
 class DocumentNode:

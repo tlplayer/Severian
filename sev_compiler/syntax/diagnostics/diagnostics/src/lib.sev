@@ -7,14 +7,24 @@ class CallFrame:
     line: int = 0
     column: int = 0
 
+class DiagnosticLabel:
+    span: source.Span
+    message: string
+
 class Diagnostic: Error
     code: string
     message: string
     span: source.Span | None
     callstack: list[CallFrame] = []
+    package: string = ""
+    stage: string = ""
+    help: string = ""
+    labels: list[DiagnosticLabel] = []
+    sources: list[source.SourceFile] = []
+    operation: bool = false
 
     def display() -> string:
-        return code + ": " + message + render_callstack(callstack)
+        return render(Diagnostic(code, message, span, callstack, package, stage, help, labels, sources, operation), sources)
 
 
 def render_callstack(frames: list[CallFrame]) -> string:
@@ -30,7 +40,17 @@ def render_callstack(frames: list[CallFrame]) -> string:
 def with_frame(value: Diagnostic, frame: CallFrame) -> Diagnostic:
     frames = value.callstack[:]
     frames.append(frame)
-    return Diagnostic(value.code, value.message, value.span, frames)
+    return Diagnostic(value.code, value.message, value.span, frames, value.package if value.package != "" else frame.package, value.stage if value.stage != "" else frame.callable, value.help, value.labels, value.sources, value.operation)
+
+
+# Source errors must supply context and remediation before crossing an Error
+# boundary. The renderer also reports incomplete legacy diagnostics explicitly.
+def source_error(code: string, message: string, span: source.Span, input: source.SourceFile, package: string, stage: string, help: string) -> Diagnostic:
+    return Diagnostic(code, message, span, [], package, stage, help, [], [input])
+
+
+def operation_error(code: string, message: string, package: string, stage: string, help: string) -> Diagnostic:
+    return Diagnostic(code, message, None, [], package, stage, help, [], [], true)
 
 
 def diagnostic(code: string, message: string) -> Diagnostic:
@@ -41,20 +61,85 @@ def diagnostic_at(code: string, message: string, span: source.Span) -> Diagnosti
     return Diagnostic(code, message, span)
 
 
+def diagnostic_sources(value: Diagnostic, files: list[source.SourceFile]) -> list[source.SourceFile]:
+    known = files[:]
+    for input in value.sources:
+        found := false
+        for existing in known:
+            found = found or (existing.id.index == input.id.index and existing.path == input.path and existing.text == input.text)
+        if not found:
+            known.append(input)
+    return known
+
+
+def validate(value: Diagnostic, files: list[source.SourceFile] = []) -> list[string]:
+    missing: list[string] = []
+    if value.code == "":
+        missing.append("diagnostic code is empty")
+    if value.message == "":
+        missing.append("cause is empty")
+    if value.package == "":
+        missing.append("package context is missing")
+    if value.stage == "":
+        missing.append("stage context is missing")
+    if value.help == "":
+        missing.append("actionable help is missing")
+    spans: list[source.Span] = []
+    primary ?= value.span
+    if primary != None:
+        spans.append(primary)
+    elif not value.operation:
+        missing.append("primary source span is missing")
+    for label in value.labels:
+        spans.append(label.span)
+        if label.message == "":
+            missing.append("related-location explanation is empty")
+    known = diagnostic_sources(value, files)
+    for span in spans:
+        matches := 0
+        valid := false
+        for input in known:
+            if input.id.index == span.source.index:
+                matches += 1
+                valid = input.path != "" and span.start <= span.end and int(span.end) <= len(input.characters)
+        if matches != 1 or not valid:
+            missing.append("source " + string(span.source.index) + " has no unique valid file/span mapping")
+    return missing
+
+
 def render(value: Diagnostic, files: list[source.SourceFile]) -> string:
-    heading = value.code + ": " + value.message
+    heading := value.code + ": " + value.message
+    missing = validate(value, files)
+    if value.package != "":
+        heading += "\n package: " + value.package
+    if value.stage != "":
+        heading += "\n stage: " + value.stage
+    known = diagnostic_sources(value, files)
     location ?= value.span
     if location != None:
-        return heading + render_location(location, files) + render_callstack(value.callstack)
+        heading += render_location(location, known)
+    elif value.operation:
+        heading += "\n location: not applicable (operation failure)"
+    for label in value.labels:
+        heading += "\n related: " + label.message + render_location(label.span, known)
+    if value.help != "":
+        heading += "\n help: " + value.help
+    if len(missing) > 0:
+        heading += "\n diagnostic contract: incomplete diagnostic: " + missing.join("; ")
     return heading + render_callstack(value.callstack)
 
 
 def render_location(location: source.Span, files: list[source.SourceFile]) -> string:
-    if int(location.source.index) < len(files):
-        input = files[location.source.index]
+    matches := 0
+    for input in files:
+        if input.id.index == location.source.index:
+            matches += 1
+    for input in files:
+        if matches != 1 or input.id.index != location.source.index:
+            continue
         characters = input.characters
         offset = int(location.start)
-        if offset <= len(characters):
+        if location.start <= location.end and int(location.end) <= len(characters):
             line := 1
             line_start := 0
             cursor := 0
@@ -82,4 +167,28 @@ def render_location(location: source.Span, files: list[source.SourceFile]) -> st
             output += string(line) + " | " + characters[line_start:line_end].join("")
             output += "\n" + gutter + " | " + padding + "^"
             return output
-    return ""
+    return "\n --> source " + string(location.source.index) + " offsets " + string(location.start) + ".." + string(location.end) + " (source unavailable or invalid span; diagnostic contract violation)"
+
+
+test "source diagnostics retain location and remediation when displayed as Error":
+    input = source.virtual_source("conflict.sev", "hashing = 1\n")
+    value = source_error("E000203", "duplicate hashing", source.Span(input.id, 0, 7), input, "syntax", "import resolution", "remove or alias the duplicate import")
+    rendered = value.display()
+    assert(rendered.contains("package: syntax"))
+    assert(rendered.contains("stage: import resolution"))
+    assert(rendered.contains("conflict.sev:1:1"))
+    assert(rendered.contains("help: remove or alias"))
+    assert(len(validate(value)) == 0)
+
+
+test "operation diagnostics explicitly omit source coordinates":
+    value = operation_error("E000001", "manifest cannot be opened", "example", "package loading", "check the manifest path and permissions")
+    assert(len(validate(value)) == 0)
+    assert(value.display().contains("location: not applicable"))
+
+
+test "incomplete source diagnostics expose the contract violation":
+    value = diagnostic_at("E000203", "duplicate hashing", source.Span(source.SourceId(42), 3, 8))
+    assert(len(validate(value)) > 0)
+    assert(value.display().contains("source 42 offsets 3..8"))
+    assert(value.display().contains("diagnostic contract:"))

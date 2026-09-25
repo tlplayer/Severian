@@ -1,5 +1,5 @@
-import * from "model.sev"
-import * from "codec.sev"
+import Declaration, DependencyInterface, Interface from "model.sev"
+import decode, encode, interface_path, validate from "codec.sev"
 import metadata
 
 # Consumer name lookup only needs the dependency .sevi declarations.

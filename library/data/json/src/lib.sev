@@ -3,7 +3,7 @@ from data import Row
 from data import Schema
 from data import Table
 import file
-import * from "../../../system/file/src/text.sev" as text
+import "../../../system/file/src/text.sev" as text
 import tensor
 
 class JsonFile: File

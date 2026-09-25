@@ -1,4 +1,4 @@
-import * from "model.sev"
+import ArtifactRecord, Compatibility, DependencyRecord, FieldLayout, ImplementationRecord, ImplementationSelection, InterfaceRecord, LayoutRecord, PackageIdentity, Realization, RuntimeRecord, SymbolRecord, TypeRecord from "model.sev"
 import build_flow
 
 def identifier(value: string) -> string | Error:

@@ -1,4 +1,4 @@
-import * from "model.sev"
+import Declaration, DependencyInterface, Interface from "model.sev"
 import metadata
 import build_flow
 

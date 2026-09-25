@@ -39,7 +39,7 @@ def arguments() -> list[string]
 @c(symbol = "__sev_process_current_directory")
 def current_directory() -> string
 
-import * from "resources.sev"
+import guarded_command, memory_budget from "resources.sev"
 
 @c(symbol = "__sev_process_id")
 def id() -> int

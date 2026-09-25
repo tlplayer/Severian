@@ -1,5 +1,5 @@
-import * from "../build/src/model.sev"
-import * from "../diagnostic/src/compilation.sev" as report
+import Archive, ArchiveEntry, Artifact, Build, BuildPlan, BuildResult, BuildUnit, Check, Clean, Compiler, DependencyEdge, Entry, Install, PackageIdentity, Project, Publish, Requirements, Resolution, Resolve, ResolvedPackage, Run, Selection, Target, Test, TestReport, TestResult from "../build/src/model.sev"
+import "../diagnostic/src/compilation.sev" as report
 
 # An iterative search retains the consumer-to-provider path, including aliases.
 # The visited parent indexes handle shared dependencies without repeated frames.

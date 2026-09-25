@@ -1,5 +1,5 @@
 # Text is an encoding over file bytes. IO and ownership stay below this module.
-import * from "streams.sev" as streams
+import "streams.sev" as streams
 
 def decode(data: list[u8]) -> string | Error:
     parts: list[string] = []

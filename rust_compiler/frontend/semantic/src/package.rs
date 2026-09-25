@@ -136,6 +136,7 @@ pub struct Definition {
     pub id: DefId,
     pub name: String,
     pub module: ModuleId,
+    pub span: severian_source::Span,
     pub visibility: Visibility,
     pub kind: DefKind,
 }
@@ -235,18 +236,29 @@ pub fn analyze_package(
 pub fn import_index(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diagnostic> {
     let mut graph = module_graph.clone();
     graph.policies.clear();
-    let mut index = collect_declarations(&graph)?;
+    let mut index = collect_declarations(&graph)
+        .map_err(|diagnostic| module_graph.contextualize(diagnostic, "import resolution"))?;
     resolve_imports(&graph, &mut index);
     Ok(index)
 }
 
 /// The same demand plan used by compilation, exposed for source tooling.
 pub fn import_plan(graph: &ModuleGraph) -> Result<imports::ImportPlan, Diagnostic> {
-    let index = collect_declarations(graph)?;
+    let index = collect_declarations(graph)
+        .map_err(|diagnostic| graph.contextualize(diagnostic, "import planning"))?;
     Ok(imports::resolve_required_imports(graph, &index, imports::collect_import_requirements(graph)))
 }
 
 pub fn analyze_package_with_context(
+    module_graph: &ModuleGraph,
+    universal: &UniversalContext,
+    context: PackageAnalysisContext,
+) -> Result<TypedProgram, Diagnostic> {
+    analyze_package_impl(module_graph, universal, context)
+        .map_err(|diagnostic| module_graph.contextualize(diagnostic, "semantic analysis"))
+}
+
+fn analyze_package_impl(
     module_graph: &ModuleGraph,
     universal: &UniversalContext,
     context: PackageAnalysisContext,
@@ -261,9 +273,16 @@ pub fn analyze_package_with_context(
     imports::apply_import_plan(&mut index, &plan);
     for module in index.modules.values() {
         for (name, resolution) in &module.scope.bindings {
-            if matches!(resolution, Resolution::Ambiguous(_)) {
-                return Err(Diagnostic::new("E000203",
-                    format!("name `{name}` has conflicting declarations in the same scope"), None));
+            if let Resolution::Ambiguous(ids) = resolution {
+                let declarations: Vec<_> = ids.iter().filter_map(|id| index.definitions.get(id)).collect();
+                let mut diagnostic = Diagnostic::new("E000203",
+                    format!("name `{name}` has conflicting declarations in the same scope"),
+                    declarations.last().map(|definition| definition.span))
+                    .with_help(format!("import `{name}` from one provider, or use distinct `as` aliases"));
+                for declaration in declarations {
+                    diagnostic = diagnostic.with_label(declaration.span, format!("conflicting declaration of `{}`", declaration.name));
+                }
+                return Err(diagnostic);
             }
         }
     }
@@ -1825,19 +1844,22 @@ fn resolution_definitions(resolution: &Resolution) -> Vec<DefId> {
 /// not declarations owned by the module and therefore must never be re-exported
 /// through an unqualified source import.
 fn is_injected_prelude_item(item: &Item) -> bool {
-    let source = match item {
-        Item::Trait(declaration) => declaration.span.source,
-        Item::Class(declaration) => declaration.span.source,
-        Item::Enum(declaration) => declaration.span.source,
-        Item::Binding(binding) => binding.span.source,
-        Item::Expression(expression) => expression.span.source,
-        Item::Function(function) => function.span.source,
-        Item::Type(declaration) => declaration.span.source,
-        Item::Test(declaration) => declaration.span.source,
-        Item::Import(import) => import.span.source,
-        Item::Extension(extension) => extension.span.source,
-    };
-    source.0 >= u32::MAX - 3
+    item_span(item).source.0 >= u32::MAX - 3
+}
+
+fn item_span(item: &Item) -> severian_source::Span {
+    match item {
+        Item::Trait(value) => value.span,
+        Item::Class(value) => value.span,
+        Item::Enum(value) => value.span,
+        Item::Binding(value) => value.span,
+        Item::Expression(value) => value.span,
+        Item::Function(value) => value.span,
+        Item::Type(value) => value.span,
+        Item::Test(value) => value.span,
+        Item::Import(value) => value.span,
+        Item::Extension(value) => value.span,
+    }
 }
 
 // Explicit imports introduce names even when no expression uses them. Diagnose
@@ -1848,7 +1870,8 @@ fn validate_explicit_import_names(module_graph: &ModuleGraph) -> Result<(), Diag
         for item in &module.ast.items {
             let Item::Import(import) = item else { continue; };
             if import.selected_name().is_some_and(|name| name.starts_with("__")) {
-                return Err(Diagnostic::new("E000124", "file-local declarations cannot be imported", Some(import.span)));
+                return Err(Diagnostic::new("E000124", "file-local declarations cannot be imported", Some(import.span))
+                    .with_help("use a public declaration, or rename the provider's declaration with a single leading underscore to allow explicit imports"));
             }
             if import.is_wildcard() && import.alias.is_none() { continue; }
             let name = import.alias.clone().or_else(|| import.selected_name().map(str::to_owned))
@@ -1859,7 +1882,9 @@ fn validate_explicit_import_names(module_graph: &ModuleGraph) -> Result<(), Diag
                 });
             if let Some(previous) = names.insert(name.clone(), import.span) {
                 return Err(Diagnostic::new("E000203", format!("name `{name}` is already defined in this scope"), Some(import.span))
-                    .with_label(previous, "previous import introduces this name"));
+                    .with_label(import.span, "this import introduces the name again")
+                    .with_label(previous, "previous import introduces this name")
+                    .with_help(format!("remove one import of `{name}`, or give it a distinct `as` alias")));
             }
         }
         for item in &module.ast.items {
@@ -1874,7 +1899,9 @@ fn validate_explicit_import_names(module_graph: &ModuleGraph) -> Result<(), Diag
             };
             if let Some(previous) = names.get(name) {
                 return Err(Diagnostic::new("E000203", format!("name `{name}` is already defined in this scope"), Some(span))
-                    .with_label(*previous, "previous import introduces this name"));
+                    .with_label(span, "this declaration conflicts with the import")
+                    .with_label(*previous, "previous import introduces this name")
+                    .with_help(format!("rename this declaration or import `{name}` with a distinct `as` alias")));
             }
         }
     }
@@ -1940,12 +1967,13 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                     module: module.id.0,
                     declaration: DeclarationId(stable_hash(&key)),
                 };
-                if index.definitions.contains_key(&id) {
+                if let Some(previous) = index.definitions.get(&id) {
                     return Err(Diagnostic::new(
                         "E000203",
                         format!("import `{name}` is declared more than once"),
                         Some(import.span),
-                    ));
+                    ).with_label(previous.span, "previous import")
+                        .with_help(format!("remove the repeated import of `{name}`")));
                 }
                 index.definitions.insert(
                     id,
@@ -1953,6 +1981,7 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                         id,
                         name,
                         module: module.id,
+                        span: import.span,
                         visibility: Visibility::Public,
                         kind: DefKind::Import,
                     },
@@ -2064,14 +2093,16 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                         "declaration `{name}` has the same canonical identity as `{}`",
                         existing.name
                     ),
-                    None,
-                ));
+                    Some(item_span(item)),
+                ).with_label(existing.span, "previous declaration has this identity")
+                    .with_help(format!("remove the duplicate declaration of `{name}` or rename it")));
             }
             let visibility = Visibility::for_name(&name);
             let definition = Definition {
                 id,
                 name: name.clone(),
                 module: module.id,
+                span: item_span(item),
                 visibility,
                 kind,
             };
@@ -2696,11 +2727,22 @@ mod scope_resolution_tests {
         std::fs::write(root.join("main.sev"), "import x from \"foo.sev\"\nfrom \"foo.sev\" import y as x\n").unwrap();
         let graph = severian_modules::resolve(&root.join("main.sev")).unwrap();
         let result = import_index(&graph);
+        let planning_error = import_plan(&graph).unwrap_err();
         std::fs::remove_dir_all(&root).unwrap();
         let error = result.unwrap_err();
         assert_eq!(error.code, "E000203");
         assert!(error.message.contains("`x`"));
-        assert_eq!(error.labels.len(), 1);
+        assert_eq!(error.labels.len(), 2);
+        assert!(error.validate().is_ok());
+        let rendered = error.to_string();
+        assert!(rendered.contains("main.sev:2:"));
+        assert!(rendered.contains("main.sev:1:"));
+        assert!(rendered.contains("previous import introduces this name"));
+        assert!(rendered.contains("stage: import resolution"));
+        assert!(rendered.contains("help: remove one import of `x`"));
+        assert!(planning_error.validate().is_ok());
+        assert!(planning_error.to_string().contains("main.sev:2:"));
+        assert!(planning_error.to_string().contains("stage: import planning"));
     }
 }
 

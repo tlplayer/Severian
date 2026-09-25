@@ -1,4 +1,4 @@
-import * from "host.sev"
+import link_digest, link_mkdir, link_quote, link_write from "host.sev"
 import file
 import os
 import path

@@ -1,4 +1,4 @@
-import * from "host.sev"
+import canonical, capture, copy_file, digest, document_quote, mkdir, read_text, remove_tree, replace_file, temporary, write_text from "host.sev"
 import os
 import path
 

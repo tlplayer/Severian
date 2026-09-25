@@ -7,7 +7,7 @@ from diagnostic import
     lint_level,
     validate_lint,
 }
-import * from "model.sev"
+import Archive, ArchiveEntry, Artifact, Build, BuildPlan, BuildResult, BuildUnit, Check, Clean, Compiler, Dependency, DependencyEdge, Entry, Install, Manifest, PackageIdentity, Project, Publish, Reference, Requirements, Resolution, Resolve, ResolvedPackage, Run, Selection, Target, Test, TestReport, TestResult from "model.sev"
 
 class Option:
     path: string

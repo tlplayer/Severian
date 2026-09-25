@@ -1,1 +1,1 @@
-import * from "../lint/src/policy.sev"
+import LintRule, lint_entry, lint_level, lint_rules, validate_lint from "../lint/src/policy.sev"

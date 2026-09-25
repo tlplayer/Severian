@@ -31,7 +31,7 @@ import path
 import process
 import time
 
-import * from "host.sev"
+import sorted_strings from "host.sev"
 import source
 
 def coverage_sources(files: list[source.SourceFile], roots: list[string], excluded: list[string], prelude_sources: list[int]) -> list[source.SourceFile]:

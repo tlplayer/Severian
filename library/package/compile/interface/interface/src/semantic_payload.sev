@@ -1,7 +1,7 @@
-import * from "../../../../../../sev_compiler/hir/module/module.sev" as model_hir_module_module
+import "../../../../../../sev_compiler/hir/module/module.sev" as model_hir_module_module
 import lexer
 import source
-import * from "../../package.pkg/build/semantic_archive.sev" as codec
+import "../../package.pkg/build/semantic_archive.sev" as codec
 
 
 class SemanticPayload:

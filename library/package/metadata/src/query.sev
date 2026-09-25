@@ -1,5 +1,5 @@
-import * from "model.sev"
-import * from "validate.sev"
+import ArtifactRecord, Compatibility, DependencyRecord, ImplementationRecord, ImplementationSelection, InterfaceRecord, LayoutRecord, PackageIdentity, Realization, SymbolRecord, TypeRecord from "model.sev"
+import component, identifier, unique, validate, validate_compatibility from "validate.sev"
 
 def compatible(actual: Compatibility, required: Compatibility) -> bool:
     return actual.compiler == required.compiler and actual.abi == required.abi and actual.target == required.target and actual.backend == required.backend and actual.profile == required.profile and actual.options == required.options and actual.dependencies == required.dependencies

@@ -1,6 +1,6 @@
-import * from "model.sev"
-import * from "codec.sev"
-import * from "query.sev"
+import Declaration, DependencyInterface, Interface from "model.sev"
+import decode, encode, interface_path from "codec.sev"
+import same_package, validate_binding from "query.sev"
 import metadata
 import build_flow
 import file

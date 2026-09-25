@@ -22,8 +22,9 @@ pub struct Plan {
 #[derive(Clone)]
 struct Word { text: String, start: usize, end: usize }
 
-fn words(module: &severian_modules::ResolvedModule) -> Result<Vec<Word>, String> {
-    let tokens = severian_lexer::scan(&module.source).map_err(|e| e.to_string())?;
+fn words(module: &severian_modules::ResolvedModule, graph: &ModuleGraph) -> Result<Vec<Word>, String> {
+    let tokens = severian_lexer::scan(&module.source)
+        .map_err(|error| graph.contextualize(error, "lint tokenization").to_string())?;
     Ok(tokens.into_iter().filter(|t| t.span.start < t.span.end).map(|t| Word {
         text: module.source.text[t.span.start as usize..t.span.end as usize].to_owned(),
         start: t.span.start as usize, end: t.span.end as usize,
@@ -75,7 +76,7 @@ fn plan_with_mode(graph: &ModuleGraph, root: &Path, automatic: bool) -> Result<P
     let mut required: BTreeMap<ModuleId, BTreeSet<String>> = graph.modules.iter().map(|m| (m.id, BTreeSet::new())).collect();
     let mut lexed = BTreeMap::new();
     for module in &graph.modules {
-        let tokens = words(module)?;
+        let tokens = words(module, graph)?;
         // Build and source conversion share AST-derived requirements. Include
         // downstream requests that arrive through facade import edges too.
         for name in build_plan.requirements.get(&module.id).into_iter().flatten() {
@@ -211,8 +212,20 @@ fn plan_with_mode(graph: &ModuleGraph, root: &Path, automatic: bool) -> Result<P
         if edits.windows(2).any(|pair|pair[0].1>pair[1].0) {return Err(format!("{}: overlapping import edits",module.path.display()));}
         let mut after = module.source.text.to_string();
         for (start,end,text) in edits.into_iter().rev() {after.replace_range(start..end,&text);}
-        let source = severian_source::SourceFile::virtual_source(module.path.clone(), after.clone());
-        severian_parser::parse(&severian_lexer::scan(&source).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+        let mut source = severian_source::SourceFile::virtual_source(module.path.clone(), after.clone());
+        source.id = module.source.id;
+        let report = |error: severian_diagnostics::Diagnostic| {
+            // A failed proposed edit needs its own exact source snapshot.
+            let mut preview = graph.clone();
+            if let Some(edited) = preview.modules.iter_mut().find(|candidate| candidate.id == module.id) {
+                edited.source = source.clone();
+            }
+            preview.contextualize(error
+                .with_note("location refers to the proposed import correction; no edits have been applied")
+                .with_help("keep the original source and report this invalid lint correction with the shown import"),
+                "lint correction").to_string()
+        };
+        severian_parser::parse(&severian_lexer::scan(&source).map_err(&report)?).map_err(&report)?;
         result.files.push(FileEdit {path:module.path.clone(),before:module.source.text.to_string(),after,imports:count});
     }
     result.notes.sort(); result.notes.dedup();

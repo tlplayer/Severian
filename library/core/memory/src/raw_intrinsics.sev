@@ -1,4 +1,4 @@
-import * from "../../../../sev_compiler/syntax/primitive/byte/byte.sev"
+import byte from "../../../../sev_compiler/syntax/primitive/byte/byte.sev"
 
 # Hosted raw-memory boundaries; typed buffers use the same target memory lowering.
 @c(symbol="__sev_memory_zeroed")

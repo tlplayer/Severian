@@ -1,9 +1,9 @@
-import * from "document.sev"
+import document_quote, entries_json, parse_document, relative_path, setting, string_array, text_setting, toml_quote, unquote from "document.sev"
 import diagnostic
-import * from "stages.sev"
+import CompilerPipeline, CompilerStepResult, build_root, compiler_cache_root, compiler_step, pipeline_blob, pipeline_report, pipeline_text from "stages.sev"
 import dependency
-import * from "dependency.sev"
-import * from "lint.sev"
+import Archive, ArchiveEntry, Artifact, Build, BuildPlan, BuildResult, BuildUnit, Check, Clean, Compiler, Entry, Install, Project, Publish, Requirements, Resolution, Resolve, Run, Selection, Target, Test, TestReport, TestResult, dependency_graph from "dependency.sev"
+import LintCallable, LintDiagnostic, LintSource, LintSuppression, LintTest, enforce_lint, lint, lint_block_end, lint_churn, lint_constant, lint_declarations, lint_doc, lint_doc_section, lint_documentation, lint_documented_type, lint_duplicates, lint_in_test, lint_json, lint_measure, lint_metrics, lint_reachable, lint_read, lint_signature_type, lint_source, lint_suppressed, lint_suppressions, lint_test_file, lint_tests, lint_top_level, lint_uncached, lint_unreachable, lint_unused, resolve, semantic_plan, semantic_plan_json, semantic_source_unit, semantic_unit_key from "lint.sev"
 from diagnostic import
 {
     coverage_sources,
@@ -16,12 +16,12 @@ from diagnostic import
     coverage_metric,
     coverage_finish,
 }
-import * from "compiler.sev"
-import * from "host.sev"
-import * from "model.sev"
-import * from "manifest.sev"
-import * from "resolve.sev"
-import * from "archive.sev"
+import LinkInput, LinkPlan, LinkResult, PreparedGenerators, add, artifact_kind, compilation_error, compilation_frames, compile_unit, decode_resolution, execute_link, fork_compilation_unit, init, installed_realization, interfaces, library_sidecars, new, options, payload_copy, payload_text, plan_link, portable_graph, portable_inputs, portable_path, prepare_generators, relocated_path, remove, render_legacy_manifest, render_manifest, report, reset_generators, restore_realization, retain_container, retain_cross_native, retain_file, retain_native_interface, retain_payload, retain_realization, reusable_inputs, sidecars_match, unit_resolution, update, wait_compilation_unit from "compiler.sev"
+import canonical, capture, command, copy_file, digest, exists, files, manifest_file, mkdir, mutable_project, project_lock_file, published_project, read_bytes, read_text, remove_tree, replace_file, require_command, sorted_strings, temporary, write_bytes, write_text from "host.sev"
+import "model.sev" as _dependency_408
+import inside, open, parse_manifest, prelude_exclusions, reference, safe_name, write_document from "manifest.sev"
+import dependency_source, fetch, library_target, module_source, registry_release, registry_root, source_checksum, standalone_source, versions from "resolve.sev"
+import append_number, append_text, archive_text, number, publication_files, verify_publication, write_archive from "archive.sev"
 import os
 import path
 import process

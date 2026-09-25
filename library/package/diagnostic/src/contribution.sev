@@ -31,7 +31,7 @@ import path
 import process
 import time
 
-import * from "host.sev"
+import files from "host.sev"
 
 class FileContribution:
     path: string

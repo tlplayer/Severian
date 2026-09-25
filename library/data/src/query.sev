@@ -1,4 +1,4 @@
-import * from "expression.sev" as expression
+import "expression.sev" as expression
 
 class Step:
     operation: string

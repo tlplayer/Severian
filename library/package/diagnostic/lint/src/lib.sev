@@ -31,8 +31,8 @@ import path
 import process
 import time
 
-import * from "../../support/src/lib.sev"
-import * from "policy.sev"
+import collect_files, exists, files, manifest_file, monotonic, sorted_strings from "../../support/src/lib.sev"
+import LintRule, document_nodes, lint_entry, lint_level, lint_rules, validate_lint from "policy.sev"
 import lexer
 import source
 
