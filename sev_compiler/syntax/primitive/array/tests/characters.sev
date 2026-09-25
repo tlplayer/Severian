@@ -1,6 +1,6 @@
-import * from "../storage.sev" as arrays
-import * from "../../char/units.sev" as characters
-import * from "../../../../../library/core/collections/vector/src/vector.sev" as vectors
+import "../storage.sev" as arrays
+import "../../char/units.sev" as characters
+import "../../../../../library/core/collections/vector/src/vector.sev" as vectors
 
 
 def make_characters() -> array[char[u32]]:

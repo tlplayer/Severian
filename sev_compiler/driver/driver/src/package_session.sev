@@ -1,8 +1,8 @@
 import package
 import process
 import environment
-import * from "pipeline/source.sev" as pipeline
-import * from "package_compiler.sev"
+import "pipeline/source.sev" as pipeline
+import compile_package_unit from "package_compiler.sev"
 
 @c(symbol="exit")
 def session_exit(status: i32)

@@ -1,9 +1,9 @@
-import * from "package:syntax/block/block.sev"
+import Block, BlockKind, BlockLayout, BlockSentence, SentenceId, SourceBlockId, span, standard_block_syntax from "package:syntax/block/block.sev"
 import source
-import * from "../../syntax/symbol/symbol.sev"
-import * from "../../syntax/sentence/sentence.sev"
-import * from "../../syntax/function/function.sev"
-import * from "../../syntax/constraint/model.sev"
+import DeclarationId, DefId, RegionId from "../../syntax/symbol/symbol.sev"
+import Statement from "../../syntax/sentence/sentence.sev"
+import Expression, ExpressionKind, Operation, ResolvedCallee from "../../syntax/function/function.sev"
+import "../../syntax/constraint/model.sev" as _dependency_model
 
 
 enum RegionKind:

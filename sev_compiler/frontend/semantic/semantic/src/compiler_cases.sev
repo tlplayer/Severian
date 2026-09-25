@@ -1,6 +1,6 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
 
 
 # Each compiler case gets a fresh module. Its declarations are checked with the

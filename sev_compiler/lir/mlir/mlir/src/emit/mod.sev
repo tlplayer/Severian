@@ -1,14 +1,14 @@
-import * from "../../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../../syntax/function/lowering.sev" as model_syntax_function_lowering
-import * from "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../../syntax/literal/lowered.sev" as model_syntax_literal_lowered
-import * from "../../../../../syntax/lowered.sev" as model_syntax_lowered
-import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../../syntax/function/lowering.sev" as model_syntax_function_lowering
+import "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../../syntax/literal/lowered.sev" as model_syntax_literal_lowered
+import "../../../../../syntax/lowered.sev" as model_syntax_lowered
+import "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import artifact
 import target
-import * from "../ir/lib.sev"
+import MlirAttributeValue, MlirBuilderError, MlirFunctionHandle, MlirFunctionIdentity, MlirNamedAttribute, MlirOpBuilder, MlirOperationName, MlirProgram, MlirType, MlirValue, MlirVerificationError, bf16_type, boolean_attribute, builder_assert, builder_binary, builder_call, builder_constant, builder_create_block, builder_create_function, builder_create_generated_function, builder_create_region, builder_if, builder_new_value, builder_return, builder_set_insertion_point, builder_value, builder_yield, float_attribute, float_type, generated_mlir_function_name, integer_attribute, integer_type, is_float, operation_name, operation_name_text, pointer_type, print_program, private_visibility, public_visibility, string_attribute_value, validate from "../ir/lib.sev"
 
 
 def lowered_type(type_id: model_syntax_lowered.LoweredType) -> MlirType | MlirError:

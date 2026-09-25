@@ -1,7 +1,7 @@
-import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/primitive/catalog.sev" as scalar
-import * from "../../../../syntax/function/lowering.sev" as boundary
+import "../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/primitive/catalog.sev" as scalar
+import "../../../../syntax/function/lowering.sev" as boundary
 
 
 class CachedEffect:

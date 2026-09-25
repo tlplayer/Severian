@@ -1,12 +1,12 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import package
 import source
-import * from "../../../../syntax/primitive/catalog.sev" as scalar
-import * from "package:mir/mir/src/agent_ir.sev" as agent_ir
+import "../../../../syntax/primitive/catalog.sev" as scalar
+import "package:mir/mir/src/agent_ir.sev" as agent_ir
 
 class EditorIndex:
     definitions: list[string] = []

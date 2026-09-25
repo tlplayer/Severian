@@ -1,5 +1,5 @@
-import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../pipeline/mod.sev"
+import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../pipeline/mod.sev" as _dependency_mod
 
 class TestResult:
     name: string

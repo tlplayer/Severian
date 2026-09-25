@@ -1,7 +1,7 @@
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import artifact
 import target
-import * from "emit/mod.sev"
+import "emit/mod.sev" as _dependency_mod
 
 class VerifiedMlirArtifact:
     id: model_syntax_symbol_symbol.ArtifactId

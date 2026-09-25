@@ -1,10 +1,10 @@
-import * from "../../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
-import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
+import "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import source
-import * from "../ir/lib.sev"
-import * from "../../../../../syntax/primitive/catalog.sev" as scalar
+import MlirAttributeValue, MlirDebugVariable, MlirLocation, MlirNamedAttribute, MlirOpBuilder, MlirValue, builder_constant, builder_create_function, builder_create_operation_at, builder_new_value, index_type, integer_attribute, integer_type, operation_name, private_visibility, symbol_attribute, type_text from "../ir/lib.sev"
+import "../../../../../syntax/primitive/catalog.sev" as scalar
 
 def debug_quote(text: string) -> string:
     return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\0A") + "\""

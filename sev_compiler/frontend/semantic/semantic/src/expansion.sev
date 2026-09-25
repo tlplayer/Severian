@@ -1,9 +1,9 @@
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import source
 import diagnostics
-import * from "definitions.sev" as definitions
+import "definitions.sev" as definitions
 
 
 # Execute expression-producing source bodies by substitution and pack

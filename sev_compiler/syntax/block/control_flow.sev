@@ -1,5 +1,5 @@
 import source
-import * from "../symbol/symbol.sev"
+import AbiId, ArtifactId, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, IndexedId, InferVarId, InterfaceId, LocalId, ModuleId, NamedId, OpId, PackageId, PrimitiveId, ProviderId, RegionId, ScopeId, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TypeBinding, TypeConstructorBinding, TypeId, ValueId, VariantId, definition_from_key, named_definition, same_definition, semantic_digest, semantic_key from "../symbol/symbol.sev"
 
 
 # Control-flow relationships belong to the shared block model. The target is

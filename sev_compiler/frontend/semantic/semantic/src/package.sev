@@ -1,9 +1,11 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 
 enum Visibility:
     Public
+    Explicit
+    File
 
 
 enum DefKind:
@@ -102,11 +104,17 @@ def collect_declarations(graph: model_hir_module_module.ModuleGraph) -> ProgramI
             if name != None:
                 id = definition_id(module.package, module.id, name, ordinal)
                 ordinal += 1
-                definition = Definition(id, name, module.id, Public, kind)
+                visibility := Visibility.Public
+                if name.starts_with("__"):
+                    visibility = Visibility.File
+                elif name.starts_with("_"):
+                    visibility = Visibility.Explicit
+                definition = Definition(id, name, module.id, visibility, kind)
                 index.definitions[id] = definition
                 items.append(id)
                 insert_resolution(scope.bindings, name, id)
-                insert_resolution(exports, name, id)
+                if visibility != Visibility.File:
+                    insert_resolution(exports, name, id)
         index.modules[module.id] = ModuleScope(module.id, module.package, items, scope)
         index.exports[module.id] = exports
         if not index.packages.contains(module.package):

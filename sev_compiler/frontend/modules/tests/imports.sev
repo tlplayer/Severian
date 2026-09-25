@@ -1,9 +1,9 @@
-import * from "../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import "../../../hir/module/module.sev" as model_hir_module_module
+import "../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
 import source
-import * from "../modules/src/imports.sev" as imports
+import "../modules/src/imports.sev" as imports
 
 
 test "automatic import selection retains function implementation dependencies":

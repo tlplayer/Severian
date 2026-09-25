@@ -1,7 +1,7 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 
 
 def operator_key(operation: model_syntax_function_syntax.OperatorDeclaration, owner: string) -> string:

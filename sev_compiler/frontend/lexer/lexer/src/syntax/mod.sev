@@ -1,9 +1,9 @@
-import * from "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import source
 import diagnostics
-import * from "../token/mod.sev"
-import * from "../runtime.sev"
+import Token, token_is_symbol, token_number from "../token/mod.sev"
+import SourceLexicalRule, TokenKind, span from "../runtime.sev"
 
 
 class SyntaxProperty:

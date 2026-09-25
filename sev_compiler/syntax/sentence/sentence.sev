@@ -1,10 +1,10 @@
-import * from "../block/block.sev"
-import * from "../source.sev"
+import B, Block, BlockKind, OperatorSyntax, SourceId, Y, load, span from "../block/block.sev"
+import "../source.sev" as _dependency_source
 import source
-import * from "../symbol/symbol.sev"
-import * from "../type/annotation.sev"
-import * from "../function/function.sev"
-import * from "../function/lowering.sev"
+import AttrValue, BindingId, Symbol, TypeId from "../symbol/symbol.sev"
+import TypeAnnotation from "../type/annotation.sev"
+import Expression, Operation from "../function/function.sev"
+import "../function/lowering.sev" as _dependency_lowering
 
 # Sentence composition sits above local operator parsing. The parser supplies
 # classified terms; the semantic layer supplies constraint dispatch.

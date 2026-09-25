@@ -1,4 +1,4 @@
-import * from "catalog.sev"
+import LiteralConstruction, LiteralSyntax, PrimitiveCategory, PrimitiveDescriptor, SourceId, Span, StringPrimitive, TokenKind, TypeId, describe_primitive, primitive_descriptor, primitive_descriptors, span from "catalog.sev"
 
 
 def default_literal_type(syntax: LiteralSyntax) -> PrimitiveDescriptor:

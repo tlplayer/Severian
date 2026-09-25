@@ -1,14 +1,14 @@
-import * from "../../../modules/graph/model.sev" as model_frontend_modules_graph_model
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../syntax/literal/value.sev" as model_syntax_literal_value
-import * from "../../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
-import * from "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../modules/graph/model.sev" as model_frontend_modules_graph_model
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../syntax/literal/value.sev" as model_syntax_literal_value
+import "../../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
+import "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import primitives
 import diagnostics
 import environment
@@ -16,29 +16,29 @@ import time
 import process
 from diagnostics import Diagnostic
 import source
-import * from "../../../../syntax/primitive/catalog.sev" as scalar
-import * from "../../../../syntax/type/storage.sev" as storage_types
-import * from "grammar_scalar.sev" as grammar_scalar
-import * from "../../../../syntax/function/lowering.sev" as boundary
-import * from "packs.sev" as packs
-import * from "expansion.sev" as expansion
-import * from "construction.sev" as construction
-import * from "compiler_cases.sev" as compiler_cases
-import * from "../../../../syntax/type/tagged.sev" as tagged
-import * from "definitions.sev" as definitions
-import * from "match.sev" as matches
-import * from "../../../../syntax/type/scalar_conversion.sev" as conversions
-import * from "../../../../syntax/type/integer_spelling.sev" as integer_spelling
-import * from "test_modes.sev" as test_modes
-import * from "../../../../syntax/type/slice_bounds.sev" as slicing
-import * from "package:ownership/ownership/src/loans.sev" as loans
-import * from "package:ownership/ownership/src/places.sev" as places
-import * from "package:ownership/ownership/src/effects.sev" as parameter_effects
-import * from "closures.sev" as closures
-import * from "callable_index.sev" as callable_index
-import * from "with.sev" as with_clauses
-import * from "lazy_bodies.sev" as lazy_bodies
-import * from "constraints.sev" as constraints
+import "../../../../syntax/primitive/catalog.sev" as scalar
+import "../../../../syntax/type/storage.sev" as storage_types
+import "grammar_scalar.sev" as grammar_scalar
+import "../../../../syntax/function/lowering.sev" as boundary
+import "packs.sev" as packs
+import "expansion.sev" as expansion
+import "construction.sev" as construction
+import "compiler_cases.sev" as compiler_cases
+import "../../../../syntax/type/tagged.sev" as tagged
+import "definitions.sev" as definitions
+import "match.sev" as matches
+import "../../../../syntax/type/scalar_conversion.sev" as conversions
+import "../../../../syntax/type/integer_spelling.sev" as integer_spelling
+import "test_modes.sev" as test_modes
+import "../../../../syntax/type/slice_bounds.sev" as slicing
+import "package:ownership/ownership/src/loans.sev" as loans
+import "package:ownership/ownership/src/places.sev" as places
+import "package:ownership/ownership/src/effects.sev" as parameter_effects
+import "closures.sev" as closures
+import "callable_index.sev" as callable_index
+import "with.sev" as with_clauses
+import "lazy_bodies.sev" as lazy_bodies
+import "constraints.sev" as constraints
 
 
 class TransitionState:

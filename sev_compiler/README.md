@@ -352,6 +352,18 @@ characters support `\n`, `\r`, `\t`, `\\`, `\"`, and `\'`. Other escapes,
 including NUL and numeric Unicode escapes, are diagnosed. The seed's input
 runtime still uses C strings; this slice does not support embedded NUL input.
 
+Compiler packages require explicit imports (`language.explicit-imports`):
+`import Item from "module.sev"` imports a declaration, and
+`import "module.sev" as model` imports a namespace. The Rust driver's
+`sev fmt sev_compiler --bin sev_compiler` expands wildcard imports using resolved
+references, without running generators or compiling. The editor's “Make Imports
+Explicit” action uses that same command. Public facade exports and dependencies
+needed for initialization are retained.
+
+Export names follow these rules: `foo` is public, `_foo` is available through
+explicit imports but excluded from wildcard expansion, and `__foo` is local to
+its defining file and cannot be imported.
+
 Relative source imports, optionally `as alias`, load ordinary modules before
 analysis. Imports resolve relative to the importing file and cycles are
 diagnosed. Imported modules contain function declarations; their tests are not

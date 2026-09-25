@@ -4,7 +4,7 @@ import os
 import package
 import process
 import time
-import * from "profile_analysis.sev" as analysis
+import "profile_analysis.sev" as analysis
 
 class ProfileInvocation:
     mode: string

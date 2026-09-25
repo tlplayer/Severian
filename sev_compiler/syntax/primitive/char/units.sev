@@ -1,4 +1,4 @@
-import * from "encoding.sev"
+import decode_four, decode_three, decode_two, valid, width from "encoding.sev"
 
 # char[T] is transparent over T; validation belongs to the character constructor.
 def char[T: u8 | u32 = u32](value: int) -> char[T]:

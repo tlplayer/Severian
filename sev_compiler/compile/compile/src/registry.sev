@@ -1,8 +1,8 @@
-import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import artifact
 import mlir
-import * from "error.sev"
-import * from "model.sev"
+import CompileError from "error.sev"
+import CompileContext, CompilePlan, CompileRegion, PlanSegment from "model.sev"
 
 trait CompileHandler:
     compile(region: CompileRegion, context: CompileContext) -> mlir.MlirArtifact | CompileError

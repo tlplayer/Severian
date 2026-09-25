@@ -1,6 +1,6 @@
-import * from "../function/function.sev" as model_syntax_function_function
-import * from "../symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "annotation.sev" as model_syntax_type_annotation
+import "../function/function.sev" as model_syntax_function_function
+import "../symbol/symbol.sev" as model_syntax_symbol_symbol
+import "annotation.sev" as model_syntax_type_annotation
 import diagnostics
 import source
 

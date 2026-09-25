@@ -1,4 +1,4 @@
-import * from "../primitive.sev"
+import Error from "../primitive.sev"
 '''
 # `array[T, N]`
 

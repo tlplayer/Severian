@@ -1,4 +1,4 @@
-import * from "../../../../library/core/storage/src/buffer.sev" as storage
+import "../../../../library/core/storage/src/buffer.sev" as storage
 
 # Typed rank-one arrays use the shared storage/memory allocation boundary.
 # char[T] is an ordinary element type here, with the same loans and ownership
@@ -12,30 +12,30 @@ def copy[T](value: view array[T]) -> array[T]:
 
 
 @mlir("arith.index_cast")
-def __index(value: int) -> index
+def _index(value: int) -> index
 
 @mlir("arith.index_cast")
-def __size(value: index) -> int
+def _size(value: index) -> int
 
 @mlir("memref.dim")
 def __dimension[T](value: view array[T], axis: index) -> index
 
 @mlir("memref.load")
-def __load[T](value: view array[T], position: index) -> T
+def _load[T](value: view array[T], position: index) -> T
 
 @mlir("memref.store")
-def __store[T](item: T, value: borrow array[T], position: index)
+def _store[T](item: T, value: borrow array[T], position: index)
 
 
 def length[T](value: view array[T]) -> int:
-    return __size(__dimension(value, __index(0)))
+    return _size(__dimension(value, _index(0)))
 
 
 def read[T](value: view array[T], position: int) -> T:
     assert(position >= 0 and position < length(value))
-    return __load(value, __index(position))
+    return _load(value, _index(position))
 
 
 def write[T](value: borrow array[T], position: int, item: T):
     assert(position >= 0 and position < length(value))
-    __store(item, value, __index(position))
+    _store(item, value, _index(position))

@@ -1,4 +1,4 @@
-import * from "package:primitives/mlir.sev"
+import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, array_mlir, byte_view_mlir, index_mlir, memref_mlir, ranked_memref_storage, scalar_mlir, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir from "package:primitives/mlir.sev"
 class MlirScalarType:
     kind: string
     bits: u16

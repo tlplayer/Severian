@@ -1,15 +1,15 @@
-import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../syntax/literal/value.sev" as model_syntax_literal_value
-import * from "../../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
-import * from "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../syntax/literal/value.sev" as model_syntax_literal_value
+import "../../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
+import "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import diagnostics
 import source
-import * from "definitions.sev" as definitions
-import * from "../../../../syntax/type/tagged.sev" as tagged
+import "definitions.sev" as definitions
+import "../../../../syntax/type/tagged.sev" as tagged
 
 
 def literal_pattern(expression: model_syntax_function_function.Expression) -> bool:

@@ -1,20 +1,20 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "plan.sev"
-import * from "validate/mod.sev"
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "plan.sev" as _dependency_plan
+import validate_module from "validate/mod.sev"
 
 def validate(program: model_hir_module_module.Program):
     for module in program.modules:
         validate_module(module)
     return unit
 
-import * from "cfg.sev"
-import * from "effects.sev"
-import * from "loans.sev"
-import * from "places.sev"
+import "cfg.sev" as _dependency_cfg
+import "effects.sev" as _dependency_effects
+import "loans.sev" as _dependency_loans
+import "places.sev" as _dependency_places
 
 # Public module interfaces.
-import * from "cfg.sev" as cfg
-import * from "effects.sev" as effects
-import * from "loans.sev" as loans
-import * from "places.sev" as places
-import * from "plan.sev" as plan
+import "cfg.sev" as cfg
+import "effects.sev" as effects
+import "loans.sev" as loans
+import "places.sev" as places
+import "plan.sev" as plan

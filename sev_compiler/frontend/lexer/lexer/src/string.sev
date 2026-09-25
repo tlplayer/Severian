@@ -1,8 +1,8 @@
 import diagnostics
-import * from "token/mod.sev"
-import * from "rule.sev"
-import * from "indentation.sev"
-import * from "package:primitives/char/encoding.sev"
+import "token/mod.sev" as _dependency_mod
+import LexemeInput, LexemeMatch, LexicalRule, TokenKind, lexeme_span from "rule.sev"
+import contains_non_whitespace, indentation_width, strip_indentation from "indentation.sev"
+import decode_four, decode_three, decode_two, valid, width from "package:primitives/char/encoding.sev"
 
 
 def literal_escape(value: string) -> string | None:

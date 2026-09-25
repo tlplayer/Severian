@@ -1,6 +1,6 @@
 import profiling
-import * from "validate.sev"
-import * from "model.sev"
+import MlirVerificationError, validate from "validate.sev"
+import MlirAffineExpression, MlirAffineMap, MlirAttributeValue, MlirFunctionOp, MlirLocation, MlirNamedAttribute, MlirNamedProperty, MlirOperation, MlirProgram, MlirRegion, MlirScalarType, MlirType, MlirTypeBinding, MlirTypeParameter, MlirValue, affine_expression_kind_name, array_type, attribute_kind_name, declared_mlir_type, dimension_text, integer_type, operation_name_text, tensor_type, visibility_name from "model.sev"
 
 
 # Text is a terminal inspection/bootstrap format. Lowering and optimization

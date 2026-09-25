@@ -1,8 +1,8 @@
-import * from "../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../mir/value.sev" as model_mir_value
-import * from "../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../hir/module/module.sev" as model_hir_module_module
+import "../../../mir/value.sev" as model_mir_value
+import "../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import artifact
 import mir
 import target

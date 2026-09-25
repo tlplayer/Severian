@@ -1,6 +1,6 @@
-import * from "../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../cfg/cfg.sev" as model_mir_cfg_cfg
-import * from "cfg.sev"
+import "../../../hir/module/module.sev" as model_hir_module_module
+import "../../cfg/cfg.sev" as model_mir_cfg_cfg
+import Operation, value from "cfg.sev"
 
 enum IrStage:
     Constructed

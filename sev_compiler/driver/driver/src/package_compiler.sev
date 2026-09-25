@@ -1,14 +1,14 @@
-import * from "../../../syntax/function/lowering.sev" as boundary
+import "../../../syntax/function/lowering.sev" as boundary
 import package
 import source
 import os
 import path
-import * from "pipeline/source.sev" as pipeline
-import * from "package:backend/backend/src/native_mlir.sev" as backend
-import * from "pipeline/frontend_archive.sev" as frontend_archive
-import * from "package:interface/interface/src/package_metadata.sev" as metadata
-import * from "pipeline/mir_archive.sev" as mir_archive
-import * from "pipeline/package_interface.sev" as package_interface
+import "pipeline/source.sev" as pipeline
+import "package:backend/backend/src/native_mlir.sev" as backend
+import "pipeline/frontend_archive.sev" as frontend_archive
+import "package:interface/interface/src/package_metadata.sev" as metadata
+import "pipeline/mir_archive.sev" as mir_archive
+import "pipeline/package_interface.sev" as package_interface
 import diagnostics
 from diagnostics import Diagnostic
 

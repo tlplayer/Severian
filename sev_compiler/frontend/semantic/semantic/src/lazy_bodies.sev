@@ -1,9 +1,9 @@
-import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import diagnostics
 import file
-import * from "../../package.pkg/build/body_archive.sev" as codec
+import "../../package.pkg/build/body_archive.sev" as codec
 
 
 class BodyCache:

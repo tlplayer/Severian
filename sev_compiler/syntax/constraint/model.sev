@@ -1,6 +1,6 @@
 import source
-import * from "../symbol/symbol.sev"
-import * from "../function/function.sev"
+import BlockId, DefId, RegionId, ValueId from "../symbol/symbol.sev"
+import Expression from "../function/function.sev"
 
 
 enum ConstraintStage:

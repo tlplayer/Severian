@@ -1,6 +1,6 @@
 import diagnostics
-import * from "token/mod.sev"
-import * from "rule.sev"
+import "token/mod.sev" as _dependency_mod
+import LexemeInput, LexemeMatch, LexicalRule, TokenKind from "rule.sev"
 
 
 class TriviaLexeme: LexicalRule

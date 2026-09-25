@@ -46,12 +46,12 @@ pub fn plan(graph: &ModuleGraph, root: &Path) -> Result<Plan, String> {
     plan_with_mode(graph, root, Some(true))
 }
 
-/// Successful builds show used names while retaining extensibility by default.
+/// Successful builds use the same concrete import expansion as formatting.
 pub fn plan_compiled(graph: &ModuleGraph, root: &Path) -> Result<Plan, String> {
     plan_with_mode(graph, root, None)
 }
 
-fn plan_with_mode(graph: &ModuleGraph, root: &Path, explicit: Option<bool>) -> Result<Plan, String> {
+fn plan_with_mode(graph: &ModuleGraph, root: &Path, _explicit: Option<bool>) -> Result<Plan, String> {
     let build_plan = severian_semantic::import_plan(graph).map_err(|e|e.to_string())?;
     let index = severian_semantic::import_index(graph).map_err(|e| e.to_string())?;
     let root = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
@@ -125,15 +125,28 @@ fn plan_with_mode(graph: &ModuleGraph, root: &Path, explicit: Option<bool>) -> R
     }
     for module in &graph.modules {
         if !module.path.starts_with(&root) || module.path.components().any(|c|c.as_os_str()=="package.pkg") { continue; }
-        // Nested dependency packages have their own sources and build policy.
-        if module.path.ancestors().skip(1).take_while(|directory| *directory != root)
-            .any(|directory| directory.join("package.json").is_file()) { continue; }
+        // Include nested packages owned by this source tree.
         let tokens = &lexed[&module.id];
         let mut edits: Vec<(usize,usize,String)> = Vec::new();
         let mut supplied = BTreeSet::new();
         let mut count = 0;
         for import in module.ast.items.iter().filter_map(|i|if let Item::Import(i)=i {Some(i)}else{None}) {
-            if !wildcard(import) || import.alias.is_some() { continue; }
+            if !wildcard(import) { continue; }
+            let spelling = &module.source.text[import.span.start as usize..import.span.end as usize];
+            if let Some(alias) = &import.alias {
+                if !spelling.contains('*') { continue; }
+                let locator = match &import.subject {
+                    ImportSubject::Locator(path) => serde_json::to_string(path).map_err(|e| e.to_string())?,
+                    ImportSubject::Name(_) => import.source.clone().ok_or("missing import source")?,
+                };
+                if !spelling.trim_start().starts_with("import ") {
+                    result.notes.push(format!("{}: rewrite grouped namespace import explicitly", module.path.display()));
+                    continue;
+                }
+                edits.push((import.span.start as usize, import.span.end as usize, format!("import {locator} as {alias}")));
+                count += 1;
+                continue;
+            }
             if !module.imports.iter().any(|edge| edge.span == import.span) { continue; }
             let locator = match &import.subject {
                 ImportSubject::Locator(locator) => locator.as_str(),
@@ -145,11 +158,10 @@ fn plan_with_mode(graph: &ModuleGraph, root: &Path, explicit: Option<bool>) -> R
                     members.push(name.clone());
                 }
             }
-            let closed = explicit.unwrap_or_else(|| graph.policies.get(&module.package).is_some_and(|policy| policy.narrow_imports));
             let member_only = module.source.text[import.span.start as usize..import.span.end as usize].trim() == "*";
             // An existing explicit list already displays its known names. In
             // closed mode remove only its wildcard and adjacent comma.
-            if closed && member_only && members.is_empty() {
+            if member_only && members.is_empty() {
                 let start = import.span.start as usize;
                 let end = import.span.end as usize;
                 let previous = tokens.iter().rev().find(|token| token.end <= start);
@@ -172,7 +184,13 @@ fn plan_with_mode(graph: &ModuleGraph, root: &Path, explicit: Option<bool>) -> R
             if members.is_empty() {
                 // Importing can register extensions or execute initializers. Do
                 // not erase a dependency merely because it contributes no names.
-                result.notes.push(format!("{}: no named uses of `{locator}`; retained for review of initialization/extension effects",module.path.display()));
+                if !member_only {
+                    let source = if matches!(import.subject, ImportSubject::Locator(_)) { serde_json::to_string(locator).map_err(|e|e.to_string())? } else { locator.to_owned() };
+                    let mut alias = format!("_dependency_{}", import.span.start);
+                    while index.modules[&module.id].scope.bindings.contains_key(&alias) { alias.push('_'); }
+                    edits.push((import.span.start as usize, import.span.end as usize, format!("import {source} as {alias}")));
+                    count += 1;
+                }
                 continue;
             }
             let source = if matches!(import.subject, ImportSubject::Locator(_)) {serde_json::to_string(locator).map_err(|e|e.to_string())?} else {locator.to_owned()};
@@ -180,7 +198,7 @@ fn plan_with_mode(graph: &ModuleGraph, root: &Path, explicit: Option<bool>) -> R
                 result.notes.push(format!("{}: retained import containing an internal comment", module.path.display()));
                 continue;
             }
-            if !closed { members.push("*".to_owned()); }
+
             let replacement = if member_only { members.join(", ") }
                 else { format!("import {} from {source}", members.join(", ")) };
             edits.push((import.span.start as usize,import.span.end as usize,replacement));
@@ -243,7 +261,8 @@ mod tests {
             ("main.sev","import * from \"lib.sev\" as helpers\ndef main() -> int:\n    # helpers.unused()\n    print(\"helpers.unused()\")\n    return helpers.used()\n")]);
         let graph=severian_modules::resolve(&root.join("main.sev")).unwrap();
         let p=plan(&graph,&root).unwrap();
-        assert!(p.files.is_empty());
+        assert_eq!(p.files.len(), 1);
+        assert!(p.files[0].after.contains("import \"lib.sev\" as helpers"));
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -270,7 +289,7 @@ mod tests {
         assert!(edits.files[0].after.contains("import needed"));
         std::fs::write(root.join("main.sev"),"import * from \"lib.sev\" as helpers\ndef run() -> string:\n    value = helpers.needed()\n    return f\"{helpers.needed()}\"\n").unwrap();
         let graph=severian_modules::resolve(&root.join("main.sev")).unwrap();
-        assert!(plan(&graph,&root).unwrap().files.is_empty());
+        assert!(plan(&graph,&root).unwrap().files[0].after.contains("import \"lib.sev\" as helpers"));
         std::fs::remove_dir_all(root).unwrap();
     }
 

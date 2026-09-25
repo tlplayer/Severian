@@ -1,9 +1,9 @@
-import * from "../declarations.sev"
-import * from "../primitive.sev"
-import * from "../../../../../library/core/collections/list/src/slice.sev"
-import * from "core.sev" as utf8_core
+import LiteralBinding, LiteralSyntax, MlirTypeBinding, PrimitiveId, StringPrimitive, TypeId from "../declarations.sev"
+import Error from "../primitive.sev"
+import "../../../../../library/core/collections/list/src/slice.sev" as _dependency_slice
+import "core.sev" as utf8_core
 
-import * from "../../function/trait.sev"
+import Equatable, Ordered, Truth from "../../function/trait.sev"
 
 
 '''

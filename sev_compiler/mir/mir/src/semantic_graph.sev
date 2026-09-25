@@ -1,14 +1,14 @@
-import * from "../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
-import * from "../../../hir/module/hierarchy.sev" as model_hir_module_hierarchy
-import * from "../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../cfg/cfg.sev" as model_mir_cfg_cfg
-import * from "../../../syntax/constraint/model.sev" as model_syntax_constraint_model
-import * from "../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
+import "../../../hir/module/hierarchy.sev" as model_hir_module_hierarchy
+import "../../../hir/module/module.sev" as model_hir_module_module
+import "../../cfg/cfg.sev" as model_mir_cfg_cfg
+import "../../../syntax/constraint/model.sev" as model_syntax_constraint_model
+import "../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import source
-import * from "../../../frontend/modules/graph/verify.sev" as graph_verify
+import "../../../frontend/modules/graph/verify.sev" as graph_verify
 
 
 def callable_definition(module: model_hir_module_module.Module, function: model_syntax_symbol_symbol.FunctionId) -> model_syntax_symbol_symbol.DefId | Error:

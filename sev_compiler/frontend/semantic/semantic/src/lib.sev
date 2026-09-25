@@ -1,9 +1,9 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import diagnostics
-import * from "callable.sev" as callable
-import * from "definitions.sev" as definitions
+import "callable.sev" as callable
+import "definitions.sev" as definitions
 
 
 # Both compiler entries use the same declaration environment and typed body
@@ -44,9 +44,9 @@ def analyze(module: model_hir_module_module.Module) -> model_hir_module_module.P
 def analyze_tests(module: model_hir_module_module.Module) -> model_hir_module_module.Program | diagnostics.Diagnostic:
     return analyze_with_package_functions(module, definitions.SemanticDefinitions(), AnalysisContext(Test, "memory"), [], [], [])
 
-import * from "macros.sev"
-import * from "callable.sev"
-import * from "definitions.sev"
+import "macros.sev" as _dependency_macros
+import "callable.sev" as _dependency_callable
+import "definitions.sev" as _dependency_definitions
 
 # Public module interfaces.
-import * from "macros.sev" as macros
+import "macros.sev" as macros

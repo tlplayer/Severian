@@ -1,4 +1,4 @@
-import * from "contract.sev"
+import LiteralSyntax from "contract.sev"
 
 class NumericMatch:
     end: int

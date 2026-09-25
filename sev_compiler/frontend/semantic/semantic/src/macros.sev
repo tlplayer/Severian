@@ -1,17 +1,17 @@
-import * from "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import lexer
 import diagnostics
 from lexer import TokenKind
 import parser
 import source
-import * from "../../../../syntax/primitive/catalog.sev" as scalar
-import * from "../../../../syntax/type/scalar_conversion.sev" as conversions
-import * from "../../../../syntax/type/integer_spelling.sev" as integer_spelling
-import * from "definitions.sev" as family_definitions
+import "../../../../syntax/primitive/catalog.sev" as scalar
+import "../../../../syntax/type/scalar_conversion.sev" as conversions
+import "../../../../syntax/type/integer_spelling.sev" as integer_spelling
+import "definitions.sev" as family_definitions
 
 
 # Declaration macros enumerate type families before ordinary name resolution.

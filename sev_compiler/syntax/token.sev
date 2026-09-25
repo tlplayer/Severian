@@ -1,4 +1,4 @@
-import * from "lexeme.sev"
+import Lexeme, LexemeTerm, Span, Symbol, span from "lexeme.sev"
 
 enum TokenKind:
     Identifier

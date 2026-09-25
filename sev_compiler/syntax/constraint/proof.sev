@@ -1,4 +1,4 @@
-import * from "model.sev"
+import ProofResult from "model.sev"
 
 
 class IntegerInterval:

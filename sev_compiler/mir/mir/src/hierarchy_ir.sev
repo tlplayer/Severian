@@ -1,6 +1,6 @@
-import * from "../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
-import * from "../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
+import "../../../hir/module/module.sev" as model_hir_module_module
+import "../../../syntax/block/block.sev" as model_syntax_block_block
 import source
 
 

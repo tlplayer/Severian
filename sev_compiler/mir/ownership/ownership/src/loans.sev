@@ -1,4 +1,4 @@
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
 import diagnostics
 import source
 

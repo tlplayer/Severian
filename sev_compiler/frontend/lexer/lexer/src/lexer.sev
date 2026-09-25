@@ -1,13 +1,13 @@
 import source
 import diagnostics
-import * from "token/mod.sev"
-import * from "rule.sev"
-import * from "identifier.sev"
-import * from "number.sev"
-import * from "string.sev"
-import * from "symbol.sev"
-import * from "trivia.sev"
-import * from "runtime.sev"
+import "token/mod.sev" as _dependency_mod
+import LexemeInput, LexemeMatch, LexicalRule, lexeme_input, lexeme_span, lexeme_text from "rule.sev"
+import AbiId, ArtifactId, AssertionLocation, AssertionOrigin, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, CoverageKind, CoveragePoint, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, IdentifierLexeme, IndexedId, InferVarId, InterfaceId, Lexeme, LexemeTerm, LocalId, ModuleId, NamedId, OpId, PackageId, PrimitiveId, ProviderId, QualityRegion, RegionId, ScopeId, SourceFile, SourceId, SourceMap, Span, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TokenKind, TokenTerm, TypeBinding, TypeConstructorBinding, TypeId, ValueId, VariantId, definition_from_key, is_alphabetic, is_alphanumeric, is_digit, load, named_definition, same_definition, semantic_digest, semantic_key, source_id, span, utf8_offset, virtual_source from "identifier.sev"
+import NumericLexeme from "number.sev"
+import StringLexeme, block_string, decode_four, decode_three, decode_two, literal_codepoint, literal_escape, valid, width from "string.sev"
+import LexicalSymbol, SymbolLexeme, lexical_symbols, match_symbol from "symbol.sev"
+import TriviaLexeme from "trivia.sev"
+import LexicalFlow, LexicalFrame, LexicalValue, SourceLexicalRule, lexical_binary, lexical_block, lexical_call, lexical_category, lexical_equal, lexical_error, lexical_expression, lexical_get, lexical_invoke, lexical_number, lexical_path, lexical_set, lexical_text, lexical_tick, lexical_truth, match_source_rules, model_syntax_block_block, model_syntax_function_function, model_syntax_type_annotation, source_lexical_rule from "runtime.sev"
 
 
 # Built-in rules are specialized; imported rules execute source bodies through

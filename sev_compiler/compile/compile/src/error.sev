@@ -1,4 +1,4 @@
-import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import mir
 
 enum CompileError:

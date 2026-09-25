@@ -1,12 +1,12 @@
-import * from "../../../cfg/branch.sev" as model_mir_cfg_branch
-import * from "../../../cfg/cfg.sev" as model_mir_cfg_cfg
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../cfg/branch.sev" as model_mir_cfg_branch
+import "../../../cfg/cfg.sev" as model_mir_cfg_cfg
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import source
-import * from "provenance.sev" as provenance
+import "provenance.sev" as provenance
 import diagnostics
-import * from "../../../cfg/availability.sev" as availability
-import * from "../../../cfg/dominance.sev" as graph
+import "../../../cfg/availability.sev" as availability
+import "../../../cfg/dominance.sev" as graph
 
 def successors(exit: model_mir_cfg_branch.CfgExit) -> list[model_mir_cfg_branch.CfgEdge]:
     match exit:

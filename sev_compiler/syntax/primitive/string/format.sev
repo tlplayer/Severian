@@ -1,2 +1,2 @@
 # Compatibility import; formatting is owned by core.string.format.
-import * from "../../../../library/core/string/format/src/lib.sev"
+import StringRepresentation, object_text, pointer_text, quoted, string, text from "../../../../library/core/string/format/src/lib.sev"

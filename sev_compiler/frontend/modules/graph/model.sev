@@ -1,6 +1,6 @@
-import * from "package:syntax/block/block.sev"
+import BlockKind, OperationOrigin, span from "package:syntax/block/block.sev"
 import source
-import * from "../../../syntax/symbol/symbol.sev"
+import DefId, semantic_key from "../../../syntax/symbol/symbol.sev"
 
 
 # Revision-local indices are deliberately distinct from semantic identities.

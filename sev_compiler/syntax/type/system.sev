@@ -1,4 +1,4 @@
-import * from "../symbol/symbol.sev"
+import DeclarationId, DefId, GenericParamId, InferVarId, PrimitiveId, RegionId, Substitution, SymbolKind, TypeId from "../symbol/symbol.sev"
 
 
 # Structural types and inference ported from rust_compiler/universal/src/type_system.rs.

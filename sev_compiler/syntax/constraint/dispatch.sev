@@ -1,5 +1,5 @@
-import * from "model.sev"
-import * from "graph.sev"
+import ConstraintGraph, DispatchFamily, ProofResult from "model.sev"
+import DefId, constraint_schedule from "graph.sev"
 
 
 # Unknown candidates remain live; they never become false because a budget ran out.

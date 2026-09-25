@@ -1,10 +1,10 @@
-import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import source
 import diagnostics
-import * from "rule.sev"
-import * from "identifier.sev"
+import LexemeInput, LexemeMatch, LexicalRule, lexeme_span, lexeme_text from "rule.sev"
+import Symbol, TokenKind, callable, is_digit, span from "identifier.sev"
 
 
 # Imported rules retain universal source bodies. This evaluator has no parser

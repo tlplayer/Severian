@@ -1,6 +1,6 @@
 import backend
 import source
-import * from "source.sev" as pipeline
+import "source.sev" as pipeline
 
 class Compiler:
     sysroot: string = "."

@@ -1,15 +1,15 @@
-import * from "../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
-import * from "../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../cfg/cfg.sev" as model_mir_cfg_cfg
-import * from "../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../syntax/type/annotation.sev" as model_syntax_type_annotation
-import * from "../../../frontend/modules/graph/queries.sev" as graph_queries
+import "../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
+import "../../../hir/module/module.sev" as model_hir_module_module
+import "../../cfg/cfg.sev" as model_mir_cfg_cfg
+import "../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../frontend/modules/graph/queries.sev" as graph_queries
 import source
-import * from "hierarchy_ir.sev" as hierarchy_ir
-import * from "cfg.sev" as cfg
-import * from "semantic_graph.sev" as semantic_graph
+import "hierarchy_ir.sev" as hierarchy_ir
+import "cfg.sev" as cfg
+import "semantic_graph.sev" as semantic_graph
 
 
 def quoted(value: string) -> string:

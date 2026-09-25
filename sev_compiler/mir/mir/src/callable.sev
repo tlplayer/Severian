@@ -1,25 +1,25 @@
-import * from "../../../hir/module/hierarchy.sev" as model_hir_module_hierarchy
-import * from "../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../cfg/branch.sev" as model_mir_cfg_branch
-import * from "../../cfg/cfg.sev" as model_mir_cfg_cfg
-import * from "../../cfg/lazy.sev" as model_mir_cfg_lazy
-import * from "../../value.sev" as model_mir_value
-import * from "../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../syntax/literal/value.sev" as model_syntax_literal_value
-import * from "../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
-import * from "../../../syntax/source.sev" as model_syntax_source
-import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../hir/module/hierarchy.sev" as model_hir_module_hierarchy
+import "../../../hir/module/module.sev" as model_hir_module_module
+import "../../cfg/branch.sev" as model_mir_cfg_branch
+import "../../cfg/cfg.sev" as model_mir_cfg_cfg
+import "../../cfg/lazy.sev" as model_mir_cfg_lazy
+import "../../value.sev" as model_mir_value
+import "../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../syntax/literal/value.sev" as model_syntax_literal_value
+import "../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
+import "../../../syntax/source.sev" as model_syntax_source
+import "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import source
 import diagnostics
-import * from "cfg.sev" as cfg
-import * from "../../ownership/ownership/src/plan.sev" as ownership
-import * from "aggregate.sev" as aggregate
-import * from "../../../syntax/type/storage.sev" as storage_types
-import * from "../../../syntax/function/lowering.sev" as boundary
-import * from "quality.sev" as quality
+import "cfg.sev" as cfg
+import "../../ownership/ownership/src/plan.sev" as ownership
+import "aggregate.sev" as aggregate
+import "../../../syntax/type/storage.sev" as storage_types
+import "../../../syntax/function/lowering.sev" as boundary
+import "quality.sev" as quality
 
 
 class CallableMirScope:

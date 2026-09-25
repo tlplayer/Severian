@@ -1,4 +1,4 @@
-import * from "model.sev"
+import DefinitionGraph, DefinitionIndex from "model.sev"
 
 
 class DependencyComponent:

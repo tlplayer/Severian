@@ -1,7 +1,7 @@
-import * from "package:syntax/block/block.sev"
-import * from "../../syntax/symbol/symbol.sev"
-import * from "../../syntax/function/lowering.sev"
-import * from "branch.sev"
+import Block, BlockKind, Constant, OperationOrigin, SourceBlockId, span from "package:syntax/block/block.sev"
+import TypeId, ValueId from "../../syntax/symbol/symbol.sev"
+import "../../syntax/function/lowering.sev" as _dependency_lowering
+import CfgEdge, CfgExit, CfgTerminator from "branch.sev"
 
 
 def inherit_source(block: Block, source_block: Block):

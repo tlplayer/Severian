@@ -1,13 +1,13 @@
-import * from "../../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import source
-import * from "package:lexer/lexer/src/lib.sev" as lexer
-import * from "package:parser/parser/src/lib.sev" as parser
-import * from "../callable.sev" as semantic
+import "package:lexer/lexer/src/lib.sev" as lexer
+import "package:parser/parser/src/lib.sev" as parser
+import "../callable.sev" as semantic
 
 
 def callable_fixture_tokens(input: source.SourceFile) -> list[lexer.Token]:
@@ -209,7 +209,7 @@ test "generic HIR retains required operator and concrete implementation identiti
     assert(instances == 2)
 
 
-import * from "../lib.sev" as package_analysis
+import "../lib.sev" as package_analysis
 
 
 test "package and executable entries share type and member registration":

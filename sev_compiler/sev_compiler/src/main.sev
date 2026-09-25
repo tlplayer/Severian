@@ -7,13 +7,13 @@ import process
 import source
 import package
 import os
-import * from "../../driver/driver/src/directory_tests.sev" as directory_tests
-import * from "../../driver/driver/src/package_command.sev"
-import * from "../../driver/driver/src/package_compiler.sev"
-import * from "../../driver/driver/src/package_session.sev"
-import * from "../../driver/driver/src/pipeline/source.sev" as compiler
-import * from "../../../library/package/compile/backend/backend/src/native_mlir.sev" as backend
-import * from "../../driver/driver/src/profiling.sev" as profiling
+import "../../driver/driver/src/directory_tests.sev" as directory_tests
+import package_command from "../../driver/driver/src/package_command.sev"
+import compile_package_unit, compile_prelude_package, metadata, mir_archive from "../../driver/driver/src/package_compiler.sev"
+import serve_package_session from "../../driver/driver/src/package_session.sev"
+import "../../driver/driver/src/pipeline/source.sev" as compiler
+import "../../../library/package/compile/backend/backend/src/native_mlir.sev" as backend
+import "../../driver/driver/src/profiling.sev" as profiling
 
 @c(symbol="exit")
 def exit_status(status: i32)

@@ -1,4 +1,5 @@
 {
+  "language": { "explicit-imports": true },
   "package": {
     "name": "sev-compiler-hir",
     "version": "0.1.0",

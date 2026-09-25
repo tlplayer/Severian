@@ -1,5 +1,5 @@
-import * from "../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
 
 
 # The bounded evaluator never executes user code. Unsupported predicates remain

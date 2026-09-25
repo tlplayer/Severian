@@ -1,5 +1,5 @@
-import * from "../function/function.sev"
-import * from "../primitive/primitive/src/lib.sev"
+import RecordDeclaration, TypeId from "../function/function.sev"
+import scalar_representation from "../primitive/primitive/src/lib.sev"
 
 
 # Storage types retain their element identity independently of value layouts.

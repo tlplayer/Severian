@@ -1,7 +1,7 @@
-import * from "../declarations.sev"
-import * from "../primitive.sev"
+import I128Primitive, I16Primitive, I32Primitive, I64Primitive, I8Primitive, LiteralBinding, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId, U128Primitive, U16Primitive, U32Primitive, U64Primitive, U8Primitive from "../declarations.sev"
+import Error from "../primitive.sev"
 
-import * from "../../function/trait.sev"
+import Bitwise, Equatable, Ordered, Truth from "../../function/trait.sev"
 
 
 '''

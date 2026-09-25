@@ -1,23 +1,23 @@
-import * from "../char/utf8.sev" as character
-import * from "intrinsics.sev" as text_storage
+import "../char/utf8.sev" as character
+import "intrinsics.sev" as text_storage
 
 # The seed representation uses the package's MLIR text-storage implementation.
 # Keep UTF-8 algorithms independent of its physical storage layout.
 def __dimension(value: string, dimension: int) -> int:
     assert(dimension == 0)
-    return text_storage.__text_size(value)
+    return text_storage._text_size(value)
 
 
-def __size[T](value: T) -> int:
+def _size[T](value: T) -> int:
     return int(value)
 
 
-def __index(value: int) -> int:
+def _index(value: int) -> int:
     return value
 
 
-def __load(value: string, position: int) -> u8:
-    return text_storage.__text_load(value, position)
+def _load(value: string, position: int) -> u8:
+    return text_storage._text_load(value, position)
 
 
 def __byte_value(value: u8) -> int:
@@ -28,24 +28,24 @@ def __character(value: int) -> char:
     return character.from_codepoint(value)
 
 
-def __allocate(size: int) -> string:
+def _allocate(size: int) -> string:
     assert(size >= 0)
-    return text_storage.__text_allocate(size)
+    return text_storage._text_allocate(size)
 
 
-def __store(value: u8, destination: borrow string, position: int):
-    assert(position >= 0 and position < text_storage.__text_size(destination))
-    text_storage.__text_store(value, destination, position)
+def _store(value: u8, destination: borrow string, position: int):
+    assert(position >= 0 and position < text_storage._text_size(destination))
+    text_storage._text_store(value, destination, position)
 
 
 def byte_count(value: string) -> int:
-    return __size(__dimension(value, 0))
+    return _size(__dimension(value, 0))
 
 
 def byte_at(value: string, position: int) -> int:
     assert(position >= 0)
     assert(position < byte_count(value))
-    return __byte_value(__load(value, __index(position)))
+    return __byte_value(_load(value, _index(position)))
 
 
 test "string views count and address UTF-8 bytes":
@@ -118,7 +118,7 @@ def length(value: string) -> int:
     return __count(value, 0)
 
 
-def __offset(value: string, position: int, offset: int) -> int:
+def _offset(value: string, position: int, offset: int) -> int:
     assert(position >= 0)
     cursor := offset
     remaining := position
@@ -131,7 +131,7 @@ def __offset(value: string, position: int, offset: int) -> int:
 
 def character_at(value: string, position: int) -> char:
     assert(position >= 0)
-    return __character(decode(value, __offset(value, position, 0)))
+    return __character(decode(value, _offset(value, position, 0)))
 
 
 test "character indexing decodes each UTF-8 width":
@@ -174,7 +174,7 @@ test "equality compares bytes and lengths":
 def __copy(source: string, destination: borrow string, offset: int, position: int):
     cursor := position
     while cursor < byte_count(source):
-        __store(__load(source, __index(cursor)), destination, __index(offset + cursor))
+        _store(_load(source, _index(cursor)), destination, _index(offset + cursor))
         cursor += 1
 
 
@@ -185,7 +185,7 @@ def concat(left: string, right: string) -> string:
     right_size = byte_count(right)
     assert(left_size <= 9223372036854775807 - right_size)
     size = left_size + right_size
-    result = __allocate(__index(size))
+    result = _allocate(_index(size))
     __copy(left, result, 0, 0)
     __copy(right, result, left_size, 0)
     return result

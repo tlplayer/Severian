@@ -1,16 +1,16 @@
-import * from "../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../cfg/branch.sev" as model_mir_cfg_branch
-import * from "../../cfg/cfg.sev" as model_mir_cfg_cfg
-import * from "../../value.sev" as model_mir_value
-import * from "../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../syntax/literal/value.sev" as model_syntax_literal_value
-import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "package:ownership/ownership/src/cfg.sev" as ownership_cfg
-import * from "../../cfg/availability.sev" as availability
-import * from "../../cfg/dominance.sev" as graph
-import * from "package:cfg_builder/builder.sev"
-import * from "../../../syntax/type/storage.sev" as storage_types
+import "../../../hir/module/module.sev" as model_hir_module_module
+import "../../cfg/branch.sev" as model_mir_cfg_branch
+import "../../cfg/cfg.sev" as model_mir_cfg_cfg
+import "../../value.sev" as model_mir_value
+import "../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../syntax/literal/value.sev" as model_syntax_literal_value
+import "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "package:ownership/ownership/src/cfg.sev" as ownership_cfg
+import "../../cfg/availability.sev" as availability
+import "../../cfg/dominance.sev" as graph
+import Constant, ExecutionContext, Operation, append, append_at, at, bind_source, block, fallthrough, open, source_origin, span, terminate from "package:cfg_builder/builder.sev"
+import "../../../syntax/type/storage.sev" as storage_types
 import source
 import diagnostics
 

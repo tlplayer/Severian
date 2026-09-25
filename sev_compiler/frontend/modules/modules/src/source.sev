@@ -1,8 +1,8 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
-import * from "package:interface/interface/src/package_metadata.sev" as metadata
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "package:interface/interface/src/package_metadata.sev" as metadata
 import lexer
 import diagnostics
 import source
@@ -10,12 +10,12 @@ from source import SourceFile
 import package
 import interfaces
 from io import IOError
-import * from "package:semantic/semantic/src/macros.sev" as macros
-import * from "lexical.sev"
-import * from "imports.sev" as import_selection
-import * from "identity.sev" as semantic_identity
-import * from "semantic_interface.sev" as semantic_interface
-import * from "package:interface/interface/src/semantic_payload.sev" as semantic_payload
+import "package:semantic/semantic/src/macros.sev" as macros
+import discover_lexical_rules, lexical_source from "lexical.sev"
+import "imports.sev" as import_selection
+import "identity.sev" as semantic_identity
+import "semantic_interface.sev" as semantic_interface
+import "package:interface/interface/src/semantic_payload.sev" as semantic_payload
 
 def read_source(path: string) -> source.SourceFile | diagnostics.Diagnostic:
     # Normalize IO failures before entering a Diagnostic-only result. Passing
@@ -191,10 +191,13 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
                 subject += 2
                 if tokens[subject].kind not in [lexer.TokenKind.String, lexer.TokenKind.Identifier]:
                     return error(diagnostics.diagnostic("E000120", "expected a source or package after `import * from`"))
-            elif tokens[subject].kind == lexer.TokenKind.String:
-                return error(diagnostics.diagnostic("E000120", "file imports require explicit `import * from` followed by a locator string"))
-            elif subject + 2 < len(tokens) and lexer.token_word(tokens[subject + 1]) == "from" and tokens[subject + 2].kind == lexer.TokenKind.String:
-                subject += 2
+            elif tokens[subject].kind != lexer.TokenKind.String:
+                cursor := subject
+                while cursor + 1 < len(tokens) and tokens[cursor].kind not in [lexer.TokenKind.Newline, lexer.TokenKind.Eof]:
+                    if lexer.token_word(tokens[cursor]) == "from":
+                        subject = cursor + 1
+                        break
+                    cursor += 1
             match tokens[subject].kind:
                 case String:
                     child = import_source(resolution, file.path, string(tokens[subject]), sysroot)
@@ -424,6 +427,8 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
 # Diamond imports share declarations; distinct source declarations still reach
 # semantic duplicate checking, even if their visible names are identical.
 def append_selected_import(result: model_hir_module_module.Module, child: model_hir_module_module.Module, namespace: string, name: string, exposed: string) -> unit | diagnostics.Diagnostic:
+    if name.starts_with("__"):
+        return error(diagnostics.diagnostic("E000124", "file-local declaration cannot be imported: " + name))
     selected := false
     for item in child.items:
         match item:
@@ -432,6 +437,24 @@ def append_selected_import(result: model_hir_module_module.Module, child: model_
                     imported = model_syntax_function_function.FunctionDeclaration(name=exposed, decorators=declaration.decorators[:], type_parameters=declaration.type_parameters[:], constraints=declaration.constraints[:], parameters=declaration.parameters[:], result=declaration.result, body=declaration.body, span=declaration.span, lookup=declaration.lookup, result_mode=declaration.result_mode, type_defaults=declaration.type_defaults[:], definition=declaration.definition, semantic_key=declaration.semantic_key, attachments=declaration.attachments[:], dispatch_candidates=declaration.dispatch_candidates[:], dispatch_predicates=declaration.dispatch_predicates[:], lazy_body=declaration.lazy_body)
                     append_imported_item(result, model_hir_module_module.Function(imported))
                     selected = true
+            case Record:
+                if declaration.name == namespace + name:
+                    imported := declaration
+                    imported.name = exposed
+                    append_imported_item(result, model_hir_module_module.Record(imported))
+                    selected = true
+            case Type:
+                if declaration.name == namespace + name:
+                    imported := declaration
+                    imported.name = exposed
+                    append_imported_item(result, model_hir_module_module.Type(imported))
+                    selected = true
+            case Trait:
+                if declaration.name == namespace + name:
+                    imported := declaration
+                    imported.name = exposed
+                    append_imported_item(result, model_hir_module_module.Trait(imported))
+                    selected = true
             case BindingItem:
                 if binding.name == namespace + name:
                     imported := binding
@@ -439,7 +462,7 @@ def append_selected_import(result: model_hir_module_module.Module, child: model_
                     append_imported_item(result, model_hir_module_module.BindingItem(imported))
                     selected = true
             case _:
-                throw diagnostics.diagnostic("E000124", "unimplemented (sev_compiler/frontend/modules/modules/src/source.sev)")
+                continue
     if not selected:
         return error(diagnostics.diagnostic("E000124", "missing or unsupported imported declaration: " + name))
 

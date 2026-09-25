@@ -1,8 +1,8 @@
 import source
-import * from "cfg.sev"
-import * from "block.sev"
-import * from "../../syntax/block/block.sev"
-import * from "../../syntax/function/function.sev"
+import CfgBody, empty_cfg from "cfg.sev"
+import CfgEdge, CfgExit, CfgTerminator, Constant, TypeId, ValueId, execution_block, inherit_source, span from "block.sev"
+import Block, BlockKind, OperationOrigin, SourceBlockId from "../../syntax/block/block.sev"
+import Operation from "../../syntax/function/function.sev"
 import diagnostics
 
 # Compiler-owned state. Source semantic execution receives a checked capability,

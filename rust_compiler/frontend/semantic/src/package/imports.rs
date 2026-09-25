@@ -172,7 +172,7 @@ pub fn resolve_required_imports(
         }
         for edge in &edges[module] {
             let target_name = match &edge.kind {
-                EdgeKind::Wildcard => Some(path.clone()),
+                EdgeKind::Wildcard if !head.starts_with('_') => Some(path.clone()),
                 EdgeKind::Named { local, selected } if local == head => Some(match tail {
                     Some(tail) => format!("{selected}.{tail}"),
                     None => selected.clone(),
@@ -198,6 +198,7 @@ pub fn resolve_required_imports(
                 _ => None,
             };
             if let Some(name) = target_name {
+                if name.split('.').any(|part| part.starts_with("__")) { continue; }
                 if private_namespaces.contains(&(
                     edge.target,
                     name.split('.').next().unwrap_or(&name).to_owned(),
@@ -229,8 +230,15 @@ pub fn resolve_required_imports(
         if let Some(base) = &request.base {
             merged.insert(key.1.clone(), base.clone());
         }
-        for (dependency, _, _) in &request.dependencies {
+        for (dependency, import_span, _) in &request.dependencies {
             if let Some(value) = &requests[dependency].result {
+                let wildcard = edges.get(&key.0).into_iter().flatten().any(|edge|
+                    edge.target == dependency.0 && matches!(&edge.kind, EdgeKind::Wildcard)
+                    && edge.span == *import_span);
+                if super::resolution_definitions(value).iter().any(|id| {
+                    let visibility = index.definitions[id].visibility;
+                    visibility == super::Visibility::File || (wildcard && visibility != super::Visibility::Public)
+                }) { continue; }
                 insert_binding(
                     &mut merged,
                     key.1.clone(),

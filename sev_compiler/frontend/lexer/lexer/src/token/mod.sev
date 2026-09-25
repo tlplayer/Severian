@@ -1,8 +1,8 @@
 import source
-import * from "package:syntax/function/function.sev" as callable
-import * from "../../../../../syntax/lexeme.sev"
+import "package:syntax/function/function.sev" as callable
+import AbiId, ArtifactId, AssertionLocation, AssertionOrigin, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, CoverageKind, CoveragePoint, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, IndexedId, InferVarId, InterfaceId, Lexeme, LexemeTerm, LocalId, ModuleId, NamedId, OpId, PackageId, PrimitiveId, ProviderId, QualityRegion, RegionId, ScopeId, SourceFile, SourceId, SourceMap, Span, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TypeBinding, TypeConstructorBinding, TypeId, ValueId, VariantId, definition_from_key, load, named_definition, same_definition, semantic_digest, semantic_key, source_id, span, utf8_offset, virtual_source from "../../../../../syntax/lexeme.sev"
 
-import * from "package:syntax/token.sev"
+import TokenKind, TokenTerm from "package:syntax/token.sev"
 import primitives
 import syntax
 

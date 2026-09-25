@@ -1,7 +1,7 @@
-import * from "../../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
-import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import diagnostics
 
 def validate_expression(expression: model_syntax_function_function.Expression, declared: set[model_syntax_symbol_symbol.BindingId]) -> unit | diagnostics.Diagnostic:

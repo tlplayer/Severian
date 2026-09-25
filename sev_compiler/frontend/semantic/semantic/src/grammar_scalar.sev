@@ -1,10 +1,10 @@
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import diagnostics
-import * from "definitions.sev" as definitions
-import * from "../../../../syntax/primitive/catalog.sev" as scalar
+import "definitions.sev" as definitions
+import "../../../../syntax/primitive/catalog.sev" as scalar
 
 
 def path(expression: model_syntax_function_function.Expression) -> string:

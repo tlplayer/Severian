@@ -1,5 +1,5 @@
-import * from "../../syntax/function/function.sev"
-import * from "../../syntax/sentence/sentence.sev"
+import Block, Constant, Constructor, Conversion, ConversionKind, Expression, Lexeme, LexemeTerm, Size, SourceFile, SourceId, SourceMap, Span, TokenKind, TokenTerm, TypeRef, array_mlir, byte_view_mlir, cfg_blocks, control_flow, index_mlir, load, memref_mlir, ranked_memref_storage, scalar_mlir, source_id, span, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source from "../../syntax/function/function.sev"
+import "../../syntax/sentence/sentence.sev" as _dependency_sentence
 
 
 # These operands carry typed source without executing it. Only the semantic

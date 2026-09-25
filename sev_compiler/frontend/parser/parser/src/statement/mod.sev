@@ -1,19 +1,19 @@
-import * from "../../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
-import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../../syntax/grammar/grammar.sev" as model_syntax_grammar_grammar
-import * from "../../../../../syntax/literal/value.sev" as model_syntax_literal_value
-import * from "../../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
-import * from "../../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
-import * from "../../../../../syntax/type/system.sev" as model_syntax_type_system
+import "../../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
+import "../../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../../syntax/grammar/grammar.sev" as model_syntax_grammar_grammar
+import "../../../../../syntax/literal/value.sev" as model_syntax_literal_value
+import "../../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import "../../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../../../syntax/type/system.sev" as model_syntax_type_system
 import lexer
 from lexer import TokenKind
 import diagnostics
 from diagnostics import Diagnostic
 import source
-import * from "../../../../../syntax/function/syntax.sev"
+import Associativity, B, CompilerExpectation, CompilerTestCase, DecoratorValue, Fixity, Symbol, TokenKind, span from "../../../../../syntax/function/syntax.sev"
 
 def formatted_string_expression(value: string, span: source.Span, syntaxes: list[model_syntax_function_syntax.OperatorSyntax], lexical_rules: list[model_syntax_function_function.RecordDeclaration] = []) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
     rules: list[lexer.SourceLexicalRule] = []
@@ -292,6 +292,13 @@ def parser_selective_imports(parser: Parser) -> list[model_syntax_function_synta
 
 def parser_import_members(parser: Parser) -> list[model_syntax_function_syntax.ImportDeclaration] | diagnostics.Diagnostic:
     start = parser_next(parser).span
+    if parser_at_simple(parser, String):
+        locator = parser_next(parser)
+        if not parser_at_identifier(parser, "as"):
+            return error(parser_fail(parser, "file namespace imports require an explicit as alias"))
+        parser_next(parser)
+        alias = parser_identifier(parser, "expected a namespace alias")[0]
+        return [model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.Locator(string(locator)), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))]
     names: list[string] = []
     aliases: list[string | None] = []
     spans: list[source.Span] = []
@@ -356,7 +363,12 @@ def parser_import_declaration(parser: Parser) -> model_syntax_function_syntax.Im
             alias = parser_identifier(parser, "expected an import alias")[0]
         return model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.Locator(string(token)), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
     if parser_at_simple(parser, String):
-        return error(parser_fail(parser, "file imports require explicit `import * from` followed by a locator string"))
+        locator = parser_next(parser)
+        if not parser_at_identifier(parser, "as"):
+            return error(parser_fail(parser, "file namespace imports require an alias"))
+        parser_next(parser)
+        alias = parser_identifier(parser, "expected an import alias")[0]
+        return model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.Locator(string(locator)), None, alias, source.Span(start.source, start.start, parser_peek(parser).span.start))
     first = parser_identifier(parser, "expected an import name")
     if parser_at_identifier(parser, "from"):
         parser_next(parser)

@@ -1132,6 +1132,7 @@ output = f"""module {{
         for (text, alias) in [
             ("import * from \"array.sev\"\n", None),
             ("import * from \"array.sev\" as arrays\n", Some("arrays")),
+            ("import \"array.sev\" as arrays\n", Some("arrays")),
         ] {
             let source = SourceFile::virtual_source("imports.sev", text);
             let module = parse(&scan(&source).unwrap()).unwrap();
@@ -1152,11 +1153,7 @@ output = f"""module {{
     #[test]
     fn rejects_implicit_and_malformed_wildcard_file_imports() {
         for (text, message) in [
-            ("import \"array.sev\"\n", "file imports require explicit"),
-            (
-                "import \"array.sev\" as arrays\n",
-                "file imports require explicit",
-            ),
+            ("import \"array.sev\"\n", "file namespace imports require"),
             ("import * \"array.sev\"\n", "expected `from`"),
             ("import * from\n", "expected a package name or locator string"),
         ] {

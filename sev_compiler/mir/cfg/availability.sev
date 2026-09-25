@@ -1,4 +1,4 @@
-import * from "dominance.sev" as dominance
+import "dominance.sev" as dominance
 
 # A compact index of SSA definitions. Values are looked up directly instead
 # of rebuilding every ancestor's full value list for each block.

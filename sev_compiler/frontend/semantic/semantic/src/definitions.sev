@@ -1,16 +1,16 @@
-import * from "../../../../syntax/primitive/mlir.sev" as type_bindings
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
-import * from "../../../../syntax/type/mlir.sev" as model_syntax_type_mlir
+import "../../../../syntax/primitive/mlir.sev" as type_bindings
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../../syntax/type/mlir.sev" as model_syntax_type_mlir
 import diagnostics
 import source
-import * from "../../../../syntax/primitive/catalog.sev" as scalar
-import * from "../../../../syntax/type/storage.sev" as storage_types
-import * from "../../../../syntax/type/tagged.sev" as tagged
+import "../../../../syntax/primitive/catalog.sev" as scalar
+import "../../../../syntax/type/storage.sev" as storage_types
+import "../../../../syntax/type/tagged.sev" as tagged
 
 
 # Shared declaration environment. AST declarations survive with resolved

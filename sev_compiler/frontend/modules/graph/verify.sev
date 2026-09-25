@@ -1,5 +1,5 @@
-import * from "model.sev"
-import * from "queries.sev"
+import DefinitionGraph, DefinitionKind, DependencyKind, definition_identity from "model.sev"
+import dependency_components from "queries.sev"
 
 
 def freeze_definitions(graph: DefinitionGraph) -> unit | Error:

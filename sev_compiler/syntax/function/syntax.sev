@@ -1,10 +1,12 @@
+import Item from "../../hir/module/module.sev"
 import source
-import * from "../symbol/symbol.sev"
-import * from "../type/annotation.sev"
+import AttrValue, DeclarationId, DefId, FunctionId, InterfaceId, ModuleId, Symbol, TypeId from "../symbol/symbol.sev"
+import TypeAnnotation from "../type/annotation.sev"
 import LiteralSyntax from "../primitive/contract.sev"
-import * from "function.sev"
-import * from "../sentence/sentence.sev"
-import * from "lowering.sev"
+import Block from "../block/block.sev"
+import CompileRoute, Expression, ExpressionKind, FunctionDeclaration from "function.sev"
+import SentenceField from "../sentence/sentence.sev"
+import "lowering.sev" as _dependency_lowering
 
 # Source declaration and operator forms select callable implementations.
 # The descriptor imports below retain pre-existing missing dependencies;

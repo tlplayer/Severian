@@ -1,11 +1,11 @@
-import * from "../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../syntax/literal/value.sev" as model_syntax_literal_value
-import * from "../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
-import * from "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../hir/module/module.sev" as model_hir_module_module
+import "../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../syntax/literal/value.sev" as model_syntax_literal_value
+import "../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
+import "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import diagnostics
-import * from "cfg.sev" as cfg
-import * from "../../../syntax/type/storage.sev" as storage
+import "cfg.sev" as cfg
+import "../../../syntax/type/storage.sev" as storage
 
 
 class AggregatePlace:

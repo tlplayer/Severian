@@ -1,15 +1,15 @@
-import * from "../type/mlir.sev"
-import * from "../source.sev"
+import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider from "../type/mlir.sev"
+import AssertionOrigin, CoveragePoint from "../source.sev"
 import source
-import * from "../symbol/symbol.sev"
-import * from "../type/annotation.sev"
-import * from "../lowered.sev"
-import * from "syntax.sev"
-import * from "../sentence/sentence.sev"
-import * from "../../mir/cfg/cfg.sev"
-import * from "../constraint/model.sev"
-import * from "../primitive/contract.sev"
-import * from "../literal/value.sev"
+import AbiId, ArtifactId, BindingId, CompilerId, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, InterfaceId, OpId, ProviderId, Substitution, SymbolId, TypeBinding, TypeId, ValueId, VariantId, semantic_key from "../symbol/symbol.sev"
+import TypeAnnotation, TypeAnnotationKind, named_type, simple_type_name from "../type/annotation.sev"
+import LoweredFloatFormat, LoweredType from "../lowered.sev"
+import Associativity, BinaryOperator, Decorator, DecoratorValue, GenericConstraint, OperatorDeclaration, OperatorSyntax, TestMode, operator_syntax from "syntax.sev"
+import MatchArm from "../sentence/sentence.sev"
+import B, Block, Callee, CfgBody, CfgStatement, Constant, Constructor, Conversion, ConversionKind, Conversions, Effects, Evaluation, LazyOperand, Lexeme, LexemeTerm, LocalDecl, Operand, Place, Projection, Rvalue, Size, SourceFile, SourceId, SourceMap, Span, SwitchCase, TokenKind, TokenTerm, TypeRef, array_mlir, byte_view_mlir, cfg_blocks, control_flow, empty_cfg, hashing, index_mlir, load, local_place, memref_mlir, ranked_memref_storage, scalar_mlir, source_id, span, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source from "../../mir/cfg/cfg.sev"
+import AttachmentRole, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, DispatchCandidate, DispatchFamily, ProofResult, WithAttachment from "../constraint/model.sev"
+import LiteralBinding, LiteralConstruction, LiteralSyntax, PrimitiveAlias, PrimitiveCategory, PrimitiveRepresentation from "../primitive/contract.sev"
+import LiteralValue from "../literal/value.sev"
 
 # Callable identity, parameters, bodies, and expression use share one model.
 

@@ -1,15 +1,15 @@
-import * from "../block/dependencies.sev"
+import Block, BlockBindingKind, BlockGraph, source_id from "../block/dependencies.sev"
 import source
-import * from "../../syntax/symbol/symbol.sev"
-import * from "../../syntax/function/syntax.sev"
-import * from "../../syntax/function/function.sev"
-import * from "../../syntax/sentence/sentence.sev"
-import * from "../../mir/cfg/cfg.sev"
-import * from "../../mir/value.sev"
-import * from "../../syntax/grammar/grammar.sev"
-import * from "../../syntax/source.sev"
-import * from "hierarchy.sev"
-import * from "../../syntax/constraint/model.sev"
+import AttrValue, BindingId, FunctionId, ModuleId, PackageId, ValueId from "../../syntax/symbol/symbol.sev"
+import Associativity, ImportDeclaration, OperatorDeclaration, TestDeclaration, TraitDeclaration, TypeDeclaration from "../../syntax/function/syntax.sev"
+import Expression, FunctionDeclaration, RecordDeclaration from "../../syntax/function/function.sev"
+import Binding from "../../syntax/sentence/sentence.sev"
+import CfgBody, Operand from "../../mir/cfg/cfg.sev"
+import Value from "../../mir/value.sev"
+import G, GrammarDeclaration, GrammarInstruction, GrammarPrimitive, GrammarSlotKind from "../../syntax/grammar/grammar.sev"
+import QualityRegion from "../../syntax/source.sev"
+import SemanticHierarchy from "hierarchy.sev"
+import ConstraintObligation from "../../syntax/constraint/model.sev"
 
 
 enum Item:

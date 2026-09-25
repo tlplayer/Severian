@@ -1,5 +1,5 @@
-import * from "package:primitives/declarations.sev"
-import * from "../primitive/primitive/src/lib.sev"
+import TypeId, f128_type_id, f32_type_id, f64_type_id, i128_type_id, i16_type_id, i32_type_id, i64_type_id, i8_type_id, u128_type_id, u16_type_id, u32_type_id, u64_type_id from "package:primitives/declarations.sev"
+import scalar_representation, scalar_type from "../primitive/primitive/src/lib.sev"
 
 
 # Port of rust_compiler/universal/src/conversion.rs for the scalar slice.

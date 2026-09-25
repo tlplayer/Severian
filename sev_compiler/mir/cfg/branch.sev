@@ -1,2 +1,2 @@
 # Control-flow relationships are owned by the shared block model.
-import * from "../../syntax/block/control_flow.sev"
+import AbiId, ArtifactId, AttrValue, AttributeId, BindingId, BlockId, CfgEdge, CfgExit, CfgTerminator, CompiledRegionId, CompilerId, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, IndexedId, InferVarId, InterfaceId, LocalId, ModuleId, NamedId, OpId, PackageId, PrimitiveId, ProviderId, RegionId, ScopeId, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TypeBinding, TypeConstructorBinding, TypeId, ValueId, VariantId, definition_from_key, named_definition, same_definition, semantic_digest, semantic_key from "../../syntax/block/control_flow.sev"

@@ -1,7 +1,7 @@
-import * from "../declarations.sev"
-import * from "../primitive.sev"
+import BoolPrimitive, Constructor, LiteralBinding, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../declarations.sev"
+import Error from "../primitive.sev"
 
-import * from "../../function/trait.sev"
+import Bitwise, Equatable, Logical, Ordered from "../../function/trait.sev"
 
 
 '''

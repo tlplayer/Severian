@@ -1,4 +1,4 @@
-import * from "model.sev"
+import ConstraintGraph, ConstraintId, DefId from "model.sev"
 
 
 # Unsafe checks retain source order. Costs only choose among ready safe checks.

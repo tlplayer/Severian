@@ -1,17 +1,17 @@
-import * from "../../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../../mir/cfg/cfg.sev" as model_mir_cfg_cfg
-import * from "../../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../ir/text.sev" as type_printer
-import * from "package:ownership/ownership/src/plan.sev" as ownership
-import * from "../../../../../syntax/type/storage.sev" as storage_types
-import * from "../../../../../syntax/primitive/catalog.sev" as scalar
-import * from "../ir/lib.sev"
-import * from "strings.sev"
-import * from "debug.sev" as debug
-import * from "numeric_comparison.sev" as numeric_comparison
-import * from "../../../../../syntax/function/lowering.sev" as boundary
+import "../../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../../mir/cfg/cfg.sev" as model_mir_cfg_cfg
+import "../../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../ir/text.sev" as type_printer
+import "package:ownership/ownership/src/plan.sev" as ownership
+import "../../../../../syntax/type/storage.sev" as storage_types
+import "../../../../../syntax/primitive/catalog.sev" as scalar
+import "../ir/lib.sev" as _dependency_lib
+import MlirAffineExpression, MlirAffineExpressionKind, MlirAffineMap, MlirAttributeKind, MlirAttributeValue, MlirBlock, MlirBlockHandle, MlirBuilderError, MlirDebugVariable, MlirFunctionHandle, MlirFunctionIdentity, MlirFunctionName, MlirFunctionOp, MlirLocation, MlirNamedAttribute, MlirNamedProperty, MlirOpBuilder, MlirOperation, MlirOperationDefinition, MlirOperationName, MlirOperationState, MlirProgram, MlirRegion, MlirScalarType, MlirType, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, MlirValue, MlirVerificationError, MlirVisibility, Utf8ByteAttributes, affine_add, affine_binary, affine_ceil_divide, affine_constant, affine_dimension, affine_expression_kind_name, affine_floor_divide, affine_map_attribute, affine_modulo, affine_multiply, affine_symbol, array_attribute, array_mlir, array_type, attribute_kind_name, availability, bf16_scalar_type, bf16_type, boolean_attribute, builder_append_operation, builder_assert, builder_binary, builder_call, builder_constant, builder_create, builder_create_block, builder_create_function, builder_create_function_at, builder_create_generated_function, builder_create_operation, builder_create_operation_at, builder_create_region, builder_if, builder_new_value, builder_operation_from_state, builder_return, builder_set_insertion_point, builder_value, builder_yield, byte_view_mlir, copy_values, declared_mlir_type, dimension_identity, dimension_text, dynamic_dimension, empty_program, encoding, explicit_mlir_function_name, file_line_column, float8_type, float_attribute, float_type, generated_mlir_function_name, graph, index_mlir, index_type, integer_attribute, integer_type, is_boolean, is_float, is_integer, known_dimension, memref_mlir, memref_type, mlir_function_identity_text, mlir_identity_component, operation_definition, operation_name, operation_name_text, operation_state, pointer_type, private_visibility, program_is_valid, public_visibility, ranked_memref_storage, region_dominators, region_index, same_scalar_type, same_type, scalar_kind_name, scalar_mlir, select_mlir_function_name, string_array_attribute, string_attribute_value, string_literal, struct_mlir, struct_type, symbol_attribute, tensor_mlir, tensor_type, type_attribute, type_kind_name, unranked_memref_mlir, unranked_memref_type, unranked_tensor_mlir, unranked_tensor_type, utf8_byte_attribute, utf8_view_type, validate, validate_affine_expression, validate_attribute, validate_flat_region, validate_location, validate_operation, validate_operation_signature, validate_region, validate_type, visibility_name from "strings.sev"
+import "debug.sev" as debug
+import "numeric_comparison.sev" as numeric_comparison
+import "../../../../../syntax/function/lowering.sev" as boundary
 
 
 def callable_mlir_type(id: model_syntax_symbol_symbol.TypeId, records: borrow list[model_syntax_function_function.RecordDeclaration] = []) -> MlirType:

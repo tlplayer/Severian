@@ -1,12 +1,12 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/block/block.sev" as model_syntax_block_block
-import * from "../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
-import * from "../../../../syntax/function/function.sev" as model_syntax_function_function
-import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../syntax/literal/value.sev" as model_syntax_literal_value
-import * from "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/block/block.sev" as model_syntax_block_block
+import "../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
+import "../../../../syntax/function/function.sev" as model_syntax_function_function
+import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../syntax/literal/value.sev" as model_syntax_literal_value
+import "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import diagnostics
 import source
 

@@ -1,7 +1,7 @@
-import * from "../declarations.sev"
-import * from "../primitive.sev"
+import BF16Primitive, F128Primitive, F16Primitive, F32Primitive, F64Primitive, F8E4M3FnPrimitive, F8E5M2Primitive, LiteralBinding, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../declarations.sev"
+import Error from "../primitive.sev"
 
-import * from "../../function/trait.sev"
+import Equatable, Ordered, Truth from "../../function/trait.sev"
 
 
 '''

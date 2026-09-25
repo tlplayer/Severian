@@ -25,6 +25,17 @@ use generic::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Public,
+    Explicit,
+    File,
+}
+
+impl Visibility {
+    pub fn for_name(name: &str) -> Self {
+        let name = name.rsplit('.').next().unwrap_or(name);
+        if name.starts_with("__") { Self::File }
+        else if name.starts_with('_') { Self::Explicit }
+        else { Self::Public }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1836,6 +1847,9 @@ fn validate_explicit_import_names(module_graph: &ModuleGraph) -> Result<(), Diag
         let mut names = BTreeMap::new();
         for item in &module.ast.items {
             let Item::Import(import) = item else { continue; };
+            if import.selected_name().is_some_and(|name| name.starts_with("__")) {
+                return Err(Diagnostic::new("E000124", "file-local declarations cannot be imported", Some(import.span)));
+            }
             if import.is_wildcard() && import.alias.is_none() { continue; }
             let name = import.alias.clone().or_else(|| import.selected_name().map(str::to_owned))
                 .unwrap_or_else(|| match &import.subject {
@@ -2053,11 +2067,12 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                     None,
                 ));
             }
+            let visibility = Visibility::for_name(&name);
             let definition = Definition {
                 id,
                 name: name.clone(),
                 module: module.id,
-                visibility: Visibility::Public,
+                visibility,
                 kind,
             };
             index.definitions.insert(id, definition);
@@ -2068,7 +2083,7 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                 Resolution::Def(id),
                 &index.definitions,
             );
-            if !injected_prelude {
+            if !injected_prelude && visibility != Visibility::File {
                 insert_binding(&mut exports, name, Resolution::Def(id), &index.definitions);
             }
         }
@@ -2196,6 +2211,7 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                 if import.is_wildcard() && import.alias.is_none() {
                     let members = index.exports.get(&edge.module).cloned().unwrap_or_default();
                     for (name, resolution) in members {
+                        if name.starts_with('_') || resolution_definitions(&resolution).iter().any(|id| index.definitions[id].visibility != Visibility::Public) { continue; }
                         insert_binding(
                             &mut index
                                 .modules
@@ -2685,5 +2701,40 @@ mod scope_resolution_tests {
         assert_eq!(error.code, "E000203");
         assert!(error.message.contains("`x`"));
         assert_eq!(error.labels.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod export_visibility_tests {
+    use super::*;
+
+    #[test]
+    fn leading_underscores_define_import_access() {
+        assert_eq!(Visibility::for_name("foo"), Visibility::Public);
+        assert_eq!(Visibility::for_name("_foo"), Visibility::Explicit);
+        assert_eq!(Visibility::for_name("__foo"), Visibility::File);
+    }
+
+    #[test]
+    fn star_skips_explicit_exports_and_private_imports_are_rejected() {
+        let root = std::env::temp_dir().join(format!("sev-export-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("foo.sev"), "def foo() -> int:\n    return 1\ndef _foo() -> int:\n    return 2\ndef __foo() -> int:\n    return 3\n").unwrap();
+        let entry = root.join("main.sev");
+        std::fs::write(&entry, "import * from \"foo.sev\"\n").unwrap();
+        let graph = severian_modules::resolve(&entry).unwrap();
+        let index = import_index(&graph).unwrap();
+        let scope = &index.modules[&graph.modules.last().unwrap().id].scope.bindings;
+        assert!(scope.contains_key("foo"));
+        assert!(!scope.contains_key("_foo"));
+        assert!(!scope.contains_key("__foo"));
+        std::fs::write(&entry, "import _foo from \"foo.sev\"\n").unwrap();
+        let graph = severian_modules::resolve(&entry).unwrap();
+        let index = import_index(&graph).unwrap();
+        assert!(index.modules[&graph.modules.last().unwrap().id].scope.bindings.contains_key("_foo"));
+        std::fs::write(&entry, "import __foo from \"foo.sev\"\n").unwrap();
+        let graph = severian_modules::resolve(&entry).unwrap();
+        assert_eq!(import_index(&graph).unwrap_err().code, "E000124");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

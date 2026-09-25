@@ -79,6 +79,11 @@ fn run(mut arguments: Vec<String>) -> Result<(), String> {
                 check(options, &catalog)
             }
         }
+        "fmt" => {
+            let mut options = parse_common(arguments)?;
+            options.explicit_imports.get_or_insert(false);
+            make_imports_explicit(options, &catalog)
+        }
         "build" | "compile" => {
             let options = parse_common(arguments)?;
             if options.explicit_imports.is_some() {
@@ -121,6 +126,7 @@ fn is_command(argument: &str) -> bool {
     matches!(
         argument,
         "check"
+            | "fmt"
             | "build"
             | "compile"
             | "run"
@@ -494,7 +500,7 @@ fn make_imports_explicit(options: CommonOptions, catalog: &Catalog) -> Result<()
     let input = discover(options.path.as_deref(), catalog)?;
     let manifest = match &input { Input::Package(manifest) => Some(manifest.as_ref()), _ => None };
     let config = resolve_config(catalog, manifest, &options)?;
-    let compiler = compiler(&config, manifest, false)?;
+    let compiler = compiler_without_generators(&config, manifest, false)?;
     let targets = selected_targets(&input, options.bin.as_deref())?;
     let mut plan = severian_driver::explicit_imports::Plan::default();
     for target in targets {
@@ -1198,6 +1204,14 @@ fn compiler(
     if let Some(manifest) = manifest {
         generators::prepare(manifest)?;
     }
+    compiler_without_generators(config, manifest, include_root_dev)
+}
+
+fn compiler_without_generators(
+    config: &ResolvedConfig,
+    manifest: Option<&Manifest>,
+    include_root_dev: bool,
+) -> Result<Compiler, String> {
     let target = if config.target == "host" {
         TargetSpec::host()
     } else if config.target == "gpu" {

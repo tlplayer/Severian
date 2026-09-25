@@ -1,4 +1,5 @@
 {
+  "language": { "explicit-imports": true },
   "package": {
     "name": "sev-compiler-cfg",
     "version": "0.1.0",

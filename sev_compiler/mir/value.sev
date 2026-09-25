@@ -1,5 +1,5 @@
-import * from "../syntax/lowered.sev"
-import * from "../syntax/symbol/symbol.sev"
+import LoweredType from "../syntax/lowered.sev"
+import TypeId, ValueId from "../syntax/symbol/symbol.sev"
 
 
 class Value:

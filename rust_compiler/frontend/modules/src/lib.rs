@@ -103,6 +103,13 @@ pub fn validate_import_policy(graph: &ModuleGraph) -> Result<(), Diagnostic> {
     for module in &graph.modules {
         let mut bindings = BTreeSet::new();
         for import in module.ast.items.iter().filter_map(|i|if let Item::Import(i)=i {Some(i)}else{None}) {
+            let spelling = module.source.text.get(import.span.start as usize..import.span.end as usize).unwrap_or("");
+            let namespace = spelling.trim_start().starts_with("import \"") || spelling.trim_start().starts_with("import '");
+            if import.is_wildcard() && !namespace && graph.policies.get(&module.package).is_some_and(|policy| policy.narrow_imports) {
+                return Err(Diagnostic::new("E000125", "wildcard imports are forbidden by language.explicit-imports", Some(import.span))
+                    .with_help("run `sev fmt` to expand used names or use an explicit namespace import")
+                    .with_source(module.source.clone()));
+            }
             let binding = import.alias.as_deref().or_else(||match &import.subject {
                 ImportSubject::Name(n) if n != "*"=>Some(n.as_str()),
                 ImportSubject::Name(_)=>None,

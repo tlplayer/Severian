@@ -1,13 +1,13 @@
-import * from "../symbol/symbol.sev"
+import ArtifactId, AttrValue, AttributeId, CompilerId, FunctionId, OpId, ProviderId, StableId, TypeId, ValueId from "../symbol/symbol.sev"
 import source
-import * from "../literal/value.sev"
-import * from "syntax.sev"
-import * from "../source.sev"
-import * from "../literal/lowered.sev"
-import * from "../sentence/sentence.sev"
-import * from "function.sev"
-import * from "../type/system.sev"
-import * from "../../../library/core/utils/src/hash.sev" as hashing
+import LiteralValue from "../literal/value.sev"
+import Add, Associativity, BinaryOperator, BitwiseAnd, BitwiseOr, BitwiseXor, CompilerExpectation, CompilerTestCase, Contains, Decorator, DecoratorArgument, DecoratorValue, Divide, Equal, Fixity, FloorDivide, GenericConstraint, Greater, GreaterEqual, ImportDeclaration, ImportSubject, LeftShift, Less, LessEqual, LogicalAnd, LogicalOr, Move, Multiply, Negative, Not, NotEqual, Operator, OperatorDeclaration, OperatorDomain, OperatorParameter, OperatorSignature, OperatorSyntax, Positive, Power, PropertyDeclaration, Remainder, RightShift, ScalarOperation, Subtract, TestCaseRow, TestDeclaration, TestExpectation, TestMode, TestModeArguments, TestStream, TraitDeclaration, TypeConstraint, TypeDeclaration, TypePattern, UnaryOperator, Y, operator_syntax, test_mode_name from "syntax.sev"
+import AssertionLocation from "../source.sev"
+import Constant from "../literal/lowered.sev"
+import "../sentence/sentence.sev" as _dependency_sentence
+import AttachmentRole, Block, BoundaryModifier, CallArgument, CallType, CallableAlternative, Callee, CfgBody, CfgStatement, CompileRoute, CompilerCapability, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, Constructor, Conversion, ConversionKind, Conversions, DispatchCandidate, DispatchFamily, Effects, Evaluation, Expression, ExpressionConversion, ExpressionConversionKind, ExpressionKind, ExternalCall, FieldConstraint, FunctionDeclaration, FunctionLinkage, FunctionParameter, LazyOperand, Lexeme, LexemeTerm, LiteralBinding, LiteralConstruction, LiteralSyntax, LocalDecl, LoweredFloatFormat, LoweredType, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, MockFunction, Operand, Operation, Place, PrimitiveAlias, PrimitiveCategory, PrimitiveRepresentation, Projection, ProofResult, RecordDeclaration, ResolvedCallee, Rvalue, Size, SourceFile, SourceId, SourceMap, Span, SwitchCase, TokenKind, TokenTerm, TypeAnnotation, TypeAnnotationKind, TypeRef, WithAttachment, annotation_key, array_mlir, byte_view_mlir, callable_key, cfg_blocks, control_flow, declared_mlir_binding, empty_cfg, hashing, index_mlir, load, local_place, memref_mlir, named_type, outcome_variants, ranked_memref_storage, record_mlir_binding, resolve_expression, resolved_function, scalar_mlir, simple_type_name, source_id, span, struct_mlir, tensor_mlir, union_variants, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source from "function.sev"
+import Constraint, InferenceContext, Signature, TraitRef, TyInterner, TypeKind, UnifyError, insert_type, same_constructor, same_parameters, type_children from "../type/system.sev"
+import "../../../library/core/utils/src/hash.sev" as hashing
 
 
 # Operations, registry contracts, and callable lowering metadata.

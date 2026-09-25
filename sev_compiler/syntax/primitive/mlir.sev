@@ -1,4 +1,4 @@
-import * from "../type/mlir.sev"
+import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider from "../type/mlir.sev"
 
 # Built-in constructors are declaration data. New dialect types provide their
 # own binding, without extending lowering or the MLIR text printer.

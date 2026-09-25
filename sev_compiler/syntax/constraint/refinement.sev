@@ -1,5 +1,5 @@
-import * from "model.sev"
-import * from "proof.sev"
+import BlockId, ValueId from "model.sev"
+import IntegerInterval from "proof.sev"
 
 
 class ValueRefinement:

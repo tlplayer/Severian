@@ -1,6 +1,6 @@
 # This scenario needs the typed model, builder, and validator. The validator's
 # imports provide that slice without also compiling the independent text view.
-import * from "../mlir/src/ir/validate.sev"
+import MlirFunctionIdentity, MlirFunctionName, MlirLocation, MlirNamedAttribute, MlirNamedProperty, MlirOpBuilder, MlirOperationState, MlirProgram, MlirType, MlirValue, bf16_scalar_type, builder_binary, builder_create, builder_create_function, builder_create_generated_function, builder_new_value, builder_return, builder_set_insertion_point, builder_value, dynamic_dimension, explicit_mlir_function_name, generated_mlir_function_name, integer_type, known_dimension, operation_definition, operation_name, operation_name_text, private_visibility, program_is_valid, public_visibility, same_type, tensor_type, validate from "../mlir/src/ir/validate.sev"
 
 
 def fixed_point_add_program() -> MlirProgram:

@@ -3,8 +3,8 @@ import package
 import process
 import environment
 import source
-import * from "pipeline/source.sev" as compiler
-import * from "package:backend/backend/src/native_mlir.sev" as backend
+import "pipeline/source.sev" as compiler
+import "package:backend/backend/src/native_mlir.sev" as backend
 
 @c(symbol="exit")
 def worker_exit(status: i32)

@@ -1,5 +1,5 @@
-import * from "../../../../library/core/collections/vector/src/vector.sev" as vectors
-import * from "../char/utf8.sev" as encoding
+import "../../../../library/core/collections/vector/src/vector.sev" as vectors
+import "../char/utf8.sev" as encoding
 
 trait StringOperations:
     def encode()

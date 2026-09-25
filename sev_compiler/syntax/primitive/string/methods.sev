@@ -1,6 +1,6 @@
-import * from "core.sev" as text
-import * from "format.sev" as format
-import * from "../../type/slice_bounds.sev" as slicing
+import "core.sev" as text
+import "format.sev" as format
+import "../../type/slice_bounds.sev" as slicing
 
 
 @mlir("memref.extract_aligned_pointer_as_index")
@@ -10,7 +10,7 @@ def __float_end_address(value: array[int]) -> index
 def __float_pointer_value(value: pointer) -> int
 
 def __parse_float_buffer(value: string, end: borrow array[int]) -> float:
-    return format.__parse(format.__address(value), format.__pointer(text.__size(__float_end_address(end))))
+    return format.__parse(format.__address(value), format.__pointer(text._size(__float_end_address(end))))
 
 operator float(value: string) -> float:
     buffer = format.__terminated(value)
@@ -44,13 +44,13 @@ def __contains_bytes(value: string, needle: string) -> bool:
 # ASCII case conversion preserves all other UTF-8 bytes. Full Unicode case
 # mapping (including expanding mappings) requires the Unicode data library.
 def __upper_ascii(value: string) -> string:
-    result = text.__allocate(text.__index(text.byte_count(value)))
+    result = text._allocate(text._index(text.byte_count(value)))
     position := 0
     while position < text.byte_count(value):
         byte := text.byte_at(value, position)
         if byte >= 97 and byte <= 122:
             byte -= 32
-        text.__store(u8(byte), result, text.__index(position))
+        text._store(u8(byte), result, text._index(position))
         position += 1
     return result
 
@@ -94,18 +94,18 @@ extend string:
                     continue
             if position == size:
                 break
-            position = text.__offset(self, 1, position) if width == 0 else position + 1
+            position = text._offset(self, 1, position) if width == 0 else position + 1
         remaining = size - matches * width
         if extra != 0:
             assert(matches <= (9223372036854775807 - remaining) / extra)
-        result = text.__allocate(text.__index(remaining + matches * extra))
+        result = text._allocate(text._index(remaining + matches * extra))
         position = 0
         output := 0
         while position <= size:
             if width == 0 or __matches(self, needle, position):
                 offset := 0
                 while offset < extra:
-                    text.__store(text.__load(replacement, text.__index(offset)), result, text.__index(output))
+                    text._store(text._load(replacement, text._index(offset)), result, text._index(output))
                     output += 1
                     offset += 1
                 if width != 0:
@@ -113,10 +113,10 @@ extend string:
                     continue
             if position == size:
                 break
-            count = text.__offset(self, 1, position) - position if width == 0 else 1
+            count = text._offset(self, 1, position) - position if width == 0 else 1
             offset := 0
             while offset < count:
-                text.__store(text.__load(self, text.__index(position)), result, text.__index(output))
+                text._store(text._load(self, text._index(position)), result, text._index(output))
                 position += 1
                 output += 1
                 offset += 1

@@ -1,8 +1,8 @@
-import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
 import profiling
 import diagnostics
-import * from "token/mod.sev"
-import * from "rule.sev"
+import "token/mod.sev" as _dependency_mod
+import LexemeInput, LexemeMatch, LexicalRule, TokenKind from "rule.sev"
 
 
 class LexicalSymbol:

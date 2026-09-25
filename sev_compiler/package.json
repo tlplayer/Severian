@@ -99,6 +99,7 @@
   },
   "dev-dependencies": {},
   "language": {
+    "explicit-imports": true,
     "type-safe": true
   },
   "build": {

@@ -1,7 +1,7 @@
-import * from "../declarations.sev"
-import * from "../primitive.sev"
+import CharPrimitive, LiteralBinding, LiteralSyntax, MlirTypeBinding, PrimitiveAlias, PrimitiveId, Type, TypeId from "../declarations.sev"
+import "../primitive.sev" as _dependency_primitive
 
-import * from "../../function/trait.sev"
+import Equatable, Ordered from "../../function/trait.sev"
 
 
 '''

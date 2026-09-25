@@ -1,4 +1,4 @@
-import * from "../source.sev"
+import Span, span from "../source.sev"
 
 class TypeAnnotation:
     kind: TypeAnnotationKind

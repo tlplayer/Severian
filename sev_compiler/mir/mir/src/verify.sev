@@ -1,6 +1,6 @@
-import * from "../../../hir/module/module.sev" as model_hir_module_module
+import "../../../hir/module/module.sev" as model_hir_module_module
 import diagnostics
-import * from "cfg.sev" as cfg
+import "cfg.sev" as cfg
 
 
 def verify(module: model_hir_module_module.Module) -> bool | diagnostics.Diagnostic:

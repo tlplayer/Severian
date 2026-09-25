@@ -1,5 +1,5 @@
-import * from "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../package.sev"
+import "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import ProgramIndex, Resolution, insert_resolution from "../package.sev"
 
 test "program indexes start with stable empty tables":
     index = ProgramIndex({}, {}, {}, {})

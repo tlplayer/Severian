@@ -1,4 +1,4 @@
-import * from "encoding.sev"
+import decode_four, decode_three, decode_two, valid, width from "encoding.sev"
 
 @mlir("arith.extui")
 def codepoint(value: char) -> int

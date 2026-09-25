@@ -22,7 +22,7 @@ test('uses the compiler JSON plan and applies an undoable workspace edit', async
   const h = harness('import * from "lib.sev"\n');
   await makeImportsExplicit(h.vscode, { target: '.', cwd: '/workspace' }, { appendLine() {} }, async (executable, args) => {
     assert.equal(executable, 'sev');
-    assert.deepEqual(args, ['build', '.', '--explicit-imports=json']);
+    assert.deepEqual(args, ['fmt', '.', '--explicit-imports=json']);
     return { stdout: JSON.stringify({ files: [{ path: '/workspace/main.sev', before: 'import * from "lib.sev"\n', after: 'from "lib.sev" import used\n' }], notes: [] }) };
   });
   assert.equal(h.applied[0].edits[0].after, 'from "lib.sev" import used\n');

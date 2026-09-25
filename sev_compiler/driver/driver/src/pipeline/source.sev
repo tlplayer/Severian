@@ -1,12 +1,12 @@
 import lowering
-import * from "../../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
-import * from "../../../../hir/module/hierarchy.sev" as model_hir_module_hierarchy
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import * from "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
-import * from "../../../../syntax/function/lowering.sev" as boundary
-import * from "package:mir/mir/src/agent_ir.sev" as agent_ir
-import * from "package:mir/mir/src/semantic_graph.sev" as semantic_graph
+import "../../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
+import "../../../../hir/module/hierarchy.sev" as model_hir_module_hierarchy
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
+import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
+import "../../../../syntax/function/lowering.sev" as boundary
+import "package:mir/mir/src/agent_ir.sev" as agent_ir
+import "package:mir/mir/src/semantic_graph.sev" as semantic_graph
 import source
 from source import SourceFile
 import process
@@ -17,18 +17,18 @@ import parser
 import diagnostics
 from diagnostics import Diagnostic
 from semantic import callable as semantic
-import * from "package:mir/mir/src/callable.sev" as mir
-import * from "package:mlir/mlir/src/emit/callable.sev" as mlir
-import * from "package:mlir/mlir/src/ir/text.sev" as text
-import * from "package:modules/modules/src/source.sev"
-import * from "timing.sev" as timing
-import * from "package_interface.sev" as package_interface
-import * from "mir_archive.sev" as mir_archive
-import * from "package:interface/interface/src/semantic_payload.sev" as semantic_payload
-import * from "package:backend/backend/src/native_mlir.sev" as native
-import * from "quality.sev" as quality
-import * from "editor.sev" as editor
-import * from "prelude_package.sev" as prelude_package
+import "package:mir/mir/src/callable.sev" as mir
+import "package:mlir/mlir/src/emit/callable.sev" as mlir
+import "package:mlir/mlir/src/ir/text.sev" as text
+import append_selected_import, import_source, load_source_module, normalized_path, parent_path, read_known_source, read_source, registered_source from "package:modules/modules/src/source.sev"
+import "timing.sev" as timing
+import "package_interface.sev" as package_interface
+import "mir_archive.sev" as mir_archive
+import "package:interface/interface/src/semantic_payload.sev" as semantic_payload
+import "package:backend/backend/src/native_mlir.sev" as native
+import "quality.sev" as quality
+import "editor.sev" as editor
+import "prelude_package.sev" as prelude_package
 from semantic import definitions
 
 

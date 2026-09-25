@@ -1,7 +1,7 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../package.pkg/build/mir_archive.sev" as codec
-import * from "package:interface/interface/src/package_metadata.sev" as metadata
-import * from "package:interface/interface/src/semantic_graph.sev" as semantic_interface
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../package.pkg/build/mir_archive.sev" as codec
+import "package:interface/interface/src/package_metadata.sev" as metadata
+import "package:interface/interface/src/semantic_graph.sev" as semantic_interface
 import package
 
 

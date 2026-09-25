@@ -1,6 +1,6 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../hir/module/module.sev" as model_hir_module_module
 import diagnostics
-import * from "../callable.sev" as callable
+import "../callable.sev" as callable
 
 
 # Both driver entries construct CFG and obtain MIR ownership authorization.

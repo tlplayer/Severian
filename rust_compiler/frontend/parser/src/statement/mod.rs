@@ -1891,6 +1891,18 @@ impl Parser<'_> {
 
     fn import_members(&mut self) -> Result<Vec<ImportDeclaration>, Diagnostic> {
         let start = self.next().span;
+        if let TokenKind::String(locator) = self.peek().kind.clone() {
+            self.next();
+            if !self.at_identifier("as") {
+                return Err(self.error("file namespace imports require an explicit `as` alias"));
+            }
+            self.next();
+            let (alias, end) = self.identifier("expected a namespace alias")?;
+            return Ok(vec![ImportDeclaration {
+                subject: ImportSubject::Locator(locator), source: None, alias: Some(alias),
+                span: Span::new(start.source, start.start, end.end),
+            }]);
+        }
         let mut members = Vec::new();
         loop {
             let token = self.next();
@@ -1992,12 +2004,16 @@ impl Parser<'_> {
         let mut subject = match subject_token.kind {
             TokenKind::Identifier(name) if !wildcard => ImportSubject::Name(name),
             TokenKind::String(locator) if wildcard => ImportSubject::Locator(locator),
-            TokenKind::String(_) => {
-                return Err(Diagnostic::new(
-                    "E000118",
-                    "file imports require explicit `import * from \"path.sev\"`",
-                    Some(subject_token.span),
-                ));
+            TokenKind::String(locator) => {
+                if !self.at_identifier("as") {
+                    return Err(self.error("file namespace imports require an explicit `as` alias"));
+                }
+                self.next();
+                let (alias, end) = self.identifier("expected a namespace alias")?;
+                return Ok(ImportDeclaration {
+                    subject: ImportSubject::Locator(locator), source: None, alias: Some(alias),
+                    span: Span::new(start.source, start.start, end.end),
+                });
             }
             _ => {
                 return Err(Diagnostic::new(

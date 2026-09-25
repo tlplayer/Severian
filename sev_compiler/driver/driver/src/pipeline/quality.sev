@@ -1,7 +1,7 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../hir/module/module.sev" as model_hir_module_module
 import package
 import source
-import * from "package:mir/mir/src/quality.sev" as quality
+import "package:mir/mir/src/quality.sev" as quality
 
 def prepare_quality(module: model_hir_module_module.Module, files: list[source.SourceFile], resolution: package.Resolution):
     if len(resolution.packages) == 0:

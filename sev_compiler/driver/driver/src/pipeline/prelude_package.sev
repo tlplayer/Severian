@@ -1,13 +1,13 @@
-import * from "../../../../hir/module/module.sev" as model_hir_module_module
-import * from "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
+import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import package
 import lexer
 import source
 import os
 import path
-import * from "frontend_archive.sev" as archive
-import * from "package:semantic/semantic/src/callable.sev" as semantic
-import * from "package:semantic/semantic/src/lazy_bodies.sev" as lazy_bodies
+import "frontend_archive.sev" as archive
+import "package:semantic/semantic/src/callable.sev" as semantic
+import "package:semantic/semantic/src/lazy_bodies.sev" as lazy_bodies
 
 
 class Prelude:
