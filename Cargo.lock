@@ -659,7 +659,6 @@ name = "severian-bootstrap"
 version = "0.1.0"
 dependencies = [
  "severian-ast",
- "severian-compile-protocol",
  "severian-diagnostics",
  "severian-lexer",
  "severian-parser",
@@ -678,10 +677,6 @@ dependencies = [
  "severian-target",
  "severian-universal",
 ]
-
-[[package]]
-name = "severian-compile-protocol"
-version = "0.1.0"
 
 [[package]]
 name = "severian-diagnostics"

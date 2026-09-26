@@ -1169,8 +1169,6 @@ impl Compiler {
             ("platform", library.join("system/platform")),
             ("process", library.join("system/process")),
             ("prelude", library.join("core/prelude")),
-            ("size", library.join("core/size")),
-            ("text", library.join("core/text")),
             ("tensor", library.join("compute/tensor")),
             ("yaml", library.join("data/yaml")),
         ];
@@ -2723,13 +2721,13 @@ fn collect_operand_function(
     }
 }
 
-fn bootstrap_prelude_sources() -> [SourceFile; 5] {
+fn bootstrap_prelude_sources() -> [SourceFile; 3] {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(3)
         .expect("driver crate has a repository root");
+    // size, string conversion, and type reflection are already handled by
+    // semantic analysis. Do not inject their retired core package wrappers.
     let mut sources = [
         ("library/system/io/src/lib.sev", include_str!("../../../../../library/system/io/src/lib.sev")),
-        ("library/core/size/src/lib.sev", include_str!("../../../../../library/core/size/src/lib.sev")),
-        ("library/core/text/src/lib.sev", include_str!("../../../../../library/core/text/src/lib.sev")),
         ("library/core/prelude/src/lib.sev", include_str!("../../../../../library/core/prelude/src/lib.sev")),
         ("library/core/memory/src/box.sev", include_str!("../../../../../library/core/memory/src/box.sev")),
     ].map(|(path, text)| SourceFile::virtual_source(root.join(path), text));
@@ -2760,7 +2758,7 @@ fn with_core_prelude(
     ast: &severian_ast::Module,
     types: &severian_universal::TypeContext,
     input: &SourceFile,
-    sources: &[SourceFile; 5],
+    sources: &[SourceFile; 3],
 ) -> Result<severian_ast::Module, CompileError> {
     let standard_library = crate::runtime_paths::library_root();
     let prelude_entry = standard_library.join("core/prelude/src/lib.sev");
@@ -2779,7 +2777,7 @@ fn with_core_prelude(
         let tokens = severian_lexer::scan(source).map_err(&report)?;
         severian_parser::parse(&tokens).map_err(report)
     };
-    let prelude = parse(&sources[3])?;
+    let prelude = parse(&sources[1])?;
     let selected: BTreeSet<_> = ast.items.iter().filter_map(|item| {
         let severian_ast::Item::Import(import) = item else { return None; };
         (import.source.as_deref() == Some("prelude"))
@@ -2797,7 +2795,7 @@ fn with_core_prelude(
                 "prelude resolution", format!("alias the prelude binding explicitly: from prelude import {name} as __prelude_{name}"))
                 .with_label(selection_span, format!("prelude selects `{name}` here"))
                 .with_sources(sources.iter().cloned());
-            for provider in &sources[..3] {
+            for provider in &sources[..1] {
                 let definitions = parse(provider)?;
                 if let Some((_, span)) = definitions.items.iter().filter_map(declared_name).find(|(candidate, _)| *candidate == name) {
                     error = error.with_label(span, format!("prelude implementation of `{name}`"));
@@ -2836,35 +2834,8 @@ fn with_core_prelude(
         _ => false,
     });
 
-    let mut size = parse(&sources[1])?;
-    size.items.retain(|item| match item {
-        severian_ast::Item::Function(function) if !function.decorators.is_empty() => {
-            function
-                .parameters
-                .iter()
-                .all(|parameter| boundary_type_is_available(&parameter.annotation, types))
-                && boundary_type_is_available(&function.result, types)
-        }
-        _ => true,
-    });
-    module.items.extend(size.items);
-
-    let mut text = parse(&sources[2])?;
-    text.items.retain(|item| match item {
-        severian_ast::Item::Function(function) if !function.decorators.is_empty() => {
-            function
-                .parameters
-                .iter()
-                .all(|parameter| boundary_type_is_available(&parameter.annotation, types))
-                && boundary_type_is_available(&function.result, types)
-        }
-        _ => true,
-    });
-    module.items.extend(text.items);
-
-
     module.items.extend(prelude.items.into_iter().filter(|item| !matches!(item, severian_ast::Item::Import(_))));
-    let boxed = parse(&sources[4])?;
+    let boxed = parse(&sources[2])?;
     module.items.extend(boxed.items);
     module.items.retain(|item| !matches!(item, severian_ast::Item::Import(_))
         && declared_name(item).is_none_or(|(name, _)| !selected.contains(name)));

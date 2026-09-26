@@ -122,8 +122,19 @@ fn compile_unit(compiler: &Compiler, source: &Path, output: &Path, root: &Path, 
     }
     // Discover new import/provider roots only on a miss. Warm checks do no
     // parsing, semantic analysis, lowering or native code generation.
+    let mut reported_packages = BTreeSet::new();
     for module in compiler.resolved_module_paths(source).map_err(|e| e.to_string())? {
-        roots.insert(package_root(&module));
+        let package = package_root(&module);
+        if reported_packages.insert(package.clone()) {
+            let manifest = fs::read_to_string(package.join("package.json")).ok()
+                .and_then(|text| json5::from_str::<serde_json::Value>(&text).ok());
+            let name = manifest.as_ref().and_then(|value| value["package"]["name"].as_str())
+                .unwrap_or("source");
+            let version = manifest.as_ref().and_then(|value| value["package"]["version"].as_str())
+                .unwrap_or("unspecified");
+            eprintln!("Compiling {name} v{version} ({})", package.display());
+        }
+        roots.insert(package);
         // Directory inventories exclude build output, but generated source
         // actually read by the compiler is an input and needs its own digest.
         if module.components().any(|part| part.as_os_str() == "package.pkg") {

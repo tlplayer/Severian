@@ -16,7 +16,6 @@ members = [
 
     # Language bootstrap
     "rust_compiler/bootstrap",
-    "library/core/compile",
 
     # Boundaries
     "rust_compiler/boundaries/abi",
@@ -84,7 +83,6 @@ severian-target = "target"
 severian-compile = "compile"
 severian-artifact = "artifact"
 severian-runtime = "runtime"
-severian-compile-protocol = "core_source"
 severian-hir = "semantic"
 severian-semantic = "semantic"
 severian-ownership = "semantic"
@@ -138,7 +136,6 @@ severian-compile = [
 ]
 severian-artifact = []
 severian-runtime = ["severian-fusion"]
-severian-compile-protocol = []
 severian-hir = ["severian-source", "severian-universal"]
 severian-semantic = [
     "severian-graph",
@@ -155,7 +152,6 @@ severian-bootstrap = [
     "severian-diagnostics",
     "severian-lexer",
     "severian-parser",
-    "severian-compile-protocol",
     "severian-source",
     "severian-universal",
 ]

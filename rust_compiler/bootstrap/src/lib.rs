@@ -11,13 +11,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 pub fn load() -> Result<UniversalContext, BootstrapError> {
-    build_from_packages(severian_compile_protocol::SOURCES.iter().map(|source| {
-        (
-            severian_compile_protocol::PACKAGE_NAME,
-            source.path,
-            source.source,
-        )
-    }))
+    // Primitive installation is owned by severian-universal. Compile handlers
+    // register their routes through the compile registry; no core protocol
+    // package supplies bootstrap declarations anymore.
+    build_from_packages(std::iter::empty())
 }
 
 fn build_from_packages<'a>(
@@ -461,20 +458,12 @@ mod tests {
     }
 
     #[test]
-    fn core_compile_protocol_resolves_to_stable_universal_routes() {
+    fn source_compile_protocol_resolves_to_stable_universal_routes() {
         const SPECIAL: &str = "trait TestCompiler: Compiler\n\ntrait TestIR[T]: CompileType[TestCompiler]\n";
-        let context = build_from_packages(
-            severian_compile_protocol::SOURCES
-                .iter()
-                .map(|source| {
-                    (
-                        severian_compile_protocol::PACKAGE_NAME,
-                        source.path,
-                        source.source,
-                    )
-                })
-                .chain(std::iter::once(("test.compile", "src/mod.sev", SPECIAL))),
-        )
+        let context = build_from_packages([
+            ("test.protocol", "protocol.sev", "trait Compiler:\n\ntrait CompileType[C]:\n"),
+            ("test.compile", "src/mod.sev", SPECIAL),
+        ])
         .unwrap();
         let compiler_type = context.types.resolve_name("TestCompiler").unwrap();
         let compiler = context.types.compiler_id(compiler_type).unwrap();

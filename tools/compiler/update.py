@@ -126,6 +126,7 @@ def main():
             update_checkout()
         # Always invoke concrete artifacts, so changing the default cannot
         # accidentally make the source compiler bootstrap itself.
+        print('Building Rust bootstrap (severian-driver)', flush=True)
         run('cargo', 'build', '--release', '--target-dir', cache, '-p', 'severian-driver', '--bin', 'sev')
         seed = cache / 'release' / 'sev'
         compiler = ROOT / 'sev_compiler/package.pkg/host/dev/bin/sev_compiler'
@@ -138,6 +139,7 @@ def main():
                 # The interactive compiler must be optimized even though the
                 # launcher keeps its established installation path. Building
                 # the package's default dev profile makes cold runs take minutes.
+                print('Building source compiler (sev_compiler) and its packages', flush=True)
                 run(seed, 'build', ROOT / 'sev_compiler', '--bin', 'sev_compiler',
                     '--build-profile', 'release', '-o', compiler)
                 run(seed, '--version')

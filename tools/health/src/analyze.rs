@@ -54,13 +54,13 @@ pub fn run(root: &Path, changed: Option<&BTreeSet<PathBuf>>) -> Result<Vec<Findi
 }
 
 fn analyze_bootstrap_mirror(root: &Path, findings: &mut Vec<Finding>) -> Result<(), String> {
-    let bridge_path = PathBuf::from("library/core/compile/interop/rust/lib.rs");
-    let source_path = PathBuf::from("library/core/compile/src/mod.sev");
+    let bridge_path = PathBuf::from("rust_compiler/bootstrap/src/lib.rs");
+    let source_path = PathBuf::from("rust_compiler/universal/src/lib.rs");
     let bridge = fs::read_to_string(root.join(&bridge_path))
         .map_err(|error| format!("could not read {}: {error}", bridge_path.display()))?;
     if !root.join(&source_path).is_file()
-        || !bridge.contains("path: \"src/mod.sev\"")
-        || !bridge.contains("include_str!(\"../../src/mod.sev\")")
+        || !bridge.contains("install_primitives(&mut types)")
+        || !bridge.contains("build_from_packages(std::iter::empty())")
     {
         findings.push(Finding::new(
             "bootstrap_semantic_drift",
@@ -69,12 +69,12 @@ fn analyze_bootstrap_mirror(root: &Path, findings: &mut Vec<Finding>) -> Result<
             SourceSpan::file(bridge_path),
             Evidence {
                 summary:
-                    "Rust bootstrap bridge does not embed the canonical Severian protocol source"
+                    "Rust bootstrap does not use the universal primitive authority"
                         .into(),
                 details: vec![format!("canonical source: {}", source_path.display())],
                 metrics: BTreeMap::new(),
             },
-            "core-compile-source-embedding",
+            "universal-primitive-bootstrap",
         ));
     }
     Ok(())

@@ -81,7 +81,7 @@ XXI, FFI, or ABI phases.
 | Executable operations and control flow | MIR |
 | Stable CompileType routes | `compiler/universal` |
 | MIR region partitioning and handler dispatch | `compiler/compile` |
-| `Compiler` and `CompileType[C]` source protocols | `library/core/compile` |
+| Compile handler registration | `rust_compiler/compile` and `sev_compiler/compile` |
 | Neutral target, feature, device, and capability selection | `compiler/target` |
 | Target-resolved physical types and operations | LIR |
 | Calling conventions, concrete layouts, pass modes, and symbols | `compiler/boundaries/abi` |

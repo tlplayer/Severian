@@ -40,7 +40,7 @@ fn marker_protocol_imports_do_not_abort_before_main() {
     fs::write(
         &source,
         format!(
-            "import * from \"{0}/library/core/compile/src/mod.sev\"\n\
+            "trait Compiler:\n\ntrait CompileType[C]:\n\
              import * from \"{0}/library/compute/tensor/src/lib.sev\"\n\
              def main():\n    print(\"marker startup ok\")\n",
             repository.display(),
@@ -346,8 +346,8 @@ fn mutation_testing_preserves_compile_and_timeout_classifications() {
 }
 
 #[test]
-fn core_compile_resolves_through_its_library_target() {
-    let package = repository_root().join("library/core/compile");
+fn compiler_compile_resolves_through_its_library_target() {
+    let package = repository_root().join("sev_compiler/compile");
     let output = sev().args(["check"]).arg(package).output().unwrap();
     assert!(
         output.status.success(),

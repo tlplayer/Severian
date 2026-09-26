@@ -9,7 +9,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-severian-compile-protocol = { path = "../../library/core/compile" }
 severian-ast = { path = "../frontend/ast" }
 severian-diagnostics = { path = "../diagnostics" }
 severian-lexer = { path = "../frontend/lexer" }
