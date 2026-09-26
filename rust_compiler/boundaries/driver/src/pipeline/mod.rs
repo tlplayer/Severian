@@ -756,12 +756,22 @@ impl Compiler {
             .last()
             .map(|module| module.package)
             .expect("a resolved module graph contains its root");
+        let prelude_sources = bootstrap_prelude_sources();
         let mut sources = Vec::new();
-        for module in &mut graph.modules {
-            let source = module.source.clone();
-            module.ast = with_core_prelude(&module.ast, &self.context.types)?;
+        for index in 0..graph.modules.len() {
+            let source = graph.modules[index].source.clone();
+            let ast = with_core_prelude(&graph.modules[index].ast, &self.context.types, &source, &prelude_sources)
+                .map_err(|error| match error {
+                    CompileError::Diagnostic(mut diagnostic) if diagnostic.span.is_some_and(|span| span.source == source.id) => {
+                        diagnostic.context = None;
+                        CompileError::Diagnostic(graph.contextualize(diagnostic, "prelude resolution"))
+                    }
+                    other => other,
+                })?;
+            graph.modules[index].ast = ast;
             sources.push(source);
         }
+        sources.extend(prelude_sources.iter().cloned());
         let mut typed = severian_semantic::analyze_package_with_context(
             &graph,
             &self.context,
@@ -1158,6 +1168,9 @@ impl Compiler {
             ("path", library.join("system/path")),
             ("platform", library.join("system/platform")),
             ("process", library.join("system/process")),
+            ("prelude", library.join("core/prelude")),
+            ("size", library.join("core/size")),
+            ("text", library.join("core/text")),
             ("tensor", library.join("compute/tensor")),
             ("yaml", library.join("data/yaml")),
         ];
@@ -2710,23 +2723,90 @@ fn collect_operand_function(
     }
 }
 
+fn bootstrap_prelude_sources() -> [SourceFile; 5] {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(3)
+        .expect("driver crate has a repository root");
+    let mut sources = [
+        ("library/system/io/src/lib.sev", include_str!("../../../../../library/system/io/src/lib.sev")),
+        ("library/core/size/src/lib.sev", include_str!("../../../../../library/core/size/src/lib.sev")),
+        ("library/core/text/src/lib.sev", include_str!("../../../../../library/core/text/src/lib.sev")),
+        ("library/core/prelude/src/lib.sev", include_str!("../../../../../library/core/prelude/src/lib.sev")),
+        ("library/core/memory/src/box.sev", include_str!("../../../../../library/core/memory/src/box.sev")),
+    ].map(|(path, text)| SourceFile::virtual_source(root.join(path), text));
+    for (index, source) in sources.iter_mut().enumerate() {
+        source.id = SourceId(u32::MAX - index as u32);
+    }
+    sources
+}
+
+fn declared_name(item: &severian_ast::Item) -> Option<(&str, severian_source::Span)> {
+    use severian_ast::{ImportSubject, Item};
+    match item {
+        Item::Function(value) => Some((&value.name, value.span)),
+        Item::Class(value) => Some((&value.name, value.span)),
+        Item::Enum(value) => Some((&value.name, value.span)),
+        Item::Trait(value) => Some((&value.name, value.span)),
+        Item::Type(value) => Some((&value.name, value.span)),
+        Item::Binding(value) => Some((&value.name, value.span)),
+        Item::Import(value) => value.alias.as_deref().or_else(|| value.selected_name()).or_else(|| match &value.subject {
+            ImportSubject::Name(name) if name != "*" => Some(name.as_str()),
+            _ => None,
+        }).map(|name| (name, value.span)),
+        _ => None,
+    }
+}
+
 fn with_core_prelude(
     ast: &severian_ast::Module,
     types: &severian_universal::TypeContext,
+    input: &SourceFile,
+    sources: &[SourceFile; 5],
 ) -> Result<severian_ast::Module, CompileError> {
+    let standard_library = crate::runtime_paths::library_root();
+    let prelude_entry = standard_library.join("core/prelude/src/lib.sev");
+    let legacy_entry = standard_library.join("core/prelude.sev");
+    if [prelude_entry, legacy_entry].iter().any(|path|
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.clone()) == input.path) {
+        return Ok(ast.clone());
+    }
     if types.resolve_name("string").is_none() {
         return Ok(ast.clone());
     }
-    // Package import resolution will eventually load this dependency from the
-    // prelude's `import print from io`. Until then, bootstrap the same source
-    // module explicitly instead of duplicating its foreign declaration in core.
-    let mut io = SourceFile::virtual_source(
-        "system/io/src/lib.sev",
-        include_str!("../../../../../library/system/io/src/lib.sev"),
-    );
-    io.id = SourceId(u32::MAX);
-    let tokens = severian_lexer::scan(&io).map_err(CompileError::Diagnostic)?;
-    let mut module = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
+    let parse = |source: &SourceFile| -> Result<severian_ast::Module, CompileError> {
+        let report = |error: Diagnostic| CompileError::Diagnostic(error.with_source(source.clone())
+            .with_context(severian_diagnostics::DiagnosticContext::source("prelude", "prelude parsing"))
+            .with_help("correct the highlighted prelude source syntax"));
+        let tokens = severian_lexer::scan(source).map_err(&report)?;
+        severian_parser::parse(&tokens).map_err(report)
+    };
+    let prelude = parse(&sources[3])?;
+    let selected: BTreeSet<_> = ast.items.iter().filter_map(|item| {
+        let severian_ast::Item::Import(import) = item else { return None; };
+        (import.source.as_deref() == Some("prelude"))
+            .then(|| import.selected_name()).flatten()
+    }).collect();
+    let mut module = parse(&sources[0])?;
+    // A local declaration must explicitly rename the corresponding prelude
+    // binding. Overload sets keep their original provider identities.
+    for selector in &prelude.items {
+        let Some((name, selection_span)) = declared_name(selector) else { continue; };
+        if selected.contains(name) { continue; }
+        if let Some((_, local_span)) = ast.items.iter().filter_map(declared_name).find(|(local, _)| *local == name) {
+            let mut error = Diagnostic::source_error("E000203", format!("prelude binding `{name}` conflicts with this package's declaration"),
+                local_span, input.clone(), input.path.parent().unwrap_or_else(|| Path::new(".")).display().to_string(),
+                "prelude resolution", format!("alias the prelude binding explicitly: from prelude import {name} as __prelude_{name}"))
+                .with_label(selection_span, format!("prelude selects `{name}` here"))
+                .with_sources(sources.iter().cloned());
+            for provider in &sources[..3] {
+                let definitions = parse(provider)?;
+                if let Some((_, span)) = definitions.items.iter().filter_map(declared_name).find(|(candidate, _)| *candidate == name) {
+                    error = error.with_label(span, format!("prelude implementation of `{name}`"));
+                    break;
+                }
+            }
+            return Err(CompileError::Diagnostic(error));
+        }
+    }
     module.items.retain(|item| match item {
         severian_ast::Item::Function(function) if !function.decorators.is_empty() => {
             !ast.items.iter().any(|item| {
@@ -2756,13 +2836,7 @@ fn with_core_prelude(
         _ => false,
     });
 
-    let mut size = SourceFile::virtual_source(
-        "core/size/src/lib.sev",
-        include_str!("../../../../../library/core/size/src/lib.sev"),
-    );
-    size.id = SourceId(u32::MAX - 1);
-    let tokens = severian_lexer::scan(&size).map_err(CompileError::Diagnostic)?;
-    let mut size = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
+    let mut size = parse(&sources[1])?;
     size.items.retain(|item| match item {
         severian_ast::Item::Function(function) if !function.decorators.is_empty() => {
             function
@@ -2775,13 +2849,7 @@ fn with_core_prelude(
     });
     module.items.extend(size.items);
 
-    let mut text = SourceFile::virtual_source(
-        "core/text/src/lib.sev",
-        include_str!("../../../../../library/core/text/src/lib.sev"),
-    );
-    text.id = SourceId(u32::MAX - 2);
-    let tokens = severian_lexer::scan(&text).map_err(CompileError::Diagnostic)?;
-    let mut text = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
+    let mut text = parse(&sources[2])?;
     text.items.retain(|item| match item {
         severian_ast::Item::Function(function) if !function.decorators.is_empty() => {
             function
@@ -2794,22 +2862,12 @@ fn with_core_prelude(
     });
     module.items.extend(text.items);
 
-    let mut prelude = SourceFile::virtual_source(
-        "core/prelude.sev",
-        include_str!("../../../../../library/core/prelude.sev"),
-    );
-    prelude.id = SourceId(u32::MAX - 3);
-    let tokens = severian_lexer::scan(&prelude).map_err(CompileError::Diagnostic)?;
-    let prelude = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
-    module.items.extend(prelude.items);
-    let mut boxed = SourceFile::virtual_source(
-        "core/memory/src/box.sev",
-        include_str!("../../../../../library/core/memory/src/box.sev"),
-    );
-    boxed.id = SourceId(u32::MAX - 4);
-    let tokens = severian_lexer::scan(&boxed).map_err(CompileError::Diagnostic)?;
-    let boxed = severian_parser::parse(&tokens).map_err(CompileError::Diagnostic)?;
+
+    module.items.extend(prelude.items.into_iter().filter(|item| !matches!(item, severian_ast::Item::Import(_))));
+    let boxed = parse(&sources[4])?;
     module.items.extend(boxed.items);
+    module.items.retain(|item| !matches!(item, severian_ast::Item::Import(_))
+        && declared_name(item).is_none_or(|(name, _)| !selected.contains(name)));
     module.items.extend(ast.items.iter().cloned());
     Ok(module)
 }

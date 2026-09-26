@@ -1844,7 +1844,7 @@ fn resolution_definitions(resolution: &Resolution) -> Vec<DefId> {
 /// not declarations owned by the module and therefore must never be re-exported
 /// through an unqualified source import.
 fn is_injected_prelude_item(item: &Item) -> bool {
-    item_span(item).source.0 >= u32::MAX - 3
+    item_span(item).source.0 >= u32::MAX - 4
 }
 
 fn item_span(item: &Item) -> severian_source::Span {
@@ -2301,7 +2301,7 @@ fn resolve_imports(module_graph: &ModuleGraph, index: &mut ProgramIndex) {
                 // Selective imports are facade declarations too. Keep their
                 // original DefIds when re-exporting so downstream packages see
                 // the same nominal type and callable, not a copied definition.
-                if import.selected_name().is_some() || import.alias.is_some() {
+                if !name.starts_with("__") && (import.selected_name().is_some() || import.alias.is_some()) {
                     insert_binding(
                         index
                             .exports

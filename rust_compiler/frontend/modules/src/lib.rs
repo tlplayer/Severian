@@ -513,7 +513,9 @@ fn package_source(
             "E000124",
             format!("package import `{package}` has not been resolved"),
             Some(import.span),
-        )
+        ).with_context(severian_diagnostics::DiagnosticContext::source(
+            format!("package#{} ({})", current.id.0, current.root.display()), "package import resolution"))
+            .with_help(format!("declare dependency `{package}` in package.json, or restore its compiler standard-package registration"))
     })?;
     let dependency = packages.packages.get(dependency).ok_or_else(|| {
         Diagnostic::new(

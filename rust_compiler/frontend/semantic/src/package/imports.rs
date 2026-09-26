@@ -310,7 +310,7 @@ pub fn apply_import_plan(index: &mut ProgramIndex, plan: &ImportPlan) {
             .scope
             .bindings
             .insert(name.clone(), resolution.clone());
-        if !plan.private_namespaces.contains(&(*module, name.clone())) {
+        if !name.starts_with("__") && !plan.private_namespaces.contains(&(*module, name.clone())) {
             index
                 .exports
                 .get_mut(module)

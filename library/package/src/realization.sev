@@ -9,7 +9,7 @@ import add, init, new, options, remove, render_legacy_manifest, render_manifest,
 import os
 import path
 import environment
-import interface as interfaces
+import interface
 import metadata
 
 def retain_file(source: string, destination: string) -> unit | Error:

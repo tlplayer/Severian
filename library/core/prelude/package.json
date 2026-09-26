@@ -1,0 +1,9 @@
+{
+  "package": {"name": "prelude", "version": "0.1.0", "edition": "2026"},
+  "lib": {"path": "src/lib.sev"},
+  "dependencies": {
+    "io": {"path": "../../system/io"},
+    "size": {"path": "../size"},
+    "text": {"path": "../text"}
+  }
+}

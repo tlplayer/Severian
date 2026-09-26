@@ -1,2 +1,0 @@
-# Compatibility import for the original text package.
-import * from "../../string/format/src/lib.sev"
