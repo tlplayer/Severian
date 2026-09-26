@@ -1,8 +1,7 @@
 import "../char/utf8.sev" as character
-import "intrinsics.sev" as text_storage
+import byte_count as _text_size, read as _text_load, allocate as _text_allocate, write as _text_store from "../../../../library/core/string/src/storage.sev"
 
-# The seed representation uses the package's MLIR text-storage implementation.
-# Keep UTF-8 algorithms independent of its physical storage layout.
+# UTF-8 algorithms use core.string storage through ordinary source calls.
 def __dimension(value: string, dimension: int) -> int:
     assert(dimension == 0)
     return text_storage._text_size(value)

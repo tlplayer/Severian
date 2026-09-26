@@ -2,7 +2,6 @@
 import * from "../../sev_compiler/syntax/grammar/contracts.sev"
 import * from "../../sev_compiler/syntax/primitive/error/error.sev"
 import * from "../../sev_compiler/syntax/primitive/char/units.sev"
-import * from "../../sev_compiler/syntax/primitive/string/storage.sev"
 import * from "../../sev_compiler/syntax/primitive/tuple/tuple.sev"
 import * from "../../sev_compiler/syntax/primitive/enum/enum.sev"
 import _assert_condition from "../core/utils/src/lib.sev"

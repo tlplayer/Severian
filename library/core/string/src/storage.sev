@@ -1,0 +1,26 @@
+# String storage follows the source string's vector ownership and bounds rules.
+# Allocation goes through vector/array and the shared core.storage provider.
+import String, StringOperations, string from "../../../../sev_compiler/syntax/primitive/string/storage.sev"
+
+
+def byte_count(value: view string) -> int:
+    return value.storage.used
+
+
+def read(value: view string, position: int) -> u8:
+    return u8(value.storage.get(position))
+
+
+def allocate(count: int) -> string:
+    assert(count >= 0)
+    result = string()
+    result.storage.reserve_exact(count)
+    position := 0
+    while position < count:
+        result.storage.append(u8(0))
+        position += 1
+    return result
+
+
+def write(value: u8, destination: borrow string, position: int):
+    destination.storage.set(position, value)

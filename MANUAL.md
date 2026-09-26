@@ -99,6 +99,40 @@ Tests use:
     mock(...)        test-scoped function behavior
 '''
 
+## Visibility
+
+```sev
+
+class A:
+
+    _readable = 1 # can be read A._readable is fine, cannot write to it
+    __hidden = 2 # cannot read/write outside the class
+
+
+    def __hidden():
+        return 1 #A.__hidden() blocked
+    
+    def _readable(): # A._readable() is ok but prefer not to touch 
+        return 2
+    
+    def normal(): # normal function
+        return 3
+
+# This function cannot be imported to another file it is to remain here
+def __hidden_function():
+    return 0
+
+# This function is default excluded from import * from x, only explicit imports move it
+def _import_on_request():
+    return 1
+
+# Normal function
+def normal():
+    return 2
+
+same general rules for hidden/export request only. 
+
+```
 
 ## Testing
 

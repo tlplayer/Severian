@@ -17,6 +17,10 @@
     }
   ],
   "dependencies": {
+    "core_string": {
+      "path": "../../library/core/string",
+      "package": "core.string"
+    },
     "interface": {
       "path": "../../library/package/compile/interface",
       "package": "sev-semantic-interface"

@@ -1,5 +1,5 @@
 import * from "../../traits/src/container.sev"
-import * from "../../../../../sev_compiler/universal/primitive/array/storage.sev" as arrays
+import * from "../../../../../sev_compiler/syntax/primitive/array/storage.sev" as arrays
 
 # The vector owns its buffer directly. N is the initial capacity; reserve
 # chooses growth and core.storage checks allocations through core.memory. Replacing or

@@ -17,7 +17,8 @@
         ]
       },
       {
-        "source": "sev_compiler/syntax/primitive/string/storage.sev"
+        "source": "library/core/string/src/storage.sev",
+        "names": ["String", "StringOperations", "string"]
       },
       {
         "source": "sev_compiler/syntax/primitive/tuple/tuple.sev"
