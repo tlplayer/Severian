@@ -1,6 +1,0 @@
-# CompileType is an ordinary core protocol. Universal only receives its
-# resolved stable declaration identities during bootstrap.
-trait Compiler:
-
-
-trait CompileType[C]:

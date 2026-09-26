@@ -1,2 +1,0 @@
-# Compatibility facade for the earlier singular package spelling.
-import * from "../../utils/src/lib.sev"

@@ -1,2 +1,0 @@
-# Compatibility import; regex is owned by core.string.regex.
-import * from "../../string/regex/src/lib.sev"

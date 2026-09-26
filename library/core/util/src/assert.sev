@@ -1,2 +1,0 @@
-# Compatibility import; general utilities are owned by core.utils.
-import * from "../../utils/src/assert.sev"
