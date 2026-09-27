@@ -69,6 +69,52 @@ def run(*args, capture=False, cwd=ROOT, timeout=None):
     return result.stdout.strip() if capture else None
 
 
+def report_message(step, category, message):
+    root = Path(os.environ['SEVERIAN_BUILD_REPORT_DIR']) / step
+    for name in ('error', 'lint', 'warning'):
+        (root / name).mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', dir=root / category,
+                                     delete=False) as output:
+        json.dump({'message': message}, output, indent=2)
+        output.write('\n')
+
+
+def run_reported(step, *args, cargo=False):
+    command = list(map(str, args))
+    transcript = []
+    try:
+        child = subprocess.Popen(command, cwd=ROOT, text=True, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
+    except OSError as error:
+        report_message(step, 'error', str(error))
+        raise
+    with child:
+        for line in child.stdout:
+            if cargo:
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    event = {}
+                if event.get('reason') == 'compiler-message':
+                    diagnostic = event['message']
+                    rendered = diagnostic.get('rendered') or diagnostic['message']
+                    print(rendered, end='' if rendered.endswith('\n') else '\n', flush=True)
+                    transcript.append(rendered)
+                    if diagnostic['level'] in ('error', 'warning'):
+                        report_message(step, diagnostic['level'], rendered)
+                    continue
+                if event.get('reason'):
+                    continue
+            print(line, end='', flush=True)
+            transcript.append(line)
+            if line.lstrip().startswith('warning:'):
+                report_message(step, 'warning', line)
+        status = child.wait()
+    if status:
+        report_message(step, 'error', ''.join(transcript) or f'{command!r} exited {status}')
+        raise subprocess.CalledProcessError(status, command)
+
+
 def update_checkout():
     # Never stash, reset, or overwrite local work on the user's behalf.
     if run('git', 'status', '--porcelain', '--untracked-files=normal', capture=True):
@@ -122,12 +168,22 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError('another compiler update is running') from None
+        reports = cache / 'debug/build'
+        if reports.exists():
+            shutil.rmtree(reports)
+        reports.mkdir(parents=True)
+        os.environ['SEVERIAN_BUILD_REPORT_DIR'] = str(reports)
+        print(f'Build reports: {reports}', flush=True)
         if not args.local:
             update_checkout()
         # Always invoke concrete artifacts, so changing the default cannot
         # accidentally make the source compiler bootstrap itself.
         print('Building Rust bootstrap (severian-driver)', flush=True)
-        run('cargo', 'build', '--release', '--target-dir', cache, '-p', 'severian-driver', '--bin', 'sev')
+        try:
+            run_reported('rust-bootstrap', 'cargo', 'build', '--release', '--message-format=json', '--keep-going', '--target-dir', cache, '-p', 'severian-driver', '--bin', 'sev', cargo=True)
+        except (OSError, subprocess.SubprocessError):
+            report_message('source-compiler', 'error', 'blocked: Rust bootstrap build failed; source compiler was not built')
+            raise
         seed = cache / 'release' / 'sev'
         compiler = ROOT / 'sev_compiler/package.pkg/host/dev/bin/sev_compiler'
         # Keep the previous working source compiler if build or smoke tests fail.
@@ -140,7 +196,7 @@ def main():
                 # launcher keeps its established installation path. Building
                 # the package's default dev profile makes cold runs take minutes.
                 print('Building source compiler (sev_compiler) and its packages', flush=True)
-                run(seed, 'build', ROOT / 'sev_compiler', '--bin', 'sev_compiler',
+                run_reported('source-compiler', seed, 'build', ROOT / 'sev_compiler', '--bin', 'sev_compiler',
                     '--build-profile', 'release', '-o', compiler)
                 run(seed, '--version')
                 run(compiler, '--help')
