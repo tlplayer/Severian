@@ -1,6 +1,6 @@
 
 
-trait TupleSyntax: G:
+trait TupleSyntax: G
     symbol: Y = (
     form: GrammarForm = GrammarForm.Delimited
     closing: string = ")"

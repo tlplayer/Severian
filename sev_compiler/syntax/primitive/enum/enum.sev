@@ -3,7 +3,7 @@
 # Optional -> destinations constrain subsequent state assignments.
 # Bare case names test tags; payload bindings require explicit parentheses.
 # The compiler consumes this G contract through the shared declaration parser.
-trait enum: G:
+trait enum: G
     symbol: Y = enum
     form: GrammarForm = GrammarForm.Declaration
     members: DeclarationMembers = DeclarationMembers.Callables

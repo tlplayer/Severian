@@ -6,6 +6,23 @@ use severian_source::{SourceFile, SourceMap};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+fn source_diagnostic(mut diagnostic: Diagnostic, source: &SourceFile, package: &str, stage: &str) -> Diagnostic {
+    if diagnostic.context.is_none() {
+        diagnostic.context = Some(severian_diagnostics::DiagnosticContext::source(package, stage));
+    }
+    if diagnostic.help.is_none() {
+        diagnostic.help = Some(match stage {
+            "lexer" => "correct the invalid token or unterminated literal at the highlighted span",
+            "parser" => "correct the declaration or expression at the highlighted span before addressing recovery errors",
+            _ => "check that the imported source exists and its dependency is declared in the owning package manifest",
+        }.into());
+    }
+    let additional = std::mem::take(&mut *diagnostic.additional);
+    diagnostic.additional = Box::new(additional.into_iter()
+        .map(|error| source_diagnostic(error, source, package, stage)).collect());
+    diagnostic.with_source(source.clone())
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedModule {
     /// Stable within a package graph and derived from package identity plus the
@@ -342,10 +359,13 @@ impl<'a> Resolver<'a> {
             .get(source_id)
             .expect("a newly loaded source is present in its source map")
             .clone();
+        let owner = self.packages.packages.get(&package)
+            .map(|package| package.root.display().to_string())
+            .unwrap_or_else(|| format!("package#{}", package.0));
         let tokens = severian_lexer::scan(&source)
-            .map_err(|diagnostic| diagnostic.with_source(source.clone()))?;
+            .map_err(|diagnostic| source_diagnostic(diagnostic, &source, &owner, "lexer"))?;
         let ast = severian_parser::parse_with_max_errors(&tokens, self.max_errors)
-            .map_err(|diagnostic| diagnostic.with_source(source.clone()))?;
+            .map_err(|diagnostic| source_diagnostic(diagnostic, &source, &owner, "parser"))?;
         self.parsed.insert(canonical.clone(), ast.clone());
         let module_id = module_id(&canonical, package, self.packages)?;
         self.module_ids.insert(canonical.clone(), module_id);
@@ -356,7 +376,7 @@ impl<'a> Resolver<'a> {
         }) {
             if let Some((dependency, dependency_package)) =
                 source_import(&canonical, package, import, self.packages)
-                    .map_err(|diagnostic| diagnostic.with_source(source.clone()))?
+                    .map_err(|diagnostic| source_diagnostic(diagnostic, &source, &owner, "package import resolution"))?
             {
                 self.visit(&dependency, dependency_package)?;
                 let dependency = std::fs::canonicalize(&dependency).map_err(|error| {
@@ -536,6 +556,17 @@ fn has_runtime_initializer(module: &Module) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parser_context_and_help_reach_recovered_errors() {
+        let source = severian_source::SourceFile::virtual_source("broken.sev", "invalid\n");
+        let span = severian_source::Span::new(source.id, 0, 7);
+        let error = severian_diagnostics::Diagnostic::new("E000112", "invalid declaration", Some(span))
+            .with_additional([severian_diagnostics::Diagnostic::new("E000111", "invalid expression", Some(span))]);
+        let error = super::source_diagnostic(error, &source, "fixture", "parser");
+        assert!(error.validate().is_ok());
+        assert_eq!(error.additional[0].context.as_ref().unwrap().stage, "parser");
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

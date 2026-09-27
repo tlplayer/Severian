@@ -22,7 +22,7 @@ trait G:
     def semantic(left: Ex, right: Ex) -> X
 
 
-trait Positive: G:
+trait Positive: G
     symbol: Y = +
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
@@ -33,7 +33,7 @@ trait Positive: G:
     }
 
 
-trait Negative: G:
+trait Negative: G
     symbol: Y = -
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
@@ -44,7 +44,7 @@ trait Negative: G:
     }
 
 
-trait Not: G:
+trait Not: G
     symbol: Y = not
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
@@ -54,7 +54,7 @@ trait Not: G:
     }
 
 
-trait Bang: G:
+trait Bang: G
     symbol: Y = !
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
@@ -64,7 +64,7 @@ trait Bang: G:
     }
 
 
-trait Copy: G:
+trait Copy: G
     symbol: Y = copy
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
@@ -72,49 +72,49 @@ trait Copy: G:
     operations: {T: ScalarOperation} = {}
 
 
-trait Move: G:
+trait Move: G
     symbol: Y = move
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Right
 
 
-trait BitwiseOr: G:
+trait BitwiseOr: G
     symbol: Y = |
     fixity: Fixity = Fixity.Infix
     precedence: int = 4
     associativity: Associativity = Left
 
 
-trait BitwiseAnd: G:
+trait BitwiseAnd: G
     symbol: Y = &
     fixity: Fixity = Fixity.Infix
     precedence: int = 6
     associativity: Associativity = Left
 
 
-trait BitwiseXor: G:
+trait BitwiseXor: G
     symbol: Y = ^
     fixity: Fixity = Fixity.Infix
     precedence: int = 5
     associativity: Associativity = Left
 
 
-trait LeftShift: G:
+trait LeftShift: G
     symbol: Y = <<
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
     associativity: Associativity = Left
 
 
-trait RightShift: G:
+trait RightShift: G
     symbol: Y = >>
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
     associativity: Associativity = Left
 
 
-trait Add: G:
+trait Add: G
     symbol: Y = +
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
@@ -125,7 +125,7 @@ trait Add: G:
     }
 
 
-trait Subtract: G:
+trait Subtract: G
     symbol: Y = -
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
@@ -136,7 +136,7 @@ trait Subtract: G:
     }
 
 
-trait Multiply: G:
+trait Multiply: G
     symbol: Y = *
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
@@ -147,7 +147,7 @@ trait Multiply: G:
     }
 
 
-trait Divide: G:
+trait Divide: G
     symbol: Y = /
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
@@ -157,28 +157,28 @@ trait Divide: G:
     }
 
 
-trait FloorDivide: G:
+trait FloorDivide: G
     symbol: Y = //
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
     associativity: Associativity = Left
 
 
-trait Remainder: G:
+trait Remainder: G
     symbol: Y = %
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
     associativity: Associativity = Left
 
 
-trait Power: G:
+trait Power: G
     symbol: Y = **
     fixity: Fixity = Fixity.Infix
     precedence: int = 9
     associativity: Associativity = Right
 
 
-trait Equal: G:
+trait Equal: G
     symbol: Y = ==
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
@@ -189,7 +189,7 @@ trait Equal: G:
     }
 
 
-trait NotEqual: G:
+trait NotEqual: G
     symbol: Y = !=
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
@@ -200,7 +200,7 @@ trait NotEqual: G:
     }
 
 
-trait Less: G:
+trait Less: G
     symbol: Y = <
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
@@ -212,7 +212,7 @@ trait Less: G:
     }
 
 
-trait LessEqual: G:
+trait LessEqual: G
     symbol: Y = <=
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
@@ -224,7 +224,7 @@ trait LessEqual: G:
     }
 
 
-trait Greater: G:
+trait Greater: G
     symbol: Y = >
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
@@ -236,7 +236,7 @@ trait Greater: G:
     }
 
 
-trait GreaterEqual: G:
+trait GreaterEqual: G
     symbol: Y = >=
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
@@ -248,14 +248,14 @@ trait GreaterEqual: G:
     }
 
 
-trait Contains: G:
+trait Contains: G
     symbol: Y = in
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = None
 
 
-trait LogicalAnd: G:
+trait LogicalAnd: G
     symbol: Y = and
     fixity: Fixity = Fixity.Infix
     precedence: int = 2
@@ -267,7 +267,7 @@ trait LogicalAnd: G:
         return right if left else false
 
 
-trait LogicalOr: G:
+trait LogicalOr: G
     symbol: Y = or
     fixity: Fixity = Fixity.Infix
     precedence: int = 1
@@ -279,7 +279,7 @@ trait LogicalOr: G:
         return true if left else right
 
 
-trait If: G:
+trait If: G
     symbol: Y = if
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
@@ -300,7 +300,7 @@ trait If: G:
         cfg.at(exit)
 
 
-trait While: G:
+trait While: G
     symbol: Y = while
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
@@ -322,7 +322,7 @@ trait While: G:
         cfg.at(exit)
 
 
-trait Break: G:
+trait Break: G
     control_flow: ControlFlow = Branch
 
     def semantic():
@@ -330,7 +330,7 @@ trait Break: G:
         cfg.goto(exit)
 
 
-trait Continue: G:
+trait Continue: G
     control_flow: ControlFlow = Branch
 
     def semantic():
@@ -338,7 +338,7 @@ trait Continue: G:
         cfg.goto(header)
 
 
-trait Return: G:
+trait Return: G
     control_flow: ControlFlow = Return
 
     def semantic(value: Ex | absent):
@@ -346,7 +346,7 @@ trait Return: G:
         cfg.return(result)
 
 
-trait Conditional: G:
+trait Conditional: G
     control_flow: ControlFlow = Branch
 
     def semantic(condition: Ex, then_value: Ex, else_value: Ex) -> X:
@@ -366,7 +366,7 @@ trait Conditional: G:
         return result
 
 
-trait Assign: G:
+trait Assign: G
     control_flow: ControlFlow = Mutation
 
     def semantic(destination: Ex, value: Ex):
@@ -375,7 +375,7 @@ trait Assign: G:
         store(target, right)
 
 
-trait AddAssign: G:
+trait AddAssign: G
     symbol: Y = +=
     form: GrammarForm = GrammarForm.Assignment
     operation: string = "+"
@@ -389,7 +389,7 @@ trait AddAssign: G:
         store(target, updated)
 
 
-trait SubtractAssign: G:
+trait SubtractAssign: G
     symbol: Y = -=
     form: GrammarForm = GrammarForm.Assignment
     operation: string = "-"
@@ -403,7 +403,7 @@ trait SubtractAssign: G:
         store(target, updated)
 
 
-trait MultiplyAssign: G:
+trait MultiplyAssign: G
     symbol: Y = *=
     form: GrammarForm = GrammarForm.Assignment
     operation: string = "*"
@@ -417,7 +417,7 @@ trait MultiplyAssign: G:
         store(target, updated)
 
 
-trait DivideAssign: G:
+trait DivideAssign: G
     symbol: Y = /=
     form: GrammarForm = GrammarForm.Assignment
     operation: string = "/"
@@ -431,7 +431,7 @@ trait DivideAssign: G:
         store(target, updated)
 
 
-trait RemainderAssign: G:
+trait RemainderAssign: G
     symbol: Y = %=
     form: GrammarForm = GrammarForm.Assignment
     operation: string = "%"
@@ -477,14 +477,14 @@ trait Error: Diagnostic
 
 
 
-trait Is: G:
+trait Is: G
     symbol: Y = is
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = None
 
 
-trait Throw: G:
+trait Throw: G
     control_flow: ControlFlow = Error
 
     def semantic(value: Ex):
@@ -492,7 +492,7 @@ trait Throw: G:
         cfg.throw(result)
 
 
-trait Outcome: G:
+trait Outcome: G
     control_flow: ControlFlow = Error
 
     def semantic(value: Ex):
@@ -508,7 +508,7 @@ trait Outcome: G:
         return payload
 
 
-trait Throws: G:
+trait Throws: G
     control_flow: ControlFlow = Error
 
     def semantic(value: Ex, expected: Ex, failure: B):
@@ -521,27 +521,27 @@ trait Throws: G:
         cfg.at(caught)
 
 
-trait List: G:
+trait List: G
     construction: string = "list_create"
 
 
-trait Index: G:
+trait Index: G
     access: string = "element_at"
     storage: string = "element_set"
 
 
-trait Slice: G:
+trait Slice: G
     access: string = "slice_at"
 
 
-trait Iteration: G:
+trait Iteration: G
     start: string = "iteration_start"
     condition: string = "iteration_more"
     access: string = "element_at"
     advance: string = "iteration_next"
 
 
-trait For: G:
+trait For: G
     control_flow: ControlFlow = Loop
 
     def semantic(condition: Ex, body: B, advance: B):

@@ -45,7 +45,10 @@ pub(crate) fn prepare_reported(manifest: &Manifest, reports: Option<&Reports>) -
                             reports.record("generator", "warning", &recipe, warning)?;
                         }
                         if !output.status.success() {
-                            reports.record("generator", "error", &recipe, &format!("{}\n{}\n{}", output.status, String::from_utf8_lossy(&output.stdout), stderr))?;
+                            let status = if stderr.lines().any(|line| line.starts_with("error: E")) {
+                                "blocked: generator compilation failed"
+                            } else { "generator execution failed" };
+                            reports.record("generator", "error", &recipe, &format!("{status}: {}\n{}\n{}", output.status, String::from_utf8_lossy(&output.stdout), stderr))?;
                         }
                     }
                     if !output.status.success() { return Err(format!("package generator failed: {} ({})", recipe.display(), output.status)); }

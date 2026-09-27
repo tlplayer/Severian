@@ -568,12 +568,32 @@ fn build_reported(options: CommonOptions, catalog: &Catalog, reports: &build_rep
         Ok(compiler) => compiler.with_max_errors(usize::MAX),
         Err(error) => {
             reports.record("bootstrap", "error", input_root(&input), &error)?;
-            reports.record("build", "error", input_root(&input), "semantic analysis and code generation are blocked by compiler initialization; independent source scanning completed")?;
+            reports.record("build", "error", input_root(&input), "blocked: semantic analysis and code generation require successful compiler initialization; independent source scanning completed")?;
             return Err(reports.failure());
         }
     };
+    let known_roots: BTreeSet<_> = manifest.into_iter().flat_map(|manifest|
+        manifest.package_graph.packages.values().map(|package| package.root.clone())).collect();
+    let mut nested = BTreeMap::new();
     for source in sources {
-        if let Err(error) = compiler.check_file(&source) {
+        let owner = build_reports::owner_manifest(&source);
+        let selected: &Compiler = if let Some(owner) = owner.filter(|owner| !known_roots.contains(owner.parent().unwrap_or(Path::new(".")))) {
+            let result = nested.entry(owner.clone()).or_insert_with(|| {
+                let manifest = Manifest::load(&owner, catalog)?;
+                let config = resolve_config(catalog, Some(&manifest), &options)?;
+                compiler_without_generators(&config, Some(&manifest), false)
+                    .map(|compiler| compiler.with_max_errors(usize::MAX))
+            });
+            match result {
+                Ok(compiler) => compiler,
+                Err(error) => {
+                    reports.record("package-import-resolution", "error", &owner, error)?;
+                    failed = true;
+                    continue;
+                }
+            }
+        } else { &compiler };
+        if let Err(error) = selected.check_file(&source) {
             reports.compile_error(&source, &error)?;
             failed = true;
         }
@@ -590,7 +610,7 @@ fn build_reported(options: CommonOptions, catalog: &Catalog, reports: &build_rep
         failed = true;
     }
     if generators_failed {
-        reports.record("build", "error", root, "artifact generation is blocked by failed generators; independent source checks completed")?;
+        reports.record("build", "error", root, "blocked: artifact generation requires successful generators; independent source checks completed")?;
         return Err(reports.failure());
     }
     for target in targets {
@@ -672,7 +692,7 @@ fn lint_sources_reported(compiler: &Compiler, import_sources: Vec<PathBuf>, root
         }
     }
     if failed {
-        return Err("import lint is blocked by source resolution errors; no partial import corrections were applied".into());
+        return Err("blocked: import lint requires successful source resolution; no partial import corrections were applied".into());
     }
     let imports = severian_driver::package_lint::correct_imports(&import_graph, root)?;
     for file in &imports.files {

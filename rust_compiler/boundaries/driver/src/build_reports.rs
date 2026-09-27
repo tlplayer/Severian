@@ -5,10 +5,9 @@ use severian_source::SourceFile;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::hash::{Hash, Hasher};
 
 pub(crate) const ENV: &str = "SEVERIAN_BUILD_REPORT_DIR";
-static NEXT: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) struct Reports {
     pub(crate) root: PathBuf,
@@ -42,26 +41,69 @@ impl Reports {
         for category in ["error", "lint", "warning"] {
             fs::create_dir_all(directory.join(category)).map_err(|error| error.to_string())?;
         }
-        let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        let record = serde_json::json!({"source": source, "message": message});
-        fs::write(directory.join(category).join(format!("{}-{id}.json", std::process::id())),
-            serde_json::to_vec_pretty(&record).map_err(|error| error.to_string())?)
+        let record = serde_json::json!({"source": source, "message": message,
+            "status": if message.starts_with("blocked:") { "blocked" } else { "reported" },
+            "callers": [source]});
+        self.store(&directory.join(category), serde_json::json!([source, message]), record)
+    }
+
+    fn store(&self, directory: &Path, key: serde_json::Value, mut record: serde_json::Value) -> Result<(), String> {
+        fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+        let lock = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
+            .open(self.root.join(".reports.lock")).map_err(|error| error.to_string())?;
+        lock.lock().map_err(|error| error.to_string())?;
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        key.to_string().hash(&mut hash);
+        let mut suffix = 0usize;
+        let destination = loop {
+            let destination = directory.join(format!("{:016x}-{suffix}.json", hash.finish()));
+            if destination.is_file() {
+                let mut existing: serde_json::Value = serde_json::from_slice(
+                    &fs::read(&destination).map_err(|error| error.to_string())?).map_err(|error| error.to_string())?;
+                if existing["identity"] != key { suffix += 1; continue; }
+                if let Some(callers) = record["callers"].as_array() {
+                    for caller in callers {
+                        let known = existing["callers"].as_array_mut().ok_or("invalid report callers")?;
+                        if !known.contains(caller) { known.push(caller.clone()); }
+                    }
+                }
+                record = existing;
+            }
+            break destination;
+        };
+        record["identity"] = key;
+        fs::write(destination, serde_json::to_vec_pretty(&record).map_err(|error| error.to_string())?)
             .map_err(|error| error.to_string())
     }
 
-    fn diagnostic(&self, mut diagnostic: Diagnostic, source: &SourceFile, step: &str) -> Result<(), String> {
-        // Parser recovery returns additional diagnostics. Give every one its
-        // own report and source snapshot instead of hiding it in the first error.
+    fn diagnostic(&self, diagnostic: Diagnostic, source: &SourceFile, step: &str) -> Result<(), String> {
+        self.report_diagnostic(diagnostic.with_source(source.clone()), &source.path, step)
+    }
+
+    fn report_diagnostic(&self, mut diagnostic: Diagnostic, caller: &Path, fallback: &str) -> Result<(), String> {
         let additional = std::mem::take(&mut *diagnostic.additional);
-        diagnostic.context = Some(DiagnosticContext::source(source.path.display().to_string(), step));
+        let step = diagnostic.context.as_ref().map(|context| context.stage.clone())
+            .unwrap_or_else(|| fallback.to_owned());
+        let location = diagnostic.span.and_then(|span| diagnostic.sources.iter()
+            .find(|source| source.id == span.source).map(|source| source.path.clone()))
+            .unwrap_or_else(|| caller.to_owned());
+        if diagnostic.context.is_none() {
+            let owner = owner_manifest(&location).unwrap_or_else(|| location.clone());
+            diagnostic.context = Some(DiagnosticContext::source(owner.display().to_string(), &step));
+        }
         if diagnostic.help.is_none() {
-            diagnostic.help = Some(format!("correct this {step} error in {} and rebuild", source.path.display()));
+            diagnostic.help = Some(format!("correct the highlighted {} error in {}", step, location.display()));
         }
-        diagnostic = diagnostic.with_source(source.clone());
-        self.record(step, "error", &source.path, &diagnostic.to_string())?;
-        for additional in additional {
-            self.diagnostic(additional, source, step)?;
+        let span = diagnostic.span.map(|span| (span.start, span.end));
+        let key = serde_json::json!([diagnostic.code, location, span, diagnostic.message]);
+        let record = serde_json::json!({"code": diagnostic.code, "source": location,
+            "span": span, "message": diagnostic.to_string(), "status": "reported", "callers": [caller]});
+        let step: String = step.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
+        for category in ["error", "lint", "warning"] {
+            fs::create_dir_all(self.root.join(&step).join(category)).map_err(|error| error.to_string())?;
         }
+        self.store(&self.root.join(step).join("error"), key, record)?;
+        for error in additional { self.report_diagnostic(error, caller, fallback)?; }
         Ok(())
     }
 
@@ -110,6 +152,14 @@ impl Reports {
 
     pub(crate) fn compile_error(&self, source: &Path, error: &severian_driver::CompileError) -> Result<(), String> {
         use severian_driver::CompileError;
+        if let CompileError::Diagnostic(diagnostic) = error {
+            let fallback = match diagnostic.code {
+                "E000101" | "E000102" | "E000103" => "lexer",
+                "E000110" | "E000111" | "E000112" => "parser",
+                _ => "semantic",
+            };
+            return self.report_diagnostic(diagnostic.clone(), source, fallback);
+        }
         let step = match error {
             CompileError::Diagnostic(diagnostic) => diagnostic.context.as_ref()
                 .map(|context| context.stage.as_str()).unwrap_or("semantic"),
@@ -125,6 +175,11 @@ impl Reports {
         };
         self.record(step, "error", source, &error.to_string())
     }
+}
+
+pub(crate) fn owner_manifest(source: &Path) -> Option<PathBuf> {
+    source.ancestors().skip(1).map(severian_driver::config::document::path)
+        .find(|path| path.is_file())
 }
 
 fn collect(path: &Path, files: &mut BTreeSet<PathBuf>) -> Result<(), String> {
@@ -153,6 +208,23 @@ fn collect(path: &Path, files: &mut BTreeSet<PathBuf>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_diagnostic_keeps_its_actual_source_and_all_callers() {
+        let root = std::env::temp_dir().join(format!("sev-shared-report-{}", std::process::id()));
+        let reports = Reports::open(root.clone(), true).unwrap();
+        let source = SourceFile::virtual_source("shared.sev", "invalid\n");
+        let diagnostic = Diagnostic::new("E000112", "invalid declaration", Some(severian_source::Span::new(source.id, 0, 7)))
+            .with_source(source);
+        reports.compile_error(Path::new("first.sev"), &severian_driver::CompileError::Diagnostic(diagnostic.clone())).unwrap();
+        reports.compile_error(Path::new("second.sev"), &severian_driver::CompileError::Diagnostic(diagnostic)).unwrap();
+        let files = fs::read_dir(root.join("parser/error")).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(files.len(), 1);
+        let report: serde_json::Value = serde_json::from_slice(&fs::read(files[0].path()).unwrap()).unwrap();
+        assert_eq!(report["source"], "shared.sev");
+        assert_eq!(report["callers"], serde_json::json!(["first.sev", "second.sev"]));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn independent_parse_failures_survive_until_the_next_run() {

@@ -677,6 +677,8 @@ fn unescape_string(raw: &str) -> String {
             Some('n') => value.push('\n'),
             Some('r') => value.push('\r'),
             Some('t') => value.push('\t'),
+            Some('v') => value.push('\u{000b}'),
+            Some('f') => value.push('\u{000c}'),
             Some('0') => value.push('\0'),
             Some('"') => value.push('"'),
             Some('\\') | None => value.push('\\'),
@@ -743,5 +745,16 @@ fn token(source: &SourceFile, kind: TokenKind, start: usize, end: usize) -> Toke
     Token {
         kind,
         span: Span::new(source.id, start as u32, end as u32),
+    }
+}
+
+#[cfg(test)]
+mod escape_tests {
+    use super::*;
+
+    #[test]
+    fn whitespace_escapes_preserve_vertical_tab_and_form_feed() {
+        assert_eq!(unescape_string(r" \t\n\r\v\f"), " \t\n\r\u{000b}\u{000c}");
+        assert_eq!(unescape_string(r#"\"\\"#), "\"\\");
     }
 }

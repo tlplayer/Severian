@@ -1,5 +1,6 @@
 import "../../../../library/core/collections/vector/src/vector.sev" as vectors
 import "../char/utf8.sev" as encoding
+import Container from "../../../../library/core/collections/traits/src/container.sev"
 
 trait StringOperations:
     def encode()
@@ -26,17 +27,17 @@ trait StringOperations:
 WHITE_SPACE = " \t\n\r\v\f"
 ASCII_LOWERCASE = "abcdefghijklmnopqrstuvwxyz"
 ASCII_UPPERCASE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-ASCII_LETTERS = ascii_lowercase + ascii_uppercase
+ASCII_LETTERS = ASCII_LOWERCASE + ASCII_UPPERCASE
 DIGITS = "0123456789"
-HEXDIGITS = digits + "abcdef" + "ABCDEF"
+HEXDIGITS = DIGITS + "abcdef" + "ABCDEF"
 OCTDIGITS = "01234567"
-PUNCTUATION = r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""
-PRINTABLE = digits + ascii_letters + punctuation + whitespace
+PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+PRINTABLE = DIGITS + ASCII_LETTERS + PUNCTUATION + WHITE_SPACE
 
 
 # Text owns a vector of encoding units. UTF-8 uses bytes; UTF-32 uses scalars.
 # N is the initial vector capacity and does not limit the string's length.
-trait String: Container:
+trait String: Container
     def length() -> int
     def capacity() -> int
     def reserve(self: borrow Self, required: int)

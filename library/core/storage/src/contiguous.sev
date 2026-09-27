@@ -8,8 +8,8 @@ class ContiguousStorage[T]:
 
     def ContiguousStorage(initial_capacity: usize):
         capacity := initial_capacity
-        this.allocation := memory.Allocation[T](capacity)
-        this.used := 0
+        self.allocation = memory.Allocation[T](capacity)
+        self.used = 0
 
     def len() -> usize:
         return used
