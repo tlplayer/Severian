@@ -13,78 +13,6 @@ Authors:
 
 Created: 2026-09-22
 
-Target:
-
-Supersedes:
-
-Superseded by:
-
-## Normative migration contract (2026-09-22)
-
-The following decisions supersede conflicting illustrative examples below.
-Implementation status and retirement gates are tracked in
-[the implementation review](0008-v2-implementation-review.md); the proposal is
-not a statement that those gates have passed.
-
-- Dependency graphs and CFGs may be cyclic. Callable recursion is legal; schedule
-  strongly connected components through their acyclic condensation graph.
-  Containment, inheritance, initialization and predicate prerequisites reject
-  cycles where their respective contracts forbid them.
-- A declaration has one semantic owner. Uses and imported aliases reference it;
-  they do not duplicate its identity. A semantic owner key is independent of
-  a source path. Default file membership remains a compatibility adapter until
-  explicit package/module/submodule membership is available. Moving files only
-  preserves identity when the declared semantic owner and declaration key stay
-  the same. Anonymous definitions have revision-local identity until an explicit
-  matching policy is implemented. Initializers retain declared source order.
-- Package resolution and dependencies at the module/library level belong to
-  `library/package`. Compiler semantic dependency graphs are scoped within
-  submodules. Cross-submodule references are projected through package-owned
-  membership and planning APIs, rather than a compiler-owned package resolver.
-- Lexical regions, source sentences, CFG blocks and tasks have separate typed
-  identities. A sentence can own a nested region whose children are sentences.
-  The active `Module.cfg_bodies` tables remain the sole executable topology.
-- Internal lexer/parser spans use half-open Unicode scalar indices. Tooling
-  interfaces serialize half-open UTF-8 byte offsets through an explicit source
-  conversion. Synthetic declarations have absent provenance plus a reason;
-  they must not claim to originate from source offset zero.
-- Dispatch selects exactly one implementation from a closed candidate set.
-  Zero matches is a no-match diagnostic/failure; multiple matches is an ambiguity
-  diagnostic/failure. Costs do not break ties. Static proofs may eliminate work;
-  dynamic dispatch must establish uniqueness before executing an implementation.
-- Reordered/shared predicates must be pure, non-throwing, terminating and have
-  stable reads. Unknown effect/termination information does not grant these
-  properties. Prerequisites (including shape bounds before indexing) dominate
-  their checks. Other attached operations retain control and effect ordering.
-- Proof outcomes are Proven, Refuted and Unknown. Exhausting a budget yields
-  Unknown or a diagnostic, never Proven. Static-only Unknown diagnoses; eligible
-  dynamic obligations may generate checks. Value refinements attach to SSA or
-  memory versions and are invalidated by affected writes and calls. Joins must
-  be sound; loop widening is used only where convergence requires it.
-- Evaluation stage (static, specialization, runtime) is independent of check
-  site (prefix, invariant, defer/suffix). `fix` is established on prefix and checked after
-  relevant writes/calls, on loop edges, and on region defer/suffix. Suspension/re-prefix
-  needs its own policy before support. It does not continuously poll memory.
-  The successful integer increment example requires `0 < x and x < 90` before
-  `x += 10` under `fix x < 100`; `x = 95` is a negative test.
-- Ordinary `defer` retains delayed cleanup on scope defer/suffix. It is not an alias for
-  `fix`. Cleanup and defer/suffix checks execute exactly once on each supported normal,
-  early-return, error and loop-defer/suffix path crossing their region. Abort does not
-  promise cleanup. A failed invariant never retries another implementation.
-- Constraint payloads distinguish setup declarations, guards, contracts,
-  ownership and execution context. Resolved interfaces do not grant CFG
-  capabilities or arbitrary effects. `sorted` constructs a sequence, not a
-  Boolean predicate; floating comparisons must account for NaN.
-- Interfaces include typed generic/grammar/predicate bodies where clients need
-  them, or explicitly reject unsupported source-free use. Query dependencies
-  distinguish signatures, bodies, candidate sets and realization inputs.
-  Semantic identity is not a content fingerprint. ObjectUnit fingerprints include
-  compiler/schema, target/ABI, options and specialization inputs.
-- An ObjectUnit is a tagged realization boundary, with many-to-many submodule
-  membership. Initialization order, symbol ownership and incompatible device
-  targets are checked before emission. Existing provider APIs stay available
-  until their replacements pass their gates.
-
 ## Summary
 
 Severian should organize source semantics using:
@@ -328,9 +256,9 @@ They are not required to correspond to modules, submodules, or object files.
 | `Operation`   | execution node      | Resolved computation produced from a sentence.                                          |
 | `With`        | interface           | Attaches declarations, constraints, invariants, refinements, or requirements to a node. |
 | `Constraint`  | graph node          | Predicate required for validity, dispatch, refinement, or execution.                    |
-| `Entry`       | constraint phase    | Constraint evaluated when entering a region.                                            |
+| `Prefix`       | constraint phase    | Constraint evaluated when entering a region.                                            |
 | `Fix`         | constraint phase    | Constraint maintained throughout a region.                                              |
-| `Exit`        | constraint phase    | Constraint evaluated when leaving a region.                                             |
+| `Suffix`        | constraint phase    | Constraint evaluated when leaving a region.                                             |
 | `Defer`       | constraint form     | Alias/convenience form for a fixed invariant.                                           |
 | `ValueDomain` | analysis node       | Known subset/range/properties of possible values.                                       |
 | `Universal`   | graph IR            | Typed semantic graph containing compiler-visible entities.                              |

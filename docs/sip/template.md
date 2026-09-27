@@ -8,8 +8,6 @@ Target:
 Supersedes:
 Superseded by:
 
-## Summary
-
 ## Appendix
 
 -- all terms, file formats, variables, classes, functions, traits in a table
@@ -21,8 +19,5 @@ Superseded by:
 ## Examples
 
 ## Testing
-
-
-## Performance
 
 
