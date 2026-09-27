@@ -1,0 +1,44 @@
+{
+  "package": {
+    "name": "sev-build-codec",
+    "version": "0.1.0",
+    "edition": "2026",
+    "publish": false
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "language": {
+    "explicit-imports": true
+  },
+  "dependencies": {
+    "environment": {
+      "path": "../../../library/system/environment",
+      "package": "environment"
+    },
+    "process": {
+      "path": "../../../library/system/process",
+      "package": "process"
+    },
+    "path": {
+      "path": "../../../library/system/path",
+      "package": "path"
+    },
+    "file": {
+      "path": "../../../library/system/file",
+      "package": "file"
+    },
+    "os": {
+      "path": "../../../library/system/os",
+      "package": "os"
+    },
+    "cache": {
+      "path": "../../../library/package/cache",
+      "package": "package.cache"
+    },
+    "build_flow": {
+      "path": "../../../library/package/build",
+      "package": "package.build"
+    }
+  }
+}

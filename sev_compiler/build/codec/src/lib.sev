@@ -1,0 +1,646 @@
+import "host.sev" as package
+import environment
+import process
+import path
+import file
+import os
+
+class Field:
+    name: string
+    type: string
+
+class Variant:
+    name: string
+    fields: list[Field]
+
+class Model:
+    name: string
+    kind: string
+    namespace: string
+    location: string
+    fields: list[Field] = []
+    variants: list[Variant] = []
+
+class Codec:
+    root: string
+    mode: string
+    models: list[Model] = []
+    sources: list[string] = []
+    contents: list[string] = []
+    namespaces: list[string] = []
+    exports: list[string] = []
+    types: list[string] = []
+    functions: list[string] = []
+    options: list[string] = []
+
+
+def split(value: string, separator: string = ",") -> list[string]:
+    result: list[string] = []
+    start := 0
+    depth := 0
+    for index in range(int(len(value))):
+        part = value[index:index + 1]
+        if part in ["[", "("]:
+            depth += 1
+        if part in ["]", ")"]:
+            depth -= 1
+        if part == separator and depth == 0:
+            result.append(value[start:index].strip())
+            start = index + 1
+    result.append(value[start:].strip())
+    return result
+
+
+def identifier(value: string) -> string:
+    result := ""
+    for part in value.characters():
+        text = string(part)
+        if "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_".contains(text):
+            result += text
+        elif not result.ends_with("_"):
+            result += "_"
+    while result.starts_with("_"):
+        result = result[1:]
+    while result.ends_with("_"):
+        result = result[:-1]
+    return result
+
+
+def declaration(line: string) -> string:
+    if not line.starts_with("class ") and not line.starts_with("enum "):
+        return ""
+    return line.split(" ")[1].split(":")[0].split("[")[0]
+
+
+def skip_field(model: string, field: string, mode: string) -> bool:
+    if model == "source.SourceFile" and field in ["characters", "byte_offsets"]:
+        return true
+    if model == "model_syntax_function_function.FunctionDeclaration":
+        return field in (["binary_requirements", "capability_requirements"] if mode == "mir" else ["binary_requirements", "capability_requirements", "cfg"])
+    if model == "model_hir_module_module.Module":
+        return field in (["binding_values"] if mode == "mir" else ["initializer_cfg", "cfg_bodies", "values", "globals", "binding_values", "quality_files", "quality_exclusions", "quality_regions", "debug_files"])
+    return mode != "mir" and model == "model_syntax_block_block.Block" and field in ["operations", "lowered_operations", "cfg_index", "parameters", "terminator", "origins", "origin"]
+
+
+def load_models(codec: Codec, location: string, namespace: string) -> unit | Error:
+    location = package.canonical(location)
+    for index in range(int(len(codec.sources))):
+        if codec.sources[index] == location and codec.namespaces[index] == namespace:
+            return
+    codec.sources.append(location)
+    codec.namespaces.append(namespace)
+    contents = package.read_text(location)
+    codec.contents.append(contents)
+    current := -1
+    for line in contents.split("\n"):
+        name = declaration(line)
+        if name != "":
+            codec.models.append(Model(namespace + "." + name, "class" if line.starts_with("class ") else "enum", namespace, location))
+            current = int(len(codec.models)) - 1
+            continue
+        if line != "" and not line.starts_with(" ") and not line.starts_with("#"):
+            current = -1
+        if current < 0 or not line.starts_with("    ") or line.starts_with("     "):
+            continue
+        model = codec.models[current]
+        text = line.strip()
+        if model.kind == "class":
+            if not text.contains(": ") or text.starts_with("def "):
+                continue
+            pieces = text.split(": ")
+            name = pieces[0]
+            if identifier(name) == name and not skip_field(model.name, name, codec.mode):
+                model.fields.append(Field(name, text[int(len(name)) + 2:].split(" = ")[0]))
+        elif text != "" and identifier(text.split("(")[0]) == text.split("(")[0]:
+            fields: list[Field] = []
+            name = text.split("(")[0]
+            if text.contains("("):
+                for value in split(text[int(len(name)) + 1:-1]):
+                    pieces = value.split(": ")
+                    if len(pieces) != 2:
+                        throw Error("invalid archive variant field: " + value)
+                    fields.append(Field(pieces[0], pieces[1]))
+            model.variants.append(Variant(name, fields))
+
+
+def exported_sources(codec: Codec, location: string) -> unit | Error:
+    location = package.canonical(location)
+    if location in codec.exports:
+        return
+    codec.exports.append(location)
+    for line in package.read_text(location).split("\n"):
+        if not line.starts_with("import ") or not line.contains(" from \"") or not line.ends_with("\""):
+            continue
+        locator = line.split("\"")[1]
+        target := path.dirname(location) + "/" + locator
+        if locator.starts_with("package:"):
+            parts = locator[8:].split("/")
+            owner := path.dirname(location)
+            while not package.exists(owner + "/package.json"):
+                parent = path.dirname(owner)
+                if parent == owner:
+                    throw Error("package import outside a package: " + location)
+                owner = parent
+            entries = package.parse_document(package.read_text(owner + "/package.json"))
+            dependency = package.text_setting(entries, "dependencies." + parts[0], "path")
+            if dependency == "":
+                throw Error("codec needs a resolved local dependency: " + locator)
+            dependency_root = package.canonical(owner + "/" + dependency)
+            member := locator[8 + int(len(parts[0])):]
+            if member == "":
+                document = package.parse_document(package.read_text(dependency_root + "/package.json"))
+                member = "/" + package.text_setting(document, "lib", "path")
+            target = package.canonical(dependency_root + member)
+            if not target.starts_with(dependency_root + "/"):
+                throw Error("package import escapes dependency: " + locator)
+        exported_sources(codec, target)
+
+
+def numeric(value: string) -> bool:
+    if value in ["int", "float"]:
+        return true
+    if len(value) < 2 or value[:1] not in ["u", "i", "f"]:
+        return false
+    for digit in value[1:].characters():
+        if not "0123456789".contains(string(digit)):
+            return false
+    return true
+
+
+def resolve(codec: Codec, value: string, namespace: string) -> string | Error:
+    value = value.strip()
+    if value.contains(" | "):
+        parts: list[string] = []
+        for part in value.split(" | "):
+            parts.append(resolve(codec, part, namespace))
+        return parts.join(" | ")
+    if value.contains("["):
+        base = value.split("[")[0]
+        parts: list[string] = []
+        for part in split(value[int(len(base)) + 1:-1]):
+            parts.append(resolve(codec, part, namespace))
+        return base + "[" + parts.join(", ") + "]"
+    if value in ["bool", "string", "None", "absent"] or numeric(value):
+        return value
+    for index in range(int(len(codec.models))):
+        model = codec.models[int(len(codec.models)) - index - 1]
+        if model.name == value or model.name == namespace + "." + value:
+            return model.name
+    if value in ["SourceId", "Span", "SourceFile"]:
+        return "source." + value
+    parts = value.split(".")
+    member = parts[-1]
+    for index in range(int(len(codec.models))):
+        model = codec.models[int(len(codec.models)) - index - 1]
+        if model.namespace.starts_with("model_") and model.name.ends_with("." + member):
+            return model.name
+    for model in codec.models:
+        if model.name == "lexer." + value:
+            return model.name
+    throw Error("unresolved archive model " + value + " from " + namespace)
+
+
+def read_field(codec: Codec, output: list[string], value: string, index: int, indent: string = "    ") -> unit | Error:
+    ensure(codec, value)
+    name = "field_" + string(index)
+    call = "get_" + identifier(value) + "(input)"
+    if value.contains(" | "):
+        output.append(indent + "optional_" + string(index) + " = " + call)
+        output.append(indent + name + " ?= optional_" + string(index) + ".value")
+    else:
+        output.append(indent + name + " = " + call)
+
+
+def put(codec: Codec, value: string, expression: string) -> string | Error:
+    ensure(codec, value)
+    return "put_" + identifier(value) + "(output, " + expression + ")"
+
+
+def ensure(codec: Codec, value: string) -> unit | Error:
+    if value in codec.types:
+        return
+    codec.types.append(value)
+    name = identifier(value)
+    result = "ArchiveOption_" + name if value.contains(" | ") else value
+    encode: list[string] = ["def put_" + name + "(output: list[string], value: " + value + "):"]
+    decode: list[string] = ["def get_" + name + "(input: ArchiveInput) -> " + result + " | Error:"]
+    if value == "string":
+        encode.append("    output.append(package.toml_quote(value))")
+        decode.append("    return package.unquote(take(input))")
+    elif value == "bool":
+        encode.append("    output.append(\"1\" if value else \"0\")")
+        decode.append("    value = take(input)\n    if value not in [\"0\", \"1\"]:\n        throw Error(\"invalid frontend archive boolean\")\n    return value == \"1\"")
+    elif numeric(value):
+        encode.append("    output.append(string(value))")
+        decode.append("    return " + value + "(take(input))")
+    elif value.contains(" | "):
+        parts = value.split(" | ")
+        if len(parts) != 2 or parts[1] not in ["None", "absent"]:
+            throw Error("unsupported archive union: " + value)
+        codec.options.append("class " + result + ":\n    value: " + value)
+        encode.append("    supplied ?= value\n    if supplied != " + parts[1] + ":\n        output.append(\"1\")\n        " + put(codec, parts[0], "supplied") + "\n    else:\n        output.append(\"0\")")
+        decode.append("    tag = take(input)\n    if tag == \"0\":\n        return " + result + "(" + parts[1] + ")\n    if tag != \"1\":\n        throw Error(\"invalid frontend archive optional tag\")\n    return " + result + "(get_" + identifier(parts[0]) + "(input))")
+    elif value.starts_with("list["):
+        child = value[5:-1]
+        encode.append("    output.append(string(len(value)))\n    for element in borrow value:\n        " + put(codec, child, "element"))
+        decode.append("    result: " + value + " = []\n    count = archive_count(input)\n    for index in range(count):\n        result.append(get_" + identifier(child) + "(input))\n    return result")
+    elif value.starts_with("tuple["):
+        children = split(value[6:-1])
+        args: list[string] = []
+        for index in range(int(len(children))):
+            encode.append("    " + put(codec, children[index], "value[" + string(index) + "]"))
+            read_field(codec, decode, children[index], index)
+            args.append("field_" + string(index))
+        decode.append("    return (" + args.join(", ") + ")")
+    else:
+        found := false
+        for index in range(int(len(codec.models))):
+            model = codec.models[int(len(codec.models)) - index - 1]
+            if model.name != value:
+                continue
+            found = true
+            if model.kind == "class":
+                args: list[string] = []
+                for index in range(int(len(model.fields))):
+                    field = model.fields[index]
+                    child = resolve(codec, field.type, model.namespace)
+                    encode.append("    " + put(codec, child, "value." + field.name))
+                    read_field(codec, decode, child, index)
+                    args.append(("" if value == "source.SourceFile" else field.name + "=") + "field_" + string(index))
+                if codec.mode == "interface" and value == "source.SourceId":
+                    decode.append("    if len(input.source_ids) > 0:\n        if field_0 >= len(input.source_ids):\n            throw Error(\"semantic interface has a dangling source identity\")\n        return source.SourceId(index=u32(input.source_ids[field_0]))")
+                decode.append("    return " + value + "(" + args.join(", ") + ")")
+            else:
+                encode.append("    match value:")
+                decode.append("    tag = archive_count(input)")
+                for index in range(int(len(model.variants))):
+                    variant = model.variants[index]
+                    encode.append("        case " + variant.name + ":\n            output.append(\"" + string(index) + "\")")
+                    decode.append("    if tag == " + string(index) + ":")
+                    args: list[string] = []
+                    for position in range(int(len(variant.fields))):
+                        field = variant.fields[position]
+                        child = resolve(codec, field.type, model.namespace)
+                        encode.append("            " + put(codec, child, field.name))
+                        read_field(codec, decode, child, position, "        ")
+                        args.append("field_" + string(position))
+                    decode.append("        return " + value + "." + variant.name + ("(" + args.join(", ") + ")" if len(args) > 0 else ""))
+                decode.append("    throw Error(\"invalid frontend archive variant: " + value + "\")")
+            break
+        if not found:
+            throw Error("missing archive model: " + value)
+    codec.functions.append(encode.join("\n") + "\n\n\n" + decode.join("\n"))
+
+
+def model_sources() -> list[string]:
+    return [
+        "sev_compiler/frontend/modules/graph/model.sev",
+        "sev_compiler/frontend/modules/graph/queries.sev",
+        "sev_compiler/frontend/modules/graph/verify.sev",
+        "sev_compiler/hir/module/hierarchy.sev",
+        "sev_compiler/hir/module/module.sev",
+        "sev_compiler/mir/cfg/availability.sev",
+        "sev_compiler/mir/cfg/block.sev",
+        "sev_compiler/mir/cfg/branch.sev",
+        "sev_compiler/mir/cfg/cfg.sev",
+        "sev_compiler/mir/cfg/control_flow.sev",
+        "sev_compiler/mir/cfg/dominance.sev",
+        "sev_compiler/mir/cfg/effects.sev",
+        "sev_compiler/mir/cfg/lazy.sev",
+        "sev_compiler/mir/value.sev",
+        "sev_compiler/syntax/block/block.sev",
+        "sev_compiler/syntax/block/control_flow.sev",
+        "sev_compiler/syntax/constraint/dispatch.sev",
+        "sev_compiler/syntax/constraint/graph.sev",
+        "sev_compiler/syntax/constraint/model.sev",
+        "sev_compiler/syntax/constraint/proof.sev",
+        "sev_compiler/syntax/constraint/refinement.sev",
+        "sev_compiler/syntax/diagnostics/diagnostics/src/lib.sev",
+        "sev_compiler/syntax/function/function.sev",
+        "sev_compiler/syntax/function/lowering.sev",
+        "sev_compiler/syntax/function/syntax.sev",
+        "sev_compiler/syntax/function/trait.sev",
+        "sev_compiler/syntax/grammar/contracts.sev",
+        "sev_compiler/syntax/grammar/grammar.sev",
+        "sev_compiler/syntax/lexeme.sev",
+        "sev_compiler/syntax/literal/bool.sev",
+        "sev_compiler/syntax/literal/lowered.sev",
+        "sev_compiler/syntax/literal/value.sev",
+        "sev_compiler/syntax/lowered.sev",
+        "sev_compiler/syntax/primitive/array/array.sev",
+        "sev_compiler/syntax/primitive/array/storage.sev",
+        "sev_compiler/syntax/primitive/bool/bool.sev",
+        "sev_compiler/syntax/primitive/byte/byte.sev",
+        "sev_compiler/syntax/primitive/catalog.sev",
+        "sev_compiler/syntax/primitive/char/char.sev",
+        "sev_compiler/syntax/primitive/char/encoding.sev",
+        "sev_compiler/syntax/primitive/char/units.sev",
+        "sev_compiler/syntax/primitive/char/utf8.sev",
+        "sev_compiler/syntax/primitive/contract.sev",
+        "sev_compiler/syntax/primitive/declarations.sev",
+        "sev_compiler/syntax/primitive/enum/enum.sev",
+        "sev_compiler/syntax/primitive/error/error.sev",
+        "sev_compiler/syntax/primitive/float/float.sev",
+        "sev_compiler/syntax/primitive/int/int.sev",
+        "sev_compiler/syntax/primitive/iterator/iterator.sev",
+        "sev_compiler/syntax/primitive/literal.sev",
+        "sev_compiler/syntax/primitive/mlir.sev",
+        "sev_compiler/syntax/primitive/number.sev",
+        "sev_compiler/syntax/primitive/numeric/power.sev",
+        "sev_compiler/syntax/primitive/pointer/pointer.sev",
+        "sev_compiler/syntax/primitive/string/core.sev",
+        "sev_compiler/syntax/primitive/string/format.sev",
+        "sev_compiler/syntax/primitive/string/methods.sev",
+        "sev_compiler/syntax/primitive/string/storage.sev",
+        "sev_compiler/syntax/primitive/string/string.sev",
+        "sev_compiler/syntax/primitive/string/string_lists.sev",
+        "sev_compiler/syntax/primitive/tuple/tuple.sev",
+        "sev_compiler/syntax/primitive/units/units.sev",
+        "sev_compiler/syntax/sentence/sentence.sev",
+        "sev_compiler/syntax/source.sev",
+        "sev_compiler/syntax/symbol/symbol.sev",
+        "sev_compiler/syntax/token.sev",
+        "sev_compiler/syntax/type/annotation.sev",
+        "sev_compiler/syntax/type/integer_spelling.sev",
+        "sev_compiler/syntax/type/mlir.sev",
+        "sev_compiler/syntax/type/scalar_conversion.sev",
+        "sev_compiler/syntax/type/slice_bounds.sev",
+        "sev_compiler/syntax/type/storage.sev",
+        "sev_compiler/syntax/type/system.sev",
+        "sev_compiler/syntax/type/tagged.sev",
+        "sev_compiler/syntax/type/type.sev",
+    ]
+
+
+def archive_header() -> string:
+    return "# Generated by sev_compiler/build/frontend_codec.sev during the package build.\nimport syntax\nimport lexer\nimport source\nimport package\nimport \"package:semantic/semantic/src/callable.sev\" as semantic\nimport \"package:semantic/semantic/src/definitions.sev\" as definitions\n\n\nclass ArchiveInput:\n    lines: list[string]\n    cursor: int = 0\n    source_ids: list[int] = []\n\n\ndef take(input: ArchiveInput) -> string | Error:\n    if input.cursor >= len(input.lines):\n        throw Error(\"truncated frontend archive\")\n    value = input.lines[input.cursor]\n    input.cursor += 1\n    return value\n\n\ndef archive_count(input: ArchiveInput) -> int | Error:\n    value = int(take(input))\n    if value < 0 or value > len(input.lines):\n        throw Error(\"invalid frontend archive count\")\n    return value\n\n\n"
+
+
+def body_header() -> string:
+    return "def archive_quote(value: string) -> string:\n    return value.replace(\"\\\\\", \"\\\\\\\\\").replace(\"\\n\", \"\\\\n\").replace(\"\\r\", \"\\\\r\")\n\n\ndef archive_unquote(value: string) -> string | Error:\n    output: list[string] = []\n    escaped := false\n    for character in value.characters():\n        part = string(character)\n        if escaped:\n            if part not in [\"n\", \"r\", \"\\\\\"]:\n                throw Error(\"invalid body archive escape\")\n            output.append(\"\\n\" if part == \"n\" else (\"\\r\" if part == \"r\" else \"\\\\\"))\n            escaped = false\n        elif part == \"\\\\\":\n            escaped = true\n        else:\n            output.append(part)\n    if escaped:\n        throw Error(\"truncated body archive escape\")\n    return output.join(\"\")\n\n\n"
+
+
+def relative(location: string, directory: string) -> string:
+    target = location.split("/")
+    base = directory.split("/")
+    common := 0
+    while common < int(len(target)) and common < int(len(base)) and target[common] == base[common]:
+        common += 1
+    parts: list[string] = []
+    for index in range(common, int(len(base))):
+        parts.append("..")
+    for index in range(common, int(len(target))):
+        parts.append(target[index])
+    return parts.join("/")
+
+
+def model_imports(codec: Codec, directory: string) -> string:
+    imports: list[string] = []
+    for namespace in package.sorted_strings(codec.namespaces):
+        if not namespace.starts_with("model_"):
+            continue
+        used := false
+        for value in codec.types:
+            if value.contains(namespace + "."):
+                used = true
+        if not used:
+            continue
+        for model in codec.models:
+            if model.namespace == namespace:
+                line = "import \"" + relative(model.location, directory) + "\" as " + namespace
+                if line not in imports:
+                    imports.append(line)
+                break
+    return imports.join("\n") + "\n"
+
+
+def names(text: string, functions_only: bool = false) -> list[string]:
+    result: list[string] = []
+    for line in text.split("\n"):
+        if line.starts_with("def "):
+            result.append(line[4:].split("(")[0])
+        elif not functions_only and line.starts_with("class "):
+            result.append(declaration(line))
+    return result
+
+
+def archive_text(text: string, mode: string) -> string:
+    archive = "mir_archive" if mode == "mir" else ("semantic_archive" if mode == "interface" else ("body_archive" if mode == "bodies" else "frontend_archive"))
+    text = text.replace("frontend_archive", archive)
+    if mode != "bodies":
+        return text
+    lines: list[string] = []
+    for line in text.split("\n"):
+        if not line.starts_with("import \"package:semantic/") and line != "import package":
+            lines.append(line)
+    return lines.join("\n").replace("package.toml_quote", "archive_quote").replace("package.unquote", "archive_unquote")
+
+
+def publish(destination: string, contents: string) -> unit | Error:
+    # Compare bytes so a corrupt non-UTF-8 output can be repaired as well.
+    directory = path.dirname(destination)
+    package.mkdir(directory)
+    temporary = package.temporary(directory, ".sev-codec-")
+    staged = temporary + "/output"
+    try:
+        package.write_text(staged, contents)
+        if not os.is_file(destination) or package.read_bytes(destination) != package.read_bytes(staged):
+            package.replace_file(staged, destination)
+        package.remove_tree(temporary)
+    catch failure: Error:
+        package.remove_tree(temporary)
+        throw Error(failure.message)
+
+
+def sha256(text: string, directory: string) -> string | Error:
+    temporary = package.temporary(directory, ".sev-hash-")
+    try:
+        package.write_text(temporary + "/input", text)
+        result = package.digest(temporary + "/input").replace("sha256:", "")
+        package.remove_tree(temporary)
+        return result
+    catch failure: Error:
+        package.remove_tree(temporary)
+        throw Error(failure.message)
+
+
+def generate(root: string, mode: string = "frontend") -> string | Error:
+    if mode not in ["frontend", "mir", "interface", "bodies"]:
+        throw Error("unknown frontend codec mode: " + mode)
+    root = package.canonical(root)
+    codec = Codec(root, mode)
+    for location in model_sources():
+        namespace = "model_" + identifier(location[int(len("sev_compiler/")):-4])
+        load_models(codec, root + "/" + location, namespace)
+    exported_sources(codec, root + "/sev_compiler/frontend/lexer/lexer/src/lib.sev")
+    for location in package.sorted_strings(codec.exports):
+        load_models(codec, location, "lexer")
+    load_models(codec, root + "/sev_compiler/frontend/source/source.sev", "source")
+    load_models(codec, root + "/sev_compiler/frontend/semantic/semantic/src/definitions.sev", "definitions")
+    load_models(codec, root + "/sev_compiler/frontend/semantic/semantic/src/callable.sev", "semantic")
+    contracts := ["model_hir_module_module.Module", "lexer.SyntaxRegistry", "list[source.SourceFile]", "list[semantic.PreludeAnalysis]"]
+    if mode == "mir":
+        contracts = ["model_hir_module_module.Module"]
+    elif mode == "interface":
+        contracts = ["model_hir_module_module.Module", "lexer.SyntaxRegistry", "list[source.SourceFile]", "list[string]"]
+    elif mode == "bodies":
+        contracts = ["model_syntax_block_block.Block"]
+    for contract in contracts:
+        ensure(codec, contract)
+    build := root + "/sev_compiler/build/package.pkg/build"
+    if mode == "interface":
+        build = root + "/library/package/compile/interface/package.pkg/build"
+    elif mode == "bodies":
+        build = root + "/sev_compiler/frontend/semantic/package.pkg/build"
+    package.mkdir(build)
+    body: list[string] = []
+    for option in codec.options:
+        body.append(option)
+    for function in codec.functions:
+        body.append(function)
+    schema = sha256(body.join("\n\n\n"), build)
+    identity := package.read_text(root + "/sev_compiler/build/frontend_codec.sev") + package.read_text(root + "/sev_compiler/build/codec/src/lib.sev") + package.read_text(root + "/sev_compiler/build/codec/src/host.sev")
+    seen: list[string] = []
+    for location in package.sorted_strings(codec.sources):
+        if location in seen:
+            continue
+        seen.append(location)
+        contents := ""
+        for index in range(int(len(codec.sources))):
+            if codec.sources[index] == location:
+                contents = codec.contents[index]
+        identity += relative(location, root) + string(char(0)) + contents + string(char(0))
+    identity += "mir" if mode == "mir" else "frontend"
+    generation = sha256(identity, build)
+    archive = "mir_archive" if mode == "mir" else ("semantic_archive" if mode == "interface" else ("body_archive" if mode == "bodies" else "frontend_archive"))
+    output = build + "/" + generation + "/staging/" + archive + ".sev"
+    directory = output[:-4]
+    header := model_imports(codec, path.dirname(output)) + archive_header()
+    if mode == "bodies":
+        header += body_header()
+    codec_names: list[string] = []
+    for name in package.sorted_strings(names(header + "\n" + codec.options.join("\n") + "\n" + codec.functions.join("\n"))):
+        if name not in codec_names:
+            codec_names.append(name)
+    codec_names.append("schema")
+    chunks: list[string] = []
+    chunk: list[string] = []
+    lines := 0
+    for function in codec.functions:
+        count = int(len(function.split("\n"))) + 3
+        if len(chunk) > 0 and lines + count > 650:
+            chunks.append(chunk.join("\n\n\n"))
+            chunk.clear()
+            lines = 0
+        chunk.append(function)
+        lines += count
+    if len(chunk) > 0:
+        chunks.append(chunk.join("\n\n\n"))
+    lock = file.native_lock(build + "/frontend_archive.lock")
+    if lock < 0:
+        throw Error("could not lock frontend archive generation")
+    try:
+        imports: list[string] = []
+        for index in range(int(len(chunks))):
+            name = "part_" + ("0" if index < 10 else "") + string(index) + ".sev"
+            functions = names(chunks[index], true)
+            required: list[string] = []
+            for symbol in codec_names:
+                if symbol not in functions:
+                    required.append(symbol)
+            text = model_imports(codec, directory) + "# Generated by sev_compiler/build/frontend_codec.sev.\nimport syntax\nimport lexer\nimport source\nimport package\nimport \"package:semantic/semantic/src/callable.sev\" as semantic\nimport \"package:semantic/semantic/src/definitions.sev\" as definitions\nimport " + required.join(", ") + " from \"../frontend_archive.sev\"\n\n\n" + chunks[index] + "\n"
+            publish(directory + "/" + name, archive_text(text, mode))
+            imports.append("import " + functions.join(", ") + " from \"frontend_archive/" + name + "\"")
+        text = header + "def schema() -> string:\n    return \"" + schema + "\"\n\n\n" + codec.options.join("\n\n\n") + "\n\n" + imports.join("\n") + "\n"
+        publish(output, archive_text(text, mode))
+        # Publish the stable entry last, after all shards have been repaired.
+        publish(build + "/" + archive + ".sev", "# Generated frontend codec entry.\nimport " + codec_names.join(", ") + " from \"" + relative(output, build) + "\"\n")
+        file.unlock(lock)
+    catch failure: Error:
+        file.unlock(lock)
+        throw Error(failure.message)
+    return output
+
+
+def repository() -> string | Error:
+    configured = environment.get("SEVERIAN_SYSROOT", "")
+    if configured != "":
+        return package.canonical(configured)
+    active = environment.get("SEVERIAN_ACTIVE_GENERATOR", "")
+    location := path.dirname(active) if active != "" else process.current_directory()
+    while true:
+        if package.exists(location + "/sev_compiler/package.json"):
+            return package.canonical(location)
+        parent = path.dirname(location)
+        if parent == location:
+            throw Error("set SEVERIAN_SYSROOT to the Severian repository")
+        location = parent
+
+
+def main():
+    root = repository()
+    for mode in ["frontend", "mir", "interface", "bodies"]:
+        generate(root, mode)
+
+
+test "archive tuples split only at the outer type level":
+    assert(split("int, list[tuple[string, bool]], source.Span") == ["int", "list[tuple[string, bool]]", "source.Span"])
+
+
+test "frontend and MIR preserve their distinct transient field rules":
+    assert(skip_field("model_syntax_block_block.Block", "operations", "frontend"))
+    assert(not skip_field("model_syntax_block_block.Block", "operations", "mir"))
+    assert(skip_field("model_syntax_function_function.FunctionDeclaration", "cfg", "frontend"))
+    assert(not skip_field("model_syntax_function_function.FunctionDeclaration", "cfg", "mir"))
+    assert(skip_field("model_hir_module_module.Module", "binding_values", "mir"))
+    assert(skip_field("source.SourceFile", "byte_offsets", "mir"))
+
+
+test "archive optional values retain tags and wrapper decoding":
+    codec = Codec("", "frontend")
+    ensure(codec, "int | None")
+    assert(codec.options == ["class ArchiveOption_int_None:\n    value: int | None"])
+    assert(codec.functions[-1].contains("if supplied != None:"))
+    assert(codec.functions[-1].contains("return ArchiveOption_int_None(None)"))
+    assert(codec.functions[-1].contains("invalid frontend archive optional tag"))
+
+
+test "archive schema and publication survive warm reuse and corrupt output":
+    directory = package.temporary("/tmp", "sev-codec-")
+    try:
+        assert(sha256("abc", directory) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        destination = directory + "/codec.sev"
+        contents = "def schema() -> string:\n    return \"fixture\"\n"
+        publish(destination, contents)
+        before = package.capture(["stat", "-c", "%y", destination])
+        publish(destination, contents)
+        assert(package.capture(["stat", "-c", "%y", destination]) == before)
+        package.write_bytes(destination, [u8(255)])
+        publish(destination, contents)
+        assert(package.read_text(destination) == contents)
+        os.remove(destination)
+        publish(destination, contents)
+        assert(package.read_text(destination) == contents)
+        package.remove_tree(directory)
+    catch failure: Error:
+        package.remove_tree(directory)
+        throw Error(failure.message)
+
+
+test "all archive modes regenerate deterministically and repair missing shards":
+    root = repository()
+    for mode in ["frontend", "mir", "interface", "bodies"]:
+        output = generate(root, mode)
+        original = package.read_text(output)
+        stamp = package.capture(["stat", "-c", "%y", output])
+        assert(generate(root, mode) == output)
+        assert(package.capture(["stat", "-c", "%y", output]) == stamp)
+        shard = output[:-4] + "/part_00.sev"
+        original_shard = package.read_text(shard)
+        package.write_bytes(shard, [u8(255)])
+        assert(generate(root, mode) == output)
+        assert(package.read_text(shard) == original_shard)
+        os.remove(shard)
+        assert(generate(root, mode) == output)
+        assert(package.read_text(shard) == original_shard)
+        assert(package.read_text(output) == original)

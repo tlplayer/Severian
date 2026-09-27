@@ -1,0 +1,32 @@
+import canonical, capture, digest, mkdir, read_text, remove_tree, replace_file, temporary, write_text from "package:cache/src/host.sev"
+import parse_document, text_setting from "package:build_flow/src/document.sev"
+import file
+import os
+
+
+def exists(location: string) -> bool:
+    return os.exists(location)
+
+
+def read_bytes(location: string) -> list[u8] | Error:
+    if not os.is_file(location):
+        throw Error("could not read " + location)
+    return file.map(location)
+
+
+def write_bytes(destination: string, contents: list[u8]) -> unit | Error:
+    if file.write(destination, contents) != 0:
+        throw Error("could not write " + destination)
+
+
+def sorted_strings(values: list[string]) -> list[string]:
+    result: list[string] = []
+    for value in values:
+        result.append(value)
+    for index in range(int(len(result))):
+        for next in range(index + 1, int(len(result))):
+            if result[next] < result[index]:
+                previous = result[index]
+                result[index] = result[next]
+                result[next] = previous
+    return result

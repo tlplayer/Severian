@@ -1,19 +1,21 @@
 {
-  "language": { "explicit-imports": true },
+  "language": {
+    "explicit-imports": true
+  },
   "package": {
-    "name": "sev-compiler-driver",
+    "name": "sev-compiler-build",
     "version": "0.1.0",
     "edition": "2026",
     "publish": false
   },
   "lib": {
-    "name": "driver",
-    "path": "driver/src/lib.sev"
+    "name": "build",
+    "path": "build/src/lib.sev"
   },
   "bin": [
     {
       "name": "sev-bootstrap-driver",
-      "path": "driver/src/main.sev"
+      "path": "build/src/main.sev"
     }
   ],
   "dependencies": {
@@ -96,6 +98,15 @@
     "lowering": {
       "path": "../lir/lowering",
       "package": "sev-compiler-lowering"
+    },
+    "codec": {
+      "path": "codec",
+      "package": "sev-build-codec"
     }
+  },
+  "build": {
+    "generators": [
+      "frontend_codec.sev"
+    ]
   }
 }

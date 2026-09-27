@@ -1,0 +1,4 @@
+import codec
+
+def main():
+    codec.generate(codec.repository(), "bodies")

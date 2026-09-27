@@ -1,5 +1,7 @@
 {
-  "language": { "explicit-imports": true },
+  "language": {
+    "explicit-imports": true
+  },
   "package": {
     "name": "sev-compiler-semantic",
     "version": "0.1.0",
@@ -54,11 +56,15 @@
     "syntax": {
       "package": "sev-compiler-syntax",
       "path": "../../syntax"
+    },
+    "codec": {
+      "path": "../../build/codec",
+      "package": "sev-build-codec"
     }
   },
   "build": {
     "generators": [
-      "generate_body_codec.py"
+      "generate_body_codec.sev"
     ]
   }
 }

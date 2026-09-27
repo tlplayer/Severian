@@ -121,6 +121,8 @@ unsafe extern "C" {
     pub fn mlirIdentifierStr(identifier: MlirIdentifier) -> MlirStringRef;
     pub fn mlirStringAttrGet(context: MlirContext, value: MlirStringRef) -> MlirAttribute;
     pub fn mlirStringAttrGetValue(attribute: MlirAttribute) -> MlirStringRef;
+    // Retain this MLIR C API binding even though it currently has no Rust callers.
+    #[allow(dead_code)]
     pub fn mlirIntegerAttrGetValueInt(attribute: MlirAttribute) -> i64;
     pub fn mlirAttributeIsAType(attribute: MlirAttribute) -> bool;
     pub fn mlirTypeAttrGetValue(attribute: MlirAttribute) -> MlirType;

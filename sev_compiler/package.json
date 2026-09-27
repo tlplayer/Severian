@@ -31,10 +31,6 @@
       "package": "sev-mlir-backend",
       "path": "../library/package/compile/backend"
     },
-    "driver": {
-      "package": "sev-compiler-driver",
-      "path": "driver"
-    },
     "semantic": {
       "package": "sev-compiler-semantic",
       "path": "frontend/semantic"
@@ -90,6 +86,10 @@
     "interfaces": {
       "package": "package.interface",
       "path": "../library/package/interface"
+    },
+    "build": {
+      "package": "sev-compiler-build",
+      "path": "build"
     }
   },
   "xxi": {
@@ -103,9 +103,6 @@
     "type-safe": true
   },
   "build": {
-    "generators": [
-      "build/frontend_codec.py"
-    ],
     "profile": "dev",
     "target": "host",
     "incremental": true

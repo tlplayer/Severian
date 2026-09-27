@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Compatibility entry for the package-owned frontend codec build recipe."""
+"""Compatibility launcher for the Severian-owned frontend codec recipe."""
+import os
 from pathlib import Path
-import runpy
+import subprocess
 
 if __name__ == '__main__':
-    runpy.run_path(str(Path(__file__).resolve().parents[2] /
-                      'sev_compiler/build/frontend_codec.py'), run_name='__main__')
+    root = Path(__file__).resolve().parents[2]
+    recipe = root / 'sev_compiler/build/frontend_codec.sev'
+    compiler = os.environ.get('SEVERIAN_GENERATOR_COMPILER') or str(root / 'bin/sev_rust')
+    environment = {**os.environ, 'SEVERIAN_ACTIVE_GENERATOR': str(recipe),
+                   'SEVERIAN_SYSROOT': str(root)}
+    raise SystemExit(subprocess.call([compiler, str(recipe)], env=environment))

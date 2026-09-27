@@ -41,11 +41,15 @@
     "semantic": {
       "path": "../../../../sev_compiler/frontend/semantic",
       "package": "sev-compiler-semantic"
+    },
+    "codec": {
+      "path": "../../../../sev_compiler/build/codec",
+      "package": "sev-build-codec"
     }
   },
   "build": {
     "generators": [
-      "generate_codec.py"
+      "generate_codec.sev"
     ]
   }
 }

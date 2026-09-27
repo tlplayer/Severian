@@ -346,8 +346,8 @@ fn mutation_testing_preserves_compile_and_timeout_classifications() {
 }
 
 #[test]
-fn compiler_compile_resolves_through_its_library_target() {
-    let package = repository_root().join("sev_compiler/compile");
+fn compiler_build_resolves_through_its_library_target() {
+    let package = repository_root().join("sev_compiler/build");
     let output = sev().args(["check"]).arg(package).output().unwrap();
     assert!(
         output.status.success(),

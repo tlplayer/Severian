@@ -49,7 +49,7 @@ def prepare_prelude(sysroot: string) -> unit | Error:
     subject = source.SourceFile(source.SourceId(0), "/__severian_prelude_snapshot__.sev", "")
     result ?= compile_source(subject, false, sysroot, files, prepare_only=true)
     if result is Diagnostic:
-        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "prepare_prelude", subject.path))
+        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-build", "prepare_prelude", subject.path))
         # Indexed preludes retain source identities and paths, not source text.
         # Fetch only the source needed to render this diagnostic.
         location ?= framed.span
@@ -83,7 +83,7 @@ def load_input(path: string) -> source.SourceFile | Error:
     if result is SourceFile:
         return result
     if result is Diagnostic:
-        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "load_input", path))
+        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-build", "load_input", path))
         throw Error(framed.display())
     throw Error("could not read source file: " + path)
 
@@ -93,7 +93,7 @@ def compile_to_mlir(input: source.SourceFile, include_tests: bool = false, sysro
     if result is string:
         return result
     if result is Diagnostic:
-        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-driver", "compile_to_mlir", input.path))
+        framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-build", "compile_to_mlir", input.path))
         throw Error(diagnostics.render(framed, files))
     if result is Error:
         throw Error(result.message)
