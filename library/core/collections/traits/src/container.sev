@@ -1,7 +1,7 @@
 # Storage quantities are separate from the number of elements in a container.
 trait ByteSized:
-    def bytes() -> byte
+    def bytes(self: view Self) -> byte
 
 trait Container: ByteSized
-    def len() -> int
-    def size() -> int
+    def len(self: view Self) -> int
+    def size(self: view Self) -> int

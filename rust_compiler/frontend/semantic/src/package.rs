@@ -844,14 +844,19 @@ fn collect_package_classes(
                         declaration.name.as_str(),
                         "pointer" | "array" | "char" | "slice"
                     );
-                    if !supported
-                        || (declaration.name == "pointer" && declaration.aliases.is_empty())
-                    {
+                    if !supported {
                         return Err(Diagnostic::new(
                             "E000204",
-                            "a generic primitive declaration must complete a compiler-owned structural type and declare its source alias",
+                            format!("the bootstrap does not support generic primitive completion for `{}`", declaration.name),
                             Some(declaration.span),
-                        ));
+                        ).with_help("if this is a primitive, implement its generic structural type contract in the bootstrap; only for an ordinary source class, remove the trailing `:` after the implemented traits"));
+                    }
+                    if declaration.name == "pointer" && declaration.aliases.is_empty() {
+                        return Err(Diagnostic::new(
+                            "E000204",
+                            "generic pointer primitive completion requires a source alias",
+                            Some(declaration.span),
+                        ).with_help("declare the intended source alias using `self as Alias` in the pointer completion body; for an ordinary source class, remove the trailing `:` after the implemented traits"));
                     }
                     let path = format!("source.{:032x}.{}", module.0, declaration.name);
                     types

@@ -43,7 +43,7 @@ trait String: Container
     def reserve(self: borrow Self, required: int)
 
 
-class string[T: u8 | u32 = u8, N = 64]: String+ StringOperations:
+class string[T: u8 | u32 = u8, N = 64]: String+ StringOperations
     storage: vectors.vector[char[T], N]
 
     def string():
