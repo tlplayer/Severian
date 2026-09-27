@@ -37,10 +37,34 @@ The block is an if block (these can be dynamically defined and are all automatic
 inside we have an operation that interacts with the CFG and returns to the caller block return 0 which looks at the current block and returns to the caller block's 
 previous cursor with the Result[R] type with value 0 which could've been an error
 
+The lower levels should not have things like IfBlock or BlockIf in enums and then do custom handling for a big reason. It limits interop and hides the handling behind the compiler when the opposite should occur. The compiler should read the rules of the language to self express. 
+that information needs to be passed over from HIR to MIR after the HIR graph goes to MIR after passing CFG, Strongly Connected Component (SCC), and Memory operations to make the MIR graph. 
+
+
+
 ### Frontend
 
 Source: Loads the source text and other imports into collections 
 Parsing: groups items into blocks 
+lexer: groups items into lexemes
+modules:??? Maybe move to HIR
+semantic: 
+
+### HIR
+
+The HIR graph contains the refined output from applying the rules/information from syntax onto source outputting a graph of ops/sentences/blocks/modules etc. into a graph of objects we can begin to understand and apply rules onto to catch bugs. These package.pkg/debug/build/<compiler pipeline step>/<error,lint,warning,etc.> will tell us what's wrong with our builds at which step to better fix bugs and get a hollistic picture. 
+
+
+### MIR
+
+This is where HIR has applied the checks that make sense at that level we can now work on ownership/CFG 
+of the submodules HIR has given us. submodules map to ~.o/.so etc compilable units essentially this lets us know what objects contribute to the package's output. We can then apply our mir steps and output the issues or link up the submodules into propoer modules to expose to LIR which allows the LIR a good time finally compiling the output
+
+
+### LIR
+
+This step lowers the finalized modules into MLIR compilable objects and generates executables/.o/.so files with the .pkgi to interface with other objects. 
+
 
 
 ## Problem(s)
