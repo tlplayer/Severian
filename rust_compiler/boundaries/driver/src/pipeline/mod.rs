@@ -142,7 +142,7 @@ impl Compiler {
     }
 
     pub fn with_max_errors(mut self, max_errors: usize) -> Self {
-        self.max_errors = max_errors.max(1);
+        self.max_errors = if max_errors == 0 { usize::MAX } else { max_errors };
         self
     }
 
@@ -3018,6 +3018,24 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn zero_error_limit_reports_more_than_five_parser_failures() {
+        let root = temporary_package();
+        let source = root.join("invalid.sev");
+        std::fs::write(&source,
+            "def main():\n    one = )\n    two = )\n    three = )\n    four = )\n    five = )\n    six = )\n").unwrap();
+        for (limit, expected) in [(0, 6), (2, 2)] {
+            let compiler = Compiler::new(TargetSpec::host()).unwrap().with_max_errors(limit);
+            let error = compiler.check_file_to_hir(&source, CompileMode::Build).unwrap_err();
+            let CompileError::Diagnostic(diagnostic) = error else {
+                panic!("expected parser diagnostics");
+            };
+            assert_eq!(1 + diagnostic.additional.len(), expected);
+            assert_eq!(diagnostic.to_string().contains("additional diagnostics omitted"), limit != 0);
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import * from "buffer_intrinsics.sev"
+import allocate_buffer, buffer_index from "buffer_intrinsics.sev"
 
 
 # The source equivalent of a zeroed physical allocation. Its descriptor stays

@@ -134,6 +134,28 @@ same general rules for hidden/export request only.
 
 ```
 
+## Build
+
+### Build and test commands
+
+Run these commands from the package directory:
+
+```sh
+sev build                     # Build the current package
+sev test                      # Build and run the package tests
+```
+
+To rebuild the compiler from the current checkout:
+
+```sh
+sev update --local
+sev update --local --max-errors 0
+```
+
+Update/build reports are stored under `package.pkg/debug/build/<compiler stage>/` in
+`error/`, `lint/`, and `warning/`. 
+
+
 ## Testing
 
 Tests are seperated cleanly from code. this provides core benefits. 
@@ -592,4 +614,3 @@ API ID: `prelude.function.assert`
 | `**`    | Raise a value to a power   |
 | `round()`  | Round a numeric value      |
 | `sum(T...)`    | Sum values                 |
-

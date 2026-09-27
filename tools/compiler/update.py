@@ -160,7 +160,13 @@ def main():
     parser.add_argument('--install-dir', type=Path,
                         default=Path(os.environ.get('CARGO_HOME', Path.home() / '.cargo')) / 'bin')
     parser.add_argument('--no-install', action='store_true', help='build and verify only')
+    parser.add_argument('--max-errors', type=int,
+                        help='diagnostic limit for bootstrap and generator compilation; 0 means unlimited')
     args = parser.parse_args()
+    if args.max_errors is not None:
+        if args.max_errors < 0 or args.max_errors > 999_999_999:
+            parser.error('--max-errors must be between 0 and 999999999 (0 means unlimited)')
+        os.environ['SEVERIAN_MAX_ERRORS'] = str(args.max_errors)
     cache = ROOT / 'package.pkg'
     cache.mkdir(exist_ok=True)
     with (cache / 'compiler-update.lock').open('w') as lock:

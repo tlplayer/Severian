@@ -1326,10 +1326,11 @@ fn compiler_without_generators(
     } else {
         TargetSpec::new(config.target.clone())
     };
-    let max_errors = config.values["diagnostics.max-errors"]
-        .value
+    // Inherited by generator subprocesses as well as the top-level update.
+    let max_errors = env::var("SEVERIAN_MAX_ERRORS")
+        .unwrap_or_else(|_| config.values["diagnostics.max-errors"].value.clone())
         .parse::<usize>()
-        .map_err(|error| format!("invalid diagnostics.max-errors: {error}"))?;
+        .map_err(|error| format!("invalid diagnostic limit (SEVERIAN_MAX_ERRORS or diagnostics.max-errors): {error}"))?;
     let optimization_key = format!("profile.{}.opt-level", config.profile);
     let optimization = config.values[&optimization_key]
         .value

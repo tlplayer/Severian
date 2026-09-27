@@ -72,7 +72,7 @@ path = "diagnostics.max-errors"
 group = "Diagnostics"
 type = "integer"
 default = "5"
-description = "Maximum diagnostics emitted before checking stops."
+description = "Maximum recoverable diagnostics; 0 means unlimited. Semantic analysis may stop at its first blocking error."
 
 [[option]]
 path = "diagnostics.verify-each"
