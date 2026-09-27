@@ -1,11 +1,11 @@
-import * from "../../../system/io/src/diagnostic.sev" as diagnostic_io
+import write_text from "../../../system/io/src/buffer.sev"
 
 
 # cf.assert still owns termination. Report first through unbuffered stderr so
 # the diagnostic survives termination even when stdout has been redirected.
 def _assert_condition(condition: bool, message: string) -> bool:
     if not condition:
-        diagnostic_io.write_text(2, "assertion failed: " + message + "\n")
+        write_text(2, "assertion failed: " + message + "\n")
     return condition
 
 

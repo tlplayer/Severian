@@ -23,13 +23,13 @@ trait StringOperations:
 
 
 # Some strings for ctype-style character classification
-WHITE_SPACE = ' \t\n\r\v\f'
-ASCII_LOWERCASE = 'abcdefghijklmnopqrstuvwxyz'
-ASCII_UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+WHITE_SPACE = " \t\n\r\v\f"
+ASCII_LOWERCASE = "abcdefghijklmnopqrstuvwxyz"
+ASCII_UPPERCASE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 ASCII_LETTERS = ascii_lowercase + ascii_uppercase
-DIGITS = '0123456789'
-HEXDIGITS = digits + 'abcdef' + 'ABCDEF'
-OCTDIGITS = '01234567'
+DIGITS = "0123456789"
+HEXDIGITS = digits + "abcdef" + "ABCDEF"
+OCTDIGITS = "01234567"
 PUNCTUATION = r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""
 PRINTABLE = digits + ascii_letters + punctuation + whitespace
 

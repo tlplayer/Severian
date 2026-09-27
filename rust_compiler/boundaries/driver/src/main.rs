@@ -305,10 +305,7 @@ fn emit_ir(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
     }
     let stage = options.emit.expect("emit dispatch requires a stage");
     let input = discover(options.path.as_deref(), catalog)?;
-    let manifest = match &input {
-        Input::Package(manifest) => Some(manifest.as_ref()),
-        Input::Source { .. } => None,
-    };
+    let manifest = input.manifest();
     let config = resolve_config(catalog, manifest, &options)?;
     let targets = selected_targets(&input, options.bin.as_deref())?;
     if targets.len() != 1 {
@@ -425,8 +422,18 @@ enum Input {
         source: PathBuf,
         root: PathBuf,
         name: String,
+        manifest: Option<Box<Manifest>>,
     },
     Package(Box<Manifest>),
+}
+
+impl Input {
+    fn manifest(&self) -> Option<&Manifest> {
+        match self {
+            Self::Source { manifest, .. } => manifest.as_deref(),
+            Self::Package(manifest) => Some(manifest.as_ref()),
+        }
+    }
 }
 
 fn discover(path: Option<&Path>, catalog: &Catalog) -> Result<Input, String> {
@@ -439,7 +446,14 @@ fn discover(path: Option<&Path>, catalog: &Catalog) -> Result<Input, String> {
         if path.extension().and_then(|extension| extension.to_str()) != Some("sev") {
             return Err(format!("{} is not a Severian source file", path.display()));
         }
+        let path = path.canonicalize()
+            .map_err(|error| format!("could not resolve {}: {error}", path.display()))?;
         let root = path.parent().unwrap_or_else(|| Path::new(".")).to_owned();
+        let manifest = root.ancestors()
+            .map(severian_driver::config::document::path)
+            .find(|candidate| candidate.is_file())
+            .map(|manifest| Manifest::load(&manifest, catalog).map(Box::new))
+            .transpose()?;
         let name = path
             .file_stem()
             .map(|name| name.to_string_lossy().into_owned())
@@ -448,6 +462,7 @@ fn discover(path: Option<&Path>, catalog: &Catalog) -> Result<Input, String> {
             source: path,
             root,
             name,
+            manifest,
         });
     }
     if !path.exists() {
@@ -475,10 +490,7 @@ fn check(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
         return Err("`sev check` does not accept application arguments".into());
     }
     let input = discover(options.path.as_deref(), catalog)?;
-    let manifest = match &input {
-        Input::Package(manifest) => Some(manifest.as_ref()),
-        _ => None,
-    };
+    let manifest = input.manifest();
     let config = resolve_config(catalog, manifest, &options)?;
     let compiler = compiler(&config, manifest, false)?;
     let targets = selected_targets(&input, options.bin.as_deref())?;
@@ -496,7 +508,7 @@ fn lint_only(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
         return Err("--lint cannot be combined with --emit, --output, or application arguments".into());
     }
     let input = discover(options.path.as_deref(), catalog)?;
-    let manifest = match &input { Input::Package(manifest) => Some(manifest.as_ref()), _ => None };
+    let manifest = input.manifest();
     let config = resolve_config(catalog, manifest, &options)?;
     let compiler = compiler_without_generators(&config, manifest, false)?;
     let targets = selected_targets(&input, options.bin.as_deref())?;
@@ -528,10 +540,7 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
         return Err("`sev build` does not accept application arguments".into());
     }
     let input = discover(options.path.as_deref(), catalog)?;
-    let manifest = match &input {
-        Input::Package(manifest) => Some(manifest.as_ref()),
-        _ => None,
-    };
+    let manifest = input.manifest();
     let config = resolve_config(catalog, manifest, &options)?;
     let compiler = compiler(&config, manifest, false)?;
     let targets = selected_targets(&input, options.bin.as_deref())?;
@@ -806,10 +815,7 @@ fn run_program(mut options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
         return execute_binary(&executable, &application_args);
     }
     let input = discover(options.path.as_deref(), catalog)?;
-    let manifest = match &input {
-        Input::Package(manifest) => Some(manifest.as_ref()),
-        _ => None,
-    };
+    let manifest = input.manifest();
     let config = resolve_config(catalog, manifest, &options)?;
     let binary = selected_binary(&input, options.bin.as_deref())?;
     let output = options.output.clone().unwrap_or_else(|| {
@@ -1145,7 +1151,7 @@ fn test(options: CommonOptions, catalog: &Catalog, mutate: bool) -> Result<(), S
             let root = input_root(&input).to_owned();
             let manifest = match input {
                 Input::Package(manifest) => Some(*manifest),
-                Input::Source { .. } => None,
+                Input::Source { manifest, .. } => manifest.map(|manifest| *manifest),
             };
             (sources, fixture_packages, root, manifest, validation)
         };
@@ -1640,10 +1646,7 @@ fn config(arguments: Vec<String>, catalog: &Catalog) -> Result<(), String> {
         "show" => {
             let options = parse_common(arguments[1..].to_vec())?;
             let input = discover(options.path.as_deref(), catalog)?;
-            let manifest = match &input {
-                Input::Package(manifest) => Some(manifest.as_ref()),
-                _ => None,
-            };
+            let manifest = input.manifest();
             let resolved = resolve_config(catalog, manifest, &options)?;
             for (path, value) in &resolved.values {
                 println!("{path} = {:?} # {}", value.value, value.origin);
@@ -2119,6 +2122,38 @@ build options:\n",
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_recipe_retains_its_enclosing_package_dependencies() {
+        let root = env::temp_dir().join(format!(
+            "severian-recipe-manifest-{}-{}",
+            process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(root.join("codec")).unwrap();
+        fs::create_dir_all(root.join("recipes")).unwrap();
+        fs::write(root.join("package.json"), r#"{
+            "package": {"name": "recipe-owner", "version": "0.1.0"},
+            "lib": {"path": "lib.sev"},
+            "dependencies": {"codec": {"path": "codec", "package": "fixture-codec"}}
+        }"#).unwrap();
+        fs::write(root.join("lib.sev"), "def library_only():\n    return\n").unwrap();
+        fs::write(root.join("codec/package.json"), r#"{
+            "package": {"name": "fixture-codec", "version": "0.1.0"},
+            "lib": {"path": "lib.sev"}
+        }"#).unwrap();
+        fs::write(root.join("codec/lib.sev"), "def generate():\n    return\n").unwrap();
+        let recipe = root.join("recipes/generate.sev");
+        fs::write(&recipe, "import codec\ndef main():\n    codec.generate()\n").unwrap();
+
+        let input = discover(Some(&recipe), &Catalog::load().unwrap()).unwrap();
+        let manifest = input.manifest().expect("source retains its package manifest");
+        let owner = &manifest.package_graph.packages[&manifest.package_graph.root];
+        let dependency = owner.dependencies.get("codec").expect("codec dependency is resolved");
+        assert_eq!(manifest.package_graph.packages[dependency].name, "fixture-codec");
+        assert_eq!(selected_binary(&input, None).unwrap().path, recipe.canonicalize().unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn lint_flag_supports_correction_and_editor_plans() {
