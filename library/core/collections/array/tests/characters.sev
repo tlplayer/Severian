@@ -1,9 +1,9 @@
-import "../storage.sev" as arrays
-import "../../char/units.sev" as characters
-import "../../../../../library/core/collections/vector/src/vector.sev" as vectors
+import "../src/storage.sev" as arrays
+import "../../../../../sev_compiler/syntax/primitive/char/units.sev" as characters
+import "../../vector/src/vector.sev" as vectors
 
 
-def make_characters() -> array[char[u32]]:
+def __make_characters() -> array[char[u32]]:
     values = arrays.allocate[char[u32]](3)
     arrays.write(values, 0, characters.char[u32](955))
     arrays.write(values, 1, characters.char[u32](128512))

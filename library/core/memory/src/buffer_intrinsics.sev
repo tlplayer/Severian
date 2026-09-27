@@ -10,3 +10,10 @@ def buffer_index(count: int) -> index
 # for their aliases. This operation transfers contents, not release authority.
 @mlir("memref.copy")
 def copy_buffer[T](source: view array[T], destination: borrow array[T])
+
+
+@mlir("memref.load")
+def load_buffer[T](value: view array[T], position: index) -> T
+
+@mlir("memref.store")
+def store_buffer[T](item: T, value: borrow array[T], position: index)

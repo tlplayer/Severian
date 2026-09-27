@@ -1,7 +1,7 @@
 
-
+# This should use sentences because tuples are (...)
 trait TupleSyntax: G
-    symbol: Y = (
+    symbol: Y = "("
     form: GrammarForm = GrammarForm.Delimited
     closing: string = ")"
     separator: string = ","

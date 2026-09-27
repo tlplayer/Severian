@@ -1,6 +1,6 @@
 import "../../../../library/core/collections/vector/src/vector.sev" as vectors
 import "../char/utf8.sev" as encoding
-import "../array/storage.sev" as arrays
+import "../../../../library/core/collections/array/src/storage.sev" as arrays
 import Container from "../../../../library/core/collections/traits/src/container.sev"
 
 trait StringOperations:

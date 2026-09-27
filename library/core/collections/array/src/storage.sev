@@ -1,4 +1,4 @@
-import "../../../../library/core/storage/src/buffer.sev" as storage
+import "../../../storage/src/buffer.sev" as storage
 
 # Typed rank-one arrays use the shared storage/memory allocation boundary.
 # char[T] is an ordinary element type here, with the same loans and ownership
