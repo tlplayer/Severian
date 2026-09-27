@@ -41,6 +41,22 @@ The lower levels should not have things like IfBlock or BlockIf in enums and the
 that information needs to be passed over from HIR to MIR after the HIR graph goes to MIR after passing CFG, Strongly Connected Component (SCC), and Memory operations to make the MIR graph. 
 
 
+#### Primtiives
+
+1. int
+
+The integer is a basic building block of any programming language
+```sev
+# Assign a to a literal int
+a = 1
+print(1) 
+
+
+
+```
+
+
+
 
 ### Frontend
 
@@ -73,6 +89,11 @@ This step lowers the finalized modules into MLIR compilable objects and generate
 
 ## Testing
 
-
+1. Does the frontend pull literals, variables, block structure from syntax?
+2. Does that structure remain intact until MLIR lowering?
+3. Does submodule grouping happen in HIR?
+4. Does module grouping happen in MIR and linking correctly reuse components?
+5. Does ownership/CFG have clean structure between blocks/submodules?
+6. Does LIR/MLIR have enough information to make valid MLIR code to optimize and creature artifacts for other packages/release artifacts/executables?
 
 
