@@ -483,15 +483,20 @@ pub(crate) fn analyze_with_package_functions(
             _ => None,
         }));
         for method in &declaration.methods {
+            // Method binders extend this signature only. A generic declared by
+            // one method must neither resolve as a concrete type nor become
+            // visible to a sibling method.
+            let mut method_types = symbolic_types.clone();
+            method_types.extend(method.type_parameters.iter().cloned());
             let parameters = method
                 .parameters
                 .iter()
                 .map(|parameter| {
-                    analyzer.resolve_trait_type(&parameter.annotation, &symbolic_types)
+                    analyzer.resolve_trait_type(&parameter.annotation, &method_types)
                 })
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
             let result =
-                analyzer.resolve_trait_type(&method.result, &symbolic_types)?;
+                analyzer.resolve_trait_type(&method.result, &method_types)?;
             methods.push(HirTraitMethodDeclaration {
                 name: method.name.clone(),
                 parameters,
@@ -20392,6 +20397,9 @@ fn resolve_type_annotation(
             format!("unknown type `{name}`"),
             Some(annotation.span),
         )
+        .with_help(format!(
+            "declare or import type `{name}`, or declare it as a generic parameter on this callable or its enclosing declaration"
+        ))
     })
 }
 
@@ -21222,6 +21230,45 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn trait_method_generic_array_result_stays_symbolic() {
+        let (program, _) = analyze_source(
+            "trait StringOperations:\n    def encode[T: u8 | u32]() -> array[T]\n",
+        );
+        let method = &program.modules[0].traits[0].methods[0];
+        assert_eq!(method.name, "encode");
+        assert!(method.parameters.is_empty());
+        assert_eq!(method.result, HirTraitType::Symbolic("array[T]".into()));
+    }
+
+    #[test]
+    fn trait_method_generics_compose_with_enclosing_parameters() {
+        let (program, context) = analyze_source(
+            "trait Transform[Outer]:\n    def convert[T](input: list[Outer], target: T) -> array[T]\n    def size() -> int\n",
+        );
+        let methods = &program.modules[0].traits[0].methods;
+        assert_eq!(methods[0].parameters, vec![
+            HirTraitType::Symbolic("list[Outer]".into()),
+            HirTraitType::Symbolic("T".into()),
+        ]);
+        assert_eq!(methods[0].result, HirTraitType::Symbolic("array[T]".into()));
+        assert_eq!(methods[1].result,
+            HirTraitType::Concrete(context.types.resolve_name("int").unwrap()));
+    }
+
+    #[test]
+    fn trait_method_generics_do_not_leak_to_sibling_signatures() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source("method-scope.sev",
+            "trait Operations:\n    def encode[T]() -> array[T]\n    def invalid() -> T\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000204");
+        assert_eq!(error.message, "unknown type `T`");
+        assert_eq!(error.span.unwrap().start as usize, source.text.rfind('T').unwrap());
+        assert!(error.help.as_deref().unwrap().contains("generic parameter"));
     }
 
     #[test]

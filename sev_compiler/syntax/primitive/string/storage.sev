@@ -5,7 +5,7 @@ import Container from "../../../../library/core/collections/traits/src/container
 
 trait StringOperations:
     # Return the raw representation of the data in an array
-    def encode[T: u8 | u32]() -> array[T: u8 | u32]
+    def encode[T: u8 | u32]() -> array[T]
     def ends_with(sub_string:string|char) -> bool
     def starts_with(sub_string:string|char) -> bool
     # Finds the index of sub_string within start/end
@@ -45,7 +45,7 @@ trait String: Container
     def reserve(self: borrow Self, required: int)
 
 
-class string[T: u8 | u32 = u8, N = 64]: String + StringOperations[T]
+class string[T: u8 | u32 = u8, N = 64]: String + StringOperations
     storage: vectors.vector[char[T], N]
 
     def string():
