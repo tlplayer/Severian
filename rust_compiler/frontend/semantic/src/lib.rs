@@ -17194,6 +17194,22 @@ impl Analyzer<'_> {
         if callable_path(callee).is_some_and(|path| self.functions.contains_key(&path)) {
             return Ok(None);
         }
+        if let Some(path) = callable_path(callee) {
+            if let Some((namespace, member)) = path.split_once('.') {
+                if self.package_namespaces.contains(namespace)
+                    && !self.declarations.contains(namespace)
+                    && member.split('.').any(|part| part.starts_with("__"))
+                {
+                    return Err(Diagnostic::new(
+                        "E000124",
+                        format!("file-local declaration `{path}` cannot be accessed through an imported namespace"),
+                        Some(callee.span),
+                    ).with_help(format!(
+                        "call an exported function from `{namespace}`; keep calls to `{member}` inside its defining file"
+                    )));
+                }
+            }
+        }
         if let AstExpressionKind::Name(class_name) = &object.kind {
             let instance = self
                 .class_instances
@@ -21230,6 +21246,32 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn imported_private_namespace_call_reports_the_member() {
+        let root = std::env::temp_dir().join(format!(
+            "sev-private-namespace-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("provider.sev"),
+            "def __read() -> int:\n    return 42\ndef read() -> int:\n    return __read()\n").unwrap();
+        let entry = root.join("main.sev");
+        std::fs::write(&entry,
+            "import \"provider.sev\" as memory\ndef main() -> int:\n    return memory.read()\n").unwrap();
+        let context = severian_bootstrap::load().unwrap();
+        let graph = severian_modules::resolve(&entry).unwrap();
+        let public = analyze_package(&graph, &context).unwrap();
+        severian_mir::build(&public.hir).unwrap();
+        std::fs::write(&entry,
+            "import \"provider.sev\" as memory\ndef main() -> int:\n    return memory.__read()\n").unwrap();
+        let graph = severian_modules::resolve(&entry).unwrap();
+        let error = analyze_package(&graph, &context).unwrap_err();
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(error.code, "E000124");
+        assert!(error.message.contains("memory.__read"));
+        assert!(error.help.as_deref().unwrap().contains("exported function"));
     }
 
     #[test]

@@ -38,6 +38,14 @@ def __raw_offset(base: pointer, offset: int) -> pointer:
     return __raw_pointer(__raw_integer(base) + offset)
 
 
+# The caller retains the buffer owner while using this borrowed address.
+# Offset is in bytes; one-past-end is valid only for an empty foreign region.
+def byte_buffer_address(data: view array[u8], offset: int) -> pointer:
+    assert(offset >= 0 and offset <= len(data))
+    unsafe:
+        return __raw_pointer(__raw_index(__raw_buffer_address(data)) + offset)
+
+
 # Hosted byte writes keep the storage loan alive across address extraction and
 # the C call. Callers pass a buffer and a checked byte range, never an integer
 # masquerading as a pointer.
