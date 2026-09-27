@@ -1,5 +1,5 @@
 # Typed byte-buffer IO. Allocation remains with the caller's core.storage owner.
-import * from "../../../interop/xxi/src/buffer.sev" as xxi
+import "../../../interop/xxi/src/buffer.sev" as xxi
 import "../../../core/memory/src/raw_intrinsics.sev" as raw
 import "../../../core/string/src/storage.sev" as text
 

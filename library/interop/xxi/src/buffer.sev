@@ -1,6 +1,6 @@
 # Argument marshalling over a caller-owned byte buffer. The calling boundary
 # retains its typed view for the call; these helpers never allocate or adopt it.
-import * from "../../../core/memory/src/raw_intrinsics.sev" as memory
+import "../../../core/memory/src/raw_intrinsics.sev" as memory
 
 def address(data: view array[u8], initialized: int, offset: int, count: int) -> pointer:
     assert(initialized >= 0 and initialized <= len(data))

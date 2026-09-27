@@ -8856,6 +8856,37 @@ impl Analyzer<'_> {
                 if *operator == AstUnaryOperator::Copy {
                     let operand = self.expression(operand, expected)?;
                     if let Some(owner) = self.class_instances_by_type.get(&operand.type_id).cloned() {
+                        let mut copies = owner.operators.iter().filter(|operator| {
+                            operator.operator == severian_ast::OperatorSyntax::from_spelling("copy")
+                                && operator.type_parameters.is_empty()
+                                && operator.parameters.is_empty()
+                        });
+                        if let Some(operator) = copies.next() {
+                            if copies.next().is_some() {
+                                return Err(Diagnostic::new(
+                                    "E000212",
+                                    "ambiguous copy operator",
+                                    Some(ast.span),
+                                ));
+                            }
+                            let method = severian_ast::FunctionDeclaration {
+                                decorators: operator.decorators.clone(),
+                                compile_time: false,
+                                name: "operator copy".into(),
+                                type_parameters: Vec::new(),
+                                constraints: operator.constraints.clone(),
+                                contracts: operator.contracts.clone(),
+                                hook: None,
+                                parameters: Vec::new(),
+                                result: operator.result.clone(),
+                                body: Some(operator.body.clone()),
+                                span: operator.span,
+                            };
+                            let copied_type = operand.type_id;
+                            return self.lower_method_callable(
+                                &owner, &method, operand, &[], Some(copied_type), ast.span,
+                            );
+                        }
                         if let Some(method) = owner.methods.iter().find(|method| method.name == "clone") {
                             return self.lower_method_callable(&owner, method, operand, &[], expected, ast.span);
                         }
@@ -12775,7 +12806,8 @@ impl Analyzer<'_> {
         }
         if let Some(owner) = self.class_instances_by_type.get(&value.type_id).cloned() {
             let mut conversions = owner.operators.iter().filter(|operator| {
-                operator.operator == severian_ast::OperatorSyntax::Conversion
+                (operator.operator == severian_ast::OperatorSyntax::Conversion
+                    || operator.operator == severian_ast::OperatorSyntax::from_spelling("string"))
                     && operator.type_parameters.is_empty()
                     && operator.parameters.is_empty()
                     && operator.result.simple_name() == Some("string")
@@ -21190,6 +21222,58 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn named_copy_operator_materializes_its_implementation() {
+        let (program, _) = analyze_source(
+            "class Value:\n    number: int\n    operator copy(self) -> Self:\n        return Value(number + 1)\ndef copied() -> int:\n    value = Value(4)\n    duplicate = clone value\n    return duplicate.number\n",
+        );
+        assert!(program.modules.iter().flat_map(|module| &module.functions)
+            .any(|function| function.name.ends_with(".operator copy") && function.body.is_some()));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn named_string_operator_materializes_its_implementation() {
+        let (program, _) = analyze_source(
+            "class Value:\n    operator string(self) -> string:\n        return \"value\"\ndef rendered() -> string:\n    return string(Value())\n",
+        );
+        assert!(program.modules.iter().flat_map(|module| &module.functions)
+            .any(|function| function.name.ends_with(".<=>string") && function.body.is_some()));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn named_copy_operator_rejects_a_different_result_type() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source("invalid-copy.sev",
+            "class Value:\n    operator copy(self) -> int:\n        return 42\ndef copied():\n    value = Value()\n    duplicate = clone value\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert!(error.message.contains("method result does not satisfy the expected type"));
+    }
+
+    #[test]
+    fn named_copy_operator_rejects_ambiguous_implementations() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source("ambiguous-copy.sev",
+            "class Value:\n    operator copy(self) -> Self:\n        return self\n    operator copy(self) -> Self:\n        return self\ndef copied():\n    value = Value()\n    duplicate = clone value\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000212");
+        assert_eq!(error.message, "ambiguous copy operator");
+    }
+
+    #[test]
+    fn named_string_operator_and_conversion_are_ambiguous() {
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source("ambiguous-string.sev",
+            "class Value:\n    operator string(self) -> string:\n        return \"named\"\n    operator <=>(self) -> string:\n        return \"conversion\"\ndef rendered() -> string:\n    return string(Value())\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000212");
+        assert_eq!(error.message, "ambiguous string conversion");
     }
 
     #[test]

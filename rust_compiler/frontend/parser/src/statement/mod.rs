@@ -2811,6 +2811,11 @@ impl Parser<'_> {
             // their underlying source operator identity.
             self.take(&TokenKind::Equal);
             OperatorSyntax::Index
+        } else if let TokenKind::Identifier(name) = &operator_token.kind {
+            // Named operations use the same open identity as symbolic ones.
+            // This is declaration syntax; it must not register every identifier
+            // as an infix operator in ordinary expressions.
+            OperatorSyntax::from_spelling(name)
         } else {
             operator_syntax(&operator_token.kind).ok_or_else(|| {
                 Diagnostic::new(
@@ -5210,5 +5215,32 @@ mod assignment_tests {
                 }));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod named_operator_tests {
+    use super::*;
+
+    #[test]
+    fn named_operator_declarations_preserve_identity_and_body() {
+        let source = SourceFile::virtual_source(
+            "named-operators.sev",
+            "trait Protocol:\n    operator copy(self) -> Self\n    operator custom(self) -> int\nclass Value:\n    operator copy(self) -> Self:\n        return self\n    operator string(self) -> string:\n        return \"value\"\n    operator custom(self) -> int:\n        return 42\ndef ordinary(custom: int, value: int) -> int:\n    return custom + value\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let Item::Trait(protocol) = &module.items[0] else { panic!("expected trait") };
+        assert_eq!(protocol.operators[0].operator, OperatorSyntax::from_spelling("copy"));
+        assert_eq!(protocol.operators[1].operator, OperatorSyntax::from_spelling("custom"));
+        let Item::Class(value) = &module.items[1] else { panic!("expected class") };
+        for (operator, spelling) in value.operators.iter().zip(["copy", "string", "custom"]) {
+            assert_eq!(operator.operator, OperatorSyntax::from_spelling(spelling));
+            assert!(operator.parameters.is_empty());
+            assert!(matches!(operator.body.as_slice(), [Statement::Return { .. }]));
+        }
+        assert_eq!(value.operators.len(), 3);
+        let Item::Function(ordinary) = &module.items[2] else { panic!("expected function") };
+        assert!(matches!(ordinary.body.as_ref().unwrap().as_slice(),
+            [Statement::Return { value: Some(Expression { kind: ExpressionKind::Binary { operator: BinaryOperator::Add, .. }, .. }), .. }]));
     }
 }
