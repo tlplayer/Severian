@@ -93,7 +93,7 @@ def load_models(codec: Codec, location: string, namespace: string) -> unit | Err
     codec.contents.append(contents)
     current := -1
     for line in contents.split("\n"):
-        name = declaration(line)
+        name := declaration(line)
         if name != "":
             codec.models.append(Model(namespace + "." + name, "class" if line.starts_with("class ") else "enum", namespace, location))
             current = int(len(codec.models)) - 1
@@ -575,6 +575,7 @@ def repository() -> string | Error:
         if parent == location:
             throw Error("set SEVERIAN_SYSROOT to the Severian repository")
         location = parent
+    throw Error("set SEVERIAN_SYSROOT to the Severian repository")
 
 
 def main():
