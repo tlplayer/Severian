@@ -26,7 +26,7 @@ operator element_set(values: borrow list[string], position: int, value: string):
     assert(position < len(values.ends))
     start = values.ends[position - 1] if position > 0 else 0
     end = values.ends[position]
-    difference = value.length() - (end - start)
+    difference = len(value) - (end - start)
     values.data = values.data[:start] + value + values.data[end:]
     offsets = clone values.ends
     for index in range(position, len(offsets)):
@@ -77,5 +77,5 @@ extend list[string]:
     def append(self: borrow Self, value: string):
         self.data = self.data + value
         offsets = clone self.ends
-        offsets.append(self.data.length())
+        offsets.append(len(self.data))
         self.ends = offsets

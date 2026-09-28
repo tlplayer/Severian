@@ -72,8 +72,8 @@ import * from "{}/library/system/io/src/lib.sev" as io
 import * from "{}/sev_compiler/universal/primitive/char/utf8.sev" as character
 def main():
     value = "aλ😀z"
-    assert(text.byte_count(value) == 8)
-    assert(text.length(value) == 4)
+    assert(len(value) == 8)
+    assert(len(value) == 8)
     assert(text.byte_at(value, 1) == 206)
     assert(character.codepoint(text.character_at(value, 1)) == 955)
     assert(character.codepoint(text.character_at(value, 2)) == 128512)

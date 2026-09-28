@@ -2,7 +2,7 @@ def main():
     name: string = "Severian"
 
     print(name)
-    print(name.length())
+    print(len(name))
     print(name.upper())
     print(name.contains("ver"))
     print(f"Hello, {name}!")

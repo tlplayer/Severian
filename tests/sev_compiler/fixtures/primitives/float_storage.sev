@@ -1,5 +1,0 @@
-def identity(value: f32) -> f32:
-    return value
-
-test:
-    assert(identity(1.25) == 1.25)

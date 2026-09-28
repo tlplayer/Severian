@@ -31,7 +31,7 @@ def __write(value: string, offset: int):
     count = value.storage.used
     while position < count:
         # The loop bounds are the initialized byte range of the string.
-        result = __putchar(__output_byte(text.__byte_value(text.__load(value, text.__index(position)))))
+        result = __putchar(__output_byte(int(value.storage.get(position))))
         __output_check(result >= 0)
         position += 1
 

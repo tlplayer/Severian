@@ -54,6 +54,6 @@ test "conditional evaluation, mutation, and returned string storage":
     assert((value + "") == value)
     assert(owned_return() == "λ😀")
     assert(choose(value, false) == "aλ😀!")
-    assert(utf8.length(grow("", 64)) == 64)
+    assert(len(grow("", 64)) == 64)
     assert(f"{{{GREETING}}}" == "{hello}")
     print(value)

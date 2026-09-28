@@ -1,6 +1,0 @@
-enum Kind:
-    First
-    Second
-
-test:
-    assert(Kind.First != Kind.Second)

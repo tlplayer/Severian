@@ -80,12 +80,12 @@ def contents(stream: pointer) -> string:
     size = __position(stream)
     assert(size >= 0)
     assert(__seek(stream, 0, 0) == 0)
-    result = text.__allocate(text.__index(size))
+    result = string[u8, size]()
     index := 0
     while index < size:
         byte = __read(stream)
         assert(byte >= 0)
-        text.__store(u8(byte), result, text.__index(index))
+        result.storage.set(index, u8(byte))
         index += 1
     assert(__seek(stream, size, 0) == 0)
     return result

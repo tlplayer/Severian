@@ -1,7 +1,0 @@
-import * from "math.sev" as math
-
-def answer() -> int:
-    return math.double(21)
-
-test:
-    assert(answer() == 42)

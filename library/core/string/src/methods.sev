@@ -18,7 +18,7 @@ operator float(value: string) -> float:
     result = __parse_float_buffer(buffer, end)
     consumed := end[0] - __float_pointer_value(format.__address(buffer))
     assert(consumed > 0, "invalid floating-point string")
-    while consumed < text.byte_count(value):
+    while consumed < len(value):
         assert(__space(text.byte_at(value, consumed)), "invalid floating-point string")
         consumed += 1
     return result
@@ -29,13 +29,13 @@ operator f64(value: string) -> f64:
 
 def __contains_bytes(value: string, needle: string) -> bool:
     offset := 0
-    while offset + text.byte_count(needle) <= text.byte_count(value):
+    while offset + len(needle) <= len(value):
         index := 0
-        while index < text.byte_count(needle):
+        while index < len(needle):
             if text.byte_at(value, offset + index) != text.byte_at(needle, index):
                 break
             index += 1
-        if index == text.byte_count(needle):
+        if index == len(needle):
             return true
         offset += 1
     return false
@@ -44,13 +44,13 @@ def __contains_bytes(value: string, needle: string) -> bool:
 # ASCII case conversion preserves all other UTF-8 bytes. Full Unicode case
 # mapping (including expanding mappings) requires the Unicode data library.
 def __upper_ascii(value: string) -> string:
-    result = text._allocate(text._index(text.byte_count(value)))
+    result = string[u8, len(value)]()
     position := 0
-    while position < text.byte_count(value):
+    while position < len(value):
         byte := text.byte_at(value, position)
         if byte >= 97 and byte <= 122:
             byte -= 32
-        text._store(u8(byte), result, text._index(position))
+        result.storage.set(position, u8(byte))
         position += 1
     return result
 
@@ -61,7 +61,7 @@ operator in(needle: string, value: string) -> bool:
 
 operator slice_at(value: string, start: int, stop: int, step: int, has_start: bool, has_stop: bool) -> string:
     assert(step != 0)
-    size = text.length(value)
+    size = text.__count(value, 0)
     reverse = step < 0
     position := slicing.bound(start, size, reverse) if has_start else (size - 1 if reverse else 0)
     end = slicing.bound(stop, size, reverse) if has_stop else (-1 if reverse else size)
@@ -80,9 +80,9 @@ extend string:
         return __upper_ascii(self)
 
     def replace(needle: string, replacement: string) -> string:
-        size = text.byte_count(self)
-        width = text.byte_count(needle)
-        extra = text.byte_count(replacement)
+        size = len(self)
+        width = len(needle)
+        extra = len(replacement)
         matches := 0
         position := 0
         while position <= size:
@@ -98,14 +98,14 @@ extend string:
         remaining = size - matches * width
         if extra != 0:
             assert(matches <= (9223372036854775807 - remaining) / extra)
-        result = text._allocate(text._index(remaining + matches * extra))
+        result = string[u8, remaining + matches * extra]()
         position = 0
         output := 0
         while position <= size:
             if width == 0 or __matches(self, needle, position):
                 offset := 0
                 while offset < extra:
-                    text._store(text._load(replacement, text._index(offset)), result, text._index(output))
+                    result.storage.set(output, replacement.storage.get(offset))
                     output += 1
                     offset += 1
                 if width != 0:
@@ -116,7 +116,7 @@ extend string:
             count = text._offset(self, 1, position) - position if width == 0 else 1
             offset := 0
             while offset < count:
-                text._store(text._load(self, text._index(position)), result, text._index(output))
+                result.storage.set(output, self.storage.get(position))
                 position += 1
                 output += 1
                 offset += 1
@@ -124,8 +124,8 @@ extend string:
 
 
 def __matches(value: string, needle: string, position: int) -> bool:
-    count = text.byte_count(needle)
-    if position > text.byte_count(value) - count:
+    count = len(needle)
+    if position > len(value) - count:
         return false
     offset := 0
     while offset < count:
@@ -141,7 +141,7 @@ def __space(value: int) -> bool:
 
 operator int(value: string) -> int:
     first := 0
-    last := text.byte_count(value)
+    last := len(value)
     while first < last and __space(text.byte_at(value, first)):
         first += 1
     while last > first and __space(text.byte_at(value, last - 1)):
@@ -222,7 +222,7 @@ test "string and character concatenation":
 
 def __test_recursive_length(value: string, remaining: int) -> int:
     if remaining == 0:
-        return value.length()
+        return len(value)
     return __test_recursive_reader(value, remaining - 1)
 
 
@@ -241,7 +241,7 @@ test "recursive readers preserve a shared view":
 
 
 def __test_consume(value: move string) -> int:
-    return value.length()
+    return len(value)
 
 
 def __test_format_consumed(value: move string) -> string:
@@ -263,7 +263,7 @@ test "append chains string and character suffixes":
     value.append('中')
     value.append('😀')
     assert(value == "aλ中😀")
-    assert(value.length() == 4)
+    assert(len(value) == 10)
     value.append("")
     value.append(" tail")
     assert(value == "aλ中😀 tail")
@@ -285,7 +285,7 @@ test "append handles self append and independent copies":
     for index in range(100):
         value.append('x')
     assert(saved == "abab")
-    assert(value.length() == 104)
+    assert(len(value) == 104)
     drop(value)
     assert(saved == "abab")
     assert(before == "ab!")
@@ -303,7 +303,7 @@ test "4096 character appends reuse vector capacity":
             allocations += 1
             allocated_units += value.capacity()
             previous = current
-    assert(value.length() == 4096)
+    assert(len(value) == 4096)
     assert(value.capacity() == 4096)
     assert(allocations <= 6)
     assert(allocated_units <= 11008)
@@ -325,16 +325,16 @@ test with profile "string append keeps bounded spare capacity" with
         if index == 1024:
             assert(value.capacity() == 2048)
     assert(value.capacity() == 3072)
-    assert(value.length() == 2049)
+    assert(len(value) == 2049)
     value.append("λ😀")
-    assert(value.length() == 2051)
+    assert(len(value) == 2055)
     assert(value.capacity() == 3072)
 
 
 test "string encoding and initial capacity are parameters":
     empty = string()
-    assert(empty.length() == 0)
-    assert(empty.capacity() == 256)
+    assert(len(empty) == 0)
+    assert(empty.capacity() == 0)
     small: string[u8, 2] = ""
     small.append('a')
     small.append('b')
@@ -345,7 +345,7 @@ test "string encoding and initial capacity are parameters":
     wide.append('λ')
     wide.append('😀')
     wide.append('!')
-    assert(wide.length() == 3)
+    assert(len(wide) == 3)
     assert(wide.capacity() == 4)
     assert(wide.storage.used == 3)
     assert(string(wide) == "λ😀!")

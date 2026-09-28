@@ -45,7 +45,7 @@ def __negative_digits(value: int, negative: bool = false) -> string:
         count += 1
     if negative:
         count += 1
-    result = text.__allocate(text.__index(count))
+    result = string[u8,count]()
     position := count
     remaining = value
     while position > (1 if negative else 0):
@@ -93,7 +93,7 @@ def string(value: u64) -> string:
     while remaining >= 10:
         remaining = __unsigned_divide(remaining, 10)
         count += 1
-    result = text.__allocate(text.__index(count))
+    result = string[u8, count]()
     position := count
     remaining = value
     while position > 0:
@@ -110,7 +110,7 @@ def pointer_text(value: u64) -> string:
     while remaining >= 16:
         remaining = __unsigned_divide(remaining, 16)
         count += 1
-    result = text.__allocate(text.__index(count + 2))
+    result = string[u8, count + 2]()
     __store_byte(result, 0, 48)
     __store_byte(result, 1, 120)
     position := count + 2
@@ -132,13 +132,13 @@ def string(value: string) -> view string:
 
 
 def __store_byte(destination: borrow string, position: int, value: int):
-    text.__store(__byte(value), destination, text.__index(position))
+    destination.storage.set(position, __byte(value))
 
 
 def string(value: char) -> string:
     codepoint = text.character.codepoint(value)
     width = text.character.width(codepoint)
-    result = text.__allocate(text.__index(width))
+    result = string[u8, width]()
     if width == 1:
         __store_byte(result, 0, codepoint)
     else:
@@ -191,18 +191,18 @@ def __parse_buffer(value: string) -> f64:
 
 
 def __terminated(value: string) -> string:
-    size = text.byte_count(value)
-    result = text.__allocate(text.__index(size + 1))
+    size = len(value)
+    result = string[u8, size + 1]()
     text.__copy(value, result, 0, 0)
     __store_byte(result, size, 0)
     return result
 
 
 def __float(value: f64, precision: int) -> string:
-    format = text.__allocate(text.__index(6))
+    format = string[u8, 6]()
     __store_byte(format, 0, 37)
     __store_byte(format, 1, 46)
-    buffer = text.__allocate(text.__index(128))
+    buffer = string[u8, 128]()
     digits := precision
     count := 0
     while digits <= 17:
@@ -246,7 +246,7 @@ def quoted(value: string) -> string:
     result.append('"')
     digits = "0123456789abcdef"
     position := 0
-    count = text.byte_count(value)
+    count = len(value)
     result.reserve(count + 2)
     while position < count:
         code = text.byte_at(value, position)

@@ -1,7 +1,6 @@
 # Typed byte-buffer IO. Allocation remains with the caller's core.storage owner.
 import "../../../interop/xxi/src/buffer.sev" as xxi
 import "../../../core/memory/src/raw_intrinsics.sev" as raw
-import "../../../core/string/src/storage.sev" as text
 
 @c(symbol="__sev_io_read")
 def __read(handle: int, destination: pointer, count: int) -> int
@@ -33,14 +32,14 @@ def write_all(handle: int, data: view array[u8], count: int) -> int:
 # descriptor; its physical representation belongs to the text implementation.
 # Return the transferred byte count, or -1 if output cannot make progress.
 def write_text(descriptor: i32, value: string) -> int:
-    count = text.byte_count(value)
+    count = len(value)
     if count == 0:
         return 0
     unsafe:
         data = raw.__raw_allocate(count, 1)
         position := 0
         while position < count:
-            raw.__raw_store(text.read(value, position), raw.__raw_offset(data, position))
+            raw.__raw_store(u8(value.storage.get(position)), raw.__raw_offset(data, position))
             position += 1
         offset := 0
         while offset < count:

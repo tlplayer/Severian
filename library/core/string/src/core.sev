@@ -1,10 +1,9 @@
 import "../../../../sev_compiler/syntax/primitive/char/utf8.sev" as character
-import byte_count as _text_size, read as _text_load, allocate as _text_allocate, write as _text_store from "storage.sev"
 
 # UTF-8 algorithms use core.string storage through ordinary source calls.
 def __dimension(value: string, dimension: int) -> int:
     assert(dimension == 0)
-    return text_storage._text_size(value)
+    return len(value)
 
 
 def _size[T](value: T) -> int:
@@ -15,10 +14,6 @@ def _index(value: int) -> int:
     return value
 
 
-def _load(value: string, position: int) -> u8:
-    return text_storage._text_load(value, position)
-
-
 def __byte_value(value: u8) -> int:
     return int(value)
 
@@ -27,32 +22,18 @@ def __character(value: int) -> char:
     return character.from_codepoint(value)
 
 
-def _allocate(size: int) -> string:
-    assert(size >= 0)
-    return text_storage._text_allocate(size)
-
-
-def _store(value: u8, destination: borrow string, position: int):
-    assert(position >= 0 and position < text_storage._text_size(destination))
-    text_storage._text_store(value, destination, position)
-
-
-def byte_count(value: string) -> int:
-    return _size(__dimension(value, 0))
-
-
 def byte_at(value: string, position: int) -> int:
     assert(position >= 0)
-    assert(position < byte_count(value))
-    return __byte_value(_load(value, _index(position)))
+    assert(position < len(value))
+    return int(value.storage.get(position))
 
 
 test "string views count and address UTF-8 bytes":
     value = "aλ😀z"
-    assert(byte_count(value) == 8)
+    assert(len(value) == 8)
     assert(byte_at(value, 1) == 206)
     assert(byte_at(value, 2) == 187)
-    assert(byte_count("") == 0)
+    assert(len("") == 0)
 
 
 def continuation(value: int) -> bool:
@@ -81,7 +62,7 @@ def decode(value: string, offset: int) -> int:
     first = byte_at(value, offset)
     width = leading_width(first)
     assert(width > 0)
-    assert(offset + width <= byte_count(value))
+    assert(offset + width <= len(value))
     if width == 1:
         return first
     second = byte_at(value, offset + 1)
@@ -106,15 +87,12 @@ def decode(value: string, offset: int) -> int:
 def __count(value: string, offset: int) -> int:
     count := 0
     position := offset
-    while position < byte_count(value):
+    while position < len(value):
         codepoint = decode(value, position)
         position += character.width(codepoint)
         count += 1
     return count
 
-
-def length(value: string) -> int:
-    return __count(value, 0)
 
 
 def _offset(value: string, position: int, offset: int) -> int:
@@ -135,18 +113,18 @@ def character_at(value: string, position: int) -> char:
 
 test "character indexing decodes each UTF-8 width":
     value = "aλ😀z"
-    assert(length(value) == 4)
+    assert(len(value) == 8)
     assert(character.codepoint(character_at(value, 1)) == 955)
     assert(character.codepoint(character_at(value, 2)) == 128512)
-    assert(length("") == 0)
-    assert(length("中") == 1)
+    assert(len("") == 0)
+    assert(len("中") == 3)
     assert(decode("中", 0) == 20013)
 
 
 def __equal(left: string, right: string, offset: int) -> bool:
-    assert(offset >= 0 and offset <= byte_count(left))
+    assert(offset >= 0 and offset <= len(left))
     position := offset
-    while position < byte_count(left):
+    while position < len(left):
         if byte_at(left, position) != byte_at(right, position):
             return false
         position += 1
@@ -154,7 +132,7 @@ def __equal(left: string, right: string, offset: int) -> bool:
 
 
 def equal(left: string, right: string) -> bool:
-    if byte_count(left) != byte_count(right):
+    if len(left) != len(right):
         return false
     return __equal(left, right, 0)
 
@@ -172,19 +150,19 @@ test "equality compares bytes and lengths":
 
 def __copy(source: string, destination: borrow string, offset: int, position: int):
     cursor := position
-    while cursor < byte_count(source):
-        _store(_load(source, _index(cursor)), destination, _index(offset + cursor))
+    while cursor < len(source):
+        destination.storage.set(offset + cursor, source.storage.get(cursor))
         cursor += 1
 
 
 # The result owns new storage; arguments remain borrowed immutable views.
 # The MLIR ownership pipeline tracks returned buffers and inserts deallocation.
 def concat(left: string, right: string) -> string:
-    left_size = byte_count(left)
-    right_size = byte_count(right)
+    left_size = len(left)
+    right_size = len(right)
     assert(left_size <= 9223372036854775807 - right_size)
     size = left_size + right_size
-    result = _allocate(_index(size))
+    result = string[u8, size]()
     __copy(left, result, 0, 0)
     __copy(right, result, left_size, 0)
     return result

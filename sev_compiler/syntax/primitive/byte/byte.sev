@@ -10,10 +10,11 @@ The compiler fix must preserve that distinction by resolving the existing byte p
  and its unit conversions. Treating byte as an alias for u8 or plain int would lose the semantics you intended.
 '''
 class byte:
+    # Amount of bytes used this currentl
     amount: int
 
     operator <=>(self) -> string:
-        return string(self.amount / 8) + "B"
+        return string(self.amount) + "B"
 
 
     operator ==[G:Equal](other: Self) -> bool:
