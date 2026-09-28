@@ -1,4 +1,4 @@
-import * from "../../../../sev_compiler/syntax/primitive/string/core.sev" as text
+import * from "../../../core/string/src/core.sev" as text
 import * from "../../../core/string/format/src/lib.sev" as format
 
 # A scalar print is one standard MLIR operation. Keep the variadic source

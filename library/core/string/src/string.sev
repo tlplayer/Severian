@@ -1,9 +1,9 @@
-import LiteralBinding, LiteralSyntax, MlirTypeBinding, PrimitiveId, StringPrimitive, TypeId from "../declarations.sev"
-import Error from "../primitive.sev"
-import "../../../../../library/core/collections/list/src/slice.sev" as _dependency_slice
+import LiteralBinding, LiteralSyntax, MlirTypeBinding, PrimitiveId, StringPrimitive, TypeId from "../../../../sev_compiler/syntax/primitive/declarations.sev"
+import Error from "../../../../sev_compiler/syntax/primitive/primitive.sev"
+import "../../collections/list/src/slice.sev" as _dependency_slice
 import "core.sev" as utf8_core
 
-import Equatable, Ordered, Truth from "../../function/trait.sev"
+import Equatable, Ordered, Truth from "../../../../sev_compiler/syntax/function/trait.sev"
 
 
 '''
@@ -117,11 +117,11 @@ trait String:
     operator +(right: string) -> string
     operator *(count: usize) -> string
 
-    # for char in string gives the char in the string 
+    # for char in string gives the char in the string
     operator in() -> bool
     # Returns if an object is in the string "a"|'a' in "apple"-> true
     operator in(left:string|char) -> bool
-    
+
     def append(value: string | char)
     def encode()
     def ends_with(sub_string:string|char) -> bool
@@ -133,7 +133,7 @@ trait String:
     #Split a string by a substring "a,b,c".split(",")-> ["a","b","c"]
     def split[C=list]() -> C
     def strip() -> string
-    def append(borrow self, addition:string|char) -> self 
+    def append(borrow self, addition:string|char) -> self
     def remove(borrow self, removed:string|char) -> self
     # Without indices [] or int "abc".without(1) -> "ac"
     def without(indices: int | list[int]) -> string
@@ -141,7 +141,7 @@ trait String:
     def len(self) -> usize
     #Number of bytes consumed
     def bytes(self) -> byte
-    #total consumed memory of object 
+    #total consumed memory of object
     def memory(self) -> byte
     def empty(self) -> bool
     def raw(self) -> slice[u8]
@@ -1016,7 +1016,7 @@ test "non-empty string is true":
     value := "hello"
 
     if value:
-        throw Error("Unimplemented (sev_compiler/universal/primitive/string.sev)")
+        throw Error("Unimplemented (library/core/string/src/string.sev)")
     else:
         throw Error("non-empty string must be true")
 

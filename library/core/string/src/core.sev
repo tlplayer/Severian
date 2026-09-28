@@ -1,5 +1,5 @@
-import "../char/utf8.sev" as character
-import byte_count as _text_size, read as _text_load, allocate as _text_allocate, write as _text_store from "../../../../library/core/string/src/storage.sev"
+import "../../../../sev_compiler/syntax/primitive/char/utf8.sev" as character
+import byte_count as _text_size, read as _text_load, allocate as _text_allocate, write as _text_store from "storage.sev"
 
 # UTF-8 algorithms use core.string storage through ordinary source calls.
 def __dimension(value: string, dimension: int) -> int:

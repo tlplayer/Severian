@@ -3,8 +3,8 @@
 # Family membership is source data; generic constraint resolution has no numeric
 # type list and no method-name convention.
 import "../char/utf8.sev" as primitive_character
-import "../string/core.sev" as primitive_string
-import "../string/format.sev" as primitive_format
+import "../../../../library/core/string/src/core.sev" as core_string
+import "../../../../library/core/string/format/src/lib.sev" as core_format
 
 union NativeInteger:
     i8
@@ -114,16 +114,16 @@ test "character equality and scalar order":
 # assignment requires a resolved callable and evaluates its place only once.
 extend string:
     operator +[G:Add](right: Self) -> Self:
-        return primitive_string.concat(self, right)
+        return core_string.concat(self, right)
 
     operator +[G:Add](right: char) -> Self:
-        return primitive_string.concat(self, primitive_format.string(right))
+        return core_string.concat(self, core_format.string(right))
 
     operator ==[G:Equal](right: Self) -> bool:
-        return primitive_string.equal(self, right)
+        return core_string.equal(self, right)
 
     operator !=[G:NotEqual](right: Self) -> bool:
-        return not primitive_string.equal(self, right)
+        return not core_string.equal(self, right)
 
 
 test "string compound addition preserves the previous view":

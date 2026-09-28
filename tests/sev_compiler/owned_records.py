@@ -17,7 +17,7 @@ class OwnedRecords(MigrationCase):
         prelude.parent.mkdir(parents=True)
         prelude.with_suffix(".toml").write_text((ROOT / "sev_compiler/universal/prelude.toml").read_text())
         provider = prelude.parent / 'methods.sev'
-        source = origin.parent / 'primitive/string/methods.sev'
+        source = ROOT / 'library/core/string/src/methods.sev'
 
         def imports(text, base, target, replacement=None):
             def rewrite(match):

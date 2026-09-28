@@ -1,4 +1,4 @@
-import "../../../../../../syntax/primitive/string/core.sev" as utf8
+import "../../../../../../../library/core/string/src/core.sev" as utf8
 
 GREETING = "hello"
 

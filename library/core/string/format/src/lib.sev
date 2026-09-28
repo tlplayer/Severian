@@ -1,4 +1,4 @@
-import * from "../../../../../sev_compiler/syntax/primitive/string/core.sev" as text
+import * from "../../src/core.sev" as text
 
 @mlir("arith.divsi")
 def __divide(value: int, divisor: int) -> int

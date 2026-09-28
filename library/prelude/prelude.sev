@@ -13,10 +13,10 @@ import * from "../../sev_compiler/syntax/primitive/numeric/operators.sev"
 import * from "../../sev_compiler/syntax/primitive/numeric/power.sev"
 import * from "../../sev_compiler/syntax/primitive/units/units.sev"
 import * from "../core/collections/src/lib.sev"
-import * from "../../sev_compiler/syntax/primitive/string/string_lists.sev"
+import * from "../core/string/src/string_lists.sev"
 import * from "../../sev_compiler/syntax/primitive/pointer/pointer.sev"
 import * from "../core/memory/src/box.sev"
 import * from "../core/memory/src/raw_intrinsics.sev"
-import * from "../../sev_compiler/syntax/primitive/string/methods.sev" as string_methods
+import * from "../core/string/src/methods.sev" as string_methods
 import * from "../testing/src/lib.sev"
 import * from "../core/math/src/lib.sev"

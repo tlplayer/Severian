@@ -39,7 +39,7 @@ class ListGrowth(MigrationCase):
         provider.write_text(body.replace("def append(", "def grow("))
         # The packed-string provider consumes the scalar list API too. Keep
         # that dependency consistent so the failure belongs to the subject.
-        string_list_source = origin.parent / "primitive/string_lists.sev"
+        string_list_source = ROOT / "library/core/string/src/string_lists.sev"
         string_list_provider = prelude.parent / "string_lists.sev"
         string_list_provider.write_text(string_list_source.read_text().replace(".append(", ".grow("))
         imports = []

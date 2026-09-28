@@ -67,7 +67,7 @@ fn seed_text_abi_and_custom_print_ending_execute() {
     fs::write(
         &source,
         format!(
-            r#"import * from "{}/sev_compiler/universal/primitive/string/core.sev" as text
+            r#"import * from "{}/library/core/string/src/core.sev" as text
 import * from "{}/library/system/io/src/lib.sev" as io
 import * from "{}/sev_compiler/universal/primitive/char/utf8.sev" as character
 def main():

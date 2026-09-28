@@ -22,7 +22,7 @@ class TypeSemantics(MigrationCase):
                 self.assertEqual(self.succeeds([executable]), expected)
 
     def test_string_methods(self):
-        self.native(ROOT / 'sev_compiler/universal/primitive/string/methods.sev')
+        self.native(ROOT / 'library/core/string/src/methods.sev')
         owned_records.OwnedRecords.check_allocations(self)
 
     def test_for_initializer_runs_once_and_has_loop_scope(self):

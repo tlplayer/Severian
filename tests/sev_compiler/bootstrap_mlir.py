@@ -62,7 +62,7 @@ def main():
     compiler = ROOT / "sev_compiler/package.pkg/host/dev/bin/sev_compiler"
     if not os.environ.get("SEVERIAN_SKIP_BUILD"):
         run([SEED, "build"], cwd=ROOT / "sev_compiler")
-    string_source = ROOT / "sev_compiler/universal/primitive/string/core.sev"
+    string_source = ROOT / "library/core/string/src/core.sev"
     io_source = ROOT / "library/system/io/src/text.sev"
     scalar_tests = ROOT / "sev_compiler/frontend/semantic/semantic/src/scalar/tests"
     string_import = f'import * from "{os.path.relpath(string_source, ARTIFACTS)}" as utf8\n'
