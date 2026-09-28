@@ -460,8 +460,7 @@ fn analyze_package_impl(
                 package_constants.extend(module_constant_bindings(origin, module_graph, &index));
             }
         }
-        package_constants.sort_by(|left, right| left.lookup.cmp(&right.lookup));
-        package_constants.dedup_by(|left, right| left.lookup == right.lookup);
+        order_package_constants(&mut package_constants, module_graph);
         visible.extend(
             own_instances
                 .iter()
@@ -1733,6 +1732,17 @@ fn registry_function_bindings(
     bindings
 }
 
+// Modules retain the graph's dependency order; each global block retains its
+// source order. Lookup names (including import aliases) never order execution.
+fn order_package_constants(constants: &mut Vec<PackageConstant>, graph: &ModuleGraph) {
+    let mut seen = BTreeSet::new();
+    constants.retain(|constant| seen.insert(constant.lookup.clone()));
+    let modules = graph.modules.iter().enumerate()
+        .map(|(ordinal, module)| (module.id, ordinal))
+        .collect::<BTreeMap<_, _>>();
+    constants.sort_by_key(|constant| (modules[&constant.module], constant.ordinal));
+}
+
 fn imported_constant_bindings(
     module: ModuleId,
     module_graph: &ModuleGraph,
@@ -1754,12 +1764,13 @@ fn imported_constant_bindings(
         else {
             return;
         };
-        let Some(binding) = source
+        let Some((ordinal, binding)) = source
             .ast
             .items
             .iter()
-            .find_map(|candidate| match candidate {
-                Item::Binding(binding) if binding.name == item.name => Some(binding),
+            .enumerate()
+            .find_map(|(ordinal, candidate)| match candidate {
+                Item::Binding(binding) if binding.name == item.name => Some((ordinal, binding)),
                 _ => None,
             })
         else {
@@ -1768,6 +1779,8 @@ fn imported_constant_bindings(
         constants.push(PackageConstant {
             lookup,
             value: binding.value.clone(),
+            module: source.id,
+            ordinal,
         });
     };
     for (name, resolution) in &scope.bindings {
@@ -1789,8 +1802,7 @@ fn imported_constant_bindings(
             }
         }
     }
-    constants.sort_by(|left, right| left.lookup.cmp(&right.lookup));
-    constants.dedup_by(|left, right| left.lookup == right.lookup);
+    order_package_constants(&mut constants, module_graph);
     constants
 }
 
@@ -1807,13 +1819,15 @@ fn module_constant_bindings(
     else {
         return constants;
     };
-    constants.extend(source.ast.items.iter().filter_map(|item| {
+    constants.extend(source.ast.items.iter().enumerate().filter_map(|(ordinal, item)| {
         let Item::Binding(binding) = item else {
             return None;
         };
         Some(PackageConstant {
             lookup: binding.name.clone(),
             value: binding.value.clone(),
+            module,
+            ordinal,
         })
     }));
     constants

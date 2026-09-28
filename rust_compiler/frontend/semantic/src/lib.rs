@@ -137,6 +137,8 @@ pub(crate) struct PackageList {
 pub(crate) struct PackageConstant {
     pub lookup: String,
     pub value: AstExpression,
+    pub module: severian_modules::ModuleId,
+    pub ordinal: usize,
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -27,9 +27,9 @@ trait StringOperations:
 
 # Some strings for ctype-style character classification
 WHITE_SPACE = " \t\n\r\v\f"
-ASCII_LOWERCASE = "abcdefghijklmnopqrstuvwxyz"
-ASCII_UPPERCASE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-ASCII_LETTERS = ASCII_LOWERCASE + ASCII_UPPERCASE
+ASCII_LOWERCASE:string = "abcdefghijklmnopqrstuvwxyz"
+ASCII_UPPERCASE:string = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+ASCII_LETTERS:string = ASCII_LOWERCASE + ASCII_UPPERCASE
 DIGITS = "0123456789"
 HEXDIGITS = DIGITS + "abcdef" + "ABCDEF"
 OCTDIGITS = "01234567"

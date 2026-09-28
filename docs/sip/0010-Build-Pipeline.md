@@ -30,6 +30,11 @@ if x == y:
     return 0
 ```
 
+a[0] = a[1] + b
+
+sentence array_assign[var,"[",int,"]",=, ]
+
+
 Here we have a block which looks at two variables, unknown types, which must 
 implemnet operator/sentence sentence equal[self,"==": Y,comparator: string|int|float|char] 
 
