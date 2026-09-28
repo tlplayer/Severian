@@ -21,7 +21,7 @@
         "names": ["String", "StringOperations", "string"]
       },
       {
-        "source": "sev_compiler/syntax/primitive/tuple/tuple.sev"
+        "source": "library/core/collections/tuple/src/tuple.sev"
       },
       {
         "source": "sev_compiler/syntax/primitive/enum/enum.sev"

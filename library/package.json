@@ -24,6 +24,7 @@
       "core/collections/set",
       "core/collections/stack",
       "core/collections/traits",
+      "core/collections/tuple",
       "core/collections/vector",
       "core/error",
       "core/hash",

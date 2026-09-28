@@ -354,7 +354,7 @@ def model_sources() -> list[string]:
         "library/core/string/src/storage.sev",
         "library/core/string/src/string.sev",
         "library/core/string/src/string_lists.sev",
-        "sev_compiler/syntax/primitive/tuple/tuple.sev",
+        "library/core/collections/tuple/src/tuple.sev",
         "sev_compiler/syntax/primitive/units/units.sev",
         "sev_compiler/syntax/sentence/sentence.sev",
         "sev_compiler/syntax/source.sev",

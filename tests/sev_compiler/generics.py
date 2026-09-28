@@ -23,7 +23,7 @@ def main():
         run([SEED, "build", ROOT / "tests/sev_compiler/fixtures/primitives/aggregate_layout.sev", "-o", layout])
         run([layout], cwd=directory)
         print("PASS: wide aggregate list storage (seed native)", flush=True)
-        array_source = ROOT / "sev_compiler/universal/primitive/array.sev"
+        array_source = ROOT / "library/core/collections/array/src/array.sev"
         constructor = directory / "constructor_dimension.sev"
         constructor.write_text(f'import * from "{array_source}"\n' + """class First[T]:
     value: T

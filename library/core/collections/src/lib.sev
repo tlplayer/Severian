@@ -1,4 +1,5 @@
 import array from array
+import tuple from tuple
 import list, slice, region from list
 import deque from deque
 import queue from queue

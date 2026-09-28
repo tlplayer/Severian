@@ -1,0 +1,15 @@
+{
+  "package": {
+    "name": "collections.tuple",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Heterogeneous tuples and tuple syntax",
+    "export": [
+      "tuple",
+      "TupleSyntax"
+    ]
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  }
+}
