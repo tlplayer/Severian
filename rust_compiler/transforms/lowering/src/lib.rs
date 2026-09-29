@@ -372,6 +372,17 @@ impl CfgLowering<'_> {
                     };
                     let result = self.new_value(LoweredType::Unit);
                     operations.push(LirOperation::Call { function: FunctionId(destructor.declaration.0), arguments: vec![address], result });
+                } else if ty == LoweredType::String {
+                    let value = self.load_place(body, place, operations)?;
+                    operations.push(LirOperation::RuntimeCall {
+                        symbol: if matches!(statement, severian_mir::CfgStatement::Retain(_)) {
+                            "__sev_storage_retain"
+                        } else {
+                            "__sev_storage_release"
+                        }.into(),
+                        arguments: vec![value],
+                        result: None,
+                    });
                 } else if matches!(statement, severian_mir::CfgStatement::Retain(_)) {
                     // Primitive scalars and affine values do not acquire a shared reference.
                 } else if matches!(ty, LoweredType::Tensor { .. }) && place.projection.is_empty() {
@@ -385,10 +396,6 @@ impl CfgLowering<'_> {
                         arguments: vec![address],
                         result: None,
                     });
-                } else if ty == LoweredType::String {
-                    return Err(LoweringError::UnsupportedCfgOperation(
-                        "string destruction must use the core.string storage ownership contract".into(),
-                    ));
                 }
             }
             severian_mir::CfgStatement::StorageLive(_)
@@ -571,7 +578,34 @@ impl CfgLowering<'_> {
                 };
                 let result = self.new_value(result_type);
                 if left_type == LoweredType::String {
-                    return Err(LoweringError::UnsupportedStringOperation(*operator));
+                    if *operator == BinaryOperator::Add {
+                        operations.push(LirOperation::RuntimeCall {
+                            symbol: "__sev_string_concat".into(),
+                            arguments: vec![left, right],
+                            result: Some(result),
+                        });
+                    } else if matches!(*operator, BinaryOperator::Equal | BinaryOperator::NotEqual
+                        | BinaryOperator::Less | BinaryOperator::LessEqual
+                        | BinaryOperator::Greater | BinaryOperator::GreaterEqual)
+                    {
+                        let integer = self.lower_type_named("int")?;
+                        let comparison = self.new_value(integer.clone());
+                        let zero = self.new_value(integer);
+                        operations.push(LirOperation::RuntimeCall {
+                            symbol: "__sev_string_compare".into(),
+                            arguments: vec![left, right],
+                            result: Some(comparison),
+                        });
+                        operations.push(LirOperation::Constant {
+                            value: Constant::Integer("0".into()),
+                            result: zero,
+                        });
+                        operations.push(LirOperation::Binary {
+                            operator: *operator, left: comparison, right: zero, result,
+                        });
+                    } else {
+                        return Err(LoweringError::UnsupportedStringOperation(*operator));
+                    }
                 } else if matches!(left_type, LoweredType::Float { .. })
                     && *operator == BinaryOperator::FloorDivide
                 {

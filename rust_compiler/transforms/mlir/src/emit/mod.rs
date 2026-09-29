@@ -50,12 +50,88 @@ impl fmt::Display for MlirError {
 impl std::error::Error for MlirError {}
 
 pub fn render(module: &Module) -> Result<String, MlirError> {
-    render_unit(module, None)
+    render_unit(module, None).map(render_bootstrap_string_helpers)
 }
 
 /// A library compilation unit has no process entry point.
 pub fn render_library(module: &Module, initializer: &str) -> Result<String, MlirError> {
-    render_unit(module, Some(initializer))
+    render_unit(module, Some(initializer)).map(render_bootstrap_string_helpers)
+}
+
+// The Rust seed uses null-terminated pointer strings until the source compiler
+// takes over. Keep this ABI adapter out of the generic source string class.
+fn render_bootstrap_string_helpers(mut output: String) -> String {
+    let concat = output.contains("func.func private @__sev_string_concat(");
+    let compare = output.contains("func.func private @__sev_string_compare(");
+    if !concat && !compare {
+        return output;
+    }
+    let mut helpers = String::new();
+    if concat {
+        if !output.contains("func.func private @strlen(") {
+            helpers.push_str("  func.func private @strlen(!llvm.ptr) -> i64\n");
+        }
+        if !output.contains("func.func private @__sev_storage_new(") {
+            helpers.push_str("  func.func private @__sev_storage_new(i64, !llvm.ptr) -> !llvm.ptr\n");
+        }
+        helpers.push_str(r#"  func.func private @__sev_string_concat(%left: !llvm.ptr, %right: !llvm.ptr) -> !llvm.ptr attributes {llvm.linkage = #llvm.linkage<internal>} {
+    %left_size = func.call @strlen(%left) : (!llvm.ptr) -> i64
+    %right_size = func.call @strlen(%right) : (!llvm.ptr) -> i64
+    %zero = arith.constant 0 : i64
+    %one = arith.constant 1 : i64
+    %limit = arith.constant 9223372036854775806 : i64
+    %left_fits = arith.cmpi ule, %left_size, %limit : i64
+    cf.assert %left_fits, "string size overflow"
+    %available = arith.subi %limit, %left_size : i64
+    %right_fits = arith.cmpi ule, %right_size, %available : i64
+    cf.assert %right_fits, "string size overflow"
+    %size = arith.addi %left_size, %right_size : i64
+    %allocation_size = arith.addi %size, %one : i64
+    %null = llvm.mlir.zero : !llvm.ptr
+    %result = func.call @__sev_storage_new(%allocation_size, %null) : (i64, !llvm.ptr) -> !llvm.ptr
+    %start = arith.constant 0 : index
+    %step = arith.constant 1 : index
+    %left_end = arith.index_cast %left_size : i64 to index
+    %right_end = arith.index_cast %right_size : i64 to index
+    scf.for %index = %start to %left_end step %step {
+      %offset = arith.index_cast %index : index to i64
+      %source = llvm.getelementptr %left[%offset] : (!llvm.ptr, i64) -> !llvm.ptr, i8
+      %target = llvm.getelementptr %result[%offset] : (!llvm.ptr, i64) -> !llvm.ptr, i8
+      %byte = llvm.load %source : !llvm.ptr -> i8
+      llvm.store %byte, %target : i8, !llvm.ptr
+    }
+    scf.for %index = %start to %right_end step %step {
+      %offset = arith.index_cast %index : index to i64
+      %destination = arith.addi %left_size, %offset : i64
+      %source = llvm.getelementptr %right[%offset] : (!llvm.ptr, i64) -> !llvm.ptr, i8
+      %target = llvm.getelementptr %result[%destination] : (!llvm.ptr, i64) -> !llvm.ptr, i8
+      %byte = llvm.load %source : !llvm.ptr -> i8
+      llvm.store %byte, %target : i8, !llvm.ptr
+    }
+    %end = llvm.getelementptr %result[%size] : (!llvm.ptr, i64) -> !llvm.ptr, i8
+    %terminator = arith.constant 0 : i8
+    llvm.store %terminator, %end : i8, !llvm.ptr
+    return %result : !llvm.ptr
+  }
+"#);
+        output = output.replace("  func.func private @__sev_string_concat(!llvm.ptr, !llvm.ptr) -> !llvm.ptr\n", "");
+    }
+    if compare {
+        if !output.contains("func.func private @strcmp(") {
+            helpers.push_str("  func.func private @strcmp(!llvm.ptr, !llvm.ptr) -> i32\n");
+        }
+        helpers.push_str(r#"  func.func private @__sev_string_compare(%left: !llvm.ptr, %right: !llvm.ptr) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
+    %comparison = func.call @strcmp(%left, %right) : (!llvm.ptr, !llvm.ptr) -> i32
+    %result = arith.extsi %comparison : i32 to i64
+    return %result : i64
+  }
+"#);
+        output = output.replace("  func.func private @__sev_string_compare(!llvm.ptr, !llvm.ptr) -> i64\n", "");
+    }
+    if let Some(end) = output.rfind('}') {
+        output.insert_str(end, &helpers);
+    }
+    output
 }
 
 fn render_unit(module: &Module, library: Option<&str>) -> Result<String, MlirError> {

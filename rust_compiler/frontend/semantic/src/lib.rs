@@ -9912,15 +9912,9 @@ impl Analyzer<'_> {
                     )? {
                         return Ok(value);
                     }
-                    if self.types.primitive(receiver.type_id).is_some_and(|primitive| {
-                        primitive.representation == severian_universal::PrimitiveRepresentation::String
-                    }) {
-                        return Err(Diagnostic::new(
-                            "E000211",
-                            format!("string operator `{operator}` has no implementation for the operand type"),
-                            Some(ast.span),
-                        ).with_help("the string operator must be declared on the same type as string literals; a separate generic storage class does not complete the primitive string type"));
-                    }
+                    // The Rust seed still represents primitive string literals as
+                    // native pointers. If no source callable applies, resolve its
+                    // registered primitive signature and lower through the seed ABI.
                 }
                 // Both operands remain constraints until a single signature is
                 // selected; neither side gets an early default literal type.
