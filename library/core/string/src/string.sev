@@ -1,307 +1,86 @@
-import LiteralBinding, LiteralSyntax, MlirTypeBinding, PrimitiveId, StringPrimitive, TypeId from "../../../../sev_compiler/syntax/primitive/declarations.sev"
-import Error from "../../../../sev_compiler/syntax/primitive/primitive.sev"
+import "../../../../sev_compiler/syntax/primitive/char/utf8.sev" as encoding
+import "../../collections/array/src/storage.sev" as arrays
 import "../../collections/list/src/slice.sev" as _dependency_slice
 import "core.sev" as utf8_core
+import "../format/src/lib.sev" as formatting
+import LiteralBinding, LiteralSyntax, MlirTypeBinding, PrimitiveId, StringPrimitive, TypeId from "../../../../sev_compiler/syntax/primitive/declarations.sev"
+import Error from "../../../../sev_compiler/syntax/primitive/primitive.sev"
+import Container from "../../collections/traits/src/container.sev"
 
-import Equatable, Ordered, Truth from "../../../../sev_compiler/syntax/function/trait.sev"
+class UnicodeError: Error
+    message: string
 
-
-'''
-# `string`
-
-`string` is Severian's immutable owned UTF-8 text type.
-
-```sev
-message := "hello"
-```
-
-A string owns one contiguous allocation of UTF-8 bytes.
-
-```text
-string
-  |
-  +-----------------------------------+
-  | UTF-8 byte | UTF-8 byte | ...    |
-  +-----------------------------------+
-```
-
-The string stores both byte length and Unicode scalar length:
-
-```text
-byte_length    number of UTF-8 bytes
-length         number of Unicode scalar values
-```
-
-These are intentionally different:
-
-```sev
-ascii := "hello"
-assert(ascii.len() == 5)
-assert(ascii.bytes() == 5B)
-
-unicode := "λ"
-assert(unicode.len() == 1)
-assert(unicode.bytes() == 2B)
-```
-
-## Ownership
-
-`string` owns its UTF-8 allocation.
-
-Strings are immutable. Operations such as concatenation and slicing construct
-new strings rather than mutating existing storage.
-
-```text
-allocate[u8](N)
-      |
-      v
-   string
-      |
-      +--> slice[u8]     borrowed bytes
-```
-
-`clone()` creates independent backing storage. `mirror` may share a string
-without copying because the value cannot be mutated.
-
-Dropping the final owner releases the allocation.
-
-## UTF-8
-
-All `string` values contain valid UTF-8.
-
-Construction from raw bytes validates continuation-byte structure, overlong
-sequences, surrogate code points, and code points above `U+10FFFF`.
-
-Invalid byte input throws `UnicodeError`.
-
-## Indexing
-
-String indexing is by Unicode scalar index, not byte index:
-
-```sev
-text := "aλz"
-
-assert(text[0] == 'a')
-assert(text[1] == 'λ')
-assert(text[2] == 'z')
-```
-
-`byte(index)` provides explicit raw-byte access.
-
-String slicing also uses scalar indices and returns an owned `string`.
-
-## Truth
-
-```text
-""      -> false
-"text"  -> true
-```
-
-Truth testing does not convert the string into another value.
-'''
+    def UnicodeError(value: string):
+        message = value
 
 
-trait String:
-    Truth
-    Equatable
-    Ordered
-    Clone
-    Hash
-    Print
+class IndexError: Error
+    message: string
 
-    property length: usize
-    property byte_length: usize
+    def IndexError(value: string):
+        message = value
 
-    operator [](index: usize) -> char
-    operator [](range: Range[usize]) -> string
-    operator +(right: string) -> string
-    operator *(count: usize) -> string
 
-    # for char in string gives the char in the string
-    operator in() -> bool
-    # Returns if an object is in the string "a"|'a' in "apple"-> true
-    operator in(left:string|char) -> bool
+class ValueError: Error
+    message: string
 
-    def append(value: string | char)
-    def encode()
+    def ValueError(value: string):
+        message = value
+
+
+class TypeConversionError: Error
+    message: string
+
+    def TypeConversionError(value: string):
+        message = value
+
+
+trait StringOperations:
+    # Return the raw representation of the data in an array
+    def encode[T: u8 | u32]() -> array[T]
     def ends_with(sub_string:string|char) -> bool
     def starts_with(sub_string:string|char) -> bool
     # Finds the index of sub_string within start/end
-    def find(sub_string:string|char, start:int|absent, end:int|absent) -> int | None
-    def rfind(sub_string:string|char, start:int|absent, end:int|absent) -> int | None
+    def find(sub_string:string|char, start:int|absent = absent, end:int|absent = absent) -> int | None
+    # ",".join(["a","b","c"]) -> "a,b,c"
+    def join(iterable: list[string], conjunctor: string) -> string
 
     #Split a string by a substring "a,b,c".split(",")-> ["a","b","c"]
-    def split[C=list]() -> C
+    def split[C=list[string]](separator: string | char | absent = absent) -> C
     def strip() -> string
-    def append(borrow self, addition:string|char) -> self
-    def remove(borrow self, removed:string|char) -> self
+    def append(self: borrow Self, addition: string | char) -> borrow Self
+    def remove(self: borrow Self, removed: string | char) -> borrow Self
     # Without indices [] or int "abc".without(1) -> "ac"
     def without(indices: int | list[int]) -> string
-
-    def len(self) -> usize
-    #Number of bytes consumed
-    def bytes(self) -> byte
-    #total consumed memory of object
-    def memory(self) -> byte
-    def empty(self) -> bool
-    def raw(self) -> slice[u8]
-    #starts/ends with the index is where is starts searching from
-    def starts_with(prefix: string) -> bool
-    def ends_with(prefix: string) -> bool
-    def contains(self, needle: string) -> bool
-    def upper(self) -> string
-    def lower(self) -> string
-    def split(self) -> list[string]
-    def join(self,conjunction: string) -> string
-    def find(self,substring: string) -> int
-    #Regex match "foo".match(".*") -> ("foo" | ["foo",""foo2"],true)
-    def match(self, expression: string) -> (string, bool)
-    #Return sed like object for complex string operations
-    def sed(self) -> Sed
+    # Returns if an object is in the string "a"|'a' in "apple"-> true
+    operator in(self: Self, right: string) -> bool
+    operator +(self: Self, right: string) -> string
+    operator +=(self: borrow Self, right: string)
 
 
-'''
-# UTF-8 helpers
-
-These helpers operate on raw bytes but remain inside the string implementation.
-They are not a second public string API.
-'''
-def __utf8_is_continuation(value: u8) -> bool:
-    return utf8_core.continuation(int(value))
-
-
-def __utf8_width(first: u8) -> usize | UnicodeError:
-    width = utf8_core.leading_width(int(first))
-    if width != 0:
-        return usize(width)
-
-    throw UnicodeError(
-        f"invalid UTF-8 leading byte 0x{first:02x}"
-    )
+# Some strings for ctype-style character classification
+WHITE_SPACE = " \t\n\r\v\f"
+ASCII_LOWERCASE:string = "abcdefghijklmnopqrstuvwxyz"
+ASCII_UPPERCASE:string = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+ASCII_LETTERS:string = ASCII_LOWERCASE + ASCII_UPPERCASE
+DIGITS = "0123456789"
+HEXDIGITS = DIGITS + "abcdef" + "ABCDEF"
+OCTDIGITS = "01234567"
+PUNCTUATION = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+PRINTABLE = DIGITS + ASCII_LETTERS + PUNCTUATION + WHITE_SPACE
 
 
-def __utf8_decode(
-    memory: *[u8],
-    offset: usize,
-    end: usize,
-) -> (char, usize) | UnicodeError:
-
-    if offset >= end:
-        throw UnicodeError("unexpected end of UTF-8 input")
-
-    unsafe:
-        first := memory[offset]
-
-    width ?= __utf8_width(first)
-
-    if offset + width > end:
-        throw UnicodeError("truncated UTF-8 sequence")
-
-    if width == 1:
-        return (char(u32(first)), 1)
-
-    unsafe:
-        second := memory[offset + 1]
-
-    if not __utf8_is_continuation(second):
-        throw UnicodeError("invalid UTF-8 continuation byte")
-
-    if width == 2:
-        codepoint := (u32(first & 0x1f) << 6) | u32(second & 0x3f)
-
-        return (char(codepoint), 2)
-
-    unsafe:
-        third := memory[offset + 2]
-
-    if not __utf8_is_continuation(third):
-        throw UnicodeError("invalid UTF-8 continuation byte")
-
-    if first == 0xe0 and second < 0xa0:
-        throw UnicodeError("overlong UTF-8 sequence")
-
-    if first == 0xed and second >= 0xa0:
-        throw UnicodeError("UTF-8 surrogate code point")
-
-    if width == 3:
-        codepoint := (u32(first & 0x0f) << 12) | (u32(second & 0x3f) << 6) | u32(third & 0x3f)
-
-        return (char(codepoint), 3)
-
-    unsafe:
-        fourth := memory[offset + 3]
-
-    if not __utf8_is_continuation(fourth):
-        throw UnicodeError("invalid UTF-8 continuation byte")
-
-    if first == 0xf0 and second < 0x90:
-        throw UnicodeError("overlong UTF-8 sequence")
-
-    if first == 0xf4 and second > 0x8f:
-        throw UnicodeError("UTF-8 code point exceeds U+10FFFF")
-
-    codepoint := (u32(first & 0x07) << 18) | (u32(second & 0x3f) << 12) | (u32(third & 0x3f) << 6) | u32(fourth & 0x3f)
-
-    return (char(codepoint), 4)
+# Text owns a vector of encoding units. UTF-8 uses bytes; UTF-32 uses scalars.
+# N is the initial number of NUL encoding units; strings can grow beyond N.
+trait String: Container
+    def capacity() -> int
+    def reserve(self: borrow Self, required: int)
+    def resize(self: borrow Self, required: int)
+    def character_count(self: view Self) -> int
+    def byte_length(self: view Self) -> int
 
 
-def __utf8_validate(
-    memory: *[u8],
-    byte_length: usize,
-) -> usize | UnicodeError:
-
-    offset := 0
-    characters := 0
-
-    while offset < byte_length:
-        decoded ?= __utf8_decode(
-            memory,
-            offset,
-            byte_length,
-        )
-        _, width = decoded
-
-        offset += width
-        characters += 1
-
-    return characters
-
-
-def __utf8_byte_offset(
-    memory: *[u8],
-    byte_length: usize,
-    character_index: usize,
-) -> usize | IndexError | UnicodeError:
-
-    offset := 0
-    current := 0
-
-    while current < character_index:
-        if offset >= byte_length:
-            throw IndexError(
-                f"string index {character_index} outside character length {current}"
-            )
-
-        decoded ?= __utf8_decode(
-            memory,
-            offset,
-            byte_length,
-        )
-        _, width = decoded
-
-        offset += width
-        current += 1
-
-    return offset
-
-
-'''
-# `string`
-
-The raw memory handle is hidden. Public operations preserve UTF-8 validity and
-immutability.
-'''
-class string: String:
+class string[T: u8 | u32 = u8, N = 0]: String + StringOperations
     identity: PrimitiveId = StringPrimitive().identity
     mlir: MlirTypeBinding = StringPrimitive().mlir
     id: TypeId = StringPrimitive().id
@@ -309,389 +88,492 @@ class string: String:
     literal_family: string = StringPrimitive().literal_family
     literal_bindings: list[LiteralBinding] = StringPrimitive().literal_bindings
 
-    __memory: *[u8]
-    byte_length: usize
-    length: usize
-
+    storage: vector[char[T], N]
 
     def string():
-        unsafe:
-            __memory = allocate[u8](0)
+        storage = vector[char[T], N]()
+        resize(N)
 
-        byte_length = 0
-        length = 0
+    def string(buffer: move vector[char[T], N]):
+        storage = move buffer
+        position := 0
+        while position < storage.used:
+            codepoint = __decode(position)
+            assert(encoding.valid(codepoint))
+            position += __width(position)
 
+    def capacity() -> int:
+        return storage.capacity()
 
-    '''
-    ## UTF-8 byte construction
+    def len(self: view Self) -> int:
+        return storage.used
 
-    Input bytes are validated and copied into owned storage.
-    '''
-    def string(value: slice[u8]):
-        characters ?= __utf8_validate(
-            value.__memory,
-            value.len(),
-        )
+    def size(self: view Self) -> int:
+        return storage.used
 
-        unsafe:
-            __memory = allocate[u8](value.len())
+    def bytes(self: view Self) -> byte:
+        return bytes(storage)
 
-            for index in range(value.len()):
-                __memory[index] = value[index]
+    # Resize initialized encoding units, padding growth with NUL characters.
+    # Shrinking UTF-8 must stop at a complete character boundary.
+    def resize(self: borrow Self, required: int):
+        assert(required >= 0)
+        if required < storage.used:
+            position := 0
+            while position < required:
+                position += __width(position)
+            assert(position == required)
+            storage.used = required
+        else:
+            reserve(required)
+            while storage.used < required:
+                storage.append(T(0))
 
-        byte_length = value.len()
-        length = characters
+    # Capacity is in encoding units; growth thresholds are always in bytes.
+    # Double small allocations, then grow in 1024-byte steps.
+    def reserve(self: borrow Self, required: int):
+        assert(required >= 0)
+        capacity := storage.capacity()
+        if required <= capacity:
+            return
+        width = int(bytes(T).amount / 8.0)
+        step = 1024 / width
+        assert(required <= 9223372036854775807 / width)
+        if capacity == 0:
+            capacity = N
+            if capacity == 0:
+                capacity = 1
+        while capacity < required and capacity < step:
+            capacity *= 2
+            if capacity > step:
+                capacity = step
+        if capacity < required:
+            increments = (required - capacity - 1) / step + 1
+            if increments > (9223372036854775807 / width - capacity) / step:
+                capacity = required
+            else:
+                capacity += increments * step
+        storage.reserve_exact(capacity)
 
+    operator copy(self) -> Self:
+        return string[T, N](storage.copy())
 
-    '''
-    ## Compiler literal construction
+    operator string(self) -> string:
+        result = string()
+        position := 0
+        while position < storage.used:
+            codepoint = __decode(position)
+            position += __width(position)
+            result.append(encoding.from_codepoint(codepoint))
+        return result
 
-    Literal bytes are UTF-8 validated by the compiler before normal string
-    ownership is created.
-    '''
-    def __from_literal[N: usize](value: u8[N]) -> string:
-        unsafe:
-            memory := allocate[u8](N)
+    def __unit(position: int) -> int:
+        return int(storage.get(position))
 
-            for index in range(N):
-                memory[index] = value[index]
+    def __width(position: int) -> int:
+        if bytes(T).amount == 32.0:
+            return 1
+        first = __unit(position)
+        width := 0
+        if first < 128:
+            width = 1
+        elif first >= 194 and first <= 223:
+            width = 2
+        elif first >= 224 and first <= 239:
+            width = 3
+        elif first >= 240 and first <= 244:
+            width = 4
+        assert(width > 0 and width <= storage.used - position)
+        return width
 
-        characters ?= __utf8_validate(
-            borrow memory,
-            N,
-        )
+    def __decode(position: int) -> int:
+        first = __unit(position)
+        width = __width(position)
+        if width == 1:
+            assert(encoding.valid(first))
+            return first
+        second = __unit(position + 1)
+        if width == 2:
+            return encoding.decode_two(first, second)
+        third = __unit(position + 2)
+        if width == 3:
+            return encoding.decode_three(first, second, third)
+        return encoding.decode_four(first, second, third, __unit(position + 3))
 
-        return string.__from_valid_utf8(
-            move memory,
-            N,
-            characters,
-        )
+    def append(self: borrow Self, value: char) -> borrow Self:
+        codepoint = encoding.codepoint(value)
+        if bytes(T).amount == 32.0:
+            reserve(storage.used + 1)
+            storage.append(T(codepoint))
+        else:
+            width = encoding.width(codepoint)
+            assert(storage.used <= 9223372036854775807 - width)
+            reserve(storage.used + width)
+            if width == 1:
+                storage.append(T(codepoint))
+            elif width == 2:
+                storage.append(T(192 + codepoint / 64))
+                storage.append(T(128 + codepoint % 64))
+            elif width == 3:
+                storage.append(T(224 + codepoint / 4096))
+                storage.append(T(128 + (codepoint / 64) % 64))
+                storage.append(T(128 + codepoint % 64))
+            else:
+                storage.append(T(240 + codepoint / 262144))
+                storage.append(T(128 + (codepoint / 4096) % 64))
+                storage.append(T(128 + (codepoint / 64) % 64))
+                storage.append(T(128 + codepoint % 64))
+        return self
 
+    def append(self: borrow Self, value: string) -> borrow Self:
+        count = value.storage.used
+        if bytes(T).amount == 8.0:
+            assert(storage.used <= 9223372036854775807 - count)
+            reserve(storage.used + count)
+            position := 0
+            while position < count:
+                storage.append(T(value.storage.get(position)))
+                position += 1
+            return self
+        position := 0
+        while position < count:
+            codepoint = value.__decode(position)
+            width = value.__width(position)
+            append(encoding.from_codepoint(codepoint))
+            position += width
+        return self
 
-    '''
-    ## Adopt validated storage
+    def __characters() -> list[int]:
+        result: list[int] = []
+        position := 0
+        while position < storage.used:
+            result.append(__decode(position))
+            position += __width(position)
+        return result
 
-    Internal operations use this after creating bytes on known UTF-8 boundaries.
-    '''
-    def __from_valid_utf8(
-        memory: *[u8],
-        byte_length: usize,
-        length: usize,
-    ) -> string:
-        result := string()
+    def __pattern(value: string | char) -> list[int]:
+        if value is char:
+            return [encoding.codepoint(value)]
+        else:
+            return value.__characters()
 
-        unsafe:
-            free(result.__memory)
+    def __piece(values: list[int], start: int, end: int) -> string:
+        result = string()
+        for index in range(start, end):
+            result.append(encoding.from_codepoint(values[index]))
+        return result
 
-        result.__memory = move memory
-        result.byte_length = byte_length
-        result.length = length
+    def __matches(values: list[int], pattern: list[int], start: int, end: int) -> bool:
+        if start < 0 or start > end or len(pattern) > end - start:
+            return false
+        for index in range(int(len(pattern))):
+            if values[start + index] != pattern[index]:
+                return false
+        return true
 
+    # Transcode only initialized units, independently of reserved capacity.
+    def encode[Unit: u8 | u32]() -> array[Unit]:
+        converted = string[Unit]()
+        for codepoint in __characters():
+            converted.append(encoding.from_codepoint(codepoint))
+        result = arrays.allocate[Unit](converted.storage.used)
+        for index in range(converted.storage.used):
+            arrays.write(result, index, Unit(converted.storage.get(index)))
         return result
 
 
-    operator if(self) -> self.length != 0
-    operator else(self) -> self.length == 0
+    def starts_with(sub_string: string | char) -> bool:
+        values = __characters()
+        return __matches(values, __pattern(sub_string), 0, int(len(values)))
 
+    def ends_with(sub_string: string | char) -> bool:
+        values = __characters()
+        pattern = __pattern(sub_string)
+        return __matches(values, pattern, int(len(values)) - int(len(pattern)), int(len(values)))
 
-    '''
-    ## Unicode indexing
-    '''
-    operator [](index: usize) -> char:
-        if index >= self.length:
-            throw IndexError(
-                f"string index {index} outside [0, {self.length})"
-            )
+    # Bounds are half-open character offsets; negative offsets count from end.
+    def find(sub_string: string | char, start: int | absent = absent, end: int | absent = absent) -> int | None:
+        values = __characters()
+        pattern = __pattern(sub_string)
+        count = int(len(values))
+        first := 0
+        last := count
+        if start is int:
+            first = start
+            if first < 0:
+                first = max(0, count + first)
+        if end is int:
+            last = end
+            if last < 0:
+                last = max(0, count + last)
+            last = min(count, last)
+        while first <= last:
+            if __matches(values, pattern, first, last):
+                return first
+            first += 1
+        return None
 
-        offset ?= __utf8_byte_offset(
-            borrow __memory,
-            byte_length,
-            index,
-        )
+    def join(iterable: list[string], conjunctor: string) -> string:
+        result = string()
+        for index in range(int(len(iterable))):
+            if index > 0:
+                result.append(conjunctor)
+            result.append(iterable[index])
+        return result
 
-        decoded ?= __utf8_decode(
-            borrow __memory,
-            offset,
-            byte_length,
-        )
-        value, _ = decoded
+    def join(iterable: list[string]) -> string:
+        return join(iterable, __piece(__characters(), 0, int(len(__characters()))))
 
-        return value
+    # C must construct an empty container and support append(string).
+    # Explicit separators preserve empty fields; whitespace splitting skips them.
+    def split[C=list[string]](separator: string | char | absent = absent) -> C:
+        result = C()
+        for piece in __split(separator):
+            result.append(piece)
+        return result
 
+    # The common list result does not require inferring a return-only generic.
+    def split(separator: string | char | absent = absent) -> list[string]:
+        return __split(separator)
 
-    '''
-    ## Unicode slicing
-    '''
-    operator [](range: Range[usize]) -> string:
-        start := range.start
-        end := range.end
+    def __split(separator: string | char | absent) -> list[string]:
+        values = __characters()
+        result: list[string] = []
+        count = int(len(values))
+        first := 0
+        position := 0
+        if separator is absent:
+            whitespace = __pattern(WHITE_SPACE)
+            while position < count:
+                while position < count and values[position] in whitespace:
+                    position += 1
+                first = position
+                while position < count and values[position] not in whitespace:
+                    position += 1
+                if first < position:
+                    result.append(__piece(values, first, position))
+            return result
+        pattern: list[int] := []
+        if separator is string:
+            pattern = __pattern(separator)
+        elif separator is char:
+            pattern = __pattern(separator)
+        assert(len(pattern) > 0)
+        while position < count:
+            if __matches(values, pattern, position, count):
+                result.append(__piece(values, first, position))
+                position += int(len(pattern))
+                first = position
+            else:
+                position += 1
+        result.append(__piece(values, first, count))
+        return result
 
-        if start > end:
-            throw IndexError(
-                f"string slice start {start} exceeds end {end}"
-            )
+    def strip() -> string:
+        values = __characters()
+        whitespace = __pattern(WHITE_SPACE)
+        first := 0
+        last := int(len(values))
+        while first < last and values[first] in whitespace:
+            first += 1
+        while last > first and values[last - 1] in whitespace:
+            last -= 1
+        return __piece(values, first, last)
 
-        if end > self.length:
-            throw IndexError(
-                f"string slice end {end} exceeds length {self.length}"
-            )
+    def append(self: borrow Self, addition: string | char) -> borrow Self:
+        if addition is char:
+            return append(addition)
+        else:
+            return append(addition)
 
-        start_byte ?= __utf8_byte_offset(
-            borrow __memory,
-            byte_length,
-            start,
-        )
+    # Snapshot both operands before mutation, including remove(self).
+    # An empty pattern is a no-op; matches are removed without overlapping.
+    def remove(self: borrow Self, removed: string | char) -> borrow Self:
+        values = __characters()
+        pattern = __pattern(removed)
+        if len(pattern) == 0:
+            return self
+        storage.clear()
+        position := 0
+        count = int(len(values))
+        while position < count:
+            if __matches(values, pattern, position, count):
+                position += int(len(pattern))
+            else:
+                append(encoding.from_codepoint(values[position]))
+                position += 1
+        return self
 
-        end_byte ?= __utf8_byte_offset(
-            borrow __memory,
-            byte_length,
-            end,
-        )
+    # Negative indices count from end; duplicates and out-of-range indices
+    # have no additional effect. The receiver remains unchanged.
+    def without(indices: int | list[int]) -> string:
+        values = __characters()
+        selected: list[int] := []
+        if indices is int:
+            selected.append(indices)
+        else:
+            selected = indices
+        count = int(len(values))
+        omitted: list[int] = []
+        for index in selected:
+            omitted.append(count + index if index < 0 else index)
+        result = string()
+        for index in range(count):
+            if index not in omitted:
+                result.append(encoding.from_codepoint(values[index]))
+        return result
 
-        result_bytes := end_byte - start_byte
+    operator in(self: Self, right: string) -> bool:
+        return right.find(__piece(__characters(), 0, int(len(__characters())))) != None
 
+    operator +(self: Self, right: string) -> string:
+        result = __piece(__characters(), 0, int(len(__characters())))
+        result.append(right)
+        return result
+
+    operator +=(self: borrow Self, right: string):
+        replacement = string[T, N](storage.copy())
+        replacement.append(right)
+        self = move replacement
+
+    # len/size count encoding units; character_count counts Unicode scalars.
+    def character_count(self: view Self) -> int:
+        return int(len(__characters()))
+
+    def byte_length(self: view Self) -> int:
+        return storage.used * int(bytes(T).amount / 8.0)
+
+    def empty(self: view Self) -> bool:
+        return storage.used == 0
+
+    operator if(self) -> self.storage.used != 0
+    operator else(self) -> self.storage.used == 0
+
+    def string(value: slice[u8]):
+        storage = vector[char[T], N]()
+        position := 0
+        while position < int(value.len()):
+            first = int(value[usize(position)])
+            width = utf8_core.leading_width(first)
+            if width == 0 or width > int(value.len()) - position:
+                throw UnicodeError("invalid or truncated UTF-8 sequence")
+            codepoint := first
+            if width > 1:
+                second = int(value[usize(position + 1)])
+                if not utf8_core.continuation(second):
+                    throw UnicodeError("invalid UTF-8 continuation byte")
+                if width == 2:
+                    codepoint = encoding.decode_two(first, second)
+                else:
+                    third = int(value[usize(position + 2)])
+                    if not utf8_core.continuation(third):
+                        throw UnicodeError("invalid UTF-8 continuation byte")
+                    if width == 3:
+                        codepoint = encoding.decode_three(first, second, third)
+                    else:
+                        fourth = int(value[usize(position + 3)])
+                        if not utf8_core.continuation(fourth):
+                            throw UnicodeError("invalid UTF-8 continuation byte")
+                        codepoint = encoding.decode_four(first, second, third, fourth)
+            if not encoding.valid(codepoint) or encoding.width(codepoint) != width:
+                throw UnicodeError("invalid or overlong UTF-8 scalar")
+            append(encoding.from_codepoint(codepoint))
+            position += width
+
+    def __from_literal[Count: usize](value: u8[Count]) -> string:
+        result = string()
+        for index in range(Count):
+            result.storage.append(value[index])
+        return result
+
+    # Adopt the old UTF-8 boundary by decoding into the single owning vector.
+    def __from_valid_utf8(memory: *[u8], byte_length: usize, length: usize) -> string:
+        result = string()
         unsafe:
-            memory := allocate[u8](result_bytes)
-
-            for index in range(result_bytes):
-                memory[index] = __memory[start_byte + index]
-
-        return string.__from_valid_utf8(
-            move memory,
-            result_bytes,
-            end - start,
-        )
-
-
-    def len(self) -> usize:
-        return length
-
-
-    def bytes(self) -> usize:
-        return byte_length
-
-
-    def raw(self) -> slice[u8]:
-        return slice[u8](__memory, 0, byte_length)
-
-
-    def byte(self, index: usize) -> u8:
-        if index >= byte_length:
-            throw IndexError(
-                f"string byte index {index} outside [0, {byte_length})"
-            )
-
-        unsafe:
-            return __memory[index]
-
-
-    def empty(self) -> bool:
-        return length == 0
-
-
-    '''
-    ## Concatenation
-    '''
-    operator +(right: string) -> string:
-        result_bytes := byte_length + right.byte_length
-        result_chars := length + right.length
-
-        unsafe:
-            memory := allocate[u8](result_bytes)
-
             for index in range(byte_length):
-                memory[index] = __memory[index]
+                result.storage.append(memory[index])
+            free(memory)
+        return result
 
-            for index in range(right.byte_length):
-                memory[byte_length + index] = right.__memory[index]
+    operator [](index: usize) -> char:
+        values = __characters()
+        if index >= usize(len(values)):
+            throw IndexError("string character index out of range")
+        return encoding.from_codepoint(values[int(index)])
 
-        return string.__from_valid_utf8(
-            move memory,
-            result_bytes,
-            result_chars,
-        )
+    operator [](range: Range[usize]) -> string:
+        values = __characters()
+        if range.start > range.end or range.end > usize(len(values)):
+            throw IndexError("string character slice out of range")
+        return __piece(values, int(range.start), int(range.end))
 
+    # UTF-8 byte access remains available even on a UTF-32 receiver.
+    def byte(self: view Self, index: usize) -> u8:
+        encoded = encode[u8]()
+        if index >= usize(arrays.length(encoded)):
+            throw IndexError("string byte index out of range")
+        return arrays.read(encoded, int(index))
 
-    '''
-    ## Repetition
-    '''
+    def raw(self: view Self) -> StringView[char[T]]:
+        return StringView[char[T]](view storage.data, storage.used)
+
     operator *(count: usize) -> string:
-        if count == 0 or byte_length == 0:
-            return string()
+        result = string()
+        piece = __piece(__characters(), 0, character_count())
+        for repetition in range(count):
+            result.append(piece)
+        return result
 
-        result_bytes := byte_length * count
-        result_chars := length * count
-
-        unsafe:
-            memory := allocate[u8](result_bytes)
-
-            for repetition in range(count):
-                destination := repetition * byte_length
-
-                for index in range(byte_length):
-                    memory[destination + index] = __memory[index]
-
-        return string.__from_valid_utf8(
-            move memory,
-            result_bytes,
-            result_chars,
-        )
-
-
-    '''
-    ## Equality and ordering
-
-    Valid UTF-8 can be compared directly by stored bytes for equality and
-    lexicographic Unicode scalar order.
-    '''
     operator ==(right: string) -> bool:
-        if byte_length != right.byte_length:
+        left_values = __characters()
+        right_values = right.__characters()
+        if len(left_values) != len(right_values):
             return false
-
-        for index in range(byte_length):
-            if self.byte(index) != right.byte(index):
-                return false
-
-        return true
-
+        return __matches(left_values, right_values, 0, int(len(left_values)))
 
     operator !=(right: string) -> bool:
         return not (self == right)
 
-
     operator <(right: string) -> bool:
-        common := min(byte_length, right.byte_length)
-
-        for index in range(common):
-            left_byte := self.byte(index)
-            right_byte := right.byte(index)
-
-            if left_byte < right_byte:
-                return true
-
-            if left_byte > right_byte:
-                return false
-
-        return byte_length < right.byte_length
-
+        left_values = __characters()
+        right_values = right.__characters()
+        for index in range(min(int(len(left_values)), int(len(right_values)))):
+            if left_values[index] != right_values[index]:
+                return left_values[index] < right_values[index]
+        return len(left_values) < len(right_values)
 
     operator <=(right: string) -> bool:
         return self < right or self == right
 
-
     operator >(right: string) -> bool:
-        return right < self
-
+        return not (self <= right)
 
     operator >=(right: string) -> bool:
-        return right <= self
+        return not (self < right)
 
+    def contains(needle: string | char) -> bool:
+        return find(needle) != None
 
-    '''
-    ## Search helpers
-    '''
-    def starts_with(self, prefix: string) -> bool:
-        if prefix.byte_length > byte_length:
-            return false
-
-        for index in range(prefix.byte_length):
-            if self.byte(index) != prefix.byte(index):
-                return false
-
-        return true
-
-
-    def ends_with(self, suffix: string) -> bool:
-        if suffix.byte_length > byte_length:
-            return false
-
-        offset := byte_length - suffix.byte_length
-
-        for index in range(suffix.byte_length):
-            if self.byte(offset + index) != suffix.byte(index):
-                return false
-
-        return true
-
-
-    def contains(self, needle: string) -> bool:
-        if needle.byte_length == 0:
-            return true
-
-        if needle.byte_length > byte_length:
-            return false
-
-        last_start := byte_length - needle.byte_length
-
-        for start in range(last_start + 1):
-            matches := true
-
-            for index in range(needle.byte_length):
-                if self.byte(start + index) != needle.byte(index):
-                    matches = false
-                    break
-
-            if matches:
-                return true
-
-        return false
-
-
-    '''
-    ## Iteration
-    '''
     operator in(self) -> Iterator[char]:
-        offset := 0
+        position := 0
+        while position < storage.used:
+            yield encoding.from_codepoint(__decode(position))
+            position += __width(position)
 
-        while offset < byte_length:
-            decoded ?= __utf8_decode(
-                borrow __memory,
-                offset,
-                byte_length,
-            )
-            value, width = decoded
+    def clone(self: view Self) -> Self:
+        return string[T, N](storage.copy())
 
-            yield value
-            offset += width
-
-
-    '''
-    ## Clone and hash
-    '''
-    def clone(self) -> string:
-        unsafe:
-            memory := allocate[u8](byte_length)
-
-            for index in range(byte_length):
-                memory[index] = __memory[index]
-
-        return string.__from_valid_utf8(
-            move memory,
-            byte_length,
-            length,
-        )
-
-
-    def hash(self) -> u64:
+    def hash(self: view Self) -> u64:
+        encoded = encode[u8]()
         value: u64 = 14695981039346656037
-
-        for index in range(byte_length):
-            value ^= u64(self.byte(index))
+        for index in range(arrays.length(encoded)):
+            value ^= u64(arrays.read(encoded, index))
             value *= 1099511628211
-
         return value
 
+    def print(self: view Self) -> string:
+        return __piece(__characters(), 0, character_count())
 
-    def print(self) -> string:
-        return self
-
-
-    '''
-    ## Integer formatting
-
-    This is the implementation used by integer `print()` and the `int -> string`
-    conversion relation.
-    '''
     def from_integer[integer_type: int](value: integer_type, base: u8 = 10) -> string:
         if base < 2 or base > 36:
             throw ValueError(
@@ -758,6 +640,7 @@ class string: String:
                 f"integer base {base} outside [2, 36]"
             )
 
+        length = character_count()
         if length == 0:
             throw TypeConversionError("empty string is not an integer")
 
@@ -828,11 +711,11 @@ class string: String:
     '''
     ## Floating formatting
 
-    Shortest-round-trip decimal formatting is a library algorithm rather than an
-    MLIR primitive operation.
+    Formatting uses the package formatter; its supported float widths and
+    precision policy apply here as well.
     '''
     def from_float[float_type: float](value: float_type) -> string:
-        return decimal.format_float[float_type](value)
+        return formatting.string(value)
 
 
     '''
@@ -860,6 +743,7 @@ class string: String:
 
             return mlir(arith.constant, "-inf", to=float_type)
 
+        length = character_count()
         if length == 0:
             throw TypeConversionError("empty string is not a float")
 
@@ -943,48 +827,36 @@ class string: String:
         return value
 
 
-    def drop():
-        unsafe:
-            free(__memory)
 
 
-'''
-## Conversion relations
+# A bounded read-only loan; unused vector capacity is never exposed.
+class StringView[Unit]:
+    data: view array[Unit]
+    count: int
 
-`string` participates in the same graph used by numeric primitives.
+    def StringView(value: view array[Unit], used: int):
+        assert(used >= 0 and used <= arrays.length(value))
+        data = view value
+        count = used
 
-The numeric primitive files own the generated numeric/string edges:
+    def len(self: view Self) -> int:
+        return count
 
-```text
-int    -> string
-string ~> int
+    operator [](index: int) -> Unit:
+        assert(index >= 0 and index < count)
+        return arrays.read(data, index)
 
-float  -> string
-string ~> float
-```
 
-This file provides the formatting and parsing operations used by those
-relations.
-
-Raw bytes have an asymmetric relationship with string:
-
-```text
-string -> bytes
-bytes  ~> string
-```
-
-A string can always expose or copy its UTF-8 bytes. Arbitrary bytes may fail
-UTF-8 validation when converted to string.
-'''
 extend string:
 
     operator <=>(self, T) -> T | TypeConversionError:
 
         self -> bytes:
-            result := bytes(byte_length)
+            encoded = self.encode[u8]()
+            result := bytes(arrays.length(encoded))
 
-            for index in range(byte_length):
-                result[index] = self.byte(index)
+            for index in range(arrays.length(encoded)):
+                result[index] = arrays.read(encoded, index)
 
             return result
 
@@ -997,16 +869,101 @@ extend string:
             )
 
 
-'''
-# Executable specification
-'''
+
+test "UTF32 string encodes Unicode scalars as UTF8 bytes":
+    value = string[u32]()
+    value.append('A')
+    value.append('λ')
+    value.append('😀')
+    encoded = value.encode[u8]()
+    assert(arrays.length(encoded) == 7)
+    expected: list[int] = [65, 206, 187, 240, 159, 152, 128]
+    for index in range(7):
+        assert(int(arrays.read(encoded, index)) == expected[index])
+    assert(len(value) == 3)
+    assert(value.size() == 3)
+
+
+test "UTF8 string encodes Unicode scalars as UTF32 units":
+    value = string[u8]()
+    value.append("Aλ😀")
+    encoded = value.encode[u32]()
+    assert(arrays.length(encoded) == 3)
+    assert(arrays.read(encoded, 0) == u32(65))
+    assert(arrays.read(encoded, 1) == u32(955))
+    assert(arrays.read(encoded, 2) == u32(128512))
+    assert(len(value) == 7)
+    assert(value.size() == 7)
+
+
+test "string searches use character offsets and half open bounds":
+    value = string()
+    value.append("aλ😀λ")
+    assert(value.starts_with('a'))
+    assert(value.ends_with('λ'))
+    assert(not value.ends_with("longer than the receiver"))
+    assert(value.find('λ') == 1)
+    assert(value.find('λ', 2) == 3)
+    assert(value.find('λ', -1) == 3)
+    assert(value.find('😀', 0, 2) == None)
+    assert(value.find("", 4, 4) == 4)
+    assert(value.find("", 5) == None)
+
+
+test "string splitting preserves explicit empty fields and skips whitespace":
+    value = string()
+    value.append("λ,,😀,")
+    pieces: list[string] = value.split(',')
+    assert(len(pieces) == 4)
+    assert(pieces[0].find('λ') == 0)
+    assert(len(pieces[1]) == 0)
+    assert(pieces[2].find('😀') == 0)
+    assert(len(pieces[3]) == 0)
+    padded = string()
+    padded.append(" \tλ\n😀\r ")
+    words: list[string] = padded.split()
+    assert(len(words) == 2)
+    assert(len(padded.strip()) == 7)
+    separator = string()
+    separator.append(',')
+    joined = separator.join(words)
+    assert(len(joined) == 7)
+    assert(joined.find(',') == 1)
+
+
+test "string removal and exclusion preserve scalar boundaries":
+    value = string[u32]()
+    value.append("λ😀λ😀")
+    excluded = value.without([1, -1, 1, 99])
+    assert(len(excluded) == 4)
+    assert(excluded.starts_with('λ'))
+    assert(len(value) == 4)
+    value.remove('λ')
+    assert(len(value) == 2)
+    assert(value.starts_with('😀'))
+    assert(value.size() == 2)
+    value.remove("")
+    assert(len(value) == 2)
+
+
+test "string self append and concatenation retain their operands":
+    value = string()
+    value.append("λ😀")
+    value.append(value)
+    assert(len(value) == 12)
+    combined = value + "!"
+    assert(len(combined) == 13)
+    assert(combined.ends_with('!'))
+    assert(len(value) == 12)
+    value.remove(value)
+    assert(len(value) == 0)
 
 
 test "empty string has zero lengths and false truth":
     value := ""
 
     assert(value.len() == 0)
-    assert(value.bytes() == 0B)
+    assert(value.byte_length() == 0)
 
     if value:
         throw Error("empty string must be false")
@@ -1016,7 +973,7 @@ test "non-empty string is true":
     value := "hello"
 
     if value:
-        throw Error("Unimplemented (library/core/string/src/string.sev)")
+        assert(not value.empty())
     else:
         throw Error("non-empty string must be true")
 
@@ -1025,14 +982,15 @@ test "ASCII length equals byte length":
     value := "hello"
 
     assert(value.len() == 5)
-    assert(value.bytes() == 5)
+    assert(value.byte_length() == 5)
 
 
 test "Unicode scalar length differs from byte length":
     value := "aλz"
 
-    assert(value.len() == 3)
-    assert(value.bytes() == 4)
+    assert(value.character_count() == 3)
+    assert(value.len() == 4)
+    assert(value.byte_length() == 4)
 
 
 test "string indexing uses Unicode scalar indices":
@@ -1048,7 +1006,7 @@ test "string indexing uses Unicode scalar indices":
 test "byte access exposes UTF-8 representation":
     value := "λ"
 
-    assert(value.bytes() == 2)
+    assert(value.byte_length() == 2)
     assert(value.byte(0) == 0xce)
     assert(value.byte(1) == 0xbb)
 
@@ -1176,7 +1134,7 @@ test "string converts to bytes and validates bytes on return":
     assert(restored == value)
 
 
-test with compiler "string is immutable":
+test with compiler "string does not expose character assignment":
     reject:
         value = "hello"
         value[0] = 'H'
@@ -1184,6 +1142,6 @@ test with compiler "string is immutable":
 
 test with compiler "borrowed string bytes cannot outlive string":
     reject:
-        def invalid() -> slice[u8]:
+        def invalid() -> StringView[char[u8]]:
             value := "hello"
-            return value.bytes()
+            return value.raw()
