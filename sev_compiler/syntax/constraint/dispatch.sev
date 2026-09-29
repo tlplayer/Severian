@@ -1,32 +1,72 @@
 import ConstraintGraph, DispatchFamily, ProofResult from "model.sev"
 import DefId, constraint_schedule from "graph.sev"
+import ConstraintId, ConstraintRequirement, DispatchCandidate from "model.sev"
+import Expression, ExpressionKind, LiteralValue from "../function/function.sev"
+import DeclarationId, SourceId, Span from "../source.sev"
+
+
+# Structural discovery can narrow a family before every capture is resolved.
+# Return original candidate indices so declaration identity and order survive.
+def admissible_dispatch_candidates(family: DispatchFamily, graph: ConstraintGraph) -> list[int] | Error:
+    constraint_schedule(graph)
+    candidates: list[int] = []
+    index := 0
+    for candidate in family.candidates:
+        rejected := false
+        for requirement in candidate.requirements:
+            if requirement.index >= len(graph.requirements):
+                throw Error("dispatch references an unknown constraint")
+            if graph.requirements[requirement.index].result == ProofResult.Refuted:
+                rejected = true
+        if not rejected:
+            candidates.append(index)
+        index += 1
+    return candidates
 
 
 # Unknown candidates remain live; they never become false because a budget ran out.
 def select_dispatch(family: DispatchFamily, graph: ConstraintGraph) -> DefId | Error:
-    constraint_schedule(graph)
     selected := -1
     unknown := false
-    index := 0
-    for candidate in family.candidates:
-        rejected := false
+    for index in admissible_dispatch_candidates(family, graph):
+        candidate = family.candidates[index]
         unresolved := false
         for requirement in candidate.requirements:
-            if requirement.index >= len(graph.requirements):
-                throw Error("dispatch references an unknown constraint")
             result = graph.requirements[requirement.index].result
-            rejected = rejected or result == ProofResult.Refuted
             unresolved = unresolved or result == ProofResult.Unknown
-        if not rejected:
-            if unresolved:
-                unknown = true
-            elif selected >= 0:
-                throw Error("ambiguous dispatch: multiple implementations match")
-            else:
-                selected = index
-        index += 1
+        if unresolved:
+            unknown = true
+        elif selected >= 0:
+            throw Error("ambiguous dispatch: multiple implementations match")
+        else:
+            selected = index
     if unknown:
         throw Error("dispatch requires runtime predicate evaluation")
     if selected < 0:
         throw Error("no implementation matches dispatch constraints")
     return family.candidates[selected].definition
+
+
+test "progressive dispatch retains unknown candidates and excludes refuted ones":
+    location = Span(SourceId(0), 0, 1)
+    condition = Expression(ExpressionKind.LiteralValue(LiteralValue.BooleanValue(true)), location)
+    graph = ConstraintGraph([
+        ConstraintRequirement(ConstraintId(0), condition, result=ProofResult.Unknown),
+        ConstraintRequirement(ConstraintId(1), condition, result=ProofResult.Refuted),
+        ConstraintRequirement(ConstraintId(2), condition, result=ProofResult.Proven),
+    ])
+    first = DefId(0, 0, DeclarationId(1))
+    second = DefId(0, 0, DeclarationId(2))
+    family = DispatchFamily("parse", [
+        DispatchCandidate(first, [ConstraintId(0)]),
+        DispatchCandidate(second, [ConstraintId(1), ConstraintId(0)]),
+    ])
+    candidates = admissible_dispatch_candidates(family, graph)
+    assert(len(candidates) == 1 and candidates[0] == 0)
+    unresolved ?= select_dispatch(family, graph)
+    assert(unresolved is Error)
+    graph.requirements[0].result = ProofResult.Proven
+    assert(select_dispatch(family, graph) == first)
+    family.candidates.append(DispatchCandidate(second, [ConstraintId(2)]))
+    ambiguous ?= select_dispatch(family, graph)
+    assert(ambiguous is Error)

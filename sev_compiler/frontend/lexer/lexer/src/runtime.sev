@@ -5,6 +5,8 @@ import source
 import diagnostics
 import LexemeInput, LexemeMatch, LexicalRule, lexeme_span, lexeme_text from "rule.sev"
 import Symbol, TokenKind, callable, is_digit, span from "identifier.sev"
+import "../../../../syntax/constraint/model.sev" as constraints
+import admissible_dispatch_candidates from "../../../../syntax/constraint/dispatch.sev"
 
 
 # Imported rules retain universal source bodies. This evaluator has no parser
@@ -529,12 +531,70 @@ def lexical_block(frame: LexicalFrame, block: model_syntax_block_block.Block) ->
     return LexicalFlow()
 
 
+def has_lexical_constraints(rule: SourceLexicalRule) -> bool:
+    for method in rule.methods:
+        if method.name == "scan":
+            for attachment in method.attachments:
+                if attachment.role == constraints.AttachmentRole.Dispatch:
+                    return true
+    return false
+
+
+# Evaluate declared acceptance before executing any candidate's scan body.
+# Preserve predicate order; no reordering or sharing is inferred here.
+def constrained_source_rules(rules: list[SourceLexicalRule], input: LexemeInput, start: int) -> list[SourceLexicalRule] | diagnostics.Diagnostic:
+    graph = constraints.ConstraintGraph()
+    family = constraints.DispatchFamily("lexical.scan", [])
+    candidates: list[SourceLexicalRule] = []
+    for rule in rules:
+        if not has_lexical_constraints(rule):
+            continue
+        for method in rule.methods:
+            if method.name != "scan":
+                continue
+            if len(method.parameters) != 2:
+                return error(lexical_error("scan requires input: LexemeInput and start: int", rule.span))
+            frame = LexicalFrame(rule, [10000])
+            lexical_set(frame, method.parameters[0].name, LexicalValue.Input(input))
+            lexical_set(frame, method.parameters[1].name, LexicalValue.Number(start))
+            requirements: list[constraints.ConstraintId] = []
+            for attachment in method.attachments:
+                if attachment.role != constraints.AttachmentRole.Dispatch:
+                    continue
+                accepted = lexical_truth(lexical_expression(frame, attachment.condition), rule.span)
+                id = constraints.ConstraintId(u32(len(graph.requirements)))
+                proof = constraints.ProofResult.Proven if accepted else constraints.ProofResult.Refuted
+                graph.requirements.append(constraints.ConstraintRequirement(id, attachment.condition, result=proof))
+                requirements.append(id)
+                if not accepted:
+                    break
+            family.candidates.append(constraints.DispatchCandidate(method.definition, requirements))
+            candidates.append(rule)
+    result: list[SourceLexicalRule] = []
+    for index in admissible_dispatch_candidates(family, graph):
+        result.append(candidates[index])
+    return result
+
+
 def match_source_rules(rules: list[SourceLexicalRule], input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
+    candidates = constrained_source_rules(rules, input, start)
+    if len(candidates) > 1:
+        return error(diagnostics.diagnostic_at("E000106", "ambiguous lexical with constraints: " + candidates[0].name + " and " + candidates[1].name, lexeme_span(input, start, start)))
+    if len(candidates) == 1:
+        selected = candidates[0].scan(input, start)
+        if not selected.matched:
+            return error(lexical_error("selected lexical implementation rejected its accepted source window", candidates[0].span))
+        if selected.end <= start or selected.end > len(input.characters):
+            return error(diagnostics.diagnostic_at("E000104", "lexical rule must consume a nonempty source range: " + candidates[0].name, lexeme_span(input, start, start)))
+        return selected
+    # Compatibility path until all legacy recognizers declare acceptance.
     selected := LexemeMatch(start, None, false)
     priority := 0
     owner := ""
     ambiguous := false
     for rule in rules:
+        if has_lexical_constraints(rule):
+            continue
         result = rule.scan(input, start)
         if result.matched:
             if result.end <= start or result.end > len(input.characters):
@@ -549,3 +609,63 @@ def match_source_rules(rules: list[SourceLexicalRule], input: LexemeInput, start
     if ambiguous:
         return error(diagnostics.diagnostic_at("E000106", "ambiguous lexical rules at " + owner, lexeme_span(input, start, selected.end)))
     return selected
+
+
+def lexical_constraint_fixture(name: string, accepted: bool, location: source.Span) -> SourceLexicalRule:
+    condition = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_function_function.LiteralValue.BooleanValue(accepted)), location)
+    parameters = [
+        model_syntax_function_function.FunctionParameter("input", model_syntax_type_annotation.named_type("LexemeInput", [], location), absent, location),
+        model_syntax_function_function.FunctionParameter("start", model_syntax_type_annotation.named_type("int", [], location), absent, location),
+    ]
+    # Deliberately invalid result: tests detect any premature body execution.
+    method = model_syntax_function_function.FunctionDeclaration(name="scan", parameters=parameters, body=model_syntax_block_block.Block(), attachments=[constraints.WithAttachment(constraints.AttachmentRole.Dispatch, condition)])
+    return SourceLexicalRule(name, [method], location)
+
+
+test "refuted lexical with never executes its body":
+    file = source.virtual_source("rejected.sev", "0")
+    input = LexemeInput(file, file.characters)
+    rule = lexical_constraint_fixture("Rejected", false, lexeme_span(input, 0, 1))
+    result = match_source_rules([rule], input, 0)
+    assert(not result.matched)
+
+
+test "lexical overlap is diagnosed before bodies regardless of priority":
+    file = source.virtual_source("overlap.sev", "0")
+    input = LexemeInput(file, file.characters)
+    first = lexical_constraint_fixture("First", true, lexeme_span(input, 0, 1))
+    second = lexical_constraint_fixture("Second", true, lexeme_span(input, 0, 1))
+    second.priority = 100
+    result ?= match_source_rules([first, second], input, 0)
+    if result is diagnostics.Diagnostic:
+        assert(result.code == "E000106")
+    else:
+        assert(false)
+
+
+test "selected lexical body failure is not a dispatch retry":
+    file = source.virtual_source("selected.sev", "0")
+    input = LexemeInput(file, file.characters)
+    rule = lexical_constraint_fixture("Selected", true, lexeme_span(input, 0, 1))
+    result ?= match_source_rules([rule], input, 0)
+    if result is diagnostics.Diagnostic:
+        assert(result.code == "E000105")
+    else:
+        assert(false)
+
+
+test "unique lexical with selects a body within a source window":
+    file = source.virtual_source("accepted.sev", "x0y")
+    input = LexemeInput(file, ["0"], 1)
+    location = lexeme_span(input, 0, 1)
+    rule = lexical_constraint_fixture("Accepted", true, location)
+    end = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_function_function.LiteralValue.IntegerValue("1")), location)
+    category = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("TokenKind"), location)
+    kind = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Member(category, "Integer"), location)
+    constructor = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("LexemeMatch"), location)
+    call = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Call(constructor, [model_syntax_function_function.CallArgument(None, end, location), model_syntax_function_function.CallArgument(None, kind, location)]), location)
+    rule.methods[0].body = model_syntax_block_block.Block([model_syntax_block_block.Statement.Return(call, location)])
+    result = match_source_rules([rule], input, 0)
+    assert(result.matched and result.kind == TokenKind.Integer)
+    assert(result.end == 1)
+    assert(lexeme_span(input, 0, result.end).start == 1)

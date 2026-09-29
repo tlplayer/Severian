@@ -6,6 +6,7 @@ import AbiId, ArtifactId, AssertionLocation, AssertionOrigin, AttrValue, Attribu
 class LexemeInput:
     file: source.SourceFile
     characters: list[string]
+    offset: int = 0
 
 
 def lexeme_input(file: source.SourceFile) -> LexemeInput:
@@ -15,13 +16,20 @@ def lexeme_input(file: source.SourceFile) -> LexemeInput:
 def lexeme_span(input: LexemeInput, start: int, end: int) -> source.Span:
     # Source spans currently use character offsets throughout the source
     # compiler (including diagnostic rendering and interpolation).
-    return source.Span(input.file.id, u32(start), u32(end))
+    return source.Span(input.file.id, u32(input.offset + start), u32(input.offset + end))
 
 
 def lexeme_text(input: LexemeInput, start: int, end: int) -> string | diagnostics.Diagnostic:
     if start < 0 or end < start or end > len(input.characters):
         return error(diagnostics.diagnostic_at("E000104", "lexeme source slice is out of bounds", lexeme_span(input, 0, 0)))
     return input.characters[start:end].join("")
+
+
+# Child windows use local cursors while retaining the original source identity.
+def lexeme_window(input: LexemeInput, start: int, end: int) -> LexemeInput | diagnostics.Diagnostic:
+    if start < 0 or end < start or end > len(input.characters):
+        return error(diagnostics.diagnostic_at("E000104", "lexeme window escapes its enclosing source range", lexeme_span(input, 0, 0)))
+    return LexemeInput(input.file, input.characters[start:end], input.offset + start)
 
 
 class LexemeMatch:
@@ -35,3 +43,18 @@ class LexemeMatch:
 # Lx and To have distinct contracts; G owns grammar/CFG behavior.
 trait LexicalRule:
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic
+
+
+test "nested lexical windows preserve source locations and bounded text":
+    input = lexeme_input(source.virtual_source("windows.sev", "if 1 == 0.0:"))
+    condition = lexeme_window(input, 3, 11)
+    literal = lexeme_window(condition, 5, 8)
+    assert(lexeme_text(literal, 0, 3) == "0.0")
+    location = lexeme_span(literal, 0, 3)
+    assert(location.source == input.file.id)
+    assert(location.start == 8 and location.end == 11)
+    invalid ?= lexeme_window(condition, 0, 9)
+    if invalid is diagnostics.Diagnostic:
+        assert(invalid.code == "E000104")
+    else:
+        assert(false)
