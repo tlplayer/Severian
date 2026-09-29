@@ -351,7 +351,6 @@ def model_sources() -> list[string]:
         "library/core/string/src/core.sev",
         "library/core/string/src/format.sev",
         "library/core/string/src/methods.sev",
-        "library/core/string/src/storage.sev",
         "library/core/string/src/string.sev",
         "library/core/string/src/string_lists.sev",
         "library/core/collections/tuple/src/tuple.sev",

@@ -17,8 +17,8 @@
         ]
       },
       {
-        "source": "library/core/string/src/storage.sev",
-        "names": ["String", "StringOperations", "string"]
+        "source": "library/core/string/src/string.sev",
+        "names": ["String", "StringOperations", "StringView", "string"]
       },
       {
         "source": "library/core/collections/tuple/src/tuple.sev"

@@ -6,6 +6,7 @@ import * from "../core/collections/tuple/src/tuple.sev"
 import * from "../../sev_compiler/syntax/primitive/enum/enum.sev"
 import _assert_condition from "../core/utils/src/lib.sev"
 import * from "../core/utils/src/lib.sev"
+import String, StringOperations, StringView, string from "../core/string/src/string.sev"
 import * from "../core/string/src/lib.sev"
 import * from "../system/io/src/text.sev"
 import * from "../../sev_compiler/syntax/primitive/numeric/conversion.sev" as numeric

@@ -80,7 +80,7 @@ trait String: Container
     def byte_length(self: view Self) -> int
 
 
-class string[T: u8 | u32 = u8, N = 0]: String + StringOperations
+class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
     identity: PrimitiveId = StringPrimitive().identity
     mlir: MlirTypeBinding = StringPrimitive().mlir
     id: TypeId = StringPrimitive().id
