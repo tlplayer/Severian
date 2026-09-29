@@ -57,6 +57,7 @@ class Module:
     debug_files: list[source.SourceFile] = []
     hierarchy: SemanticHierarchy = SemanticHierarchy()
     obligations: list[ConstraintObligation] = []
+    block_declarations: list[RecordDeclaration] = []
 
 
 class Program:

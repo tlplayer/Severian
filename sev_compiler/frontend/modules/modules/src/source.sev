@@ -271,6 +271,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
     if not narrow:
         import_selection.require_name(required, "*")
     result = model_hir_module_module.empty_module()
+    result.block_declarations = parsed.block_declarations[:]
     aliases: list[string] = []
     for item in parsed.items:
         match item:

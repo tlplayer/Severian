@@ -157,6 +157,8 @@ def parser_delimited_layout(parser: Parser):
 
 def parser_module(parser: Parser) -> model_hir_module_module.Module | diagnostics.Diagnostic:
     result = model_hir_module_module.Module([])
+    if len(parser.tokens) > 0:
+        result.block_declarations = parser.tokens[0].block_declarations[:]
     parser_separators(parser)
     while not parser_at_simple(parser, Eof):
         if parser_declaration_syntax(parser).grammar_form == "Declaration":

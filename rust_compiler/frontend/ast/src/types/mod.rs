@@ -457,9 +457,22 @@ pub struct ClassDeclaration {
     pub fields: Vec<PropertyDeclaration>,
     pub constructors: Vec<FunctionDeclaration>,
     pub methods: Vec<FunctionDeclaration>,
+    pub sentences: Vec<SentenceDeclaration>,
     pub operators: Vec<OperatorImplementation>,
     pub tests: Vec<crate::TestDeclaration>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SentenceElement {
+    Literal(String),
+    Capture(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SentenceDeclaration {
+    pub fields: Vec<SentenceElement>,
+    pub function: FunctionDeclaration,
 }
 
 /// Behavior added to an existing type without changing that type's identity.

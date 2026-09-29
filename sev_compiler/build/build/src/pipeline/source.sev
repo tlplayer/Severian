@@ -297,7 +297,9 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                     continue
     if len(prepared) > 0:
         parsed.items = parsed.items[provider_items:]
+    parsed.block_declarations = registry.block_declarations[:]
     typed = semantic.analyze_registered_callables(parsed, include_tests, [], [], [], definitions.SemanticDefinitions(), initializer_namespace, files, prepared, captured)
+    typed.block_declarations = parsed.block_declarations[:]
     if archive_output != "":
         try:
             prelude_package.finish(archive_output, captured)

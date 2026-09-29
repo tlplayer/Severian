@@ -2054,6 +2054,57 @@ impl Parser<'_> {
         })
     }
 
+    fn sentence_declaration(&mut self) -> Result<severian_ast::SentenceDeclaration, Diagnostic> {
+        let start = self.next().span;
+        let (name, _) = self.identifier("expected a sentence name")?;
+        self.expect(&TokenKind::LeftBracket, "expected sentence grammar")?;
+        self.line_breaks();
+        let mut fields = Vec::new();
+        let mut parameters: Vec<FunctionParameter> = Vec::new();
+        while !self.at(&TokenKind::RightBracket) {
+            if let TokenKind::String(spelling) = self.peek().kind.clone() {
+                self.next();
+                fields.push(severian_ast::SentenceElement::Literal(spelling));
+            } else {
+                let (capture, span) = self.identifier("expected a spelling or typed capture")?;
+                if parameters.iter().any(|parameter| parameter.name == capture) {
+                    return Err(self.error("duplicate sentence capture"));
+                }
+                let variadic = self.take(&TokenKind::Ellipsis).is_some();
+                self.expect(&TokenKind::Colon, "expected capture type")?;
+                let annotation = self.type_annotation()?;
+                fields.push(severian_ast::SentenceElement::Capture(parameters.len()));
+                parameters.push(FunctionParameter {
+                    name: capture, annotation, variadic, span,
+                    immutable_reference: false, default: None,
+                });
+            }
+            self.line_breaks();
+            if self.take(&TokenKind::Comma).is_none() { break; }
+            self.line_breaks();
+        }
+        self.expect(&TokenKind::RightBracket, "expected end of sentence grammar")?;
+        self.expect(&TokenKind::LeftParen, "expected sentence parameter list")?;
+        let close = self.expect(&TokenKind::RightParen, "sentence arguments come from captures")?.span;
+        let result = if self.take(&TokenKind::Arrow).is_some() {
+            self.type_annotation()?
+        } else {
+            TypeAnnotation::named("unit", Vec::new(), close)
+        };
+        let (constraints, contracts) = self.function_contracts(&[])?;
+        self.expect(&TokenKind::Colon, "expected sentence body")?;
+        let (body, end) = self.indented_block("sentence")?;
+        Ok(severian_ast::SentenceDeclaration {
+            fields,
+            function: FunctionDeclaration {
+                decorators: Vec::new(), compile_time: false, name,
+                type_parameters: Vec::new(), constraints, contracts, hook: None,
+                parameters, result, body: Some(body),
+                span: Span::new(start.source, start.start, end),
+            },
+        })
+    }
+
     fn class_declaration(
         &mut self,
         decorators: Vec<Decorator>,
@@ -2082,6 +2133,7 @@ impl Parser<'_> {
         let mut fields = Vec::new();
         let mut aliases = Vec::new();
         let mut constructors = Vec::new();
+        let mut sentences = Vec::new();
         let mut methods = Vec::new();
         let mut operators = Vec::new();
         let mut tests = Vec::new();
@@ -2108,6 +2160,9 @@ impl Parser<'_> {
                 } else {
                     methods.push(function);
                 }
+            } else if self.at_identifier("sentence") {
+                sentences.push(self.sentence_declaration()?);
+                member_has_body = true;
             } else if self.at_identifier("operator") {
                 if self
                     .tokens
@@ -2154,6 +2209,7 @@ impl Parser<'_> {
             .expect(&TokenKind::Dedent, "expected end of class body")?
             .span;
         Ok(ClassDeclaration {
+            sentences,
             decorators,
             name,
             primitive,
@@ -5240,5 +5296,31 @@ mod named_operator_tests {
         let Item::Function(ordinary) = &module.items[2] else { panic!("expected function") };
         assert!(matches!(ordinary.body.as_ref().unwrap().as_slice(),
             [Statement::Return { value: Some(Expression { kind: ExpressionKind::Binary { operator: BinaryOperator::Add, .. }, .. }), .. }]));
+    }
+}
+
+#[cfg(test)]
+mod block_sentence_tests {
+    use super::*;
+
+    #[test]
+    fn sentence_members_preserve_grammar_captures_constraints_and_body() {
+        let source = SourceFile::virtual_source(
+            "sentences.sev",
+            "class custom: Y + B\n    sentence custom[\"custom\", values...: bool, \":\"]() -> B with len(values) > 0:\n        return self\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let Item::Class(class) = &module.items[0] else { panic!("expected class") };
+        assert_eq!(class.sentences.len(), 1);
+        let sentence = &class.sentences[0];
+        assert_eq!(sentence.fields, vec![
+            severian_ast::SentenceElement::Literal("custom".into()),
+            severian_ast::SentenceElement::Capture(0),
+            severian_ast::SentenceElement::Literal(":".into()),
+        ]);
+        assert!(sentence.function.parameters[0].variadic);
+        assert_eq!(sentence.function.parameters[0].annotation.simple_name(), Some("bool"));
+        assert_eq!(sentence.function.constraints.len(), 1);
+        assert!(sentence.function.body.is_some());
     }
 }

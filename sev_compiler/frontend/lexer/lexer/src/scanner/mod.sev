@@ -137,6 +137,10 @@ def scan(file: source.SourceFile, operators: list[callable_syntax.OperatorSyntax
 
 def scan_registered(file: source.SourceFile, registry: SyntaxRegistry, providers: list[primitives.PrimitiveDescriptor] | None = None) -> list[Token] | diagnostics.Diagnostic:
     tokens = scan_tokens(file, registry.operators, rules=registry.rules, providers=providers)
+    # Carry visible provider contracts into parsing once, including their with
+    # attachments; do not rebuild a separate keyword table from their names.
+    if len(tokens) > 0:
+        tokens[0].block_declarations = registry.block_declarations[:]
     for descriptor in registry.descriptors:
         if descriptor.resolved and descriptor.span.source.index == file.id.index:
             index := 0

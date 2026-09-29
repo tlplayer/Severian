@@ -827,6 +827,7 @@ fn collect_package_classes(
                             fields,
                             constructors: Vec::new(),
                             methods: Vec::new(),
+                            sentences: Vec::new(),
                             operators: Vec::new(),
                             tests: Vec::new(),
                             span: declaration.span,

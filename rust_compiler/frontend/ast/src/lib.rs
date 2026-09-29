@@ -10,7 +10,7 @@ pub use expression::{
 };
 pub use statement::{Binding, LoopGuard, LoopGuardAction, MatchCase, SelectCase, Statement};
 pub use types::{
-    ClassDeclaration, CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument,
+    ClassDeclaration, SentenceDeclaration, SentenceElement, CompilerExpectation, CompilerTestCase, Decorator, DecoratorArgument,
     DecoratorValue, EnumDeclaration, EnumVariant, ExtensionDeclaration, FunctionContract,
     FunctionDeclaration, FunctionParameter, GenericConstraint, HookSpecification,
     ImportDeclaration, ImportSubject, OperatorDeclaration, OperatorImplementation,

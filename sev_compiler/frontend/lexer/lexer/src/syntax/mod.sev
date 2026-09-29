@@ -3,6 +3,7 @@ import "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import source
 import diagnostics
 import RecordDeclaration from "../../../../../syntax/function/function.sev"
+import "../../../../../syntax/function/function.sev" as model_syntax_function_function
 import Token, token_is_symbol, token_number from "../token/mod.sev"
 import SourceLexicalRule, TokenKind, span from "../runtime.sev"
 
@@ -31,7 +32,7 @@ class SyntaxRegistry:
     discovered: list[string] = []
     rules: list[SourceLexicalRule] = []
     lexical_discovered: list[string] = []
-    block_declarations: list[RecordDeclaration] = []
+    block_declarations: list[model_syntax_function_function.RecordDeclaration] = []
     blocks_discovered: list[string] = []
 
 

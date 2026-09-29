@@ -18,6 +18,7 @@ class Token: TokenTerm
     value: string | None = None
     lexical_rules: list[callable.RecordDeclaration] = []
     literal: syntax.LiteralConstruction | None = None
+    block_declarations: list[callable.RecordDeclaration] = []
 
     operator <=>(self) -> string:
         # Only decoded text and macro replacements need an override. Ordinary

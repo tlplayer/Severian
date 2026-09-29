@@ -95,6 +95,16 @@ def load_models(codec: Codec, location: string, namespace: string) -> unit | Err
     for line in contents.split("\n"):
         name := declaration(line)
         if name != "":
+            # Re-exporting a syntax model does not create a new model identity.
+            # Preserve its canonical namespace and transient-field policy.
+            canonical := false
+            if namespace == "lexer":
+                for existing in codec.models:
+                    if existing.location == location and existing.namespace.starts_with("model_") and existing.name == existing.namespace + "." + name:
+                        canonical = true
+            if canonical:
+                current = -1
+                continue
             codec.models.append(Model(namespace + "." + name, "class" if line.starts_with("class ") else "enum", namespace, location))
             current = int(len(codec.models)) - 1
             continue
@@ -592,6 +602,21 @@ def main():
 
 test "archive tuples split only at the outer type level":
     assert(split("int, list[tuple[string, bool]], source.Span") == ["int", "list[tuple[string, bool]]", "source.Span"])
+
+
+test "lexer reexports retain canonical callable archive identity":
+    codec = Codec(repository(), "frontend")
+    location = codec.root + "/sev_compiler/syntax/function/function.sev"
+    load_models(codec, location, "model_syntax_function_function")
+    count = len(codec.models)
+    load_models(codec, location, "lexer")
+    assert(len(codec.models) == count)
+    assert(resolve(codec, "FunctionDeclaration", "lexer") == "model_syntax_function_function.FunctionDeclaration")
+    for model in codec.models:
+        if model.name == "model_syntax_function_function.FunctionDeclaration":
+            for field in model.fields:
+                assert(field.name != "binary_requirements")
+                assert(field.name != "capability_requirements")
 
 
 test "frontend and MIR preserve their distinct transient field rules":
