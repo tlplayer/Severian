@@ -431,7 +431,13 @@ impl TypeContext {
     }
 
     pub fn resolve_name(&self, name: &str) -> Option<TypeId> {
-        self.by_name.get(name).copied()
+        self.by_name.get(name).copied().or_else(|| {
+            // The source storage-quantity spelling shares the bootstrap's
+            // measured data-size identity, including unit conversions.
+            (name == "byte")
+                .then(|| self.by_name.get("data_size").copied())
+                .flatten()
+        })
     }
 
     pub fn type_for_primitive(&self, id: PrimitiveId) -> Option<TypeId> {

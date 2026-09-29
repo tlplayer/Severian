@@ -23045,6 +23045,18 @@ def interpolate(text: string) -> string:
     }
 
     #[test]
+    fn byte_quantities_resolve_in_signatures_and_unit_conversions() {
+        let (program, context) = analyze_source(
+            "def read_count(count: byte = 1KB) -> int:\n    return int(count / 1B)\ndef written(count: int) -> byte:\n    return byte(count)\nrequested: byte = 4KiB\ncount = read_count(requested)\nresult: byte = written(count)\n",
+        );
+        let byte = context.types.resolve_name("byte").unwrap();
+        assert_eq!(Some(byte), context.types.resolve_name("data_size"));
+        assert_ne!(Some(byte), context.types.resolve_name("u8"));
+        assert_ne!(Some(byte), context.types.resolve_name("int"));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
     fn mixed_integer_comparisons_do_not_coerce_distinct_unit_dimensions() {
         let context = severian_bootstrap::load().unwrap();
         let source = SourceFile::virtual_source("units.sev", "test:\n    assert(10ms < 20MB)\n");

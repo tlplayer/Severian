@@ -35,7 +35,7 @@ def error() -> i32
 def close(handle: i32) -> i32
 
 def read(reader: int, count: byte = 1KB) -> list[u8] | Error:
-    requested = xxi.count(count.amount, 67108864)
+    requested = xxi.count(int(count / 1B), 67108864)
     data: list[u8] = []
     for index in range(requested):
         data.append(0)
