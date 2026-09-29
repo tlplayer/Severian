@@ -881,3 +881,10 @@ test with compiler "package level no loss of data for conversion":
     accept:
         big_number: i64 = 10**10
         small_representation: f8e4m3fn = big_number
+
+test "integer comparison of similar literals/floats":
+    x: int = 0
+    assert(type(x) == int)
+    assert(x == 0.0)
+    assert(x == float(0))
+    assert(x +1 == float(1.0))

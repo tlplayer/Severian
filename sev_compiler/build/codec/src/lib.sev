@@ -142,10 +142,14 @@ def exported_sources(codec: Codec, location: string) -> unit | Error:
                     throw Error("package import outside a package: " + location)
                 owner = parent
             entries = package.parse_document(package.read_text(owner + "/package.json"))
-            dependency = package.text_setting(entries, "dependencies." + parts[0], "path")
-            if dependency == "":
+            raw = package.setting(entries, "dependencies", parts[0])
+            if raw == "":
                 throw Error("codec needs a resolved local dependency: " + locator)
-            dependency_root = package.canonical(owner + "/" + dependency)
+            dependency = package.parse_dependency(parts[0], raw, false)
+            if dependency.reference.source != "path":
+                throw Error("codec needs a resolved local dependency: " + locator)
+            dependency_path = dependency.reference.location
+            dependency_root = package.canonical(dependency_path if dependency_path.starts_with("/") else owner + "/" + dependency_path)
             member := locator[8 + int(len(parts[0])):]
             if member == "":
                 document = package.parse_document(package.read_text(dependency_root + "/package.json"))

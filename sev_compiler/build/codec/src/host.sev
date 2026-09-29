@@ -1,5 +1,6 @@
 import canonical, capture, digest, mkdir, read_text, remove_tree, replace_file, temporary, write_text from "package:cache/src/host.sev"
-import parse_document, text_setting from "package:build_flow/src/document.sev"
+import parse_document, setting, text_setting from "package:build_flow/src/document.sev"
+import parse_dependency from "package:build_flow/src/dependency.sev"
 import file
 import os
 

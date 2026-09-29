@@ -1,0 +1,59 @@
+import parse_document, split_fields, text_setting, unquote from "document.sev"
+import Dependency, Reference from "model.sev"
+
+
+def safe_name(value: string) -> string | Error:
+    if value == "" or value == "." or value == "..":
+        throw Error("invalid package or target name: " + value)
+    for character in value.characters():
+        if not "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.".contains(string(character)):
+            throw Error("invalid package or target name: " + value)
+    return value
+
+def reference(value: string) -> Reference | Error:
+    if value.starts_with("git+") or value.starts_with("github.com/"):
+        location = value[4:] if value.starts_with("git+") else "https://" + value + ".git"
+        return Reference("", "", "git", location)
+    parts = value.split("@")
+    if int(len(parts)) > 2:
+        throw Error("invalid package reference: " + value)
+    name = safe_name(parts[0])
+    selector = parts[1] if int(len(parts)) == 2 else "*"
+    if selector not in ["*", "latest"]:
+        for component in selector.split("."):
+            if component == "":
+                throw Error("invalid version selector: " + selector)
+            for digit in component.characters():
+                if not "0123456789".contains(string(digit)):
+                    throw Error("invalid version selector: " + selector)
+        if int(len(selector.split("."))) > 3:
+            throw Error("invalid version selector: " + selector)
+    return Reference(name, selector, "registry", "")
+
+def parse_dependency(alias: string, raw: string, development: bool) -> Dependency | Error:
+    safe_name(alias[:])
+    if not raw.starts_with("{"):
+        return Dependency(alias, reference(alias + "@" + unquote(raw)), development)
+    fields = parse_document(split_fields(raw[1:int(int(len(raw))) - 1], ",").join("\n"))
+    for field in fields:
+        if field.key not in ["package", "version", "path", "git", "rev", "registry"]:
+            throw Error("unknown dependency field: " + field.key)
+    name = text_setting(fields, "", "package", alias)
+    selector = text_setting(fields, "", "version", "*")
+    ref = reference(name + "@" + selector)
+    location = text_setting(fields, "", "path")
+    git = text_setting(fields, "", "git")
+    if location != "" and git != "":
+        throw Error("dependency cannot select both path and Git")
+    if location != "":
+        ref.source = "path"
+        ref.location = location
+    elif git != "":
+        ref.source = "git"
+        ref.location = git
+        revision = text_setting(fields, "", "rev")
+        if revision != "":
+            ref.location += "#" + revision
+    else:
+        ref.location = text_setting(fields, "", "registry")
+    return Dependency(alias, ref, development)
