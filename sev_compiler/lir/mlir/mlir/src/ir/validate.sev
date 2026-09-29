@@ -159,7 +159,7 @@ def validate_operation_signature(program: borrow MlirProgram, operation: borrow 
         attribute_names.append(attribute.name)
         validate_attribute(attribute.value)
     property_names: list[string] = []
-    for in operation.properties:
+    for property in operation.properties:
         if property.name == "" or property.name in property_names:
             return error(DuplicateProperty(name, property.name))
         if property.name in attribute_names:

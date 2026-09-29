@@ -305,7 +305,7 @@ def trait_application(definitions: SemanticDefinitions, annotation: model_syntax
                         return error(diagnostics.Diagnostic("E000212", "generic trait methods require method argument inference", method.span))
                     methods.append(replace_function_types(method, applied.type_parameters, replacements))
                 properties: list[model_syntax_function_syntax.PropertyDeclaration] = []
-                for in applied.properties:
+                for property in applied.properties:
                     property.annotation = replace_annotation(property.annotation, applied.type_parameters, replacements)
                     properties.append(property)
                 operations: list[model_syntax_function_syntax.OperatorDeclaration] = []
@@ -397,7 +397,7 @@ def resolve_grammar_binding(definitions: SemanticDefinitions, syntax: model_synt
         if not contract_definition.grammar:
             return error(diagnostics.diagnostic_at("E000212", "operator binding requires a compiler G contract", span))
         for inherited in inherited_traits(definitions, contract_definition):
-            for in inherited.properties:
+            for property in inherited.properties:
                 if property.name == "symbol":
                     value ?= property.default
                     if value != None:
@@ -510,7 +510,7 @@ def register_declarations(module: model_hir_module_module.Module, environment: S
                 resolved_methods: list[model_syntax_function_function.FunctionDeclaration] = []
                 resolved_operators: list[model_syntax_function_syntax.OperatorDeclaration] = []
                 resolved_properties: list[model_syntax_function_syntax.PropertyDeclaration] = []
-                for in trait_declaration.properties:
+                for property in trait_declaration.properties:
                     if property.definition.declaration.value == 0:
                         property.definition = definition_id(property.name, ordinal)
                     ordinal += 1

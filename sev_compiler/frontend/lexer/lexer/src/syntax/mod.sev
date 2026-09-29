@@ -183,7 +183,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                 constructor = base_syntax.constructor
                 representation = base_syntax.representation
             fields: list[string] = []
-            for in descriptor.properties:
+            for property in descriptor.properties:
                 if property.name in fields:
                     return error(diagnostics.diagnostic_at("E000103", "duplicate operator syntax " + property.name, descriptor.span))
                 fields.append(property.name)

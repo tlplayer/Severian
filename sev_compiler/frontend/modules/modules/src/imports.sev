@@ -377,7 +377,7 @@ def item_names(item: model_hir_module_module.Item, names: list[string]) -> bool:
             complete := constraints_names(declaration.constraints, names)
             for base in declaration.bases:
                 annotation_names(base, names)
-            for in declaration.properties:
+            for property in declaration.properties:
                 annotation_names(property.annotation, names)
                 if not optional_names(property.default, names):
                     complete = false

@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "../../../../core/storage/native/storage.h"
+#include "../../../../core/memory/storage/native/storage.h"
 
 typedef struct { uint8_t *data; uintptr_t length; } sev_xxi_bytes;
 typedef struct { void *storage; } sev_xxi_list;
@@ -26,7 +26,7 @@ static inline void sev_xxi_contract_failure(const char *message) {
 }
 
 /* Keep the source owner alive for the entire loan. Scratch contents have their
- * own core.storage owner; no foreign allocator or hidden ownership registry. */
+ * own core.memory.storage owner; no foreign allocator or hidden ownership registry. */
 static inline sev_xxi_bytes_loan sev_xxi_bytes_acquire(sev_xxi_list value, int write_back) {
     uintptr_t length = __sev_list_len(value.storage);
     if (length > INT64_MAX) sev_xxi_contract_failure("sequence length cannot fit the source index type");

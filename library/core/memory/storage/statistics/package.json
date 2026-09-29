@@ -1,6 +1,6 @@
 {
   "package": {
-    "name": "core.storage.statistics",
+    "name": "core.memory.storage.statistics",
     "version": "0.1.0",
     "edition": "2026",
     "description": "Optional native storage allocation instrumentation",
@@ -16,7 +16,13 @@
   "lib": {
     "path": "src/lib.sev"
   },
-  "dependencies": {},
+  "dependencies": {
+    "memory": {
+      "package": "core.memory",
+      "path": "../..",
+      "version": "0.1.0"
+    }
+  },
   "xxi": {
     "c": {
       "sources": [

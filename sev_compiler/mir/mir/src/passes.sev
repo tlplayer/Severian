@@ -56,9 +56,9 @@ class AnalysisManager:
 
 
 trait Pass:
-    metadata() -> PassMetadata
-    run_module(module: model_hir_module_module.Module, analyses: AnalysisManager) -> unit | PassError
-    run_function(body: model_mir_cfg_cfg.CfgBody, analyses: AnalysisManager) -> unit | PassError
+    def metadata() -> PassMetadata
+    def run_module(module: model_hir_module_module.Module, analyses: AnalysisManager) -> unit | PassError
+    def run_function(body: model_mir_cfg_cfg.CfgBody, analyses: AnalysisManager) -> unit | PassError
 
 
 class PassManager:

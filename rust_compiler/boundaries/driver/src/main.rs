@@ -550,10 +550,12 @@ fn build_reported(options: CommonOptions, catalog: &Catalog, reports: &build_rep
     if !options.application_args.is_empty() {
         return Err("`sev build` does not accept application arguments".into());
     }
+    eprintln!("[build] Resolving package configuration and dependencies");
     let input = discover(options.path.as_deref(), catalog)?;
     let manifest = input.manifest();
     let config = resolve_config(catalog, manifest, &options)?;
     let (sources, mut failed) = reports.scan(manifest, options.path.as_deref().unwrap_or(input_root(&input)))?;
+    eprintln!("[build] Preparing source generators");
     let generators_failed = if let Some(manifest) = manifest {
         match generators::prepare_reported(manifest, Some(reports)) {
             Ok(()) => false,
@@ -564,6 +566,7 @@ fn build_reported(options: CommonOptions, catalog: &Catalog, reports: &build_rep
             }
         }
     } else { false };
+    eprintln!("[build] Initializing compiler");
     let compiler = match compiler_without_generators(&config, manifest, false) {
         Ok(compiler) => compiler.with_max_errors(usize::MAX),
         Err(error) => {
@@ -575,7 +578,14 @@ fn build_reported(options: CommonOptions, catalog: &Catalog, reports: &build_rep
     let known_roots: BTreeSet<_> = manifest.into_iter().flat_map(|manifest|
         manifest.package_graph.packages.values().map(|package| package.root.clone())).collect();
     let mut nested = BTreeMap::new();
-    for source in sources {
+    let source_count = sources.len();
+    let mut last_progress = std::time::Instant::now();
+    eprintln!("[build] Checking imports and semantics for {source_count} source files");
+    for (index, source) in sources.into_iter().enumerate() {
+        if index == 0 || index + 1 == source_count || last_progress.elapsed().as_secs() >= 1 {
+            eprintln!("[build] Import/semantic check {}/{}: {}", index + 1, source_count, source.display());
+            last_progress = std::time::Instant::now();
+        }
         let owner = build_reports::owner_manifest(&source);
         let selected: &Compiler = if let Some(owner) = owner.filter(|owner| !known_roots.contains(owner.parent().unwrap_or(Path::new(".")))) {
             let result = nested.entry(owner.clone()).or_insert_with(|| {
@@ -605,6 +615,7 @@ fn build_reported(options: CommonOptions, catalog: &Catalog, reports: &build_rep
     let root = input_root(&input);
     let mut artifacts = Vec::new();
     let import_sources: Vec<_> = targets.iter().map(|target| target.path().to_path_buf()).collect();
+    eprintln!("[build] Checking import lint");
     if let Err(error) = lint_sources_reported(&compiler, import_sources, root, Some(reports)) {
         reports.record("imports", "lint", root, &error)?;
         failed = true;
@@ -614,6 +625,7 @@ fn build_reported(options: CommonOptions, catalog: &Catalog, reports: &build_rep
         return Err(reports.failure());
     }
     for target in targets {
+        eprintln!("[build] Compiling artifact: {}", target.path().display());
         let result = (|| -> Result<PathBuf, String> {
             let output = options
                 .output
@@ -647,6 +659,7 @@ fn build_reported(options: CommonOptions, catalog: &Catalog, reports: &build_rep
         match result {
             Ok(output) => artifacts.push(output),
             Err(error) => {
+                eprintln!("[build] Artifact failed: {error}");
                 reports.record("code-generation", "error", target.path(), &error)?;
                 failed = true;
             }

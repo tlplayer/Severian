@@ -24,8 +24,8 @@
       "version": "0.1.0"
     },
     "storage": {
-      "package": "core.storage",
-      "path": "../../storage",
+      "package": "core.memory.storage",
+      "path": "../../memory/storage",
       "version": "0.1.0"
     },
     "list": {

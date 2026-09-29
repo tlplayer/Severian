@@ -6,7 +6,7 @@
 #include <string.h>
 
 /* The hosted physical allocation boundary. These functions do not own values
- * or run destructors: core.storage owns initialized contents and lifetimes.
+ * or run destructors: core.memory.storage owns initialized contents and lifetimes.
  * Foreign owners must supply their own release callback instead of being freed
  * through this provider. A zero-byte request still has allocation identity. */
 static inline void *sev_memory_allocate(size_t bytes) {

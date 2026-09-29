@@ -30,7 +30,7 @@ def stamp_module(module: model_hir_module_module.Module, owner: string) -> model
                 declaration.definition = model_syntax_symbol_symbol.named_definition(owner, "trait", declaration.name)
                 member_owner = model_syntax_symbol_symbol.semantic_key([owner, "trait", declaration.name])
                 properties: list[model_syntax_function_syntax.PropertyDeclaration] = []
-                for in declaration.properties:
+                for property in declaration.properties:
                     property.definition = model_syntax_symbol_symbol.named_definition(member_owner, "property", property.name)
                     properties.append(property)
                 methods: list[model_syntax_function_function.FunctionDeclaration] = []

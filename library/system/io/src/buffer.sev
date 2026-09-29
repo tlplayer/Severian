@@ -1,4 +1,4 @@
-# Typed byte-buffer IO. Allocation remains with the caller's core.storage owner.
+# Typed byte-buffer IO. Allocation remains with the caller's core.memory.storage owner.
 import "../../../interop/xxi/src/buffer.sev" as xxi
 
 @c(symbol="__sev_io_read")

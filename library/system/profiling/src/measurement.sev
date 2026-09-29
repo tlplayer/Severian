@@ -1,4 +1,4 @@
-import * from "../../../core/storage/src/statistics.sev" as storage
+import storage
 import * from "../../../core/memory/src/raw_intrinsics.sev" as raw
 
 @c(symbol="clock_gettime")

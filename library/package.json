@@ -32,7 +32,7 @@
       "core/memory",
       "core/random",
       "core/regex",
-      "core/storage",
+      "core/memory/storage",
       "core/time",
       "data",
       "data/csv",

@@ -108,6 +108,7 @@ impl Reports {
     }
 
     pub(crate) fn scan(&self, manifest: Option<&Manifest>, input: &Path) -> Result<(Vec<PathBuf>, bool), String> {
+        eprintln!("[build] Discovering source files: {}", input.display());
         let mut files = BTreeSet::new();
         if let Some(manifest) = manifest {
             for package in manifest.package_graph.packages.values() {
@@ -118,7 +119,13 @@ impl Reports {
         }
         let mut valid = Vec::new();
         let mut failed = false;
-        for path in files {
+        let total = files.len();
+        let mut last_progress = std::time::Instant::now();
+        for (index, path) in files.into_iter().enumerate() {
+            if index == 0 || index + 1 == total || last_progress.elapsed().as_secs() >= 1 {
+                eprintln!("[build] Lexer/parser {}/{}: {}", index + 1, total, path.display());
+                last_progress = std::time::Instant::now();
+            }
             let source = match SourceFile::load(&path) {
                 Ok(source) => source,
                 Err(error) => {
@@ -143,6 +150,7 @@ impl Reports {
                 }
             }
         }
+        eprintln!("[build] Lexer/parser finished: {} of {} files parsed successfully", valid.len(), total);
         Ok((valid, failed))
     }
 

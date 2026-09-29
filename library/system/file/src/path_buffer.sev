@@ -1,4 +1,4 @@
-import * from "../../../core/storage/src/buffer.sev" as storage
+import * from "../../../core/memory/storage/src/buffer.sev" as storage
 import * from "../../../core/memory/src/raw_intrinsics.sev" as raw
 
 @c(symbol="__sev_file_open_read")

@@ -1037,7 +1037,7 @@ def execute_grammar(module: model_hir_module_module.Module, context: cfg.Executi
     for definition in module.traits:
         if definition.grammar and definition.definition.module == syntax.definition.module and definition.definition.declaration.value == syntax.definition.declaration.value:
             capable := false
-            for in definition.properties:
+            for property in definition.properties:
                 if property.name == "control_flow":
                     supplied ?= property.default
                     if supplied != None:

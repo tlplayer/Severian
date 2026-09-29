@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include "../../../core/storage/native/storage.h"
+#include "../../../core/memory/storage/native/storage.h"
 #include "../native/json.h"
 extern uintptr_t __sev_list_len(void *);
 extern const char *__sev_list_index_ptr(void *, int64_t);

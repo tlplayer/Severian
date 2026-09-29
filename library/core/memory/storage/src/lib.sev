@@ -2,3 +2,4 @@ import * from "buffer.sev"
 import * from "capacity.sev"
 import * from "contiguous.sev"
 import * from "ring.sev"
+import allocation_count, allocated_bytes from statistics

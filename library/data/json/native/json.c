@@ -2,7 +2,7 @@
  * Parsing visits each record once; column discovery shares that traversal.
  * Nested values remain JSON text, matching the Data table cell contract. */
 #include "../../../core/memory/native/memory.h"
-#include "../../../core/storage/native/storage.h"
+#include "../../../core/memory/storage/native/storage.h"
 #include "json.h"
 #include <errno.h>
 #include <stdint.h>

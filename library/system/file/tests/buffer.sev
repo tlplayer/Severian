@@ -1,6 +1,6 @@
 import * from "../src/path_buffer.sev" as file
 import * from "../../io/src/buffer.sev" as io
-import * from "../../../core/storage/src/buffer.sev" as storage
+import * from "../../../core/memory/storage/src/buffer.sev" as storage
 
 test with profile "file bytes use caller owned IO buffers" with
 {

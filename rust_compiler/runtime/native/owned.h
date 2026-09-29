@@ -1,2 +1,2 @@
 /* Bootstrap compatibility include; no separate ownership ABI. */
-#include "../../../library/core/storage/native/storage.h"
+#include "../../../library/core/memory/storage/native/storage.h"

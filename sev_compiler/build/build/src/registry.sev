@@ -5,7 +5,7 @@ import CompileError from "error.sev"
 import CompileContext, CompilePlan, CompileRegion, PlanSegment from "model.sev"
 
 trait CompileHandler:
-    compile(region: CompileRegion, context: CompileContext) -> mlir.MlirArtifact | CompileError
+    def compile(region: CompileRegion, context: CompileContext) -> mlir.MlirArtifact | CompileError
 
 
 class CompilerRegistry:

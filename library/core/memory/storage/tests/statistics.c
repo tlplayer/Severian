@@ -1,5 +1,5 @@
 #include <assert.h>
-#include "../../memory/native/memory.h"
+#include "../../native/memory.h"
 #include "../statistics/native/statistics.h"
 #ifdef SEV_TEST_OWNERSHIP
 #include "../native/storage.h"

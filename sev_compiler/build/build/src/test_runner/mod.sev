@@ -3,7 +3,7 @@ import "../pipeline/mod.sev" as _dependency_mod
 
 class TestResult:
     name: string
-throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.sev)")ed: bool
+    passed: bool
     duration_ms: int
     stdout: string
     stderr: string
@@ -11,16 +11,16 @@ throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.s
 
 def execute_test(test: CompiledTest, arguments: list[string]) -> TestResult:
     started = time.monotonic_milliseconds()
-    output = process.run([test.artifact.path] + arguments)
-throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.sev)")ed = output.status == 0
+    output = process.execute([test.artifact.path] + arguments)
+    passed = output.status == 0
     for expectation in test.expectations:
         match expectation:
             case Contains:
                 stream_value = output.stdout if stream == model_syntax_function_syntax.Stdout else output.stderr
-                throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.sev)")ed = passed and stream_value.contains(value)
+                passed = passed and stream_value.contains(value)
             case Equals:
                 stream_value = output.stdout if stream == model_syntax_function_syntax.Stdout else output.stderr
-                throw Error("Unimplemented (sev_compiler/boundaries/driver/src/test_runner/mod.sev)")ed = passed and stream_value == value
+                passed = passed and stream_value == value
     return TestResult(test.name, passed, time.monotonic_milliseconds() - started, output.stdout, output.stderr)
 
 

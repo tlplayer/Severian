@@ -1,5 +1,7 @@
 {
-  "language": { "explicit-imports": true },
+  "language": {
+    "explicit-imports": true
+  },
   "package": {
     "name": "sev-compiler-mlir",
     "version": "0.1.0",
@@ -30,6 +32,14 @@
     "primitives": {
       "path": "../../syntax/primitive",
       "package": "sev-compiler-primitives"
+    },
+    "artifact": {
+      "package": "package.artifact",
+      "path": "../../../library/package/artifact"
+    },
+    "process": {
+      "package": "process",
+      "path": "../../../library/system/process"
     }
   }
 }

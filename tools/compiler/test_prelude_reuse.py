@@ -64,13 +64,13 @@ test:
             'bin': [{'name': 'consumer', 'path': 'main.sev'}],
             'dependencies': {
                 'runtime': {'package': 'sev-prelude-runtime', 'version': 'latest'},
-                'storage': {'package': 'core.storage', 'path': os.path.relpath(ROOT/'library/core/storage', consumer)},
+                'storage': {'package': 'core.memory.storage', 'path': os.path.relpath(ROOT/'library/core/memory/storage', consumer)},
             },
             'test': {'coverage': False},
             'lint': {'enabled': False},
         }
         (consumer/'package.json').write_text(json.dumps(consumer_manifest))
-        (consumer/'main.sev').write_text('import * from "package:runtime/library/core/storage/statistics/src/lib.sev" as stats\n'
+        (consumer/'main.sev').write_text('import * from "package:runtime/library/core/memory/storage/statistics/src/lib.sev" as stats\n'
                                          'import * from "package:storage/statistics/src/lib.sev" as local_stats\n'
                                          'test:\n    assert(stats.allocation_count() >= u64(0))\n'
                                          '    assert(local_stats.allocation_count() >= u64(0))\n')

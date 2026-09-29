@@ -1,5 +1,5 @@
 #include "storage.h"
-#include "../../memory/native/memory.h"
+#include "../../native/memory.h"
 #include <stdalign.h>
 #include <stdatomic.h>
 #include <stdlib.h>
