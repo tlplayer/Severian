@@ -2,6 +2,7 @@ import "../../../../../syntax/function/syntax.sev" as model_syntax_function_synt
 import "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import source
 import diagnostics
+import RecordDeclaration from "../../../../../syntax/function/function.sev"
 import Token, token_is_symbol, token_number from "../token/mod.sev"
 import SourceLexicalRule, TokenKind, span from "../runtime.sev"
 
@@ -30,6 +31,8 @@ class SyntaxRegistry:
     discovered: list[string] = []
     rules: list[SourceLexicalRule] = []
     lexical_discovered: list[string] = []
+    block_declarations: list[RecordDeclaration] = []
+    blocks_discovered: list[string] = []
 
 
 def symbol_syntaxes(operators: list[model_syntax_function_syntax.OperatorSyntax], symbol: string) -> list[model_syntax_function_syntax.OperatorSyntax]:

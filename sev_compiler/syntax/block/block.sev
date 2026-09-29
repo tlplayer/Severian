@@ -21,6 +21,9 @@ enum BlockKind:
     For
     While
     With
+    Enum
+    Try
+    Catch
 
 class BlockLayout:
     id: SourceBlockId
@@ -52,6 +55,10 @@ class BlockSyntax:
     prefix: list[string]
     kind: BlockKind
     name_position: int = -1
+    bodyless: bool = false
+    global_entry: string = ""
+    follows: list[string] = []
+    parents: list[string] = []
 
 
 class Block: B
@@ -68,6 +75,8 @@ class Block: B
     syntax_name: string = ""
     name: string = ""
     header: BlockSentence | None = None
+    previous: SourceBlockId | None = None
+    chain: SourceBlockId | None = None
     # Executable realizations use the same block contract. CFG compaction may
     # change cfg_index; source id, layout and containment must remain stable.
     cfg_index: int = -1
@@ -84,25 +93,82 @@ class BlockFile:
     next_sentence: u32 = 0
 
 
+def global_source_block(file: source.SourceFile) -> Block:
+    return Block(span=source.Span(file.id, 0, u32(len(file.characters))), kind=BlockKind.Global, syntax_name="global", name=file.path)
+
+
+# Discovery consumes these contracts; spelling and containment rules live here.
+def resolve_block_syntax(header: BlockSentence, syntaxes: list[BlockSyntax]) -> BlockSyntax | None:
+    selected: BlockSyntax | None := None
+    for syntax in syntaxes:
+        if len(syntax.prefix) == 0 or len(syntax.prefix) > len(header.terms):
+            continue
+        matches := true
+        for index in range(int(len(syntax.prefix))):
+            if header.terms[index].spelling != syntax.prefix[index] or header.terms[index].role == BlockTermRole.Opaque:
+                matches = false
+        if syntax.name_position >= 0:
+            if syntax.name_position >= len(header.terms):
+                matches = false
+            elif header.terms[syntax.name_position].role != BlockTermRole.Name:
+                matches = false
+        if matches:
+            if selected != None:
+                throw Error("ambiguous block syntax")
+            selected = syntax
+    return selected
+
+
+def declared_source_block(file: BlockFile, parent: SourceBlockId, header: BlockSentence, syntaxes: list[BlockSyntax]) -> Block:
+    id = SourceBlockId(u32(len(file.blocks)))
+    block = Block(span=header.span, id=id, parent=parent, header=header)
+    syntax ?= resolve_block_syntax(header, syntaxes)
+    if syntax == None:
+        return block
+    owner = file.blocks[parent.index]
+    if len(syntax.parents) > 0 and owner.syntax_name not in syntax.parents:
+        throw Error("invalid enclosing block for " + syntax.name)
+    block.kind = syntax.kind
+    block.syntax_name = syntax.name
+    if syntax.name_position >= 0:
+        block.name = header.terms[syntax.name_position].spelling
+    if syntax.global_entry != "" and owner.kind == BlockKind.Global and block.name == syntax.global_entry:
+        block.kind = BlockKind.Main
+    if len(syntax.follows) > 0:
+        if len(owner.subblocks) == 0 or len(owner.sentences) < 2:
+            throw Error("missing preceding block for " + syntax.name)
+        previous = file.blocks[owner.subblocks[-1].index]
+        previous_header ?= previous.header
+        if previous_header == None:
+            throw Error("missing preceding block header for " + syntax.name)
+        if previous.syntax_name not in syntax.follows or previous_header.id != owner.sentences[-2].id:
+            throw Error("invalid preceding block for " + syntax.name)
+        block.previous = previous.id
+        block.chain = previous.chain if previous.chain != None else previous.id
+    return block
+
+
 # Bootstrap declarations, supplied as data to the structural parser. Packages
 # can supply additional BlockSyntax values without adding parser keyword cases.
 def standard_block_syntax() -> list[BlockSyntax]:
     return [
-        BlockSyntax("function", ["def"], BlockKind.Callable, 1),
-        BlockSyntax("operator", ["operator"], BlockKind.Callable, 1),
-        BlockSyntax("class", ["class"], BlockKind.Class, 1),
-        BlockSyntax("trait", ["trait"], BlockKind.Trait, 1),
-        BlockSyntax("enum", ["enum"], BlockKind.Class, 1),
-        BlockSyntax("extension", ["extend"], BlockKind.Class, 1),
-        BlockSyntax("test", ["test"], BlockKind.Test),
+        BlockSyntax("function", ["def"], BlockKind.Callable, 1, bodyless=true, global_entry="main"),
+        BlockSyntax("operator", ["operator"], BlockKind.Callable, bodyless=true),
+        BlockSyntax("class", ["class"], BlockKind.Class, 1, bodyless=true),
+        BlockSyntax("trait", ["trait"], BlockKind.Trait, 1, bodyless=true),
+        BlockSyntax("enum", ["enum"], BlockKind.Enum, 1, bodyless=true),
+        BlockSyntax("extension", ["extend"], BlockKind.Class, 1, bodyless=true),
+        BlockSyntax("test", ["test"], BlockKind.Test, bodyless=true),
         BlockSyntax("for", ["for"], BlockKind.For),
         BlockSyntax("while", ["while"], BlockKind.While),
         BlockSyntax("if", ["if"], BlockKind.If),
-        BlockSyntax("elif", ["elif"], BlockKind.If),
-        BlockSyntax("else", ["else"], BlockKind.Else),
+        BlockSyntax("elif", ["elif"], BlockKind.If, follows=["if", "elif"]),
+        BlockSyntax("else", ["else"], BlockKind.Else, follows=["if", "elif"]),
+        BlockSyntax("try", ["try"], BlockKind.Try),
+        BlockSyntax("catch", ["catch"], BlockKind.Catch, follows=["try", "catch"]),
         BlockSyntax("match", ["match"], BlockKind.Match),
         BlockSyntax("switch", ["switch"], BlockKind.Switch),
-        BlockSyntax("case", ["case"], BlockKind.Case),
+        BlockSyntax("case", ["case"], BlockKind.Case, parents=["match", "switch"]),
         BlockSyntax("with", ["with"], BlockKind.With),
     ]
 

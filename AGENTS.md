@@ -1,5 +1,6 @@
  NEVER REMOVE CODE, BEFORE IMPLEMENTING THE REPLACEMENT!
 DONT RUN TESTS, give me the test to run
+NEVER NEVER NEVER UNDO if you do something wrong. I CAN DO THAT. YOU DO WHAT I SAY.
 DONT add python scripts that just test, add tests and have the rust compiler run them in severian
 PUT TESTS in the same file they test against with test blocks following the code. NOT A NEW FILE.
 UNLESS IT's an INTEG test against the package itself

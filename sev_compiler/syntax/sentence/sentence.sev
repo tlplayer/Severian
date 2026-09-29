@@ -34,6 +34,7 @@ enum SentenceField:
 
 class Grammar:
     fields: list[SentenceField]
+    repetitions: list[int] = []
 
 class Capture:
     name: string
@@ -66,6 +67,10 @@ class SentenceMatch:
 # Type/shape filtering precedes every value predicate, as required by SIP-0000.
 # A nested sentence is one classified term with children in the parser's arena.
 def accepts_shape(grammar: Grammar, terms: list[Term]) -> bool:
+    # Repeated captures require the window matcher; fixed-arity matching must
+    # not silently reinterpret them as single captures during migration.
+    if len(grammar.repetitions) != 0:
+        return false
     if len(grammar.fields) != len(terms):
         return false
     for index in range(int(len(terms))):

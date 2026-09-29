@@ -1663,6 +1663,47 @@ def parser_field_constraints(parser: Parser) -> list[model_syntax_function_funct
     return constraints
 
 
+def parser_sentence_declaration(parser: Parser) -> model_syntax_function_function.FunctionDeclaration | diagnostics.Diagnostic:
+    start = parser_next(parser).span
+    name = parser_identifier(parser, "expected a sentence name")[0]
+    parser_expect_symbol(parser, "[", "expected sentence grammar")
+    fields: list[model_syntax_sentence_sentence.SentenceField] = []
+    repetitions: list[int] = []
+    parameters: list[model_syntax_function_function.FunctionParameter] = []
+    parser_delimited_layout(parser)
+    while not parser_at_symbol(parser, "]"):
+        if parser_at_simple(parser, String):
+            fields.append(model_syntax_sentence_sentence.SentenceField.Literal(string(parser_next(parser))))
+        else:
+            capture = parser_identifier(parser, "expected a literal spelling or typed capture")
+            for previous in parameters:
+                if previous.name == capture[0]:
+                    return error(parser_fail(parser, "duplicate sentence capture " + capture[0]))
+            variadic = parser_take_symbol(parser, "...") != None
+            parser_expect_symbol(parser, ":", "expected capture type")
+            annotation = parser_type_annotation(parser)
+            if variadic:
+                repetitions.append(int(len(fields)))
+            fields.append(model_syntax_sentence_sentence.SentenceField.Capture(capture[0], model_syntax_sentence_sentence.TermRole.Expression, []))
+            parameters.append(model_syntax_function_function.FunctionParameter(capture[0], annotation, absent, capture[1], variadic=variadic))
+        parser_delimited_layout(parser)
+        if parser_take_symbol(parser, ",") == None:
+            break
+        parser_delimited_layout(parser)
+    parser_expect_symbol(parser, "]", "expected end of sentence grammar")
+    parser_expect_symbol(parser, "(", "expected sentence parameter list")
+    parser_expect_symbol(parser, ")", "sentence arguments are declared by its captures")
+    result = model_syntax_type_annotation.named_type("unit", [], start)
+    if parser_take_symbol(parser, "->") != None:
+        result = parser_type_annotation(parser)
+    attachments: list[model_syntax_constraint_model.WithAttachment] = []
+    constraints = parser_declaration_constraints(parser, attachments, true)
+    parser_expect_symbol(parser, ":", "expected sentence body")
+    body = parser_indented_block(parser, "sentence")
+    grammar = model_syntax_sentence_sentence.Grammar(fields, repetitions)
+    return model_syntax_function_function.FunctionDeclaration(name=name, parameters=parameters, constraints=constraints, result=result, body=body[0], span=source.Span(start.source, start.start, body[1]), attachments=attachments, sentence=grammar)
+
+
 def parser_record_declaration(parser: Parser, extension: bool = false) -> model_syntax_function_function.RecordDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
     record_name := ""
@@ -1701,10 +1742,13 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> model_
     fields: list[model_syntax_function_function.FunctionParameter] = []
     methods: list[model_syntax_function_function.FunctionDeclaration] = []
     operators: list[model_syntax_function_syntax.OperatorDeclaration] = []
+    sentences: list[model_syntax_function_function.FunctionDeclaration] = []
     if parser_take(parser, Indent) != None:
         while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
             if parser_at_identifier(parser, "def"):
                 methods.append(parser_function_declaration(parser, []))
+            elif parser_at_identifier(parser, "sentence"):
+                sentences.append(parser_sentence_declaration(parser))
             elif parser_at_identifier(parser, "operator"):
                 operation = parser_operator_declaration(parser)
                 if operation.syntax.symbol == "drop":
@@ -1726,7 +1770,7 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> model_
                 fields.append(model_syntax_function_function.FunctionParameter(field[0], annotation, default, field[1], variadic=packed, field_constraints=constraints))
             parser_separators(parser)
         parser_expect(parser, Dedent, "expected end of class")
-    return model_syntax_function_function.RecordDeclaration(record_name, fields, methods, source.Span(start.source, start.start, parser_peek(parser).span.start), traits=traits, operators=operators, type_parameters=parameters, constraints=generic_constraints, extension=extension, type_pack=pack[0] if len(pack) != 0 else "", type_defaults=defaults, extension_target=extension_target)
+    return model_syntax_function_function.RecordDeclaration(record_name, fields, methods, source.Span(start.source, start.start, parser_peek(parser).span.start), traits=traits, operators=operators, type_parameters=parameters, constraints=generic_constraints, extension=extension, type_pack=pack[0] if len(pack) != 0 else "", type_defaults=defaults, extension_target=extension_target, sentences=sentences)
 
 
 def parser_family_declaration(parser: Parser) -> model_syntax_function_syntax.TypeDeclaration | diagnostics.Diagnostic:
@@ -1811,3 +1855,36 @@ test "MLIR type annotations survive class parsing":
                 assert(binding.spelling == "!example.handle")
         case _:
             assert(false)
+
+
+test "class sentences retain typed variadic captures and with contracts in HIR":
+    input = source.virtual_source("block-provider.sev", "class unless: Y + B\n    sentence unless[\"unless\", conditions...: bool, \":\"]() with conditions:\n        return\n")
+    parsed = parser_module(Parser(lexer.scan_bootstrap(input)))
+    assert(len(parsed.items) == 1)
+    match parsed.items[0]:
+        case Record:
+            assert(declaration.name == "unless")
+            assert(len(declaration.sentences) == 1)
+            method = declaration.sentences[0]
+            assert(method.name == "unless" and method.body != None)
+            assert(len(method.parameters) == 1 and method.parameters[0].variadic)
+            assert(model_syntax_type_annotation.simple_type_name(method.parameters[0].annotation) == "bool")
+            assert(len(method.attachments) == 1)
+            grammar ?= method.sentence
+            assert(grammar != None)
+            if grammar != None:
+                assert(len(grammar.fields) == 3)
+                assert(len(grammar.repetitions) == 1 and grammar.repetitions[0] == 1)
+                match grammar.fields[0]:
+                    case Literal:
+                        assert(spelling == "unless")
+                    case _:
+                        assert(false)
+        case _:
+            assert(false)
+
+
+test "duplicate sentence capture names are diagnosed":
+    input = source.virtual_source("duplicate-capture.sev", "class Example: Y + B\n    sentence example[\"example\", value: bool, value: bool]():\n        return\n")
+    parsed ?= parser_module(Parser(lexer.scan_bootstrap(input)))
+    assert(parsed is diagnostics.Diagnostic)

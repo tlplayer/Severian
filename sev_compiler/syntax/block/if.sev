@@ -1,0 +1,21 @@
+import Y from "../generic/symbol.sev"
+import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import source
+
+
+# The sentence belongs to the implementing block, including its CFG behavior.
+class if: Y + B
+    span: source.Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    body: B
+
+    sentence if["if", conditions...: bool, ":"]():
+        exit = cfg.block()
+        for condition in conditions:
+            taken = cfg.block()
+            cfg.branch(lower(condition), taken, exit)
+            cfg.at(taken)
+        lower(self.body)
+        cfg.fallthrough(exit)
+        cfg.at(exit)

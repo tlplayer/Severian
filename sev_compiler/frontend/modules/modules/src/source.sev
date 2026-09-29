@@ -11,7 +11,7 @@ import package
 import interfaces
 from io import IOError
 import "package:semantic/semantic/src/macros.sev" as macros
-import discover_lexical_rules, lexical_source from "lexical.sev"
+import discover_block_declarations, discover_lexical_rules, lexical_source from "lexical.sev"
 import "imports.sev" as import_selection
 import "identity.sev" as semantic_identity
 import "semantic_interface.sev" as semantic_interface
@@ -258,6 +258,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
     discover_source_syntax(input, [], files, registry, resolution, sysroot)
     lexer.resolve_operator_descriptors(registry)
     discover_lexical_rules(files, registry)
+    discover_block_declarations(files, registry)
     registered = registered_source(input, files)
     parsed = macros.parse_module(lexer.scan_registered(lexical_source(registered, registry, false), registry))
     try:
