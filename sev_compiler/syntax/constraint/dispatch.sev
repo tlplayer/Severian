@@ -1,4 +1,4 @@
-import ConstraintGraph, DispatchFamily, ProofResult from "model.sev"
+import ConstraintGraph, ConstraintStage, DispatchFamily, ProofResult from "model.sev"
 import DefId, constraint_schedule from "graph.sev"
 import ConstraintId, ConstraintRequirement, DispatchCandidate from "model.sev"
 import Expression, ExpressionKind, LiteralValue from "../function/function.sev"
@@ -25,7 +25,10 @@ def admissible_dispatch_candidates(family: DispatchFamily, graph: ConstraintGrap
 
 
 # Unknown candidates remain live; they never become false because a budget ran out.
-def select_dispatch(family: DispatchFamily, graph: ConstraintGraph) -> DefId | Error:
+def select_dispatch(family: DispatchFamily, graph: ConstraintGraph, evaluate: ((Expression) -> ProofResult) | None = None) -> DefId | Error:
+    evaluator ?= evaluate
+    if evaluator != None:
+        return select_dispatch(family, evaluate_dispatch_constraints(family, graph, evaluator))
     selected := -1
     unknown := false
     for index in admissible_dispatch_candidates(family, graph):
@@ -45,6 +48,67 @@ def select_dispatch(family: DispatchFamily, graph: ConstraintGraph) -> DefId | E
     if selected < 0:
         throw Error("no implementation matches dispatch constraints")
     return family.candidates[selected].definition
+
+
+# Evaluation facts belong to this invocation; never cache runtime value facts in
+# the declaration graph. Prerequisites dominate evaluation, including callbacks
+# whose reads are only safe after a preceding guard succeeds.
+def evaluate_dispatch_constraints(family: DispatchFamily, graph: ConstraintGraph, evaluate: (Expression) -> ProofResult) -> ConstraintGraph | Error:
+    schedule = constraint_schedule(graph)
+    live = admissible_dispatch_candidates(family, graph)
+    needed: list[int] = []
+    for index in live:
+        for requirement in family.candidates[index].requirements:
+            if int(requirement.index) not in needed:
+                needed.append(int(requirement.index))
+    cursor := 0
+    while cursor < len(needed):
+        for prerequisite in graph.requirements[needed[cursor]].prerequisites:
+            if int(prerequisite.index) not in needed:
+                needed.append(int(prerequisite.index))
+        cursor += 1
+    resolved = ConstraintGraph()
+    for requirement in graph.requirements:
+        resolved.requirements.append(ConstraintRequirement(
+            requirement.id, requirement.condition,
+            prerequisites=requirement.prerequisites[:], stage=requirement.stage,
+            result=requirement.result, reorderable=requirement.reorderable,
+            cost=requirement.cost, value_versions=requirement.value_versions[:],
+        ))
+    for id in schedule:
+        if int(id.index) not in needed:
+            continue
+        # A failed earlier requirement eliminates the whole candidate. Do not
+        # evaluate its remaining conditions unless a live candidate needs them.
+        pending: list[int] = []
+        for index in admissible_dispatch_candidates(family, resolved):
+            for constraint in family.candidates[index].requirements:
+                if int(constraint.index) not in pending:
+                    pending.append(int(constraint.index))
+        cursor = 0
+        while cursor < len(pending):
+            for prerequisite in resolved.requirements[pending[cursor]].prerequisites:
+                if int(prerequisite.index) not in pending:
+                    pending.append(int(prerequisite.index))
+            cursor += 1
+        if int(id.index) not in pending:
+            continue
+        requirement = resolved.requirements[id.index]
+        ready := true
+        blocked := false
+        for prerequisite in requirement.prerequisites:
+            result = resolved.requirements[prerequisite.index].result
+            ready = ready and result == ProofResult.Proven
+            blocked = blocked or result == ProofResult.Refuted
+        if blocked:
+            resolved.requirements[id.index].result = ProofResult.Refuted
+        elif not ready:
+            resolved.requirements[id.index].result = ProofResult.Unknown
+        elif requirement.result == ProofResult.Unknown:
+            if requirement.stage != ConstraintStage.Runtime:
+                throw Error("dispatch constraint requires a proof before runtime")
+            resolved.requirements[id.index].result = evaluate(requirement.condition)
+    return resolved
 
 
 test "progressive dispatch retains unknown candidates and excludes refuted ones":

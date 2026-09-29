@@ -404,6 +404,8 @@ def parser_declaration_constraints(parser: Parser, attachments: list[model_synta
     if not parser_at_identifier(parser, "with"):
         return constraints
     parser_next(parser)
+    while parser_take(parser, Newline) != None:
+        continue
     if callable and not parser_at_symbol(parser, "{"):
         attachments.append(model_syntax_constraint_model.WithAttachment(model_syntax_constraint_model.AttachmentRole.Dispatch, parser_expression(parser, 0)))
         return constraints

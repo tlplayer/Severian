@@ -2458,6 +2458,7 @@ impl Parser<'_> {
             return Ok(Vec::new());
         }
         self.next();
+        while self.take(&TokenKind::Newline).is_some() {}
         self.expect(
             &TokenKind::LeftBrace,
             "expected `{` after declaration `with`",

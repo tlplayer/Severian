@@ -52,6 +52,9 @@ includes supporting private declarations needed for public layouts and generics.
 | `sev test` | Reuse dependencies, build test targets locally, run with explicit resource/time bounds |
 | `sev publish <name>:version --local` | Validate name, source completeness and selected completed artifacts; exclude build/cache/debug; install atomically |
 | `sev add <name>:version` | Resolve and atomically update manifest/lock without compiling the dependency |
+| `sev add file.sev` | add file to package |
+| `sev [remove|delete] file.sev` | delete file to package |
+| `sev export file.sev:foobar` | export object to package interface|
 | `sev update <name>` | Intentionally refresh selected dependency resolution; subsequent build evaluates freshness |
 | `sev file.sev` | Use explicit dependencies or compatible published packages/prelude from any directory |
 | `sev clean` | Remove bloat, old builds, cache/* build/* etc.  |
