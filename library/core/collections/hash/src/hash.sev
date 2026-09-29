@@ -3,7 +3,7 @@ import * from list as lists
 
 # Bucket slots index dense initialized entries. -1 is empty, -2 a tombstone.
 # Dense order is insertion order, including after deletion and rehashing.
-class Hash[K:traits.HashKey, V]: traits.Container
+class Hash[K:traits.HashKey, V]: C
     __keys: lists.list[K]
     __values: lists.list[V]
     __hashes: lists.list[usize]

@@ -62,7 +62,7 @@ trait Character:
     Hash
     Print
 
-    property storage: Type
+    storage: T
 
     def codepoint(self) -> u32
     def ascii(self) -> bool
@@ -71,7 +71,7 @@ trait Character:
     def utf8_len(self) -> usize
 
 
-class char[T: char_storage = u32]: Character, PrimitiveAlias[T]:
+class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]:
     identity: PrimitiveId = CharPrimitive().identity
     mlir: MlirTypeBinding = CharPrimitive().mlir
     id: TypeId = CharPrimitive().id
@@ -79,7 +79,7 @@ class char[T: char_storage = u32]: Character, PrimitiveAlias[T]:
     literal_family: string = CharPrimitive().literal_family
     literal_bindings: list[LiteralBinding] = CharPrimitive().literal_bindings
 
-    storage: Type = T
+    storage: T
 
     def char(value: T) -> char[T]:
         if T is u32:

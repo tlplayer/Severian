@@ -1,10 +1,9 @@
-import Container from "../../traits/src/container.sev"
 import "../../array/src/storage.sev" as arrays
 
 # The vector owns its buffer directly. N is the initial capacity; reserve
 # chooses growth and core.storage checks allocations through core.memory. Replacing or
 # dropping the buffer releases its allocation through ordinary ownership.
-class vector[T, N = 256]: Container
+class vector[T, N = 256]: C
     data: array[T]
     used: int
 

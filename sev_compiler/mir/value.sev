@@ -1,8 +1,0 @@
-import LoweredType from "../syntax/lowered.sev"
-import TypeId, ValueId from "../syntax/symbol/symbol.sev"
-
-
-class Value:
-    id: ValueId
-    type_id: TypeId = TypeId(0)
-    lowered_type: LoweredType = Unit

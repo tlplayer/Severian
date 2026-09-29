@@ -1,4 +1,5 @@
 # Prelude selects source declarations; it is not a compiler model namespace.
+import * from "../../sev_compiler/syntax/generic/generic.sev"
 import * from "../../sev_compiler/syntax/grammar/contracts.sev"
 import * from "../../sev_compiler/syntax/primitive/error/error.sev"
 import * from "../../sev_compiler/syntax/primitive/char/units.sev"

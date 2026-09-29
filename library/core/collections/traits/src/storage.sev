@@ -1,8 +1,7 @@
-import Container from "container.sev"
 
 # Provider operations are independent of hashing and ordering. The selected
 # provider adds its own key constraint when C[K,V] is instantiated.
-trait MappingStorage[K, V]: Container
+trait MappingStorage[K, V]: C
     def empty() -> bool
     def reserve(minimum: usize)
     def contains(key: K) -> bool

@@ -1,0 +1,13 @@
+import Lexeme, LexemeTerm from "lexeme.sev"
+import TokenKind, TokenTerm from "token.sev"
+import DefId, ScopeId, TypeId from "../symbol/symbol.sev"
+
+# A symbol owns the matched spelling, classified token, and semantic context.
+# Source-free declarations and symbols awaiting resolution leave those parts
+# absent; resolved source symbols retain them for diagnostics and tooling.
+trait Y:
+    lexeme: Lexeme | None = None
+    token: TokenTerm | None = None
+    definition: DefId | None = None
+    scope: ScopeId | None = None
+    type_id: TypeId | None = None

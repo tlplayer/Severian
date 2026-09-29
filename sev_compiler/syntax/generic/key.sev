@@ -5,3 +5,9 @@ trait HashKey:
 
 trait Ordered:
     operator <(right: Self) -> bool
+
+
+# A key supplies both hashing/equality and ordering.
+trait Key: HashKey + Ordered
+
+Key as K

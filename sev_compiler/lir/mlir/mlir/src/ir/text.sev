@@ -178,7 +178,7 @@ def properties_text(properties: list[MlirNamedProperty]) -> string:
     if len(properties) == 0:
         return ""
     rendered: list[string] = []
-    for property in properties:
+    for in properties:
         rendered.append(property.name + " = " + attribute_value_text(property.value))
     return " <{" + rendered.join(", ") + "}>"
 

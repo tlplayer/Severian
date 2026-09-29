@@ -5,7 +5,6 @@ import "core.sev" as utf8_core
 import "../format/src/lib.sev" as formatting
 import LiteralBinding, LiteralSyntax, MlirTypeBinding, PrimitiveId, StringPrimitive, TypeId from "../../../../sev_compiler/syntax/primitive/declarations.sev"
 import Error from "../../../../sev_compiler/syntax/primitive/primitive.sev"
-import Container from "../../collections/traits/src/container.sev"
 
 class UnicodeError: Error
     message: string
@@ -72,7 +71,7 @@ PRINTABLE = DIGITS + ASCII_LETTERS + PUNCTUATION + WHITE_SPACE
 
 # Text owns a vector of encoding units. UTF-8 uses bytes; UTF-32 uses scalars.
 # N is the initial number of NUL encoding units; strings can grow beyond N.
-trait String: Container
+trait String: C
     def capacity() -> int
     def reserve(self: borrow Self, required: int)
     def resize(self: borrow Self, required: int)
@@ -833,7 +832,7 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
 
 
 # A bounded read-only loan; unused vector capacity is never exposed.
-class StringView[Unit]: Container
+class StringView[Unit]: C
     data: view array[Unit]
     count: int
 

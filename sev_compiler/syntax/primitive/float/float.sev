@@ -91,11 +91,11 @@ trait Floating:
     Default
     Print
 
-    property bits: u16
-    property exponent_bits: u16
-    property precision_bits: u16
-    property supports_infinity: bool
-    property supports_nan: bool
+    bits: u16
+    exponent_bits: u16
+    precision_bits: u16
+    supports_infinity: bool
+    supports_nan: bool
 
 
 '''

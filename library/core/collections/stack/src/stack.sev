@@ -1,8 +1,7 @@
-import Container from "../../traits/src/container.sev"
 import storage
 
 
-class stack[T]: Container
+class stack[T]: C
     storage: storage.ContiguousStorage[T]
 
     def stack(capacity: usize = 0):

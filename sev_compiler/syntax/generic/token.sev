@@ -15,5 +15,6 @@ enum TokenKind:
 
 
 trait TokenTerm:
-    property lexeme: Lexeme
-    property span: Span
+    kind: TokenKind
+    lexeme: Lexeme
+    span: Span

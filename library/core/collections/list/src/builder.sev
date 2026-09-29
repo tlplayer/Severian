@@ -1,8 +1,7 @@
-import Container from "../../traits/src/container.sev"
 import * from "list.sev"
 
 
-class ListBuilder[T]: Container
+class ListBuilder[T]: C
     values: list[T]
 
     def ListBuilder(capacity: usize):

@@ -1,4 +1,3 @@
-import Container from "../../traits/src/container.sev"
 import storage
 
 
@@ -62,8 +61,8 @@ trait VectorScalar:
     operator /(right: Self) -> Self
 
 
-trait Vector[T: VectorScalar, N: usize]: Container
-    property length: usize
+trait Vector[T: VectorScalar, N: usize]: C
+    length: usize
 
     operator [](index: usize) -> T
     operator []=(index: usize, value: T)
@@ -84,7 +83,7 @@ trait Vector[T: VectorScalar, N: usize]: Container
     def iter(self) -> Iterator[T]
 
 
-class numeric_vector[T: VectorScalar, N: usize]: Container
+class numeric_vector[T: VectorScalar, N: usize]: C
     trait Vector[T, N]
 
     __values: array[T]

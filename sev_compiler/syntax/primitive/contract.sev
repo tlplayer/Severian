@@ -1,9 +1,9 @@
 import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, array_mlir, byte_view_mlir, index_mlir, memref_mlir, ranked_memref_storage, scalar_mlir, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir from "mlir.sev"
 import AbiId, ArtifactId, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, IndexedId, InferVarId, InterfaceId, LocalId, ModuleId, NamedId, OpId, PackageId, PrimitiveId, ProviderId, RegionId, ScopeId, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TypeBinding, TypeConstructorBinding, TypeId, ValueId, VariantId, definition_from_key, named_definition, same_definition, semantic_digest, semantic_key from "../symbol/symbol.sev"
-import Constructor, Conversion, ConversionKind, Size, TypeRef from "../type/type.sev"
+import Constructor, Conversion, ConversionKind, Size, TypeRef from "../generic/type.sev"
 import AssertionLocation, AssertionOrigin, CoverageKind, CoveragePoint, QualityRegion, SourceFile, SourceId, SourceMap, Span, load, source_id, span, utf8_offset, virtual_source from "../source.sev"
 
-import Lexeme, LexemeTerm, TokenKind, TokenTerm from "../token.sev"
+import Lexeme, LexemeTerm, TokenKind, TokenTerm from "../generic/token.sev"
 
 enum PrimitiveCategory:
     Boolean
@@ -26,33 +26,17 @@ enum PrimitiveRepresentation:
     RecordAggregate
     TaggedAggregate
 
-enum LiteralSyntax:
-    Integer
-    Float
-    Boolean
-    Character
-    String
-    Bytes
-    NoneValue
-    Absent
-    Unit
-
-class LiteralBinding:
-    token: TokenKind
-    spellings: list[string] = []
-
+import L, Literal, LiteralBinding, LiteralSyntax from "../generic/literal.sev"
+import Y from "../generic/symbol.sev"
+import Type from "../generic/type.sev"
 
 # Identity and literal behavior are required parts of the primitive contract.
 # TypeId is a compilation handle; identity is the declaration's stable identity.
-trait Primitive: Type + MlirTypeProvider
-    property identity: PrimitiveId
-    property id: TypeId
-    property category: PrimitiveCategory
-    property representation: PrimitiveRepresentation
-    property literal: LiteralSyntax | None
-    property default_literal: bool
-    property literal_family: string
-    property literal_bindings: list[LiteralBinding]
+trait Primitive: Type + Y + L + MlirTypeProvider
+    identity: PrimitiveId
+    id: TypeId
+    category: PrimitiveCategory
+    representation: PrimitiveRepresentation
 
 trait PrimitiveAlias[T]: Primitive
 

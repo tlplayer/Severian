@@ -1,3 +1,5 @@
+import Y from "../generic/symbol.sev"
+
 class SymbolName:
     value: string
 
@@ -8,15 +10,15 @@ enum SymbolKind:
     ThreadLocal
 
 trait IndexedId:
-    property index: u32
+    index: u32
 
 
 trait StableId:
-    property value: u128
+    value: u128
 
 
 trait NamedId:
-    property value: string
+    value: string
 
 
 class HirId: IndexedId
@@ -169,7 +171,7 @@ class SymbolId: NamedId
     value: string
 
 
-class Symbol:
+class Symbol: Y
     name: SymbolName
     kind: SymbolKind
     id: SymbolId | None = None

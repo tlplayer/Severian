@@ -1,8 +1,7 @@
-import Container from "../../traits/src/container.sev"
 import deque
 
 
-class queue[T]: Container
+class queue[T]: C
     values: deque.deque[T]
 
     def queue(capacity: usize = 0):

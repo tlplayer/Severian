@@ -3,7 +3,7 @@ import "../../../hir/module/module.sev" as model_hir_module_module
 import "../../cfg/branch.sev" as model_mir_cfg_branch
 import "../../cfg/cfg.sev" as model_mir_cfg_cfg
 import "../../cfg/lazy.sev" as model_mir_cfg_lazy
-import "../../value.sev" as model_mir_value
+import "../../../syntax/generic/value.sev" as model_mir_value
 import "../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../syntax/function/syntax.sev" as model_syntax_function_syntax
@@ -1037,7 +1037,7 @@ def execute_grammar(module: model_hir_module_module.Module, context: cfg.Executi
     for definition in module.traits:
         if definition.grammar and definition.definition.module == syntax.definition.module and definition.definition.declaration.value == syntax.definition.declaration.value:
             capable := false
-            for property in definition.properties:
+            for in definition.properties:
                 if property.name == "control_flow":
                     supplied ?= property.default
                     if supplied != None:

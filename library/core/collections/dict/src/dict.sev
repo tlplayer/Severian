@@ -1,8 +1,7 @@
-import Container from "../../traits/src/container.sev"
 import hashed
 import traits
 
-class dict[K: traits.HashKey, V]: Container
+class dict[K: traits.HashKey, V]: C
     storage: hashed.Hash[K, V]
 
     def dict():

@@ -94,7 +94,7 @@ def resolve(environment: definitions.SemanticDefinitions, records: list[model_sy
             properties: list[string] = []
             operations: list[model_syntax_function_syntax.ScalarOperation] = []
             for inherited in definitions.inherited_traits(environment, declaration):
-                for property in inherited.properties:
+                for in inherited.properties:
                     if property.name in properties:
                         continue
                     supplied ?= property.default

@@ -37,7 +37,7 @@ def path(expression: model_syntax_function_function.Expression) -> string:
 
 
 def property_value(declaration: model_syntax_function_syntax.TraitDeclaration, name: string) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
-    for property in declaration.properties:
+    for in declaration.properties:
         if property.name == name:
             value ?= property.default
             if value != None:

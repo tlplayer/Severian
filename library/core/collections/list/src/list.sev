@@ -1,4 +1,3 @@
-import Container from "../../traits/src/container.sev"
 import storage
 import Sequence from traits
 import * from "iterator.sev"

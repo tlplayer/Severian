@@ -6,7 +6,7 @@ class MlirTypeParameter:
 
 
 trait MlirTypeProvider:
-    property mlir: MlirTypeBinding
+    mlir: MlirTypeBinding
 
 
 class MlirTypeBinding:

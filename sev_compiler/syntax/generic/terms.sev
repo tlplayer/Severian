@@ -1,0 +1,10 @@
+import FunctionDeclaration, Expression, Operation from "../function/function.sev"
+import Sentence, Statement from "../sentence/sentence.sev"
+import WithAttachment from "../constraint/model.sev"
+
+# Role aliases retain the concrete contracts of the existing compiler terms.
+FunctionDeclaration | Expression | Operation as F
+Statement | Operation as O
+Sentence as S
+WithAttachment as W
+Error as E

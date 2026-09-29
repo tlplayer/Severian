@@ -1,13 +1,12 @@
-import Container from "../../traits/src/container.sev"
 import btree
 import traits
 import * from list as lists
 
-class map[K, V, C:traits.MappingStorage[K,V]=btree.BTree]: Container
-    storage: C[K,V]
+class map[K, V, Storage:traits.MappingStorage[K,V]=btree.BTree]: C
+    storage: Storage[K,V]
 
     def map(entries...: tuple[K,V]):
-        storage = C[K,V]()
+        storage = Storage[K,V]()
         for entry in entries:
             storage.set(entry[0], entry[1])
 
@@ -63,7 +62,7 @@ class map[K, V, C:traits.MappingStorage[K,V]=btree.BTree]: Container
             yield (key, self[key])
 
     def copy(self: view Self) -> Self:
-        result := map[K, V, C]()
+        result := map[K, V, Storage]()
         for key in keys():
             result.set(copy key, copy self[key])
         return result

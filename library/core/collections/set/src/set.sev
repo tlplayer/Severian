@@ -1,13 +1,12 @@
-import Container from "../../traits/src/container.sev"
 import btree
 import traits
 import * from list as lists
 
-class set[T, C:traits.MappingStorage[T,bool]=btree.BTree]: Container
-    storage: C[T,bool]
+class set[T, Storage:traits.MappingStorage[T,bool]=btree.BTree]: C
+    storage: Storage[T,bool]
 
     def set(values...: T):
-        storage = C[T,bool]()
+        storage = Storage[T,bool]()
         for value in values:
             storage.set(value, true)
 
@@ -99,7 +98,7 @@ class set[T, C:traits.MappingStorage[T,bool]=btree.BTree]: Container
             item ?= upper_bound(item)
 
     def copy(self: view Self) -> Self:
-        result := set[T, C]()
+        result := set[T, Storage]()
         for item in values():
             result.add(copy item)
         return result

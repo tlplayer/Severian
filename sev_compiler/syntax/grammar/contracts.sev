@@ -1,25 +1,4 @@
-# Source grammar contracts loaded into the shared declaration environment.
-trait G:
-    symbol: Y
-    arity: int | absent
-    precedence: int | absent
-    associativity: Associativity | absent
-    left: Operand | absent
-    right: Operand | absent
-    result: T | absent
-    evaluation: Evaluation
-    effects: Effects
-    conversions: Conversions
-    overflow: Overflow | absent
-    underflow: Underflow | absent
-    control_flow: ControlFlow | absent
-    short_circuit: bool | absent
-    const: bool
-    foldable: bool
-    operations: {T: ScalarOperation}
-
-    def valid(left: Ex, right: Ex) -> bool
-    def semantic(left: Ex, right: Ex) -> X
+import G from "../generic/grammar.sev"
 
 
 trait Positive: G

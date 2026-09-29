@@ -53,11 +53,11 @@ A count is false exactly when no positive-frequency keys remain.
 '''
 
 
-trait Count[T: traits.HashKey]: traits.Container
+trait Count[K]: C 
     Truth
 
-    property unique: usize
-    property total_count: usize
+    unique: usize
+    total_count: usize
 
     operator [](value: T) -> usize
 
@@ -78,7 +78,7 @@ trait Count[T: traits.HashKey]: traits.Container
     def copy(self) -> count[T]
 
 
-class count[T: traits.HashKey]: traits.Container
+class count[T: traits.HashKey]: C
     trait Count[T]
 
     __counts: dict[T, usize]

@@ -183,9 +183,9 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                 constructor = base_syntax.constructor
                 representation = base_syntax.representation
             fields: list[string] = []
-            for property in descriptor.properties:
+            for in descriptor.properties:
                 if property.name in fields:
-                    return error(diagnostics.diagnostic_at("E000103", "duplicate operator syntax property " + property.name, descriptor.span))
+                    return error(diagnostics.diagnostic_at("E000103", "duplicate operator syntax " + property.name, descriptor.span))
                 fields.append(property.name)
                 if property.name == "symbol":
                     symbol = ""

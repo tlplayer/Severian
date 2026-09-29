@@ -1,8 +1,7 @@
 import storage
-import Container from "../../traits/src/container.sev"
 
 
-class bounded_array[T]: Container
+class bounded_array[T]: C
     storage: storage.ContiguousStorage[T]
     limit: usize
 

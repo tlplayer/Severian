@@ -12,7 +12,7 @@ class Location:
     index: int
     found: bool
 
-class BTree[K:traits.Ordered, V]: traits.Container
+class BTree[K:traits.Ordered, V]: C
     __nodes: lists.list[TreeNode]
     __slots: lists.list[int]
     __children: lists.list[int]

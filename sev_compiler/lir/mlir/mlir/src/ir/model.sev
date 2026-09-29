@@ -295,7 +295,7 @@ class MlirNamedAttribute:
 
 
 # Properties are deliberately distinct from discardable attributes. `A` is
-# Severian's Argument category, so this API spells Attribute and Property out.
+# Severian's Argument category, so this API spells Attribute and out.
 class MlirNamedProperty:
     name: string
     value: MlirAttributeValue

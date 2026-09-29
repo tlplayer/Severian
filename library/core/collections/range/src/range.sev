@@ -1,6 +1,5 @@
-import Container from "../../traits/src/container.sev"
 
-class Range: Container
+class Range: C
     start: int
     stop: int
     step: int

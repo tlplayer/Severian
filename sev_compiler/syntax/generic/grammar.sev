@@ -3,10 +3,6 @@ import Block, DeclarationId, DefId, FunctionParameter, TypeAnnotation, span from
 import Associativity, OperatorSyntax from "../function/syntax.sev"
 
 
-# Marker shared by grammar declarations; it has no module initializer.
-trait G:
-
-
 enum GrammarPrimitive:
     LowerExpression
     LowerBody
@@ -56,3 +52,29 @@ class GrammarDeclaration:
     protocols: list[string] = []
     lookup: string = ""
     result: TypeAnnotation | None = None
+
+
+# Source grammar contracts loaded into the shared declaration environment.
+trait G:
+    symbol: Y
+    arity: int | absent
+    precedence: int | absent
+    associativity: Associativity | absent
+    left: Operand | absent
+    right: Operand | absent
+    result: T | absent
+    evaluation: Evaluation
+    effects: Effects
+    conversions: Conversions
+    overflow: Overflow | absent
+    underflow: Underflow | absent
+    control_flow: ControlFlow | absent
+    short_circuit: bool | absent
+    const: bool
+    foldable: bool
+    operations: {T: ScalarOperation}
+
+    def valid(left: Ex, right: Ex) -> bool
+    def semantic(left: Ex, right: Ex) -> X
+
+

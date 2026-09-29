@@ -1,0 +1,27 @@
+import TokenKind from "token.sev"
+
+enum LiteralSyntax:
+    Integer
+    Float
+    Boolean
+    Character
+    String
+    Bytes
+    NoneValue
+    Absent
+    Unit
+
+class LiteralBinding:
+    token: TokenKind
+    spellings: list[string] = []
+
+
+# Literal providers declare accepted source forms. Recognition and conversion
+# belong to implementations; this contract does not select precision or range.
+trait Literal:
+    literal: LiteralSyntax | None
+    default_literal: bool
+    literal_family: string
+    literal_bindings: list[LiteralBinding]
+
+Literal as L

@@ -8,7 +8,7 @@ trait Measured:
     def measure() -> int
 
 trait Value: Addable + Measured:
-    property amount: int
+    amount: int
 
 class Box: Value:
     amount: Later

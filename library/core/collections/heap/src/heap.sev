@@ -1,9 +1,8 @@
-import Container from "../../traits/src/container.sev"
 import storage
 import Ordered from traits
 
 
-class heap[T: Ordered]: Container
+class heap[T: Ordered]: C
     storage: storage.ContiguousStorage[T]
 
     def heap(capacity: usize = 0):

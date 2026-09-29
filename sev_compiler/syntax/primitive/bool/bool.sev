@@ -39,7 +39,7 @@ The compiler supplies `operator if(self) -> true` and
 the truth contract. A type may override both operators:
 
 ```sev
-class map: Container + Truth
+class map: C + Truth
     items: list[(Any, Any)]
 
     operator if(self) -> bool | never: len(self.items) != 0

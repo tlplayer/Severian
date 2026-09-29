@@ -1268,7 +1268,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: model_syntax_
             for definition in state.declarations.traits:
                 if definition.grammar and definition.definition.module == operator.definition.module and definition.definition.declaration.value == operator.definition.declaration.value:
                     lazy := false
-                    for property in definition.properties:
+                    for in definition.properties:
                         if property.name == "short_circuit":
                             supplied ?= property.default
                             if supplied != None:
@@ -2532,7 +2532,7 @@ def callable_block(state: CallableAnalysis, statements: list[model_syntax_senten
                     operation := ""
                     definition ?= definitions.trait_named(state.declarations, syntax.grammar_name, "")
                     if definition != None:
-                        for property in definition.properties:
+                        for in definition.properties:
                             if property.name == "operation":
                                 supplied ?= property.default
                                 if supplied != None:
@@ -3959,7 +3959,7 @@ def callable_satisfies(state: CallableAnalysis, type_id: model_syntax_symbol_sym
                     found = callable_same_types(implementation.parameter_types, signature.parameter_types) and implementation.result_type.index == signature.result_type.index
             if not found:
                 return false
-        for property in required.properties:
+        for in required.properties:
             found := false
             receiver_type = model_syntax_type_annotation.named_type(definitions.type_name(type_id, state.records), [], required.span)
             annotation = definitions.replace_annotation(property.annotation, ["Self"], [receiver_type])
@@ -4195,18 +4195,18 @@ def callable_required_property(state: CallableAnalysis, receiver: model_syntax_f
     result_type := model_syntax_symbol_symbol.TypeId(0)
     requirement := model_syntax_symbol_symbol.DefId(0, 0, model_syntax_symbol_symbol.DeclarationId(0))
     for trait in callable_parameter_traits(state, receiver.type_id):
-        for property in trait.properties:
+        for in trait.properties:
             if property.name == name:
                 annotation = definitions.replace_annotation(property.annotation, ["Self"], [model_syntax_type_annotation.named_type(definitions.type_name(receiver.type_id, state.records), [], span)])
                 actual = callable_annotation(annotation, state.records, trait.lookup, state.declarations)
                 if result_type.index != 0 and actual.index != result_type.index:
-                    return error(diagnostics.diagnostic_at("E000219", "ambiguous trait property " + name, span))
+                    return error(diagnostics.diagnostic_at("E000219", "ambiguous trait " + name, span))
                 result_type = actual
                 requirement = property.definition
     if result_type.index == 0:
         return error(diagnostics.diagnostic_at("E000219", "generic member requires an explicit trait property: " + name, span))
     if expected.index != 0 and expected.index != result_type.index:
-        return error(diagnostics.diagnostic_at("E000219", "trait property does not match expected type", span))
+        return error(diagnostics.diagnostic_at("E000219", "trait does not match expected type", span))
     id = model_syntax_symbol_symbol.HirId(u32(state.next_id[0]))
     state.next_id[0] += 1
     return model_syntax_function_function.Expression(model_syntax_function_function.RequiredMember(receiver, requirement, name), span, id, result_type)
@@ -4274,7 +4274,7 @@ def callable_success(state: CallableAnalysis, value: model_syntax_function_funct
 def callable_protocol_name(state: CallableAnalysis, contract: string, property_name: string, span: source.Span) -> string | diagnostics.Diagnostic:
     definition ?= definitions.trait_named(state.declarations, contract, "")
     if definition != None:
-        for property in definition.properties:
+        for in definition.properties:
             if property.name == property_name:
                 supplied ?= property.default
                 if supplied != None:

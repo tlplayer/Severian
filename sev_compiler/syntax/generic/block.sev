@@ -1,0 +1,34 @@
+import source
+
+class SourceBlockId:
+    index: u32
+
+class SentenceId:
+    index: u32
+
+enum BlockTermRole:
+    Name
+    Symbol
+    Opaque
+
+
+class BlockTerm:
+    spelling: string
+    span: source.Span
+    role: BlockTermRole
+
+
+class BlockSentence:
+    id: SentenceId
+    span: source.Span
+    terms: list[BlockTerm]
+
+
+# B is the source structure shared by discovery and resolved block bodies.
+# Sentence spans remain available before any expression or literal is resolved.
+trait B:
+    span: source.Span | None
+    sentences: list[BlockSentence]
+    subblocks: list[SourceBlockId]
+
+

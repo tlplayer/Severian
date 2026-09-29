@@ -298,9 +298,6 @@ enum Operation:
     FieldAddress(object: ValueId, owner: TypeId, index: int, result: ValueId)
     CompiledRegionCall(artifact_id: ArtifactId, inputs: list[ValueId], outputs: list[ValueId])
 
-# F groups concrete callable, expression and operation contracts.
-FunctionDeclaration | Expression | Operation as F
-
 
 # Functions use @mlir for operation identity; type declarations use it for a
 # type spelling. Both preserve the same parsed decorator/sentence data.

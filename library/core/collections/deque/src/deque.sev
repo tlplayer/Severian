@@ -1,8 +1,7 @@
-import Container from "../../traits/src/container.sev"
 import storage
 
 
-class deque[T]: Container
+class deque[T]: C
     storage: storage.RingStorage[T]
 
     def deque(capacity: usize = 0):

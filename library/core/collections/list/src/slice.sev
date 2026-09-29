@@ -1,7 +1,6 @@
-import Container from "../../traits/src/container.sev"
 import * from "list.sev"
 
-class slice[T]: Container
+class slice[T]: C
     owner: borrow list[T]
     offset: usize
     length: usize

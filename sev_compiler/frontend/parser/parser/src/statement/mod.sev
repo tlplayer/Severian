@@ -3,7 +3,7 @@ import "../../../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
 import "../../../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
-import "../../../../../syntax/grammar/grammar.sev" as model_syntax_grammar_grammar
+import "../../../../../syntax/generic/grammar.sev" as model_syntax_grammar_grammar
 import "../../../../../syntax/literal/value.sev" as model_syntax_literal_value
 import "../../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
 import "../../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
@@ -593,8 +593,8 @@ def parser_trait_declaration(parser: Parser, decorators: list[model_syntax_funct
                 property_start = parser_peek(parser).span
                 if parser_at_identifier(parser, "property"):
                     parser_next(parser)
-                property_name = parser_identifier(parser, "expected property name")[0]
-                parser_expect_symbol(parser, ":", "expected property type")
+                property_name = parser_identifier(parser, "expected name")[0]
+                parser_expect_symbol(parser, ":", "expected type")
                 annotation = parser_type_annotation(parser)
                 default: model_syntax_function_function.Expression | None := None
                 if parser_take_symbol(parser, "=") != None:

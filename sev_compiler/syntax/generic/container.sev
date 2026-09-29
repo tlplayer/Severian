@@ -8,3 +8,9 @@ trait Container:
 
     def bytes(self: view Self) -> byte
     def alignment(self: view Self) -> byte
+
+
+Container as C
+
+# N counts elements; it is not a node or a storage byte count.
+usize as N

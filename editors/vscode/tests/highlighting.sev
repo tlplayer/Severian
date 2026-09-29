@@ -60,12 +60,12 @@ status=ready
     test with integ "native output":
         assert(size([1, 2, 3]) == 3)
 
-    test with property and chaos "ownership":
+    test with  chaos "ownership":
         assert(true and not false)
 
 
 extend HttpServer:
-    property active: bool
+    active: bool
 
 
 def control_surface(value: int):

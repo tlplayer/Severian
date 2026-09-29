@@ -16,7 +16,7 @@ class Constructor:
 
 
 trait Conversion:
-    property constructors: list[Constructor]
+    constructors: list[Constructor]
 
 enum Size:
     Fixed(bytes: u64)
@@ -24,6 +24,9 @@ enum Size:
     Dynamic
 
 trait Type: Conversion
-    property name: string
-    property size: Size
-    property alignment: Size
+    name: string
+    size: Size
+    alignment: Size
+
+
+Type as T

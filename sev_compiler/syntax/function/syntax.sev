@@ -256,17 +256,14 @@ class OperatorSyntax:
 
 
 
-# Y is the compiler-term kind for an interned, resolved symbol. Operator tags
-# are symbols, not strings and not Rust enum variants.
-trait Y:
-#Unimplemented???
+import Y from "../generic/symbol.sev"
 
 trait Operator:
     Y
-    property symbol: string
-    property fixity: Fixity
-    property precedence: u8
-    property associativity: Associativity
+    symbol: string
+    fixity: Fixity
+    precedence: u8
+    associativity: Associativity
 
 
 trait UnaryOperator:
