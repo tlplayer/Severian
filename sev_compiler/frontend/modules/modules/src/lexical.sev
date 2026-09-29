@@ -3,6 +3,7 @@ import parser
 import source
 import diagnostics
 import "package:syntax/function/syntax.sev" as syntax
+import block_contract from "package:syntax/block/contract.sev"
 
 
 def lexical_definition(descriptor: lexer.OperatorDescriptor) -> bool:
@@ -54,6 +55,10 @@ def discover_lexical_rules(files: list[source.SourceFile], registry: lexer.Synta
 
 # Discover contracts through declared inheritance, without a block-name table.
 def block_definition(descriptor: lexer.OperatorDescriptor, registry: lexer.SyntaxRegistry) -> bool:
+    return block_implements(descriptor, registry, "Y") and block_implements(descriptor, registry, "B")
+
+
+def block_implements(descriptor: lexer.OperatorDescriptor, registry: lexer.SyntaxRegistry, contract: string) -> bool:
     pending = descriptor.bases[:]
     seen: list[string] = []
     while len(pending) > 0:
@@ -65,7 +70,7 @@ def block_definition(descriptor: lexer.OperatorDescriptor, registry: lexer.Synta
             if parent.name == base:
                 for inherited in parent.bases:
                     pending.append(inherited)
-    return "Y" in seen and "B" in seen
+    return contract in seen
 
 
 def discover_block_declarations(files: list[source.SourceFile], registry: lexer.SyntaxRegistry) -> unit | diagnostics.Diagnostic:
@@ -82,8 +87,15 @@ def discover_block_declarations(files: list[source.SourceFile], registry: lexer.
             for item in parsed.items:
                 match item:
                     case Record:
-                        if len(declaration.sentences) > 0:
-                            registry.block_declarations.append(declaration)
+                        try:
+                            contract = block_contract(declaration)
+                            for descriptor in registry.descriptors:
+                                if descriptor.name == declaration.name and descriptor.span.source.index == declaration.span.source.index:
+                                    if block_implements(descriptor, registry, "ExecutableBlock"):
+                                        contract.require_lowering()
+                        catch failure: Error:
+                            return error(diagnostics.diagnostic_at("E000105", failure.message, declaration.span))
+                        registry.block_declarations.append(declaration)
                     case Trait:
                         continue
                     case _:
@@ -92,7 +104,7 @@ def discover_block_declarations(files: list[source.SourceFile], registry: lexer.
 
 
 test "block sentence discovery follows contracts rather than keyword names":
-    file = source.virtual_source("custom-block.sev", "class unless: Y + B\n    sentence unless[\"unless\", conditions...: bool, \":\"]():\n        return\n")
+    file = source.virtual_source("custom-block.sev", "class unless: Y + B\n    context: BlockContext = BlockContext()\n    span: Span | None = None\n    sentences: list[BlockSentence] = []\n    subblocks: list[SourceBlockId] = []\n    sentence unless[\"unless\", conditions...: bool, \":\"]() -> B:\n        return self\n")
     registry = lexer.SyntaxRegistry([syntax.OperatorSyntax("+", syntax.Fixity.Infix, 1, syntax.Associativity.Left)])
     lexer.discover_operator_descriptors(lexer.scan_bootstrap(file), registry)
     discover_block_declarations([file], registry)
@@ -101,3 +113,17 @@ test "block sentence discovery follows contracts rather than keyword names":
     assert(len(registry.block_declarations[0].sentences) == 1)
     discover_block_declarations([file], registry)
     assert(len(registry.block_declarations) == 1)
+
+
+test "block discovery rejects incomplete compiler contracts at the declaration":
+    for text in [
+        "class incomplete: Y + B\n    span: Span | None = None\n",
+        "class incomplete: Y + B\n    context: BlockContext = BlockContext()\n    span: Span | None = None\n    sentences: list[BlockSentence] = []\n    subblocks: list[SourceBlockId] = []\n    sentence incomplete[\"incomplete\"]():\n        return\n",
+        "class incomplete: Y + B + ExecutableBlock\n    context: BlockContext = BlockContext()\n    span: Span | None = None\n    sentences: list[BlockSentence] = []\n    subblocks: list[SourceBlockId] = []\n    sentence incomplete[\"incomplete\"]() -> B:\n        return self\n",
+    ]:
+        file = source.virtual_source("incomplete-block.sev", text)
+        registry = lexer.SyntaxRegistry([syntax.OperatorSyntax("+", syntax.Fixity.Infix, 1, syntax.Associativity.Left)])
+        lexer.discover_operator_descriptors(lexer.scan_bootstrap(file), registry)
+        result ?= discover_block_declarations([file], registry)
+        assert(result is diagnostics.Diagnostic)
+        assert(len(registry.block_declarations) == 0)

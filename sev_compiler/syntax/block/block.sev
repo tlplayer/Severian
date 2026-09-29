@@ -47,7 +47,7 @@ class OperationOrigin:
     path: list[CallableOrigin] = []
 
 
-import B, BlockSentence, BlockTerm, BlockTermRole, SentenceId, SourceBlockId from "../generic/block.sev"
+import B, BlockContext, BlockSentence, BlockTerm, BlockTermRole, SentenceId, SourceBlockId from "../generic/block.sev"
 
 
 class BlockSyntax:
@@ -84,6 +84,7 @@ class Block: B
     terminator: CfgTerminator | None = None
     origins: list[OperationOrigin] = []
     origin: OperationOrigin = OperationOrigin()
+    context: BlockContext = BlockContext()
 
 
 class BlockFile:

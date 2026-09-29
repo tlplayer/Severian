@@ -1,0 +1,114 @@
+import RecordDeclaration, FunctionDeclaration from "../function/function.sev"
+import simple_type_name from "../type/annotation.sev"
+import source
+import B from "../generic/block.sev"
+
+
+# This is a checked view of the owning declaration, not a second grammar/body.
+class BlockContract:
+    declaration: RecordDeclaration
+    lowering: FunctionDeclaration | None = None
+
+    def require_lowering() -> FunctionDeclaration:
+        implementation ?= self.lowering
+        if implementation == None:
+            throw Error("block " + self.declaration.name + " has no lowering implementation")
+        return implementation
+
+
+def block_contract(declaration: RecordDeclaration) -> BlockContract | Error:
+    required = ["context", "span", "sentences", "subblocks"]
+    for name in required:
+        found := false
+        for field in declaration.fields:
+            if field.name == name:
+                found = true
+        if not found:
+            throw Error("block " + declaration.name + " must declare " + name)
+    context := false
+    for field in declaration.fields:
+        if field.name in ["sentences", "subblocks"]:
+            expected = "BlockSentence" if field.name == "sentences" else "SourceBlockId"
+            match field.annotation.kind:
+                case Named:
+                    if name != "list" or len(arguments) != 1:
+                        throw Error("block " + field.name + " requires list[" + expected + "]")
+                    if simple_type_name(arguments[0]) != expected:
+                        throw Error("block " + field.name + " has an invalid element contract")
+                case _:
+                    throw Error("block " + field.name + " requires a list contract")
+        if field.name == "context":
+            if simple_type_name(field.annotation) != "BlockContext":
+                throw Error("block context must implement BlockContext")
+            context = true
+    if not context:
+        throw Error("block " + declaration.name + " must declare context: BlockContext")
+    if len(declaration.sentences) == 0:
+        throw Error("block " + declaration.name + " must declare a construction sentence")
+    for sentence in declaration.sentences:
+        grammar ?= sentence.sentence
+        result ?= sentence.result
+        if grammar == None or sentence.body == None or result == None:
+            throw Error("block sentence requires grammar, result and construction body")
+        if result != None and simple_type_name(result) != "B":
+            throw Error("block construction sentence must return B")
+        if grammar != None:
+            captures: list[string] = []
+            index := 0
+            for field in grammar.fields:
+                match field:
+                    case Capture:
+                        if name in captures:
+                            throw Error("duplicate block capture " + name)
+                        captures.append(name)
+                        found := false
+                        for parameter in sentence.parameters:
+                            if parameter.name == name:
+                                found = true
+                                if parameter.variadic != (index in grammar.repetitions):
+                                    throw Error("block capture repetition disagrees with its parameter")
+                        if not found:
+                            throw Error("block capture requires a typed parameter: " + name)
+                    case Literal:
+                        if index in grammar.repetitions:
+                            throw Error("block repetition must refer to a capture")
+                index += 1
+            for repetition in grammar.repetitions:
+                if repetition < 0 or repetition >= len(grammar.fields):
+                    throw Error("block repetition is outside its grammar")
+            if len(captures) != len(sentence.parameters):
+                throw Error("block parameters must correspond to sentence captures")
+    contract = BlockContract(declaration)
+    for method in declaration.methods:
+        if method.name == "lower":
+            if contract.lowering != None or method.body == None or len(method.parameters) != 1:
+                throw Error("block lower requires one implementation and a compiler context")
+            if simple_type_name(method.parameters[0].annotation) != "BlockLowering":
+                throw Error("block lower requires BlockLowering context")
+            result ?= method.result
+            if result != None and simple_type_name(result) != "unit":
+                throw Error("block lower must return unit")
+            contract.lowering = method
+    for implemented in declaration.traits:
+        if simple_type_name(implemented) == "ExecutableBlock":
+            contract.require_lowering()
+    return contract
+
+
+def require_resolved_block(block: B):
+    block.context.require_resolved()
+    location ?= block.span
+    if location == None:
+        throw Error("resolved block requires a source span")
+    if location != None and location.end < location.start:
+        throw Error("resolved block has an inverted source span")
+    identity ?= block.context.identity
+    parent ?= block.context.parent
+    if identity != None and parent != None and identity.index == parent.index:
+        throw Error("block cannot be its own enclosing scope")
+
+
+test "incomplete block declarations are rejected":
+    declaration = RecordDeclaration("Incomplete", [], [], source.Span(source.SourceId(0), 0, 1))
+    result ?= block_contract(declaration)
+    assert(result is Error)

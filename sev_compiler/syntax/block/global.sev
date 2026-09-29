@@ -1,9 +1,12 @@
 import Y from "../generic/symbol.sev"
-import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
 import source
+import DefId, DeclarationId, ScopeId, ModuleId from "../symbol/symbol.sev"
+import require_resolved_block from "contract.sev"
 
 # The source window itself introduces global scope; there is no global keyword.
 class global: Y + B
+    context: BlockContext = BlockContext()
     span: source.Span | None = None
     sentences: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
@@ -11,3 +14,18 @@ class global: Y + B
 
     sentence global[]() -> B with self.parent == None:
         return self
+
+
+test "global block retains resolved source and provider identity":
+    root = global(span=source.Span(source.SourceId(4), 0, 20))
+    unresolved ?= require_resolved_block(root)
+    assert(unresolved is Error)
+    root.context.identity = SourceBlockId(0)
+    root.context.provider = DefId(1, 2, DeclarationId(3))
+    root.context.constructor = DefId(1, 2, DeclarationId(4))
+    root.context.scope = ScopeId(ModuleId(5))
+    require_resolved_block(root)
+    assert(root.context.parent == None)
+    root.context.parent = SourceBlockId(0)
+    invalid ?= require_resolved_block(root)
+    assert(invalid is Error)

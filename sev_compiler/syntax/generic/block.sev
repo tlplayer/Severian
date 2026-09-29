@@ -1,4 +1,6 @@
 import source
+import DefId, ScopeId, ValueId from "../symbol/symbol.sev"
+import Capture, Statement from "../sentence/sentence.sev"
 
 class SourceBlockId:
     index: u32
@@ -24,11 +26,40 @@ class BlockSentence:
     terms: list[BlockTerm]
 
 
+# Populated by resolution, not guessed from a block's spelling or CFG index.
+class BlockContext:
+    identity: SourceBlockId | None = None
+    provider: DefId | None = None
+    constructor: DefId | None = None
+    scope: ScopeId | None = None
+    parent: SourceBlockId | None = None
+    captures: list[Capture] = []
+    contents: list[Statement] = []
+
+    def require_resolved():
+        if self.identity == None or self.provider == None or self.constructor == None or self.scope == None:
+            throw Error("block resolution requires identity, provider, constructor and scope")
+
+
+# Provider lowering uses explicit compiler context instead of free cfg/lower
+# names. Implementations supply behavior; the compiler supplies these operations.
+trait BlockLowering:
+    def block() -> int
+    def condition(value: bool) -> ValueId
+    def body(value: B)
+    def branch(value: ValueId, taken: int, otherwise: int)
+    def at(block: int)
+    def fallthrough(block: int)
+
+
 # B is the source structure shared by discovery and resolved block bodies.
 # Sentence spans remain available before any expression or literal is resolved.
 trait B:
+    context: BlockContext
     span: source.Span | None
     sentences: list[BlockSentence]
     subblocks: list[SourceBlockId]
 
 
+trait ExecutableBlock: B
+    def lower(cfg: BlockLowering)

@@ -1,0 +1,9 @@
+test 
+"""
+Testing with a block name definition
+x->y->z
+""":
+    x = 1
+    y = x
+    z = y
+    assert(z == 1)

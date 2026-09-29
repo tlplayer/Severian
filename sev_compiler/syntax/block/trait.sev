@@ -1,10 +1,11 @@
 import Y from "../generic/symbol.sev"
-import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
 import source
 import Symbol from "../symbol/symbol.sev"
 import TypeAnnotation from "../type/annotation.sev"
 
 class trait: Y + B
+    context: BlockContext = BlockContext()
     span: source.Span | None = None
     sentences: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []

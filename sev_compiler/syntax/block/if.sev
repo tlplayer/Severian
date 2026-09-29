@@ -1,22 +1,72 @@
 import Y from "../generic/symbol.sev"
-import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import B, ExecutableBlock, BlockLowering, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
 import source
+import ValueId from "../symbol/symbol.sev"
+import Block from "block.sev"
 
 
 # The sentence belongs to the implementing block, including its CFG behavior.
-class if: Y + B
+class if: Y + B + ExecutableBlock
+    context: BlockContext = BlockContext()
     span: source.Span | None = None
     sentences: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: B
     body: B
 
-    sentence if["if", conditions...: bool, ":"]():
+    conditions: list[bool] = []
+
+    sentence if["if", conditions...: bool, ":"]() -> B:
+        self.conditions = conditions
+        return self
+
+    def lower(cfg: BlockLowering):
         exit = cfg.block()
-        for condition in conditions:
+        for condition in self.conditions:
             taken = cfg.block()
-            cfg.branch(lower(condition), taken, exit)
+            cfg.branch(cfg.condition(condition), taken, exit)
             cfg.at(taken)
-        lower(self.body)
+        cfg.body(self.body)
         cfg.fallthrough(exit)
         cfg.at(exit)
+
+
+class RecordingBlockLowering: BlockLowering
+    next: int = 0
+    branches: list[ValueId] = []
+    destinations: list[int] = []
+    bodies: int = 0
+    exit: int = -1
+
+    def block() -> int:
+        result = self.next
+        self.next += 1
+        return result
+
+    def condition(value: bool) -> ValueId:
+        return ValueId(1 if value else 0)
+
+    def body(value: B):
+        self.bodies += 1
+
+    def branch(value: ValueId, taken: int, otherwise: int):
+        self.branches.append(value)
+        self.destinations.append(taken)
+        self.destinations.append(otherwise)
+
+    def at(block: int):
+        self.exit = block
+
+    def fallthrough(block: int):
+        self.destinations.append(block)
+
+
+test "if owns conditional CFG lowering through explicit context":
+    body = Block()
+    branch = if(parent=body, body=body, conditions=[true, false])
+    cfg = RecordingBlockLowering()
+    branch.lower(cfg)
+    assert(cfg.next == 3)
+    assert(cfg.branches == [ValueId(1), ValueId(0)])
+    assert(cfg.destinations == [1, 0, 2, 0, 0])
+    assert(cfg.bodies == 1 and cfg.exit == 0)

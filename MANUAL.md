@@ -61,6 +61,15 @@ def main():
 
 test "Testing if value is set":
     assert(X == "value")
+test 
+"""
+Testing with a block name definition
+x->y->z
+""":
+    x = 1
+    y = x
+    z = y
+    assert(z == 1)
 
 '''
 Scoping the test's functionality with allows finer grain test scoping and pipelining in the package
@@ -94,7 +103,8 @@ the same validation rules.
 
 Tests use:
     assert(...)      hard requirement
-    expect(...)      record failure and continue
+    expect(...)      record failure and continue useful for checking many potential failures and summarizing at the end
+    when(...):        During a situation, the following conditions should be true
     throws(...)      expected Error
     mock(...)        test-scoped function behavior
 '''
