@@ -1457,6 +1457,12 @@ pub enum LoweringError {
 
 impl fmt::Display for LoweringError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Self::UnsupportedStringOperation(operator) = self {
+            return write!(
+                formatter,
+                "string operator `{operator}` reached lowering without a resolved implementation"
+            );
+        }
         write!(formatter, "{self:?}")
     }
 }
@@ -1715,4 +1721,3 @@ mod cfg_tests {
         assert_eq!(block.terminator, severian_lir::Terminator::Unreachable);
     }
 }
-

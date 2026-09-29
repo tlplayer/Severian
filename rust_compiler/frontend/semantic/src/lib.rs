@@ -9895,13 +9895,36 @@ impl Analyzer<'_> {
                     }
                 }
                 let operator = universal_binary(*operator);
-                // Both operands remain constraints until a single signature is
-                // selected; neither side gets an early default literal type.
-                let left = match arithmetic_left {
-                    // Keep contextual literal inference in prepare/finish.
+                let prepared_left = match arithmetic_left {
                     Some(value) if !matches!(left.kind, AstExpressionKind::Literal(_) | AstExpressionKind::Unary { .. }) => Prepared::Resolved(value),
                     _ => self.prepare(left)?,
                 };
+                let receiver = match &prepared_left {
+                    Prepared::Resolved(value) => Some(value.clone()),
+                    _ if matches!(left.kind, AstExpressionKind::Literal(AstLiteral::String(_))) => {
+                        Some(self.expression(left, None)?)
+                    }
+                    _ => None,
+                };
+                if let Some(receiver) = receiver {
+                    if let Some(value) = self.source_binary_operator(
+                        operator, receiver.clone(), right, expected, ast.span,
+                    )? {
+                        return Ok(value);
+                    }
+                    if self.types.primitive(receiver.type_id).is_some_and(|primitive| {
+                        primitive.representation == severian_universal::PrimitiveRepresentation::String
+                    }) {
+                        return Err(Diagnostic::new(
+                            "E000211",
+                            format!("string operator `{operator}` has no implementation for the operand type"),
+                            Some(ast.span),
+                        ).with_help("the string operator must be declared on the same type as string literals; a separate generic storage class does not complete the primitive string type"));
+                    }
+                }
+                // Both operands remain constraints until a single signature is
+                // selected; neither side gets an early default literal type.
+                let left = prepared_left;
                 let right = self.prepare(right)?;
                 let left_constraint = left.constraint();
                 let right_constraint = right.constraint();
@@ -9937,6 +9960,86 @@ impl Analyzer<'_> {
                 })
             }
         }
+    }
+
+    fn source_binary_operator(
+        &mut self,
+        operator: BinaryOperator,
+        receiver: Expression,
+        right: &AstExpression,
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Option<Expression>, Diagnostic> {
+        // Numeric primitives retain their intrinsic operations. String and
+        // ordinary source classes require a callable implementation.
+        if self.types.primitive(receiver.type_id).is_some_and(|primitive| {
+            primitive.representation != severian_universal::PrimitiveRepresentation::String
+        }) {
+            return Ok(None);
+        }
+        let Some(owner) = self.class_instances_by_type.get(&receiver.type_id).cloned() else {
+            return Ok(None);
+        };
+        let mut aliases = self.classes.get(&owner.name)
+            .map(|class| class.type_parameters.iter().cloned()
+                .zip(owner.arguments.iter().copied()).collect::<BTreeMap<_, _>>())
+            .unwrap_or_default();
+        aliases.insert("Self".into(), owner.ty);
+        let mut selected = None;
+        for implementation in &owner.operators {
+            if universal_binary_syntax(implementation.operator) != Some(operator)
+                || !implementation.type_parameters.is_empty()
+                || implementation.parameters.len() != 1
+            {
+                continue;
+            }
+            let result = self.resolve_instantiated_type(&implementation.result, &aliases)?;
+            if Some(result) == self.types.resolve_name("unit")
+                || expected.is_some_and(|expected| !self.types.assignable(result, expected))
+            {
+                continue;
+            }
+            let parameter = self.resolve_instantiated_type(
+                &implementation.parameters[0].annotation, &aliases,
+            )?;
+            let Some((value, _)) = self.resolve_parameter_argument(right, parameter) else {
+                continue;
+            };
+            if selected.replace((implementation, value)).is_some() {
+                return Err(Diagnostic::new(
+                    "E000212", format!("ambiguous operator `{operator}` on `{}`", owner.name),
+                    Some(span),
+                ));
+            }
+        }
+        let Some((implementation, value)) = selected else { return Ok(None); };
+        let method = severian_ast::FunctionDeclaration {
+            decorators: implementation.decorators.clone(),
+            compile_time: false,
+            name: format!("operator {operator}"),
+            type_parameters: Vec::new(),
+            constraints: implementation.constraints.clone(),
+            contracts: implementation.contracts.clone(),
+            hook: None,
+            parameters: implementation.parameters.clone(),
+            result: implementation.result.clone(),
+            body: Some(implementation.body.clone()),
+            span: implementation.span,
+        };
+        let name = format!("__resolved_operator_argument_{}", self.next_id().0);
+        let previous = self.value_substitutions.insert(name.clone(), value);
+        let argument = severian_ast::CallArgument {
+            name: None, spread: false,
+            value: AstExpression { kind: AstExpressionKind::Name(name.clone()), span: right.span },
+            expected_error: None, span: right.span,
+        };
+        let result = self.lower_method_callable(&owner, &method, receiver, &[argument], expected, span);
+        if let Some(previous) = previous {
+            self.value_substitutions.insert(name, previous);
+        } else {
+            self.value_substitutions.remove(&name);
+        }
+        result.map(Some)
     }
 
     fn binary_operator_error(
