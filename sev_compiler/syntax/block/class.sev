@@ -1,0 +1,38 @@
+import Y from "../generic/symbol.sev"
+import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import source
+import Symbol from "../symbol/symbol.sev"
+import TypeAnnotation from "../type/annotation.sev"
+
+class class: Y + B
+    span: source.Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B
+    body: B
+    name: Symbol | None = None
+    parameters: list[TypeAnnotation] = []
+    bases: list[TypeAnnotation] = []
+
+    sentence class["class", name: Symbol, ":"]() -> B:
+        self.name = name
+        return self
+
+    sentence generic_class["class", name: Symbol, "[", parameters...: TypeAnnotation, "]", ":"]() -> B with len(parameters) > 0:
+        self.name = name
+        self.parameters = parameters
+        return self
+
+    sentence inherited_class["class", name: Symbol, ":", bases...: TypeAnnotation]() -> B with len(bases) > 0:
+        self.name = name
+        self.bases = bases
+        return self
+
+    sentence generic_inherited_class["class", name: Symbol, "[", parameters...: TypeAnnotation, "]", ":", bases...: TypeAnnotation]() -> B with {
+        len(parameters) > 0,
+        len(bases) > 0,
+    }:
+        self.name = name
+        self.parameters = parameters
+        self.bases = bases
+        return self

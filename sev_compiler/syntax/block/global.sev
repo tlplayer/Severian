@@ -1,0 +1,13 @@
+import Y from "../generic/symbol.sev"
+import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import source
+
+# The source window itself introduces global scope; there is no global keyword.
+class global: Y + B
+    span: source.Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B | None = None
+
+    sentence global[]() -> B with self.parent == None:
+        return self

@@ -1,0 +1,30 @@
+import Y from "../generic/symbol.sev"
+import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import source
+import try from "try.sev"
+import Symbol from "../symbol/symbol.sev"
+import TypeAnnotation from "../type/annotation.sev"
+
+class catch: Y + B
+    span: source.Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B
+    previous: try | catch
+    body: B
+    binding: Symbol | None = None
+    expected: TypeAnnotation | None = None
+
+    sentence catch["catch", binding: Symbol, ":", expected: TypeAnnotation, ":"]() -> B with self.previous.parent == self.parent:
+        self.binding = binding
+        self.expected = expected
+        return self
+
+    sentence type_first_catch["catch", expected: TypeAnnotation, binding: Symbol, ":"]() -> B with self.previous.parent == self.parent:
+        self.binding = binding
+        self.expected = expected
+        return self
+
+    sentence untyped_catch["catch", binding: Symbol, ":"]() -> B with self.previous.parent == self.parent:
+        self.binding = binding
+        return self

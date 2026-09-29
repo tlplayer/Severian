@@ -1,0 +1,49 @@
+import Y from "../generic/symbol.sev"
+import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import source
+import global from "global.sev"
+import Symbol from "../symbol/symbol.sev"
+import FunctionParameter from "../function/function.sev"
+import TypeAnnotation from "../type/annotation.sev"
+
+class function: Y + B
+    span: source.Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B
+    body: B
+    name: Symbol | None = None
+    parameters: list[FunctionParameter] = []
+    type_parameters: list[TypeAnnotation] = []
+    result: TypeAnnotation | None = None
+
+    # A method named main remains an ordinary function in its owning scope.
+    sentence function["def", name: Symbol, "(", parameters...: FunctionParameter, ")", ":"]() -> B with name.name.value != "main" or not (self.parent is global):
+        self.name = name
+        self.parameters = parameters
+        return self
+
+    sentence typed_function["def", name: Symbol, "(", parameters...: FunctionParameter, ")", "->", result: TypeAnnotation, ":"]() -> B with name.name.value != "main" or not (self.parent is global):
+        self.name = name
+        self.parameters = parameters
+        self.result = result
+        return self
+
+    sentence generic_function["def", name: Symbol, "[", types...: TypeAnnotation, "]", "(", parameters...: FunctionParameter, ")", ":"]() -> B with {
+        name.name.value != "main" or not (self.parent is global),
+        len(types) > 0,
+    }:
+        self.name = name
+        self.type_parameters = types
+        self.parameters = parameters
+        return self
+
+    sentence generic_typed_function["def", name: Symbol, "[", types...: TypeAnnotation, "]", "(", parameters...: FunctionParameter, ")", "->", result: TypeAnnotation, ":"]() -> B with {
+        name.name.value != "main" or not (self.parent is global),
+        len(types) > 0,
+    }:
+        self.name = name
+        self.type_parameters = types
+        self.parameters = parameters
+        self.result = result
+        return self

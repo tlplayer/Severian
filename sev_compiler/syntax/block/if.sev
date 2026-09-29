@@ -8,6 +8,7 @@ class if: Y + B
     span: source.Span | None = None
     sentences: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
+    parent: B
     body: B
 
     sentence if["if", conditions...: bool, ":"]():

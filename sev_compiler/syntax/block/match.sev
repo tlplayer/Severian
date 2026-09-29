@@ -1,0 +1,16 @@
+import Y from "../generic/symbol.sev"
+import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import source
+import Expression from "../function/function.sev"
+
+class match: Y + B
+    span: source.Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B
+    body: B
+    subject: Expression | None = None
+
+    sentence match["match", subject: Expression, ":"]() -> B:
+        self.subject = subject
+        return self

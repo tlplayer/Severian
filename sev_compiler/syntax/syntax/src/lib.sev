@@ -13,6 +13,18 @@ import LiteralBinding, LiteralConstruction, LiteralSyntax, Primitive, PrimitiveA
 import AttachmentRole, B, Binding, Block, BlockFile, BlockKind, BlockLayout, BlockSentence, BlockSyntax, BlockTerm, BlockTermRole, CallableOrigin, Callee, Capture, CfgBody, CfgEdge, CfgExit, CfgStatement, CfgTerminator, Constraint, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, Conversions, DispatchCandidate, DispatchFamily, Effects, Evaluation, Grammar, InferenceContext, LazyOperand, LocalDecl, MatchArm, Operand, OperationOrigin, Place, Projection, ProofResult, Rvalue, SemanticObject, Sentence, SentenceDefinition, SentenceField, SentenceId, SentenceMatch, Signature, SourceBlockId, SourceFile, SourceId, SourceMap, Span, Statement, SwitchCase, Term, TermRole, TraitRef, TyInterner, TypeKind, UnifyError, WithAttachment, accepts_shape, array_mlir, byte_view_mlir, cfg_blocks, control_flow, empty_cfg, index_mlir, insert_type, iteration_sentences, load, local_place, match_sentence, memref_mlir, ranked_memref_storage, resolve_sentence, same_constructor, same_parameters, scalar_mlir, source_id, span, standard_block_syntax, struct_mlir, tensor_mlir, type_children, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source from "../../block/block.sev"
 import "../../sentence/sentence.sev" as sentence
 import "../../block/if.sev" as _block_if
+import "../../block/global.sev" as _block_global
+import "../../block/main.sev" as _block_main
+import "../../block/function.sev" as _block_function
+import "../../block/elif.sev" as _block_elif
+import "../../block/else.sev" as _block_else
+import "../../block/try.sev" as _block_try
+import "../../block/catch.sev" as _block_catch
+import "../../block/match.sev" as _block_match
+import "../../block/case.sev" as _block_case
+import "../../block/class.sev" as _block_class
+import "../../block/trait.sev" as _block_trait
+import "../../block/enum.sev" as _block_enum
 import TokenKind, TokenTerm from "../../generic/token.sev"
 
 import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider from "../../type/mlir.sev"

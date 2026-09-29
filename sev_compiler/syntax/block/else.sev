@@ -1,0 +1,16 @@
+import Y from "../generic/symbol.sev"
+import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import source
+import if from "if.sev"
+import elif from "elif.sev"
+
+class else: Y + B
+    span: source.Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B
+    previous: if | elif
+    body: B
+
+    sentence else["else", ":"]() -> B with self.previous.parent == self.parent:
+        return self

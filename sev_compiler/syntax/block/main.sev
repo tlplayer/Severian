@@ -1,0 +1,24 @@
+import Y from "../generic/symbol.sev"
+import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import source
+import global from "global.sev"
+import FunctionParameter from "../function/function.sev"
+import TypeAnnotation from "../type/annotation.sev"
+
+class main: Y + B
+    span: source.Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: global
+    body: B
+    parameters: list[FunctionParameter] = []
+    result: TypeAnnotation | None = None
+
+    sentence main["def", "main", "(", parameters...: FunctionParameter, ")", ":"]() -> B:
+        self.parameters = parameters
+        return self
+
+    sentence typed_main["def", "main", "(", parameters...: FunctionParameter, ")", "->", result: TypeAnnotation, ":"]() -> B:
+        self.parameters = parameters
+        self.result = result
+        return self

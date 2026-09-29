@@ -1,0 +1,23 @@
+import Y from "../generic/symbol.sev"
+import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import source
+import Symbol from "../symbol/symbol.sev"
+import TypeAnnotation from "../type/annotation.sev"
+
+class enum: Y + B
+    span: source.Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B
+    body: B
+    name: Symbol | None = None
+    parameters: list[TypeAnnotation] = []
+
+    sentence enum["enum", name: Symbol, ":"]() -> B:
+        self.name = name
+        return self
+
+    sentence generic_enum["enum", name: Symbol, "[", parameters...: TypeAnnotation, "]", ":"]() -> B with len(parameters) > 0:
+        self.name = name
+        self.parameters = parameters
+        return self

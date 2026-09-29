@@ -1,0 +1,21 @@
+import Y from "../generic/symbol.sev"
+import B, BlockSentence, SourceBlockId from "../generic/block.sev"
+import source
+import if from "if.sev"
+
+# The previous branch is a sibling, never this block's enclosing scope.
+class elif: Y + B
+    span: source.Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B
+    previous: if | elif
+    body: B
+    conditions: list[bool] = []
+
+    sentence elif["elif", conditions...: bool, ":"]() -> B with {
+        self.previous.parent == self.parent,
+        len(conditions) > 0,
+    }:
+        self.conditions = conditions
+        return self
