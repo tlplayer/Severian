@@ -10021,7 +10021,18 @@ impl Analyzer<'_> {
             constraints: implementation.constraints.clone(),
             contracts: implementation.contracts.clone(),
             hook: None,
-            parameters: implementation.parameters.clone(),
+            parameters: implementation
+                .parameters
+                .iter()
+                .map(|parameter| severian_ast::FunctionParameter {
+                    name: parameter.name.clone(),
+                    annotation: parameter.annotation.clone(),
+                    immutable_reference: false,
+                    variadic: false,
+                    default: None,
+                    span: parameter.span,
+                })
+                .collect(),
             result: implementation.result.clone(),
             body: Some(implementation.body.clone()),
             span: implementation.span,
