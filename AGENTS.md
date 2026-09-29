@@ -18,6 +18,8 @@ sev build
 sev test
 ```
 
+read the manual and sips and examples in the docs/ directory when confused. those are the SOT not the compiler's current state.
+
 
 Type
     What a value is.
@@ -108,11 +110,10 @@ Effect
 | `F` | Callable | Expression | Operation | |
 | `W` | With-clause operations (including constraints) |
 | `C` | Container |
-| `Y` | Symbol |
+| `Y` | Symbol  wraps To and Lx together Token — classified parser input; includes identifiers, indentation and end-of-file, not just literals or symbols.  Lexeme — exact matched source text and span, before interpretation. It is not a literal value.|
 | `X` | Any compiler term |
 | `G` | Grammar |
-| `To` | Token — classified parser input; includes identifiers, indentation and end-of-file, not just literals or symbols. |
-| `Lx` | Lexeme — exact matched source text and span, before interpretation. It is not a literal value. |
+
 
 This is the canonical compiler-term vocabulary. Symbols describe semantic roles;
 they do not reserve generic parameter names or erase concrete type contracts.

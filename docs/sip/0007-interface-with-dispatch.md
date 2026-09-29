@@ -48,7 +48,7 @@ Dispatching to methods of implementers requires custom typing ontop of simple pr
 
 - Overlap of implementers, traditional type dispatch avoids this with rigid non type overlap we do this by erroring on conditions which pass for both dispatchers
 - Routing is type top level then value level
-- 
+- It progresses by complexity of checks, if 
 
 ## Examples
 Examples
@@ -97,11 +97,12 @@ No value predicates are evaluated until type dispatch has reduced the candidate 
 
 Value dispatch
 
-with allows implementations sharing the same type signature to partition the value space.
+`with` allows implementations sharing the same type signature to partition the value space.
 
 trait Add:
 
     operator +(left: T, right: T) -> T
+
 class SmallAdd: Add:
 
     operator +(left: int, right: int) -> int with {
