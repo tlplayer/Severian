@@ -3,8 +3,40 @@
 #include <unistd.h>
 #include <limits.h>
 #include <stddef.h>
+#include <stdio.h>
 static _Thread_local int stream_error;
 int32_t __sev_io_error(void) { return stream_error; }
+
+/* Counted output preserves embedded NUL bytes and shares stdio buffering
+ * with native scalar print overloads. Return status, not a byte count. */
+int32_t __sev_io_stdout_write(const void *buffer, int64_t count) {
+    stream_error = 0;
+    if (count < 0 || (uint64_t)count > SIZE_MAX || (count != 0 && buffer == NULL)) {
+        stream_error = EINVAL;
+        return -1;
+    }
+    const unsigned char *cursor = buffer;
+    size_t remaining = (size_t)count;
+    while (remaining != 0) {
+        errno = 0;
+        size_t written = fwrite(cursor, 1, remaining, stdout);
+        if (written == 0 || ferror(stdout)) {
+            stream_error = errno != 0 ? errno : EIO;
+            return -1;
+        }
+        cursor += written;
+        remaining -= written;
+    }
+    return 0;
+}
+
+int32_t __sev_io_stdout_flush(void) {
+    stream_error = 0;
+    errno = 0;
+    if (fflush(stdout) == 0) return 0;
+    stream_error = errno != 0 ? errno : EIO;
+    return -1;
+}
 int64_t __sev_io_read(int64_t descriptor, void *buffer, int64_t count) {
     stream_error = 0;
     if (descriptor < 0 || descriptor > INT_MAX || count < 0) {

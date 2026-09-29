@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 extern const char *__sev_string_from_i128(__int128 value);
 extern const char *__sev_string_from_u128(unsigned __int128 value);
@@ -24,6 +25,23 @@ void __sev_expect(_Bool condition, const char *message) {
 
 int32_t __sev_print_string(const char *value) {
     return puts(value);
+}
+
+/* The bootstrap string ABI is NUL-terminated. Keep its adapter here, while
+ * the source IO provider passes counted UTF-8 buffers directly. */
+int32_t __sev_print_string_end(const char *value, const char *ending) {
+    const char *parts[] = {value, ending};
+    for (size_t part = 0; part < 2; ++part) {
+        size_t remaining = strlen(parts[part]);
+        const char *cursor = parts[part];
+        while (remaining != 0) {
+            size_t written = fwrite(cursor, 1, remaining, stdout);
+            if (written == 0 || ferror(stdout)) return -1;
+            cursor += written;
+            remaining -= written;
+        }
+    }
+    return 0;
 }
 
 int32_t __sev_print_int(int64_t value) {

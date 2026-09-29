@@ -3,7 +3,7 @@ import * from list as lists
 
 # Bucket slots index dense initialized entries. -1 is empty, -2 a tombstone.
 # Dense order is insertion order, including after deletion and rehashing.
-class Hash[K:traits.HashKey, V]:
+class Hash[K:traits.HashKey, V]: traits.Container
     __keys: lists.list[K]
     __values: lists.list[V]
     __hashes: lists.list[usize]
@@ -18,8 +18,14 @@ class Hash[K:traits.HashKey, V]:
         __tombstones = 0
         reserve(capacity)
 
-    def len() -> usize:
-        return usize(len(__keys))
+    def bytes(self: view Self) -> byte:
+        return __keys.bytes() + __values.bytes() + __hashes.bytes() + __buckets.bytes()
+
+    def alignment(self: view Self) -> byte:
+        return alignment[Self]()
+
+    def len(self: view Self) -> int:
+        return int(len(__keys))
 
     def empty() -> bool:
         return len(__keys) == 0

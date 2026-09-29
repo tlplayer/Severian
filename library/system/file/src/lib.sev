@@ -26,10 +26,10 @@ def raw(path: string) -> string | Error:
 def open(path: string) -> int:
     return int(streams.open_read(path))
 
-def read(handle: int, count: data_size) -> list[u8] | Error:
+def read(handle: int, count: byte) -> list[u8] | Error:
     return io.read(handle, count)
 
-def read_bytes(handle: int, count: data_size) -> list[u8] | Error:
+def read_bytes(handle: int, count: byte) -> list[u8] | Error:
     return io.read(handle, count)
 
 def map(path: string) -> list[u8] | Error:

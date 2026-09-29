@@ -12,7 +12,7 @@ class Location:
     index: int
     found: bool
 
-class BTree[K:traits.Ordered, V]:
+class BTree[K:traits.Ordered, V]: traits.Container
     __nodes: lists.list[TreeNode]
     __slots: lists.list[int]
     __children: lists.list[int]
@@ -35,8 +35,14 @@ class BTree[K:traits.Ordered, V]:
         __width = minimum_degree * 2 - 1
         __root = 0
 
-    def len() -> usize:
-        return usize(len(__keys))
+    def bytes(self: view Self) -> byte:
+        return __nodes.bytes() + __slots.bytes() + __children.bytes() + __free.bytes() + __keys.bytes() + __values.bytes()
+
+    def alignment(self: view Self) -> byte:
+        return alignment[Self]()
+
+    def len(self: view Self) -> int:
+        return int(len(__keys))
 
     def empty() -> bool:
         return len(__keys) == 0

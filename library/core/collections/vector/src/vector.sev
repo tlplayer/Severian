@@ -9,7 +9,7 @@ class vector[T, N = 256]: Container
     used: int
 
     def vector():
-        width = int(bytes(T).amount / 8.0)
+        width = bytes(T).amount
         assert(N >= 0 and width > 0)
         assert(N <= 9223372036854775807 / width)
         data = arrays.allocate[T](N)
@@ -24,7 +24,10 @@ class vector[T, N = 256]: Container
         return used
 
     def size(self: view Self) -> int:
-        return used
+        return len(self)
+
+    def alignment(self: view Self) -> byte:
+        return alignment[T]()
 
     def bytes(self: view Self) -> byte:
         return bytes(data)
@@ -95,7 +98,7 @@ def __vector_grow[T](data: view array[T], used: int, required: int, initial: int
 
 
 def __vector_resize[T](data: view array[T], used: int, capacity: int) -> array[T]:
-    width = int(bytes(T).amount / 8.0)
+    width = bytes(T).amount
     assert(width > 0)
     assert(capacity <= 9223372036854775807 / width)
     replacement: array[T] = arrays.allocate[T](capacity)

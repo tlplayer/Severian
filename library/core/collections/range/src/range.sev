@@ -1,7 +1,25 @@
-class Range:
+import Container from "../../traits/src/container.sev"
+
+class Range: Container
     start: int
     stop: int
     step: int
+
+    def len(self: view Self) -> int:
+        assert(step != 0)
+        distance = i128(stop) - i128(start) if step > 0 else i128(start) - i128(stop)
+        if distance <= 0:
+            return 0
+        stride = i128(step) if step > 0 else -i128(step)
+        count = (distance - 1) // stride + 1
+        assert(count <= 9223372036854775807)
+        return int(count)
+
+    def bytes(self: view Self) -> byte:
+        return bytes[Self]()
+
+    def alignment(self: view Self) -> byte:
+        return alignment[Self]()
 
 def range(stop: int) -> Range:
     return Range(0, stop, 1)

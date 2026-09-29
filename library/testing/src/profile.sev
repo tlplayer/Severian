@@ -28,7 +28,7 @@ def report(context: Measurement):
     elapsed = time(context)
     calls = allocations(context)
     allocated = memory(context)
-    print("profile:", elapsed.amount, "ns;", calls, "allocations;", allocated.amount / 8.0, "allocated bytes")
+    print("profile:", elapsed.amount, "ns;", calls, "allocations;", allocated.amount, "allocated bytes")
 
 def measured_finish(context: Measurement):
     throw Error("Unimplemented (library/testing/src/profile.sev)")

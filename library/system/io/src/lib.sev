@@ -1,7 +1,6 @@
 # Bootstrap implementation of the system IO boundary. The selected IO provider
 # owns this native declaration; core and the compiler only see `io.print` as an
 # ordinary function identity.
-import write_text from "buffer.sev"
 from prelude import print as __prelude_print, panic as __prelude_panic
 class IOError: Error
     message: string
@@ -35,8 +34,8 @@ def error() -> i32
 @c(symbol = "close")
 def close(handle: i32) -> i32
 
-def read(reader: int, count: data_size = 1KiB) -> list[u8] | Error:
-    requested = xxi.count(float(count), 67108864)
+def read(reader: int, count: byte = 1KB) -> list[u8] | Error:
+    requested = xxi.count(count.amount, 67108864)
     data: list[u8] = []
     for index in range(requested):
         data.append(0)
@@ -58,7 +57,7 @@ def read_all(reader: int, max_bytes: int = 67108864, max_calls: int = 65536) -> 
             result.append(byte)
     return result
 
-def write_all(writer: int, data: list[u8], max_calls: int = 65536) -> data_size | Error:
+def write_all(writer: int, data: list[u8], max_calls: int = 65536) -> byte | Error:
     offset := 0
     context := xxi.budget(max_calls, int(len(data)))
     while offset < len(data):
@@ -68,7 +67,7 @@ def write_all(writer: int, data: list[u8], max_calls: int = 65536) -> data_size 
         written = xxi.transfer(count, int(len(data)) - offset, true)
         context = xxi.account(context, written)
         offset += written
-    return data_size(offset)
+    return byte(offset)
 
 
 @c(symbol = "__sev_print_string")
@@ -128,36 +127,22 @@ def print(value: bool) -> i32
 @c(symbol = "__sev_print_char")
 def print(value: char) -> i32
 
-@mlir("func.call", callee="__sev_text_size")
-def __print_size(value: string) -> int
+# Bulk output adapter for the bootstrap's native string representation.
+@c(symbol = "__sev_print_string_end")
+def print(value: string, end: string) -> i32
 
-@mlir("func.call", callee="__sev_text_load")
-def __print_byte(value: string, position: int) -> u8
-
-@c(symbol = "putchar")
-def __putchar(value: i32) -> i32
-
-# The seed IO provider also supports forwarding captured output verbatim.
-# Write bytes so a custom ending preserves UTF-8 and adds no implicit newline.
-def print(value: string, end: string) -> i32:
-    for part in [value, end]:
-        position := 0
-        while position < __print_size(part):
-            result = __putchar(i32(__print_byte(part, position)))
-            if result < 0:
-                return result
-            position += 1
-    return 0
-
-def print(values: Any...) -> i32:
+def print(values...: Any) -> i32:
     first := true
-    rendered := ""
     for value in values:
         if not first:
-            rendered += " "
-        rendered += string(value)
+            result = print(" ", "")
+            if result < 0:
+                return result
+        result = print(string(value), "")
+        if result < 0:
+            return result
         first = false
-    return print(rendered)
+    return print("")
 
 # Panic is a hosted diagnostic boundary. Unlike `throw`, it terminates the
 # process immediately and does not participate in structured error unwinding.

@@ -24,4 +24,4 @@ def allocations(context: Measurement) -> int:
     return int(storage.allocation_count() - context.allocation_start)
 
 def memory(context: Measurement) -> byte:
-    return byte(float(storage.allocated_bytes() - context.bytes_start) * 8.0)
+    return storage.allocated_bytes() - context.bytes_start

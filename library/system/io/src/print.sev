@@ -1,0 +1,72 @@
+import "buffer.sev" as buffer
+
+@mlir("cf.assert", msg="output failed")
+def __output_check(condition: bool)
+
+# String owns Unicode conversion; IO receives only initialized UTF-8 bytes.
+# stdio buffers small pieces and writes large pieces without per-byte calls.
+def __write(value: string):
+    encoded = value.encode[u8]()
+    __output_check(buffer.write_stdout(encoded, 0, int(len(encoded))) == 0)
+
+
+def print(value: string):
+    __write(value)
+    __write("\n")
+
+
+def __separator(value: string) -> view string:
+    return value
+
+
+def __separator(value: None) -> string:
+    return " "
+
+
+def __ending(value: string) -> view string:
+    return value
+
+
+def __ending(value: None) -> string:
+    return "\n"
+
+
+# Packs specialize to concrete values. Default string conversion provides the
+# representation; separators and endings never require a combined string.
+def print(objects...: V, sep: V = None, end: V = None, file: None = None, flush: bool = false):
+    separator = __separator(sep)
+    ending = __ending(end)
+    first := true
+    for object in objects:
+        if not first:
+            __write(separator)
+        __write(string(object))
+        first = false
+    __write(ending)
+    if flush:
+        __output_check(buffer.flush_stdout() == 0)
+
+
+test "print handles empty calls, mixed values, and keyword options":
+    print()
+    print("count", 42, true, 'λ', 0.5, None)
+    print("a", "b", sep="|", end="!")
+    print("next", sep=None, end=None, file=None, flush=true)
+    print(end="only end\n")
+    print(f"values: {42}:{0.5}:{false}:{'a'}")
+
+
+test "print writes Unicode and escaped bytes":
+    print("aλ😀z")
+    print("")
+    print("quote: \" slash: \\ tab:\tend")
+
+
+test "print formats scalar boundaries":
+    print(-9223372036854775808, 9223372036854775807)
+    byte: u8 = 255
+    small: i8 = -128
+    print(byte, small, '😀', '中')
+    print(3.1415926, 1.2345678901234567, 5e-324, 1.7976931348623157e308, -0.0)
+    nan: f64 = 0.0 / 0.0
+    print(nan, 1.0 / 0.0, -1.0 / 0.0)

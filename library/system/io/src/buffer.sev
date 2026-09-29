@@ -1,6 +1,5 @@
 # Typed byte-buffer IO. Allocation remains with the caller's core.storage owner.
 import "../../../interop/xxi/src/buffer.sev" as xxi
-import "../../../core/memory/src/raw_intrinsics.sev" as raw
 
 @c(symbol="__sev_io_read")
 def __read(handle: int, destination: pointer, count: int) -> int
@@ -16,3 +15,13 @@ def read(handle: int, data: borrow array[u8], offset: int, count: int) -> int:
 
 def write(handle: int, data: view array[u8], offset: int, count: int) -> int:
     return xxi.transferred(__write(handle, xxi.address(data, len(data), offset, count), count), count)
+
+@c(symbol="__sev_io_stdout_write")
+def __write_stdout(data: pointer, count: int) -> i32
+
+@c(symbol="__sev_io_stdout_flush")
+def flush_stdout() -> i32
+
+# Keep the typed loan alive across the entire foreign call.
+def write_stdout(data: view array[u8], offset: int, count: int) -> i32:
+    return __write_stdout(xxi.address(data, len(data), offset, count), count)

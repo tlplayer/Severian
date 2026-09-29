@@ -1,3 +1,4 @@
+import Container from "../../traits/src/container.sev"
 
 # This should use sentences because tuples are (...)
 trait TupleSyntax: G
@@ -10,8 +11,17 @@ trait TupleSyntax: G
 
 
 
-class tuple[...T]:
+class tuple[...T]: Container
     items: ...T
+
+    def len(self: view Self) -> int:
+        return int(len(items))
+
+    def bytes(self: view Self) -> byte:
+        return bytes[Self]()
+
+    def alignment(self: view Self) -> byte:
+        return alignment[Self]()
 
     operator string() -> string:
         result := "("

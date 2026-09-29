@@ -1,17 +1,24 @@
+import Container from "../../traits/src/container.sev"
 import btree
 import traits
 import * from list as lists
 
-class map[K, V, C:traits.MappingStorage[K,V]=btree.BTree]:
+class map[K, V, C:traits.MappingStorage[K,V]=btree.BTree]: Container
     storage: C[K,V]
 
-    def map(*entries: tuple[K,V]):
+    def map(entries...: tuple[K,V]):
         storage = C[K,V]()
         for entry in entries:
             storage.set(entry[0], entry[1])
 
-    def len() -> usize:
-        return storage.len()
+    def bytes(self: view Self) -> byte:
+        return storage.bytes()
+
+    def alignment(self: view Self) -> byte:
+        return storage.alignment()
+
+    def len(self: view Self) -> int:
+        return int(storage.len())
 
     def empty() -> bool:
         return storage.empty()

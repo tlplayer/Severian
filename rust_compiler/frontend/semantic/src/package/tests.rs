@@ -1492,7 +1492,7 @@ fn implicit_variadic_generics_specialize_from_test_calls() {
     let source = root.join("variadic.sev");
     std::fs::write(
         &source,
-        "def print_values(values: T...):\n    for value in values:\n        print(value)\n\ntest with integ:\n    print_values(\"answer\", 42, true)\n",
+        "def print_values(values...: T):\n    for value in values:\n        print(value)\n\ntest with integ:\n    print_values(\"answer\", 42, true)\n",
     )
     .unwrap();
     let universal = severian_bootstrap::load().unwrap();

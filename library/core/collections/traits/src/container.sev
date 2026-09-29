@@ -1,7 +1,10 @@
-# Storage quantities are separate from the number of elements in a container.
-trait ByteSized:
-    def bytes(self: view Self) -> byte
-
-trait Container: ByteSized
+# All collections share element counts, storage consumption, and alignment.
+# Capacity is separate from len/size and may exceed the initialized count.
+trait Container:
     def len(self: view Self) -> int
-    def size(self: view Self) -> int
+
+    def size(self: view Self) -> int:
+        return len(self)
+
+    def bytes(self: view Self) -> byte
+    def alignment(self: view Self) -> byte

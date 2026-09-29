@@ -1,14 +1,21 @@
+import Container from "../../traits/src/container.sev"
 import storage
 
 
-class stack[T]:
+class stack[T]: Container
     storage: storage.ContiguousStorage[T]
 
     def stack(capacity: usize = 0):
         this.storage := storage.create[T](capacity)
 
-    def len() -> usize:
-        return storage.len()
+    def bytes(self: view Self) -> byte:
+        return storage.bytes()
+
+    def alignment(self: view Self) -> byte:
+        return storage.alignment()
+
+    def len(self: view Self) -> int:
+        return int(storage.len())
 
     def empty() -> bool:
         return storage.empty()

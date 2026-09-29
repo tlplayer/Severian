@@ -447,12 +447,12 @@ def parser_function_declaration(parser: Parser, decorators: list[model_syntax_fu
     keyword_only := false
     parser_delimited_layout(parser)
     while not parser_at_symbol(parser, ")"):
-        variadic = parser_take_symbol(parser, "*") != None
+        parameter = parser_identifier(parser, "expected a parameter name")
+        variadic = parser_take_symbol(parser, "...") != None
         if variadic:
             if keyword_only:
                 return error(parser_fail(parser, "only one variadic parameter is supported"))
             keyword_only = true
-        parameter = parser_identifier(parser, "expected a parameter name")
         # Bare self uses the same inferred receiver as an omitted receiver.
         # Semantic analysis supplies its type and ownership contract.
         if parameter[0] == "self" and not variadic and not parser_at_symbol(parser, ":"):
@@ -470,6 +470,8 @@ def parser_function_declaration(parser: Parser, decorators: list[model_syntax_fu
         default: model_syntax_function_function.Expression | absent := absent
         parameter_end := annotation.span.end
         if parser_take_symbol(parser, "=") != absent:
+            if variadic:
+                return error(parser_fail(parser, "a variadic parameter cannot have a default value"))
             parsed_default = parser_expression(parser, 0)
             default = parsed_default
             parameter_end = parsed_default.span.end

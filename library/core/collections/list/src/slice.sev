@@ -1,6 +1,7 @@
+import Container from "../../traits/src/container.sev"
 import * from "list.sev"
 
-class slice[T]:
+class slice[T]: Container
     owner: borrow list[T]
     offset: usize
     length: usize
@@ -12,8 +13,15 @@ class slice[T]:
         offset = start
         length = count
 
-    def len() -> usize:
-        return length
+    def len(self: view Self) -> int:
+        return int(length)
+
+    # A view consumes its descriptor; the borrowed allocation belongs to owner.
+    def bytes(self: view Self) -> byte:
+        return bytes[Self]()
+
+    def alignment(self: view Self) -> byte:
+        return alignment[Self]()
 
     def get(index: usize) -> borrow T:
         assert(index < length)

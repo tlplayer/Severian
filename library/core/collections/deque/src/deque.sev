@@ -1,14 +1,21 @@
+import Container from "../../traits/src/container.sev"
 import storage
 
 
-class deque[T]:
+class deque[T]: Container
     storage: storage.RingStorage[T]
 
     def deque(capacity: usize = 0):
         this.storage := storage.RingStorage[T](capacity)
 
-    def len() -> usize:
-        return storage.len()
+    def bytes(self: view Self) -> byte:
+        return storage.bytes()
+
+    def alignment(self: view Self) -> byte:
+        return storage.alignment()
+
+    def len(self: view Self) -> int:
+        return int(storage.len())
 
     def empty() -> bool:
         return storage.empty()

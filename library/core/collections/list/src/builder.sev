@@ -1,7 +1,8 @@
+import Container from "../../traits/src/container.sev"
 import * from "list.sev"
 
 
-class ListBuilder[T]:
+class ListBuilder[T]: Container
     values: list[T]
 
     def ListBuilder(capacity: usize):
@@ -10,8 +11,14 @@ class ListBuilder[T]:
     def push(item: T):
         values.append(item)
 
-    def len() -> usize:
-        return values.len()
+    def bytes(self: view Self) -> byte:
+        return values.bytes()
+
+    def alignment(self: view Self) -> byte:
+        return values.alignment()
+
+    def len(self: view Self) -> int:
+        return int(values.len())
 
     def finish() -> list[T]:
         return move values

@@ -1,3 +1,4 @@
+import Container from "../../traits/src/container.sev"
 import storage
 import Sequence from traits
 import * from "iterator.sev"
@@ -12,11 +13,14 @@ class list[T]: Sequence[T]
     def list(initial_capacity: usize):
         this.storage := storage.create[T](initial_capacity)
 
-    def len() -> usize:
-        return storage.len()
+    def alignment(self: view Self) -> byte:
+        return storage.alignment()
 
-    def size() -> usize:
-        return storage.len()
+    def len(self: view Self) -> int:
+        return int(storage.len())
+
+    def size(self: view Self) -> int:
+        return len(self)
 
     def capacity() -> usize:
         return storage.capacity()
@@ -98,8 +102,8 @@ class list[T]: Sequence[T]
     def cap() -> usize:
         return capacity()
 
-    def bytes() -> byte:
-        return byte(float(capacity()) * bytes(T).amount)
+    def bytes(self: view Self) -> byte:
+        return storage.bytes()
 
     operator [](index: usize) -> borrow T:
         return get(index)

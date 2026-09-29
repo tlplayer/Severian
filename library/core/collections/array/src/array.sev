@@ -1,3 +1,4 @@
+import Container from "../../traits/src/container.sev"
 import Error from "../../../../../sev_compiler/syntax/primitive/primitive.sev"
 '''
 # `array[T, N]`
@@ -78,16 +79,7 @@ An array owns its allocation.
 '''
 
 
-trait FixedContainer[T, N]:
-    property length: usize
-
-    def len(self) -> usize
-    def size(self) -> data_size
-    def alignment(self) -> data_size
-
-
-trait Array[T, N]:
-    FixedContainer[T, N]
+trait Array[T, N]: Container
     Truth
     Copy
 
@@ -174,17 +166,17 @@ class array[T: Copy + Default, N: usize]: Array[T, N]:
     '''
     ## Length and layout
     '''
-    def len(self) -> usize:
-        return N
+    def len(self: view Self) -> int:
+        return int(N)
 
 
-    def size(self) -> data_size:
-        return N * bytes[T]()
+    def size(self: view Self) -> int:
+        return len(self)
 
-    def bytes(self) -> data_size:
-        return self.size()
+    def bytes(self: view Self) -> byte:
+        return byte(int(N) * bytes[T]().amount)
 
-    def alignment(self) -> data_size:
+    def alignment(self: view Self) -> byte:
         return alignment[T]()
 
 

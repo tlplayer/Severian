@@ -316,7 +316,7 @@ def __field_text(value: f32) -> string:
     return __field_text(f64(value))
 
 # Field tuples are specialized at compilation, preserving their concrete types.
-def object_text(*fields: V) -> string:
+def object_text(fields...: V) -> string:
     result = string()
     result.append('{')
     first := true

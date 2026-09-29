@@ -1,14 +1,21 @@
+import Container from "../../traits/src/container.sev"
 import deque
 
 
-class queue[T]:
+class queue[T]: Container
     values: deque.deque[T]
 
     def queue(capacity: usize = 0):
         this.values := deque.deque[T](capacity)
 
-    def len() -> usize:
-        return values.len()
+    def bytes(self: view Self) -> byte:
+        return values.bytes()
+
+    def alignment(self: view Self) -> byte:
+        return values.alignment()
+
+    def len(self: view Self) -> int:
+        return int(values.len())
 
     def empty() -> bool:
         return values.empty()

@@ -13,7 +13,8 @@
       ],
       "sources": [
         "src/lib.sev",
-        "src/buffer.sev"
+        "src/buffer.sev",
+        "src/print.sev"
       ]
     },
     "metadata": {

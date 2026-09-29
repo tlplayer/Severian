@@ -64,11 +64,9 @@ def __raw_write_bytes(descriptor: i32, data: view array[u8], offset: int, count:
         return __raw_write(descriptor, __raw_offset(address, offset), count)
 
 def __raw_byte_offset(size: byte) -> int:
-    # Quantities store bits; raw memory is byte-addressed. Keep this exact even
-    # beyond the integer precision of f64 and reject partial-byte quantities.
+    # byte.amount is an integer number of bytes, already in address units.
     assert(size.amount >= 0)
-    assert(size.amount % 8 == 0)
-    return size.amount / 8
+    return size.amount
 
 
 # A byte quantity requests physical storage; typed allocation still takes an
@@ -81,9 +79,9 @@ def allocate(size: byte) -> pointer[u8]:
 test "byte quantities convert to physical offsets without element scaling":
     assert(__raw_byte_offset(byte(0)) == 0)
     assert(__raw_byte_offset(0B) == 0)
-    assert(__raw_byte_offset(byte(8192)) == 1024)
-    assert(__raw_byte_offset(byte(32)) == 4)
+    assert(__raw_byte_offset(byte(8192)) == 8192)
+    assert(__raw_byte_offset(byte(32)) == 32)
 
 
 test "byte offsets preserve large integer quantities exactly":
-    assert(__raw_byte_offset(byte(9223372036854775800)) == 1152921504606846975)
+    assert(__raw_byte_offset(byte(9223372036854775800)) == 9223372036854775800)

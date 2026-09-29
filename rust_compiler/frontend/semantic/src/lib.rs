@@ -17566,12 +17566,12 @@ impl Analyzer<'_> {
             }
             if arguments.is_empty() {
                 let result = match name.as_str() {
-                    "len" => {
-                        let usize_type = self
+                    "len" | "size" => {
+                        let count_type = self
                             .types
-                            .resolve_name("usize")
-                            .expect("bootstrap defines usize");
-                        Some(self.integer_expression(&length.to_string(), usize_type, span))
+                            .resolve_name("int")
+                            .expect("bootstrap defines int");
+                        Some(self.integer_expression(&length.to_string(), count_type, span))
                     }
                     "empty" | "is_empty" => {
                         let boolean = self
@@ -17585,7 +17585,7 @@ impl Analyzer<'_> {
                             span,
                         })
                     }
-                    "size" | "bytes" | "alignment" => {
+                    "bytes" | "alignment" => {
                         let (size, alignment) = self.type_layout(element, span)?;
                         let value = if name == "alignment" {
                             alignment
@@ -23284,7 +23284,7 @@ def interpolate(text: string) -> string:
     #[test]
     fn variadic_parameters_collect_values_and_forward_spreads() {
         let (program, _) = analyze_source(
-            "def total(values: int...) -> int:\n    result := 0\n    for value in values:\n        result += value\n    return result\n\ndef forward(values: int...) -> int:\n    return total(...values)\n\nempty = total()\nanswer = total(1, 2, 3)\nforwarded = forward(...(0..5))\n",
+            "def total(values...: int) -> int:\n    result := 0\n    for value in values:\n        result += value\n    return result\n\ndef forward(values...: int) -> int:\n    return total(...values)\n\nempty = total()\nanswer = total(1, 2, 3)\nforwarded = forward(...(0..5))\n",
         );
         let symbols = program.modules[0]
             .functions
@@ -23301,7 +23301,7 @@ def interpolate(text: string) -> string:
     #[test]
     fn any_variadics_box_heterogeneous_primitive_values() {
         let (program, _) = analyze_source(
-            "def print_values(values: Any...):\n    for value in values:\n        print(value)\n\ndef invoke():\n    print_values(\"value\", 42, true)\n",
+            "def print_values(values...: Any):\n    for value in values:\n        print(value)\n\ndef invoke():\n    print_values(\"value\", 42, true)\n",
         );
         let symbols = program.modules[0]
             .functions

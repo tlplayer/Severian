@@ -10,8 +10,14 @@ class bounded_array[T]: Container
         this.storage := storage.create[T](capacity)
         this.limit := capacity
 
-    def len() -> usize:
-        return storage.len()
+    def bytes(self: view Self) -> byte:
+        return storage.bytes()
+
+    def alignment(self: view Self) -> byte:
+        return storage.alignment()
+
+    def len(self: view Self) -> int:
+        return int(storage.len())
 
     def capacity() -> usize:
         return limit

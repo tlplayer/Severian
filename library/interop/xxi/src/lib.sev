@@ -38,6 +38,11 @@ def status(code: int) -> int | Error:
         throw Error("XXI foreign operation failed (code " + string(code) + ")")
     return code
 
+def count(value: int, limit: int) -> int | Error:
+    if limit < 0 or value < 0 or value > limit:
+        throw Error("XXI count is outside its conversion bounds")
+    return value
+
 def count(value: float, limit: int) -> int | Error:
     if limit < 0 or not (value >= 0.0 and value < 9223372036854775808.0 and value <= float(limit)):
         throw Error("XXI count is outside its conversion bounds")

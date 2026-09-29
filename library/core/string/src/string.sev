@@ -109,7 +109,10 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
         return storage.used
 
     def size(self: view Self) -> int:
-        return storage.used
+        return len(self)
+
+    def alignment(self: view Self) -> byte:
+        return alignment[char[T]]()
 
     def bytes(self: view Self) -> byte:
         return bytes(storage)
@@ -136,7 +139,7 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
         capacity := storage.capacity()
         if required <= capacity:
             return
-        width = int(bytes(T).amount / 8.0)
+        width = bytes(T).amount
         step = 1024 / width
         assert(required <= 9223372036854775807 / width)
         if capacity == 0:
@@ -171,7 +174,7 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
         return int(storage.get(position))
 
     def __width(position: int) -> int:
-        if bytes(T).amount == 32.0:
+        if bytes(T).amount == 4:
             return 1
         first = __unit(position)
         width := 0
@@ -202,7 +205,7 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
 
     def append(self: borrow Self, value: char) -> borrow Self:
         codepoint = encoding.codepoint(value)
-        if bytes(T).amount == 32.0:
+        if bytes(T).amount == 4:
             reserve(storage.used + 1)
             storage.append(T(codepoint))
         else:
@@ -227,7 +230,7 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
 
     def append(self: borrow Self, value: string) -> borrow Self:
         count = value.storage.used
-        if bytes(T).amount == 8.0:
+        if bytes(T).amount == 1:
             assert(storage.used <= 9223372036854775807 - count)
             reserve(storage.used + count)
             position := 0
@@ -441,7 +444,7 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
         return int(len(__characters()))
 
     def byte_length(self: view Self) -> int:
-        return storage.used * int(bytes(T).amount / 8.0)
+        return storage.used * bytes(T).amount
 
     def empty(self: view Self) -> bool:
         return storage.used == 0
@@ -830,7 +833,7 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
 
 
 # A bounded read-only loan; unused vector capacity is never exposed.
-class StringView[Unit]:
+class StringView[Unit]: Container
     data: view array[Unit]
     count: int
 
@@ -841,6 +844,12 @@ class StringView[Unit]:
 
     def len(self: view Self) -> int:
         return count
+
+    def bytes(self: view Self) -> byte:
+        return bytes[Self]()
+
+    def alignment(self: view Self) -> byte:
+        return alignment[Self]()
 
     operator [](index: int) -> Unit:
         assert(index >= 0 and index < count)

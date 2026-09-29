@@ -53,7 +53,7 @@ A count is false exactly when no positive-frequency keys remain.
 '''
 
 
-trait Count[T: traits.HashKey]:
+trait Count[T: traits.HashKey]: traits.Container
     Truth
 
     property unique: usize
@@ -61,7 +61,6 @@ trait Count[T: traits.HashKey]:
 
     operator [](value: T) -> usize
 
-    def len(self) -> usize
     def total(self) -> usize
     def contains(self, value: T) -> bool
     def frequency(self, value: T) -> usize
@@ -79,7 +78,7 @@ trait Count[T: traits.HashKey]:
     def copy(self) -> count[T]
 
 
-class count[T: traits.HashKey]:
+class count[T: traits.HashKey]: traits.Container
     trait Count[T]
 
     __counts: dict[T, usize]
@@ -108,8 +107,14 @@ class count[T: traits.HashKey]:
         return frequency(value)
 
 
-    def len(self) -> usize:
-        return unique
+    def bytes(self: view Self) -> byte:
+        return __counts.bytes()
+
+    def alignment(self: view Self) -> byte:
+        return alignment[Self]()
+
+    def len(self: view Self) -> int:
+        return int(unique)
 
 
     def total(self) -> usize:

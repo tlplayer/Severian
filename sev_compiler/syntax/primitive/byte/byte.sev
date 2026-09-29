@@ -1,5 +1,5 @@
 '''
-Storage quantities use bits internally: 1B is eight bits; 0B is zero storage.
+Storage quantities count bytes: 1B is one byte; 0B is zero storage.
 This is a dimensioned size, independent of integer values and element counts.
 This is convenient to avoid pointer[0] which could mean 0 byte offset, or 0 type offset
 - allocate(1024B) requests exactly 1,024 bytes.
@@ -10,7 +10,7 @@ The compiler fix must preserve that distinction by resolving the existing byte p
  and its unit conversions. Treating byte as an alias for u8 or plain int would lose the semantics you intended.
 '''
 class byte:
-    # Amount of bytes used this currentl
+    # Integer number of bytes.
     amount: int
 
     operator <=>(self) -> string:

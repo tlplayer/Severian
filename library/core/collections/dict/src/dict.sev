@@ -1,14 +1,21 @@
+import Container from "../../traits/src/container.sev"
 import hashed
 import traits
 
-class dict[K: traits.HashKey, V]:
+class dict[K: traits.HashKey, V]: Container
     storage: hashed.Hash[K, V]
 
     def dict():
         storage = hashed.Hash[K, V]()
 
-    def len() -> usize:
-        return storage.len()
+    def bytes(self: view Self) -> byte:
+        return storage.bytes()
+
+    def alignment(self: view Self) -> byte:
+        return storage.alignment()
+
+    def len(self: view Self) -> int:
+        return int(storage.len())
 
     def empty() -> bool:
         return storage.empty()

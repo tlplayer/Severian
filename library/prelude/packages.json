@@ -33,7 +33,7 @@
         ]
       },
       {
-        "source": "library/system/io/src/text.sev",
+        "source": "library/system/io/src/print.sev",
         "names": [
           "print"
         ]

@@ -7,13 +7,13 @@ def pair(first: int, second: int = 2) -> int:
     return first * 10 + second
 
 
-def each(*values: V, suffix: string = "!"):
+def each(values...: V, suffix: string = "!"):
     for value in values:
         label = f"{value}{suffix}"
         print(label, end=";")
 
 
-def shadow(*values: V, value: string = "unused"):
+def shadow(values...: V, value: string = "unused"):
     for value in values:
         print(value, end=";")
 
@@ -34,7 +34,7 @@ test "interpolation and type names evaluate their expressions":
     print(type(marked("t", 1)))
 
 
-def numeric_pack(*values: V):
+def numeric_pack(values...: V):
     for value in values:
         assert(value + 1 == 2)
 

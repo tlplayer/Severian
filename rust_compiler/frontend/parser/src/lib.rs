@@ -100,7 +100,7 @@ mod tests {
     fn parses_variadic_parameters_spreads_and_ranges() {
         let source = SourceFile::virtual_source(
             "variadic.sev",
-            "def forward(values: int...):\n    target(...values)\n    target(...(0..10))\n",
+            "def forward(values...: int):\n    target(...values)\n    target(...(0..10))\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
         let severian_ast::Item::Function(function) = &module.items[0] else {
@@ -198,7 +198,7 @@ mod tests {
     fn rejects_parameters_after_a_variadic_parameter() {
         let source = SourceFile::virtual_source(
             "invalid-variadic.sev",
-            "def invalid(values: int..., tail: int):\n    return\n",
+            "def invalid(values...: int, tail: int):\n    return\n",
         );
         let error = parse(&scan(&source).unwrap()).unwrap_err();
         assert!(error
@@ -210,7 +210,7 @@ mod tests {
     fn untyped_variadics_infer_any_and_type_variables_are_implicit_generics() {
         let source = SourceFile::virtual_source(
             "inferred-variadic.sev",
-            "def dynamic(values...):\n    return\n\ndef generic(values: T...):\n    return\n",
+            "def dynamic(values...):\n    return\n\ndef generic(values...: T):\n    return\n",
         );
         let module = parse(&scan(&source).unwrap()).unwrap();
         let severian_ast::Item::Function(dynamic) = &module.items[0] else {

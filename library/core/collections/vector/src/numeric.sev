@@ -1,3 +1,4 @@
+import Container from "../../traits/src/container.sev"
 import storage
 
 
@@ -61,7 +62,7 @@ trait VectorScalar:
     operator /(right: Self) -> Self
 
 
-trait Vector[T: VectorScalar, N: usize]:
+trait Vector[T: VectorScalar, N: usize]: Container
     property length: usize
 
     operator [](index: usize) -> T
@@ -75,7 +76,6 @@ trait Vector[T: VectorScalar, N: usize]:
     operator *(right: T) -> numeric_vector[T, N]
     operator /(right: T) -> numeric_vector[T, N]
 
-    def len(self) -> usize
     def sum(self) -> T
     def dot(self, right: numeric_vector[T, N]) -> T
     def length_squared(self) -> T
@@ -84,7 +84,7 @@ trait Vector[T: VectorScalar, N: usize]:
     def iter(self) -> Iterator[T]
 
 
-class numeric_vector[T: VectorScalar, N: usize]:
+class numeric_vector[T: VectorScalar, N: usize]: Container
     trait Vector[T, N]
 
     __values: array[T]
@@ -103,8 +103,14 @@ class numeric_vector[T: VectorScalar, N: usize]:
             __values[index] = values[index]
 
 
-    def len(self) -> usize:
-        return N
+    def len(self: view Self) -> int:
+        return int(N)
+
+    def bytes(self: view Self) -> byte:
+        return bytes(__values)
+
+    def alignment(self: view Self) -> byte:
+        return alignment[T]()
 
 
     operator [](index: usize) -> T:

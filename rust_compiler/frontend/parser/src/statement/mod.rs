@@ -357,7 +357,9 @@ impl Parser<'_> {
                     break;
                 }
                 let mut immutable_reference = false;
-                let (annotation, variadic) = if self.take(&TokenKind::Colon).is_some() {
+                let ellipsis = self.take(&TokenKind::Ellipsis);
+                let variadic = ellipsis.is_some();
+                let annotation = if self.take(&TokenKind::Colon).is_some() {
                     let view = self.at_identifier("view").then(|| self.next().span);
                     immutable_reference = view.is_some();
                     if immutable_reference && (self.at_identifier("mut") || self.at_identifier("borrow") || self.at_identifier("move")) {
@@ -367,13 +369,9 @@ impl Parser<'_> {
                     if let Some(start) = view {
                         annotation.span = Span::new(start.source, start.start, annotation.span.end);
                     }
-                    let variadic = self.take(&TokenKind::Ellipsis).is_some();
-                    (annotation, variadic)
-                } else if let Some(ellipsis) = self.take(&TokenKind::Ellipsis) {
-                    (
-                        TypeAnnotation::named("Any", Vec::new(), ellipsis.span),
-                        true,
-                    )
+                    annotation
+                } else if let Some(ellipsis) = ellipsis {
+                    TypeAnnotation::named("Any", Vec::new(), ellipsis.span)
                 } else {
                     return Err(Diagnostic::new(
                         "E000112",
