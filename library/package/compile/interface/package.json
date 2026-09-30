@@ -39,7 +39,7 @@
       "package": "os"
     },
     "semantic": {
-      "path": "../../../../sev_compiler/frontend/semantic",
+      "path": "../../../../sev_compiler/hir/semantic",
       "package": "sev-compiler-semantic"
     },
     "codec": {

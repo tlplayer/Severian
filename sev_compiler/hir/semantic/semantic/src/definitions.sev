@@ -1,5 +1,5 @@
 import "../../../../syntax/primitive/mlir.sev" as type_bindings
-import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../module/module.sev" as model_hir_module_module
 import "../../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
 import "../../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
@@ -264,7 +264,7 @@ def replace_annotation(annotation: model_syntax_type_annotation.TypeAnnotation, 
                         case Named:
                             return model_syntax_type_annotation.TypeAnnotation(model_syntax_type_annotation.Named(name, applied), annotation.span, binding=annotation.binding)
                         case _:
-                            throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/definitions.sev)")
+                            throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/definitions.sev)")
                 index += 1
             replaced: list[model_syntax_type_annotation.TypeAnnotation] = []
             for argument in arguments:
@@ -326,7 +326,7 @@ def trait_application(definitions: SemanticDefinitions, annotation: model_syntax
                 applied.bases = bases
                 return applied
         case _:
-            throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/frontend/semantic/semantic/src/definitions.sev)")
+            throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/hir/semantic/semantic/src/definitions.sev)")
     return error(diagnostics.diagnostic_at("E000212", "constraint must name a trait", annotation.span))
 
 
@@ -370,7 +370,7 @@ def resolve_operator_constraints(definitions: SemanticDefinitions, operation: mo
                         if not known:
                             return error(diagnostics.diagnostic_at("E000212", "unknown operator constraint " + bound_name, span))
             case _:
-                throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/frontend/semantic/semantic/src/definitions.sev)")
+                throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/hir/semantic/semantic/src/definitions.sev)")
         if not grammar_bound:
             constraints.append(constraint)
     parameters: list[string] = []
@@ -456,7 +456,7 @@ def resolve_extension_parameters(definitions: SemanticDefinitions, declaration: 
             for argument in arguments:
                 infer_extension_parameters(definitions, argument, declaration.lookup, parameters)
         case _:
-            throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/definitions.sev)")
+            throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/definitions.sev)")
     declaration.type_parameters = parameters
     return declaration
 
@@ -556,7 +556,7 @@ def register_declarations(module: model_hir_module_module.Module, environment: S
                         names.append(declaration.name)
                 ordinal += 1
             case _:
-                throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/frontend/semantic/semantic/src/definitions.sev)")
+                throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/hir/semantic/semantic/src/definitions.sev)")
     # Resolve free extension parameters only after every concrete type and alias
     # is registered. list[string] is concrete; list[T] may bind an unknown T.
     implementation_index := 0
@@ -569,7 +569,7 @@ def register_declarations(module: model_hir_module_module.Module, environment: S
             case Record:
                 module.items[item_index] = model_hir_module_module.Record(resolve_extension_parameters(definitions, declaration))
             case _:
-                throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/frontend/semantic/semantic/src/definitions.sev)")
+                throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/hir/semantic/semantic/src/definitions.sev)")
         item_index += 1
     trait_index := 0
     for declaration in definitions.traits:

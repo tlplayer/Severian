@@ -32,15 +32,15 @@
       "package": "sev-compiler-diagnostics"
     },
     "lexer": {
-      "path": "../lexer",
+      "path": "../../frontend/lexer",
       "package": "sev-compiler-lexer"
     },
     "parser": {
-      "path": "../parser",
+      "path": "../../frontend/parser",
       "package": "sev-compiler-parser"
     },
     "source": {
-      "path": "../source",
+      "path": "../../frontend/source",
       "package": "sev-compiler-source"
     },
     "interfaces": {

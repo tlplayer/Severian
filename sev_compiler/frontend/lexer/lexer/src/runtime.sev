@@ -1,10 +1,13 @@
+import primitive_descriptors from "../../../../syntax/primitive/catalog.sev"
+import SymbolLexeme from "symbol.sev"
+import StringLexeme from "string.sev"
 import "../../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import source
 import diagnostics
 import LexemeInput, LexemeMatch, LexicalRule, lexeme_span, lexeme_text from "rule.sev"
-import Symbol, TokenKind, callable, is_digit, span from "identifier.sev"
+import Symbol, TokenKind, callable, span from "identifier.sev"
 import "../../../../syntax/constraint/model.sev" as constraints
 import admissible_dispatch_candidates from "../../../../syntax/constraint/dispatch.sev"
 import BlockCaptureValue, BlockFieldValue from "../../../../syntax/generic/block.sev"
@@ -186,22 +189,6 @@ def lexical_path(expression: model_syntax_function_function.Expression) -> strin
             return ""
 
 
-def lexical_category(name: string, span: source.Span) -> TokenKind | diagnostics.Diagnostic:
-    if name == "Identifier":
-        return TokenKind.Identifier
-    if name == "Integer":
-        return TokenKind.Integer
-    if name == "Float":
-        return TokenKind.Float
-    if name == "Character":
-        return TokenKind.Character
-    if name == "String":
-        return TokenKind.String
-    if name == "FormattedString":
-        return TokenKind.FormattedString
-    if name == "Symbol":
-        return TokenKind.Symbol
-    return error(lexical_error("unknown or structural token category " + name, span))
 
 
 def lexical_equal(left: LexicalValue, right: LexicalValue) -> bool:
@@ -236,7 +223,7 @@ def lexical_equal(left: LexicalValue, right: LexicalValue) -> bool:
         case _:
             return false
 
-
+# TODO: This should be handled on the primitive types in sentences not in the lexer
 def lexical_binary(symbol: string, left: LexicalValue, right: LexicalValue, span: source.Span) -> LexicalValue | diagnostics.Diagnostic:
     if symbol == "==" or symbol == "!=":
         equal = lexical_equal(left, right)
@@ -311,7 +298,7 @@ def lexical_invoke(parent: LexicalFrame, name: string, arguments: list[LexicalVa
             return error(lexical_error("method has no body: " + name, span))
     return error(lexical_error("unknown callable " + name, span))
 
-
+#TODO: This function is a fucking mess. Clean it up
 def lexical_call(frame: LexicalFrame, callee: model_syntax_function_function.Expression, arguments: list[model_syntax_function_function.CallArgument], span: source.Span) -> LexicalValue | diagnostics.Diagnostic:
     path = lexical_path(callee)
     values: list[LexicalValue] = []
@@ -374,8 +361,6 @@ def lexical_call(frame: LexicalFrame, callee: model_syntax_function_function.Exp
                 return values[0]
             case _:
                 return error(lexical_error("string requires an integer or text", span))
-    if path == "is_digit" and len(values) == 1:
-        return LexicalValue.Truth(is_digit(lexical_text(values[0], span)))
     if path == "Error" and len(values) == 1:
         return LexicalValue.Failure(diagnostics.Diagnostic("E000105", lexical_text(values[0], span), span))
     if path == "error" and len(values) == 1:
@@ -417,6 +402,12 @@ def lexical_call(frame: LexicalFrame, callee: model_syntax_function_function.Exp
             receiver = lexical_expression(frame, object)
             match receiver:
                 case Text:
+                    if name == "is_digit" and len(values) == 0:
+                        return LexicalValue.Truth(text.is_digit())
+                    if name == "is_alphabetic" and len(values) == 0:
+                        return LexicalValue.Truth(text.is_alphabetic())
+                    if name == "is_alphanumeric" and len(values) == 0:
+                        return LexicalValue.Truth(text.is_alphanumeric())
                     if name == "characters" and len(values) == 0:
                         return LexicalValue.Characters(text.characters())
                     if name == "starts_with" and len(values) == 1:
@@ -434,7 +425,7 @@ def lexical_call(frame: LexicalFrame, callee: model_syntax_function_function.Exp
         case _:
             return lexical_invoke(frame, path, values, span)
 
-
+#TODO: What's the difference between lexical call and lexical expression?
 def lexical_expression(frame: LexicalFrame, expression: model_syntax_function_function.Expression) -> LexicalValue | diagnostics.Diagnostic:
     lexical_tick(frame, expression.span)
     span = expression.span
@@ -458,7 +449,17 @@ def lexical_expression(frame: LexicalFrame, expression: model_syntax_function_fu
             return lexical_get(frame, name, span)
         case Member:
             if lexical_path(object) == "TokenKind":
-                return LexicalValue.Category(lexical_category(name, span))
+                for primitive in primitive_descriptors():
+                    kind ?= primitive.token_kind
+                    if kind != None and primitive.token_name == name:
+                        return LexicalValue.Category(kind)
+                symbol = SymbolLexeme([])
+                if symbol.token_name == name:
+                    return LexicalValue.Category(symbol.token_kind)
+                text = StringLexeme()
+                if text.formatted_token_name == name:
+                    return LexicalValue.Category(text.formatted_token_kind)
+                return error(lexical_error("unknown or structural token category " + name, span))
             receiver = lexical_expression(frame, object)
             match receiver:
                 case BlockReference:
@@ -542,7 +543,7 @@ def lexical_expression(frame: LexicalFrame, expression: model_syntax_function_fu
         case _:
             return error(lexical_error("unsupported expression", span))
 
-
+#TODO: we should consolidate these into using whatever block defines itself as
 def lexical_block(frame: LexicalFrame, block: model_syntax_block_block.Block) -> LexicalFlow | diagnostics.Diagnostic:
     for statement in block.statements:
         lexical_tick(frame, frame.rule.span)
@@ -625,7 +626,7 @@ def lexical_block(frame: LexicalFrame, block: model_syntax_block_block.Block) ->
                 return error(lexical_error("unsupported statement", frame.rule.span))
     return LexicalFlow()
 
-
+#TODO: WTF IS THIS? 
 def has_lexical_constraints(rule: SourceLexicalRule) -> bool:
     for method in rule.methods:
         if method.name == "scan":

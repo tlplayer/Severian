@@ -121,7 +121,7 @@ def rename_expression(expression: model_syntax_function_function.Expression, nam
         case Stringify:
             kind = model_syntax_function_function.Stringify(rename_expression(value, names, replacements))
         case _:
-            throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/packs.sev)")
+            throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/packs.sev)")
     return model_syntax_function_function.Expression(kind, expression.span, type_id=expression.type_id, grammar=expression.grammar)
 
 
@@ -151,7 +151,7 @@ def expand_block(block: model_syntax_block_block.Block, pack: string, count: int
                                 result.statements.append(expanded_statement)
                             index += 1
                     case _:
-                        throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/packs.sev)")
+                        throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/packs.sev)")
             case BindingStatement:
                 value = rename_expression(binding.value, names, replacements)
                 if binding.name not in names:

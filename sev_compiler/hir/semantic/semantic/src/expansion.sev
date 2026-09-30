@@ -59,7 +59,7 @@ def accepts(annotation: model_syntax_type_annotation.TypeAnnotation, expression:
                     case _:
                         return false
         case _:
-            throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/expansion.sev)")
+            throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/expansion.sev)")
     return false
 
 
@@ -137,11 +137,11 @@ def expression(environment: definitions.SemanticDefinitions, input: model_syntax
                                         return error(failure("expression pack index out of bounds", index.span))
                                     return elements[position]
                                 case _:
-                                    throw diagnostics.diagnostic("E000216", "unimplemented (sev_compiler/frontend/semantic/semantic/src/expansion.sev)")
+                                    throw diagnostics.diagnostic("E000216", "unimplemented (sev_compiler/hir/semantic/semantic/src/expansion.sev)")
                         case _:
-                            throw diagnostics.diagnostic("E000216", "unimplemented (sev_compiler/frontend/semantic/semantic/src/expansion.sev)")
+                            throw diagnostics.diagnostic("E000216", "unimplemented (sev_compiler/hir/semantic/semantic/src/expansion.sev)")
                 case _:
-                    throw diagnostics.diagnostic("E000216", "unimplemented (sev_compiler/frontend/semantic/semantic/src/expansion.sev)")
+                    throw diagnostics.diagnostic("E000216", "unimplemented (sev_compiler/hir/semantic/semantic/src/expansion.sev)")
             return error(failure("expression pack selection requires a constant index", input.span))
         case Call:
             target = expression(environment, callee, names, values, namespace, budget, depth)
@@ -172,7 +172,7 @@ def expression(environment: definitions.SemanticDefinitions, input: model_syntax
                                 target_namespace = lookup
                             return invoke(environment, function, actuals, target_namespace, input.span, budget, depth + 1)
                 case _:
-                    throw diagnostics.diagnostic("E000216", "unimplemented (sev_compiler/frontend/semantic/semantic/src/expansion.sev)")
+                    throw diagnostics.diagnostic("E000216", "unimplemented (sev_compiler/hir/semantic/semantic/src/expansion.sev)")
             return model_syntax_function_function.Expression(model_syntax_function_function.Call(target, operands), input.span)
         case _:
             return error(failure("unsupported expression expansion", input.span))

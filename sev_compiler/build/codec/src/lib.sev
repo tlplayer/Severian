@@ -308,9 +308,9 @@ def ensure(codec: Codec, value: string) -> unit | Error:
 
 def model_sources() -> list[string]:
     return [
-        "sev_compiler/frontend/modules/graph/model.sev",
-        "sev_compiler/frontend/modules/graph/queries.sev",
-        "sev_compiler/frontend/modules/graph/verify.sev",
+        "sev_compiler/hir/modules/graph/model.sev",
+        "sev_compiler/hir/modules/graph/queries.sev",
+        "sev_compiler/hir/modules/graph/verify.sev",
         "sev_compiler/hir/module/hierarchy.sev",
         "sev_compiler/hir/module/module.sev",
         "sev_compiler/mir/cfg/availability.sev",
@@ -492,8 +492,8 @@ def generate(root: string, mode: string = "frontend") -> string | Error:
     for location in package.sorted_strings(codec.exports):
         load_models(codec, location, "lexer")
     load_models(codec, root + "/sev_compiler/frontend/source/source.sev", "source")
-    load_models(codec, root + "/sev_compiler/frontend/semantic/semantic/src/definitions.sev", "definitions")
-    load_models(codec, root + "/sev_compiler/frontend/semantic/semantic/src/callable.sev", "semantic")
+    load_models(codec, root + "/sev_compiler/hir/semantic/semantic/src/definitions.sev", "definitions")
+    load_models(codec, root + "/sev_compiler/hir/semantic/semantic/src/callable.sev", "semantic")
     contracts := ["model_hir_module_module.Module", "lexer.SyntaxRegistry", "list[source.SourceFile]", "list[semantic.PreludeAnalysis]"]
     if mode == "mir":
         contracts = ["model_hir_module_module.Module"]
@@ -507,7 +507,7 @@ def generate(root: string, mode: string = "frontend") -> string | Error:
     if mode == "interface":
         build = root + "/library/package/compile/interface/package.pkg/build"
     elif mode == "bodies":
-        build = root + "/sev_compiler/frontend/semantic/package.pkg/build"
+        build = root + "/sev_compiler/hir/semantic/package.pkg/build"
     package.mkdir(build)
     body: list[string] = []
     for option in codec.options:

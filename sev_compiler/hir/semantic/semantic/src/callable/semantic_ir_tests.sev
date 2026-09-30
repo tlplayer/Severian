@@ -1,4 +1,4 @@
-import "../../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../module/module.sev" as model_hir_module_module
 import "../../../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
@@ -35,9 +35,9 @@ def resolved_expression(expression: model_syntax_function_function.Expression):
     assert(expression.type_id.index != 0)
     match expression.kind:
         case LiteralValue:
-            throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/callable/semantic_ir_tests.sev)")
+            throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/callable/semantic_ir_tests.sev)")
         case BindingReference:
-            throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/callable/semantic_ir_tests.sev)")
+            throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/callable/semantic_ir_tests.sev)")
         case Binary:
             resolved_expression(left)
             resolved_expression(right)

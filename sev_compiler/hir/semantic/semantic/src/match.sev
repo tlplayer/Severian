@@ -22,9 +22,9 @@ def literal_pattern(expression: model_syntax_function_function.Expression) -> bo
                     case LiteralValue:
                         return true
                     case _:
-                        throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/match.sev)")
+                        throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/match.sev)")
         case _:
-            throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/match.sev)")
+            throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/match.sev)")
     return false
 
 
@@ -152,7 +152,7 @@ def resolve_arms(declarations: definitions.SemanticDefinitions, records: list[mo
                         constructor = callee
                         destructure = true
                     case _:
-                        throw diagnostics.diagnostic("E000206", "unimplemented (sev_compiler/frontend/semantic/semantic/src/match.sev)")
+                        throw diagnostics.diagnostic("E000206", "unimplemented (sev_compiler/hir/semantic/semantic/src/match.sev)")
                 arguments = pattern_arguments(pattern)
                 index := 0
                 for alternative in alternatives:

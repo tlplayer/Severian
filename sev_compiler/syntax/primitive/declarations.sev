@@ -13,6 +13,8 @@ class BoolPrimitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Boolean
     representation: PrimitiveRepresentation = PrimitiveRepresentation.BooleanBit
     literal: LiteralSyntax | None = LiteralSyntax.Boolean
+    token_kind: TokenKind | None = TokenKind.Identifier
+    token_name: string = "Identifier"
     literal_family: string = ""
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Identifier, ["true", "false"])]
     default_literal: bool = true
@@ -33,6 +35,8 @@ class UnitPrimitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Unit
     representation: PrimitiveRepresentation = PrimitiveRepresentation.RecordAggregate
     literal: LiteralSyntax | None = LiteralSyntax.Unit
+    token_kind: TokenKind | None = TokenKind.Identifier
+    token_name: string = "Identifier"
     literal_family: string = ""
     literal_bindings: list[LiteralBinding] = []
     default_literal: bool = true
@@ -53,6 +57,8 @@ class StringPrimitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.String
     representation: PrimitiveRepresentation = PrimitiveRepresentation.RecordAggregate
     literal: LiteralSyntax | None = LiteralSyntax.String
+    token_kind: TokenKind | None = TokenKind.String
+    token_name: string = "String"
     literal_family: string = ""
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.String)]
     default_literal: bool = true
@@ -73,6 +79,8 @@ class IndexPrimitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
     literal: LiteralSyntax | None = LiteralSyntax.Integer
+    token_kind: TokenKind | None = TokenKind.Integer
+    token_name: string = "Integer"
     literal_family: string = "int"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Integer)]
     default_literal: bool = false
@@ -93,6 +101,8 @@ class PointerPrimitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Pointer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
     literal: LiteralSyntax | None = None
+    token_kind: TokenKind | None = None
+    token_name: string = ""
     literal_family: string = ""
     literal_bindings: list[LiteralBinding] = []
     default_literal: bool = false
@@ -113,6 +123,8 @@ class NoneValuePrimitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Absence
     representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
     literal: LiteralSyntax | None = LiteralSyntax.NoneValue
+    token_kind: TokenKind | None = TokenKind.Identifier
+    token_name: string = "Identifier"
     literal_family: string = ""
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Identifier, ["None"])]
     default_literal: bool = true
@@ -133,6 +145,8 @@ class AbsentPrimitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Absence
     representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
     literal: LiteralSyntax | None = LiteralSyntax.Absent
+    token_kind: TokenKind | None = TokenKind.Identifier
+    token_name: string = "Identifier"
     literal_family: string = ""
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Identifier, ["absent"])]
     default_literal: bool = true
@@ -153,6 +167,8 @@ class F32Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(32)
     literal: LiteralSyntax | None = LiteralSyntax.Float
+    token_kind: TokenKind | None = TokenKind.Float
+    token_name: string = "Float"
     literal_family: string = "float"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Float)]
     default_literal: bool = false
@@ -173,6 +189,8 @@ class F64Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(64)
     literal: LiteralSyntax | None = LiteralSyntax.Float
+    token_kind: TokenKind | None = TokenKind.Float
+    token_name: string = "Float"
     literal_family: string = "float"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Float)]
     default_literal: bool = true
@@ -193,6 +211,8 @@ class U8Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, false)
     literal: LiteralSyntax | None = LiteralSyntax.Integer
+    token_kind: TokenKind | None = TokenKind.Integer
+    token_name: string = "Integer"
     literal_family: string = "int"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Integer)]
     default_literal: bool = false
@@ -213,6 +233,8 @@ class U16Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, false)
     literal: LiteralSyntax | None = LiteralSyntax.Integer
+    token_kind: TokenKind | None = TokenKind.Integer
+    token_name: string = "Integer"
     literal_family: string = "int"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Integer)]
     default_literal: bool = false
@@ -233,6 +255,8 @@ class U32Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, false)
     literal: LiteralSyntax | None = LiteralSyntax.Integer
+    token_kind: TokenKind | None = TokenKind.Integer
+    token_name: string = "Integer"
     literal_family: string = "int"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Integer)]
     default_literal: bool = false
@@ -253,6 +277,8 @@ class U64Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, false)
     literal: LiteralSyntax | None = LiteralSyntax.Integer
+    token_kind: TokenKind | None = TokenKind.Integer
+    token_name: string = "Integer"
     literal_family: string = "int"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Integer)]
     default_literal: bool = false
@@ -273,6 +299,8 @@ class CharPrimitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Char
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, false)
     literal: LiteralSyntax | None = LiteralSyntax.Character
+    token_kind: TokenKind | None = TokenKind.Character
+    token_name: string = "Character"
     literal_family: string = ""
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Character)]
     default_literal: bool = true
@@ -293,6 +321,8 @@ class I8Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, true)
     literal: LiteralSyntax | None = LiteralSyntax.Integer
+    token_kind: TokenKind | None = TokenKind.Integer
+    token_name: string = "Integer"
     literal_family: string = "int"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Integer)]
     default_literal: bool = false
@@ -313,6 +343,8 @@ class I16Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, true)
     literal: LiteralSyntax | None = LiteralSyntax.Integer
+    token_kind: TokenKind | None = TokenKind.Integer
+    token_name: string = "Integer"
     literal_family: string = "int"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Integer)]
     default_literal: bool = false
@@ -333,6 +365,8 @@ class I32Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, true)
     literal: LiteralSyntax | None = LiteralSyntax.Integer
+    token_kind: TokenKind | None = TokenKind.Integer
+    token_name: string = "Integer"
     literal_family: string = "int"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Integer)]
     default_literal: bool = false
@@ -353,6 +387,8 @@ class I64Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
     literal: LiteralSyntax | None = LiteralSyntax.Integer
+    token_kind: TokenKind | None = TokenKind.Integer
+    token_name: string = "Integer"
     literal_family: string = "int"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Integer)]
     default_literal: bool = true
@@ -373,6 +409,8 @@ class I128Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, true)
     literal: LiteralSyntax | None = LiteralSyntax.Integer
+    token_kind: TokenKind | None = TokenKind.Integer
+    token_name: string = "Integer"
     literal_family: string = "int"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Integer)]
     default_literal: bool = false
@@ -393,6 +431,8 @@ class U128Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, false)
     literal: LiteralSyntax | None = LiteralSyntax.Integer
+    token_kind: TokenKind | None = TokenKind.Integer
+    token_name: string = "Integer"
     literal_family: string = "int"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Integer)]
     default_literal: bool = false
@@ -413,6 +453,8 @@ class F16Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(16)
     literal: LiteralSyntax | None = LiteralSyntax.Float
+    token_kind: TokenKind | None = TokenKind.Float
+    token_name: string = "Float"
     literal_family: string = "float"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Float)]
     default_literal: bool = false
@@ -433,6 +475,8 @@ class F128Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(128)
     literal: LiteralSyntax | None = LiteralSyntax.Float
+    token_kind: TokenKind | None = TokenKind.Float
+    token_name: string = "Float"
     literal_family: string = "float"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Float)]
     default_literal: bool = false
@@ -453,6 +497,8 @@ class F8E4M3FnPrimitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(8, 4, 3, false)
     literal: LiteralSyntax | None = LiteralSyntax.Float
+    token_kind: TokenKind | None = TokenKind.Float
+    token_name: string = "Float"
     literal_family: string = "float"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Float)]
     default_literal: bool = false
@@ -473,6 +519,8 @@ class F8E5M2Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(8, 5, 2, true)
     literal: LiteralSyntax | None = LiteralSyntax.Float
+    token_kind: TokenKind | None = TokenKind.Float
+    token_name: string = "Float"
     literal_family: string = "float"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Float)]
     default_literal: bool = false
@@ -493,6 +541,8 @@ class BF16Primitive: Primitive
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.BrainFloatBits(16)
     literal: LiteralSyntax | None = LiteralSyntax.Float
+    token_kind: TokenKind | None = TokenKind.Float
+    token_name: string = "Float"
     literal_family: string = "float"
     literal_bindings: list[LiteralBinding] = [LiteralBinding(TokenKind.Float)]
     default_literal: bool = false
@@ -501,3 +551,11 @@ class BF16Primitive: Primitive
 def bf16_type_id() -> TypeId:
     return BF16Primitive().id
 
+
+
+test "primitive declarations own their lexical categories":
+    assert(I64Primitive().token_kind == TokenKind.Integer)
+    assert(F64Primitive().token_kind == TokenKind.Float)
+    assert(StringPrimitive().token_kind == TokenKind.String)
+    assert(CharPrimitive().token_kind == TokenKind.Character)
+    assert(PointerPrimitive().token_kind == None)

@@ -57,9 +57,11 @@ def match_symbol(characters: list[string], cursor: int, symbols: list[LexicalSym
 
 class SymbolLexeme: LexicalRule
     symbols: list[LexicalSymbol]
+    token_name: string = "Symbol"
+    token_kind: TokenKind = TokenKind.Symbol
 
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
         symbol ?= match_symbol(input.characters, start, symbols)
         if symbol != None:
-            return LexemeMatch(start + int(len(symbol.characters)), TokenKind.Symbol)
+            return LexemeMatch(start + int(len(symbol.characters)), self.token_kind)
         return LexemeMatch(start, None, false)

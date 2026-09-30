@@ -68,7 +68,7 @@
       "package": "sev-compiler-lexer"
     },
     "modules": {
-      "path": "../frontend/modules",
+      "path": "../hir/modules",
       "package": "sev-compiler-modules"
     },
     "mir": {
@@ -84,7 +84,7 @@
       "package": "sev-compiler-parser"
     },
     "semantic": {
-      "path": "../frontend/semantic",
+      "path": "../hir/semantic",
       "package": "sev-compiler-semantic"
     },
     "source": {

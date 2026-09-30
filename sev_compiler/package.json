@@ -33,7 +33,7 @@
     },
     "semantic": {
       "package": "sev-compiler-semantic",
-      "path": "frontend/semantic"
+      "path": "hir/semantic"
     },
     "environment": {
       "path": "../library/system/environment",

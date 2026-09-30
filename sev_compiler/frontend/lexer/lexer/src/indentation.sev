@@ -26,9 +26,4 @@ def strip_indentation(line: string, width: int) -> string:
 
 
 def contains_non_whitespace(line: string) -> bool:
-    for character in line.characters():
-        if character != " " and character != "\t" and character != "\r":
-            return true
-    return false
-
-
+    return line.strip() != ""

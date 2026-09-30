@@ -1,4 +1,4 @@
-import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../module/module.sev" as model_hir_module_module
 import "../../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
@@ -61,9 +61,9 @@ def policy(declaration: model_syntax_function_syntax.TraitDeclaration) -> Policy
                 case StringValue:
                     mode = value
                 case _:
-                    throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+                    throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
         case _:
-            throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+            throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
     if mode == "" or mode == "compiler":
         return error(diagnostics.diagnostic_at("E000215", "test policy requires a nonreserved mode name", selected.span))
     names: list[string] = []
@@ -80,9 +80,9 @@ def policy(declaration: model_syntax_function_syntax.TraitDeclaration) -> Policy
                             case StringValue:
                                 binding = value
                             case _:
-                                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+                                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
                     case _:
-                        throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+                        throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
                 getter = path(values[index])
                 if binding == "" or binding in names or getter == "":
                     return error(diagnostics.diagnostic_at("E000215", "test bindings require unique names and getter references", key.span))
@@ -162,7 +162,7 @@ def project(expression: model_syntax_function_function.Expression, names: list[s
         case Stringify:
             kind = model_syntax_function_function.Stringify(project(value, names, getters, contexts, bound))
         case _:
-            throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+            throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
     return model_syntax_function_function.Expression(kind, expression.span, grammar=expression.grammar)
 
 
@@ -186,9 +186,9 @@ def project_block(block: model_syntax_block_block.Block, names: list[string], ge
                                     message = arguments[1].value
                                 projected = model_syntax_sentence_sentence.Assert(arguments[0].value, message, expression.span, arguments[0].value.span)
                     case _:
-                        throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+                        throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
             case _:
-                throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+                throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
         match projected:
             case Defer:
                 result.statements.append(model_syntax_sentence_sentence.Defer(project(value, names, getters, contexts, bound), span))
@@ -386,7 +386,7 @@ def expand(module: model_hir_module_module.Module, enabled: bool, namespace: str
                         expanded.append(model_hir_module_module.Test(model_syntax_function_syntax.TestDeclaration(case_label, declaration.source_modes, body, [], declaration.span, lookup=declaration.lookup, mode_arguments=declaration.mode_arguments)))
                         ordinal += 1
             case _:
-                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
         if not table:
             expanded.append(item)
     module.items = expanded
@@ -408,7 +408,7 @@ def expand(module: model_hir_module_module.Module, enabled: bool, namespace: str
                         wanted.append(mode)
                         wanted_spans.append(declaration.span)
             case _:
-                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
     if len(wanted) == 0 and not runner:
         module = reported_tests(module, files)
         module.items.append(summary(test_count, suite_span, namespace))
@@ -420,7 +420,7 @@ def expand(module: model_hir_module_module.Module, enabled: bool, namespace: str
             case Trait:
                 declarations.append(declaration)
             case _:
-                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
     for declaration in declarations:
         for base in declaration.bases:
             if model_syntax_type_annotation.simple_type_name(base) == "TestMode":
@@ -456,7 +456,7 @@ def expand(module: model_hir_module_module.Module, enabled: bool, namespace: str
                         case LiteralValue:
                             constant = true
                         case _:
-                            throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+                            throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
                 # Plain `=` is resolved as reassignment by callable analysis.
                 # Only the first binding can be lifted out as a constant.
                 if binding.name not in bindings:
@@ -466,7 +466,7 @@ def expand(module: model_hir_module_module.Module, enabled: bool, namespace: str
                 else:
                     suite.statements.append(model_syntax_sentence_sentence.BindingStatement(binding))
             case Test:
-                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
             case _:
                 items.append(item)
     for selected in policies[::-1]:
@@ -536,7 +536,7 @@ def expand(module: model_hir_module_module.Module, enabled: bool, namespace: str
                     suite.statements.append(statement)
                 suite.statements.append(report("  ok " + title, declaration.span))
             case _:
-                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/frontend/semantic/semantic/src/test_modes.sev)")
+                throw diagnostics.diagnostic("E000215", "unimplemented (sev_compiler/hir/semantic/semantic/src/test_modes.sev)")
     for selected in policies[::-1]:
         suite.statements.append(model_syntax_sentence_sentence.ExpressionStatement(call(selected.finish, [name("$mode$" + selected.name, selected.span)], selected.span)))
     items.append(model_hir_module_module.Test(model_syntax_function_syntax.TestDeclaration("test policies", [], suite, [], suite_span, lookup=namespace)))

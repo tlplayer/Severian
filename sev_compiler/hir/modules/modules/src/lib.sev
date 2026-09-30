@@ -1,4 +1,4 @@
-import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../module/module.sev" as model_hir_module_module
 import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
 import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import lexer
@@ -6,7 +6,7 @@ import parser
 import source
 import diagnostics
 
-import Item, ModuleGraph, source_id from "../../../../hir/module/module.sev"
+import Item, ModuleGraph, source_id from "../../../module/module.sev"
 
 
 class ResolvedPackage:

@@ -23,7 +23,7 @@ def key_type(expression: model_syntax_function_function.Expression) -> model_syn
             if operator.symbol == "|":
                 return model_syntax_type_annotation.TypeAnnotation(model_syntax_type_annotation.Union([key_type(left), key_type(right)]), expression.span)
         case _:
-            throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/frontend/semantic/semantic/src/grammar_scalar.sev)")
+            throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/hir/semantic/semantic/src/grammar_scalar.sev)")
     name = path(expression)
     if name == "":
         return error(diagnostics.diagnostic_at("E000212", "scalar operation map keys must be types", expression.span))
@@ -74,15 +74,15 @@ def descriptor(expression: model_syntax_function_function.Expression) -> model_s
                                     result.direct = value
                                     accepted = true
                             case _:
-                                throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/frontend/semantic/semantic/src/grammar_scalar.sev)")
+                                throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/hir/semantic/semantic/src/grammar_scalar.sev)")
                     case _:
-                        throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/frontend/semantic/semantic/src/grammar_scalar.sev)")
+                        throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/hir/semantic/semantic/src/grammar_scalar.sev)")
                 if not accepted:
                     return error(diagnostics.diagnostic_at("E000212", "invalid literal for ScalarOperation." + name, argument.span))
             if result.mnemonic != "":
                 return result
         case _:
-            throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/frontend/semantic/semantic/src/grammar_scalar.sev)")
+            throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/hir/semantic/semantic/src/grammar_scalar.sev)")
     return error(diagnostics.diagnostic_at("E000212", "grammar map requires ScalarOperation with a mnemonic", expression.span))
 
 
@@ -107,7 +107,7 @@ def resolve(environment: definitions.SemanticDefinitions, records: list[model_sy
                                 case SourceSymbol:
                                     syntax.symbol = spelling
                                 case _:
-                                    throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/frontend/semantic/semantic/src/grammar_scalar.sev)")
+                                    throw diagnostics.diagnostic("E000212", "unimplemented (sev_compiler/hir/semantic/semantic/src/grammar_scalar.sev)")
                         elif property.name == "fixity":
                             if path(supplied).split(".")[-1] == "Prefix":
                                 syntax.fixity = model_syntax_function_syntax.Fixity.Prefix

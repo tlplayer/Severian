@@ -12,4 +12,4 @@ class NumericLexeme: LexicalRule
             return error(diagnostics.Diagnostic("E000101", result.error, lexeme_span(input, start, result.end)))
         if not result.matched:
             return LexemeMatch(start, None, false)
-        return LexemeMatch(result.end, TokenKind.Float if result.syntax == syntax.LiteralSyntax.Float else TokenKind.Integer)
+        return LexemeMatch(result.end, primitives.F64Primitive().token_kind if result.syntax == syntax.LiteralSyntax.Float else primitives.I64Primitive().token_kind)

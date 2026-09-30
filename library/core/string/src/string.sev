@@ -47,6 +47,9 @@ trait StringOperations:
     #Split a string by a substring "a,b,c".split(",")-> ["a","b","c"]
     def split[C=list[string]](separator: string | char | absent = absent) -> C
     def strip() -> string
+    def is_digit() -> bool
+    def is_alphabetic() -> bool
+    def is_alphanumeric() -> bool
     def append(self: borrow Self, addition: string | char) -> borrow Self
     def remove(self: borrow Self, removed: string | char) -> borrow Self
     # Without indices [] or int "abc".without(1) -> "ac"
@@ -370,6 +373,15 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
                 position += 1
         result.append(__piece(values, first, count))
         return result
+
+    def is_digit() -> bool:
+        return len(self) == 1 and self in DIGITS
+
+    def is_alphabetic() -> bool:
+        return len(self) == 1 and self in ASCII_LETTERS
+
+    def is_alphanumeric() -> bool:
+        return self.is_alphabetic() or self.is_digit()
 
     def strip() -> string:
         values = __characters()
@@ -1153,3 +1165,10 @@ test with compiler "borrowed string bytes cannot outlive string":
         def invalid() -> StringView[char[u8]]:
             value := "hello"
             return value.raw()
+
+
+test "ASCII character classification rejects empty and multiple characters":
+    assert("7".is_digit() and not "".is_digit() and not "12".is_digit())
+    assert("a".is_alphabetic() and "Z".is_alphabetic())
+    assert("9".is_alphanumeric() and not "_".is_alphanumeric())
+    assert(not "é".is_alphabetic())

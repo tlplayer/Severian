@@ -36,6 +36,8 @@ trait Primitive: Type + Y + L + MlirTypeProvider
     identity: PrimitiveId
     id: TypeId
     category: PrimitiveCategory
+    token_kind: TokenKind | None
+    token_name: string
     representation: PrimitiveRepresentation
 
 trait PrimitiveAlias[T]: Primitive

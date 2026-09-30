@@ -14,11 +14,11 @@
   },
   "dependencies": {
     "parser": {
-      "path": "../parser",
+      "path": "../../frontend/parser",
       "package": "sev-compiler-parser"
     },
     "lexer": {
-      "path": "../lexer",
+      "path": "../../frontend/lexer",
       "package": "sev-compiler-lexer"
     },
     "environment": {
@@ -38,7 +38,7 @@
       "package": "sev-compiler-diagnostics"
     },
     "source": {
-      "path": "../source",
+      "path": "../../frontend/source",
       "package": "sev-compiler-source"
     },
     "ownership": {

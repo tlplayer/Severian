@@ -18,3 +18,4 @@ trait TokenTerm:
     kind: TokenKind
     lexeme: Lexeme
     span: Span
+

@@ -15,10 +15,12 @@ class PrimitiveDescriptor: Primitive
     literal_family: string = ""
     literal_bindings: list[LiteralBinding] = []
     mlir: MlirTypeBinding = MlirTypeBinding("", value=false)
+    token_kind: TokenKind | None = None
+    token_name: string = ""
 
 
 def describe_primitive[T: Primitive](value: T) -> PrimitiveDescriptor:
-    return PrimitiveDescriptor(value.identity, value.id, value.name, value.size, value.alignment, value.constructors, value.category, value.representation, value.literal, value.default_literal, value.literal_family, value.literal_bindings, value.mlir)
+    return PrimitiveDescriptor(value.identity, value.id, value.name, value.size, value.alignment, value.constructors, value.category, value.representation, value.literal, value.default_literal, value.literal_family, value.literal_bindings, value.mlir, value.token_kind, value.token_name)
 
 
 PrimitiveCatalog: list[PrimitiveDescriptor] = []
@@ -208,3 +210,12 @@ def integer_maximum(type: ScalarType) -> string:
     if type.bits == 64:
         return "9223372036854775807" if type.signed else "18446744073709551615"
     return string((1 << (int(type.bits) - (1 if type.signed else 0))) - 1)
+
+
+test "primitive descriptor preserves the class declared token name":
+    primitive = I64Primitive()
+    primitive.token_name = "WholeNumber"
+    descriptor = describe_primitive(primitive)
+    assert(descriptor.token_name == "WholeNumber")
+    assert(descriptor.token_kind == TokenKind.Integer)
+    assert(describe_primitive(PointerPrimitive()).token_name == "")

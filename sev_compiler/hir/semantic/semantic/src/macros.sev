@@ -1,5 +1,5 @@
 import "../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_sentence
-import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../module/module.sev" as model_hir_module_module
 import "../../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
@@ -100,7 +100,7 @@ def macro_definition(input: parser.Parser) -> ScalarMacro:
                             case _:
                                 throw Error("expected generated function name")
                 case _:
-                    throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/macros.sev)")
+                    throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/macros.sev)")
         tokens.append(token)
     if len(bindings) == 0 or len(functions) == 0:
         throw Error("enumerative macros require type bindings and functions")
@@ -153,9 +153,9 @@ def macro_integer(expression: model_syntax_function_function.Expression) -> Macr
                 case IntegerValue:
                     return MacroInteger(true, spelling)
                 case _:
-                    throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/macros.sev)")
+                    throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/macros.sev)")
         case _:
-            throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/macros.sev)")
+            throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/macros.sev)")
     return MacroInteger(false)
 
 
@@ -166,7 +166,7 @@ def macro_condition(expression: model_syntax_function_function.Expression) -> Ma
                 case BooleanValue:
                     return MacroCondition(true, value)
                 case _:
-                    throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/macros.sev)")
+                    throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/macros.sev)")
         case Binary:
             lhs = macro_integer(left)
             rhs = macro_integer(right)
@@ -186,7 +186,7 @@ def macro_condition(expression: model_syntax_function_function.Expression) -> Ma
                     if operator.symbol == ">=":
                         return MacroCondition(true, order >= 0)
         case _:
-            throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/macros.sev)")
+            throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/macros.sev)")
     return MacroCondition(false)
 
 
@@ -204,7 +204,7 @@ def macro_block(block: model_syntax_block_block.Block) -> model_syntax_block_blo
                             case Return:
                                 return result
                             case _:
-                                throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/macros.sev)")
+                                throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/macros.sev)")
                 else:
                     result.statements.append(model_syntax_sentence_sentence.Statement.If(condition, macro_block(then_block), macro_block(else_block), span))
             case Return:
@@ -243,7 +243,7 @@ def macro_instance(definition: ScalarMacro, types: list[scalar.ScalarType], outp
                 if value in definition.functions:
                     replacement = lexer.token_from_lexeme(lexer.TokenKind.Identifier, token.lexeme, value + suffix)
             case _:
-                throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/macros.sev)")
+                throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/macros.sev)")
         tokens.append(replacement)
     end = definition.tokens[-1].span
     eof_span = source.Span(end.source, end.end, end.end)
@@ -352,7 +352,7 @@ def parse_module(tokens: list[lexer.Token], source_blocks: model_syntax_block_bl
             case Type:
                 environment.aliases.append(declaration)
             case _:
-                throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/frontend/semantic/semantic/src/macros.sev)")
+                throw diagnostics.diagnostic("E000205", "unimplemented (sev_compiler/hir/semantic/semantic/src/macros.sev)")
     for name in invoked:
         for definition in definitions:
             if definition.name == name:

@@ -1,3 +1,4 @@
+import CharPrimitive, StringPrimitive from "package:primitives/declarations.sev"
 import diagnostics
 import "token/mod.sev" as _dependency_mod
 import LexemeInput, LexemeMatch, LexicalRule, TokenKind, lexeme_span from "rule.sev"
@@ -47,6 +48,9 @@ def block_string(raw: string) -> string:
 
 
 class StringLexeme: LexicalRule
+    formatted_token_name: string = "FormattedString"
+    formatted_token_kind: TokenKind = TokenKind.FormattedString
+
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
         characters = input.characters
         character = characters[start]
@@ -89,11 +93,11 @@ class StringLexeme: LexicalRule
             if quote == "'" and not block:
                 if len(value.characters()) != 1:
                     return error(diagnostics.Diagnostic("E000101", "character literal requires one Unicode scalar", lexeme_span(input, start, cursor)))
-                return LexemeMatch(cursor, TokenKind.Character, value=value)
+                return LexemeMatch(cursor, CharPrimitive().token_kind, value=value)
             elif formatted:
-                kind: TokenKind = TokenKind.FormattedString
+                kind: TokenKind | None = self.formatted_token_kind
                 return LexemeMatch(cursor, kind, value=value)
             else:
-                kind: TokenKind = TokenKind.String
+                kind: TokenKind | None = StringPrimitive().token_kind
                 return LexemeMatch(cursor, kind, value=value)
         return LexemeMatch(start, None, false)

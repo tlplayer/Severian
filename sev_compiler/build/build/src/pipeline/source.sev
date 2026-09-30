@@ -1,5 +1,5 @@
 import lowering
-import "../../../../frontend/modules/graph/model.sev" as model_frontend_modules_graph_model
+import "../../../../hir/modules/graph/model.sev" as model_frontend_modules_graph_model
 import "../../../../hir/module/hierarchy.sev" as model_hir_module_hierarchy
 import "../../../../hir/module/module.sev" as model_hir_module_module
 import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax

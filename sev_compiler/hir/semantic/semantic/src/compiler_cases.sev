@@ -1,4 +1,4 @@
-import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../module/module.sev" as model_hir_module_module
 import "../../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
 
@@ -10,7 +10,7 @@ def module(subject: model_hir_module_module.Module, case: model_syntax_function_
     for item in subject.items:
         match item:
             case Test:
-                throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/compiler_cases.sev)")
+                throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/compiler_cases.sev)")
             case _:
                 result.items.append(item)
     for item in case.declarations:

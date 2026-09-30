@@ -38,4 +38,4 @@ def names(value: model_syntax_function_function.Expression, result: list[string]
             for element in elements:
                 names(element, result)
         case _:
-            throw Error("unimplemented (sev_compiler/frontend/semantic/semantic/src/closures.sev)")
+            throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/closures.sev)")
