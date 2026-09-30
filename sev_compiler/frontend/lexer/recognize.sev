@@ -1,0 +1,26 @@
+import Diagnostic from "../../syntax/grammar/contracts.sev"
+import Lexeme from "../../syntax/generic/lexeme.sev"
+import Y from "../../syntax/generic/symbol.sev"
+import TokenTerm from "../../syntax/generic/token.sev"
+import Window from "window.sev"
+
+
+class LexicalCapture:
+    name: string
+    window: Window
+
+
+class LexicalMatch:
+    syntax: Y
+    lexeme: Lexeme
+    token: TokenTerm | None
+    captures: list[LexicalCapture]
+
+
+trait Recognizer:
+    # Apply the supplied declaration at the cursor without moving the cursor.
+    # None means no match; Diagnostic reports a recognition failure.
+    def recognize(
+        input: Window,
+        syntax: Y
+    ) -> LexicalMatch | None | Diagnostic

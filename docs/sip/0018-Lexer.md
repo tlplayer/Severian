@@ -48,7 +48,62 @@ The lexer takes source's output and syntax and greedily attempts to convert the 
 - variables (a)
 - literals (0,0.0, -1)
 
+## Goals
+1. syntax is the SOT for spellings, symbol arrangement. Lexer just processes in the order that they are declared based on trait implementation/syntax master list for resolution as a stop gap
+2. If a new syntax occurs the definition of that in the syntax/other filess should not break the lexer/parser. Tokens/lexemes are defined on the Y generic implementers nothing else should be needed.
 
+Why? it simplifies addition/troubleshooting. Root causing lexer/parser errors is straightforward. Forces grammar/sentence structure to be refined without rellying on magic functions to extract/remove certain elements from the language. 
+Literal/complex symbol orientation for example class X with a constructor form X{} should just require an implementation of Y for that arrangement of symbols not modifying the lexer/parser for a simplfied language. 
+
+## Structure
+
+| File | Responsibility |
+|---|---|
+| `lexer.sev` | Public entry point. Pulls declarations from the **syntax master list**, processes them in the declared order specified by the stopgap, and coordinates recognition. |
+| `window.sev` | Bounded source views, cursor movement, captured regions, and original source spans. |
+| `recognize.sev` | Applies the supplied syntax declarations to source windows and returns matches, captures, or diagnostics. |
+
+```sev
+trait Lexer:
+    def lex(input: SourceFile) -> list[LexicalMatch] | Diagnostic
+```
+
+```sev
+trait Window:
+    source: SourceFile
+    start: u32
+    end: u32
+    cursor: u32
+
+    def peek(distance: u32 = 0) -> string | None
+    def advance(count: u32) -> unit | Diagnostic
+    def finished() -> bool
+
+    def capture(start: u32, end: u32) -> Window | Diagnostic
+    def span() -> Span
+    def text() -> string
+```
+
+```sev
+trait Recognizer:
+    def recognize(
+        input: Window,
+        syntax: Y
+    ) -> LexicalMatch | None | Diagnostic
+```
+
+
+```
+class LexicalMatch:
+    syntax: Y
+    lexeme: Lexeme
+    token: TokenTerm | None
+    captures: list[LexicalCapture]
+
+class LexicalCapture:
+    name: string
+    window: Window
+```
 
 ## Problem(s)
 
@@ -108,6 +163,7 @@ b = "a:int"
 
 ## Examples
 
+### Conditional block
 ```sev
 if 1 == 0.0:
     return false
@@ -117,6 +173,7 @@ Recognition establishes:
 - A condition containing 1, ==, and 0.0.
 - A body containing the return sentence and false.
 The integer and floating-point spellings retain distinct literal contracts. The applicable equality operation is resolved using its operand contracts.
+
 ### Loop with an initializer
 ```sev
 while count < 3 with count := 0:

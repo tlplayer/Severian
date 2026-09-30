@@ -1,0 +1,23 @@
+import SourceFile, Span from "../source/source.sev"
+import Diagnostic from "../../syntax/grammar/contracts.sev"
+
+
+trait Window:
+    source: SourceFile
+    # Absolute Unicode scalar offsets into the original source snapshot.
+    # Maintain start <= cursor <= end <= source length.
+    start: u32
+    end: u32
+    cursor: u32
+
+    # Return None when the requested character is outside this window.
+    def peek(distance: u32 = 0) -> string | None
+    def advance(count: u32) -> unit | Diagnostic
+    def finished() -> bool
+
+    # Capture a child within this window without copying or modifying source.
+    # The child starts at its own start; the parent cursor remains unchanged.
+    def capture(start: u32, end: u32) -> Window | Diagnostic
+    # Describe the full window [start, end), independently of the cursor.
+    def span() -> Span
+    def text() -> string

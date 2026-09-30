@@ -1,0 +1,9 @@
+import SourceFile from "../source/source.sev"
+import Diagnostic from "../../syntax/grammar/contracts.sev"
+import LexicalMatch from "recognize.sev"
+
+
+trait Lexer:
+    # Obtain declarations from the syntax master list in its declared order.
+    # Coordinate recognition and advance the window after accepting a match.
+    def lex(input: SourceFile) -> list[LexicalMatch] | Diagnostic
