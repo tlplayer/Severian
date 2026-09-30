@@ -1,18 +1,32 @@
 SIP-0019: 
 
 Status: Draft | Accepted | Implementing | Implemented | Rejected | Superseded
-Type: Language | Compiler | Runtime | Tooling | Package | Interop | Process
-Authors:
-Created: YYYY-MM-DD
-Target:
-Supersedes:
-Superseded by:
+Type:  Compiler 
+Authors: Timothy Player
+Created: 2026 
+
 
 ## Appendix
 
 ## Context
 
 Source is simply the interface to raw .sev files. It carries span, paths, etc. Which is needed for knowing where errors occur and finding suitable fixes. 
+
+## Responsibilities
+
+- Remove empty lines, know if a file is valid
+- Remove comments
+- get imports and know what symbols belong outside the file
+- handles import * as a direct import and keeps track of the link to the current file
+
+
+## Problems
+
+
+## Implementation
+
+sev_compiler/frontend/source
+
 
 ## Data model
 
