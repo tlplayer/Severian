@@ -1,4 +1,4 @@
-import Item from "../../hir/module/module.sev"
+import Item from "../../hir/modules/module.sev"
 import source
 import AttrValue, DeclarationId, DefId, FunctionId, InterfaceId, ModuleId, Symbol, TypeId from "../symbol/symbol.sev"
 import TypeAnnotation from "../type/annotation.sev"

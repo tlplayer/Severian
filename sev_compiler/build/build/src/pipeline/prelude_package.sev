@@ -1,4 +1,4 @@
-import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../hir/modules/module.sev" as model_hir_module_module
 import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import package
 import lexer

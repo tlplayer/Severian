@@ -1,4 +1,4 @@
-import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../hir/modules/module.sev" as model_hir_module_module
 import "plan.sev" as _dependency_plan
 import validate_module from "validate/mod.sev"
 

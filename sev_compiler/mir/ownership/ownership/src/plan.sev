@@ -1,4 +1,4 @@
-import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../hir/modules/module.sev" as model_hir_module_module
 import "../../../cfg/cfg.sev" as model_mir_cfg_cfg
 import "../../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol

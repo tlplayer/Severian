@@ -1,3 +1,0 @@
-enum BoolLiteral:
-    True {"true"}
-    False {"false"}

@@ -1,5 +1,0 @@
-trait Addable:
-    def add(other: Self) -> Self
-
-def twice[T: Addable](value: T) -> T:
-    return value + value

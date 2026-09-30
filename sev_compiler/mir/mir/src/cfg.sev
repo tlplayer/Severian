@@ -1,4 +1,4 @@
-import "../../../hir/module/module.sev" as model_hir_module_module
+import "../../../hir/modules/module.sev" as model_hir_module_module
 import "../../cfg/branch.sev" as model_mir_cfg_branch
 import "../../cfg/cfg.sev" as model_mir_cfg_cfg
 import "../../../syntax/generic/value.sev" as model_mir_value

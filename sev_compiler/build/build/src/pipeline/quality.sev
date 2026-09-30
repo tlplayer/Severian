@@ -1,4 +1,4 @@
-import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../hir/modules/module.sev" as model_hir_module_module
 import package
 import source
 import "package:mir/mir/src/quality.sev" as quality

@@ -1,6 +1,0 @@
-def invalid(value: int) -> int:
-    match value:
-        case value + 1:
-            return 1
-        case _:
-            return 0

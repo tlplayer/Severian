@@ -1,4 +1,4 @@
-import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../hir/modules/module.sev" as model_hir_module_module
 import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import package
 

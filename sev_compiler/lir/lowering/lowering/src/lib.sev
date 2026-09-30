@@ -1,4 +1,4 @@
-import "package:hir/module/module.sev" as hir
+import "package:hir/modules/module.sev" as hir
 import "package:syntax/symbol/symbol.sev" as symbols
 import "package:syntax/function/function.sev" as callable
 import "package:mlir/mlir/src/emit/callable.sev" as emission

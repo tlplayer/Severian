@@ -1,4 +1,4 @@
-import "../../../../hir/module/module.sev" as model_hir_module_module
+import "../../../../hir/modules/module.sev" as model_hir_module_module
 import "../../../cfg/cfg.sev" as model_mir_cfg_cfg
 import "../../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../../syntax/primitive/catalog.sev" as model_syntax_primitive_catalog

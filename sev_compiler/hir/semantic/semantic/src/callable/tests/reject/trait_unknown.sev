@@ -1,2 +1,0 @@
-def twice[T: Missing](value: T) -> T:
-    return value + value

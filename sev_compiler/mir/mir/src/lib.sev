@@ -1,4 +1,4 @@
-import "../../../hir/module/module.sev" as model_hir_module_module
+import "../../../hir/modules/module.sev" as model_hir_module_module
 import "cfg.sev" as _dependency_cfg
 import "../../ownership/ownership/src/plan.sev" as _dependency_plan
 import "passes.sev" as _dependency_passes
