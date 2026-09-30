@@ -172,6 +172,7 @@ class bool: Boolean :
     identity: PrimitiveId = BoolPrimitive().identity
     mlir: MlirTypeBinding = BoolPrimitive().mlir
     id: TypeId = BoolPrimitive().id
+    token_kind: string = BoolPrimitive().token_kind
     literal: LiteralSyntax | None = BoolPrimitive().literal
     literal_family: string = BoolPrimitive().literal_family
     literal_bindings: list[LiteralBinding] = BoolPrimitive().literal_bindings

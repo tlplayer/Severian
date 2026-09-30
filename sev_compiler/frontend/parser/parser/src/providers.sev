@@ -48,7 +48,7 @@ def capture_window(parameter: FunctionParameter, tokens: list[lexer.Token], eof:
             name = parser_identifier(parser, "expected parameter capture")
             variadic = parser_take_symbol(parser, "...") != None
             annotation := named_type("Self", [], name[1])
-            if name[0] != "self" or not parser_at_simple(parser, lexer.TokenKind.Eof):
+            if name[0] != "self" or not parser_at_simple(parser, "Eof"):
                 parser_expect_symbol(parser, ":", "expected parameter type")
                 annotation = parser_type_annotation(parser)
             parameter_value = FunctionParameter(name[0], annotation, absent, name[1], variadic=variadic)
@@ -57,7 +57,7 @@ def capture_window(parameter: FunctionParameter, tokens: list[lexer.Token], eof:
             value.parameters.append(parameter_value)
         else:
             value.expressions.append(parser_expression(parser, 0))
-        if not parser_at_simple(parser, lexer.TokenKind.Eof):
+        if not parser_at_simple(parser, "Eof"):
             return error(diagnostics.diagnostic_at("E000120", "capture did not consume its source window", piece[0].span))
     return value
 
@@ -164,7 +164,7 @@ def resolve_provider_blocks(file: BlockFile, tokens: list[lexer.Token], declarat
         header ?= block.header
         if header != None:
             for token in tokens:
-                if token.span.start >= header.span.start and token.span.end <= header.span.end and token.kind not in [lexer.TokenKind.Newline, lexer.TokenKind.Indent, lexer.TokenKind.Dedent, lexer.TokenKind.Eof]:
+                if token.span.start >= header.span.start and token.span.end <= header.span.end and token.kind not in ["Newline", "Indent", "Dedent", "Eof"]:
                     window.append(token)
         recognized := false
         for declaration in declarations:

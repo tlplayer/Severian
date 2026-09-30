@@ -1,13 +1,11 @@
 import primitive_descriptors from "../../../../syntax/primitive/catalog.sev"
-import SymbolLexeme from "symbol.sev"
-import StringLexeme from "string.sev"
 import "../../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import source
 import diagnostics
 import LexemeInput, LexemeMatch, LexicalRule, lexeme_span, lexeme_text from "rule.sev"
-import Symbol, TokenKind, callable, span from "identifier.sev"
+import Symbol, callable, span from "identifier.sev"
 import "../../../../syntax/constraint/model.sev" as constraints
 import admissible_dispatch_candidates from "../../../../syntax/constraint/dispatch.sev"
 import BlockCaptureValue, BlockFieldValue from "../../../../syntax/generic/block.sev"
@@ -25,7 +23,6 @@ enum LexicalValue:
     Truth(truth: bool)
     Characters(characters: list[string])
     Input(input: LexemeInput)
-    Category(kind: TokenKind)
     Result(result: LexemeMatch)
     Location(span: source.Span)
     Failure(diagnostic: diagnostics.Diagnostic)
@@ -324,20 +321,20 @@ def lexical_call(frame: LexicalFrame, callee: model_syntax_function_function.Exp
             index += 1
         if not supplied[0] or not supplied[1]:
             return error(lexical_error("LexemeMatch requires end and kind", span))
-        token_kind: TokenKind | None := None
+        token_kind: string | None := None
         match slots[1]:
-            case Category:
-                token_kind = kind
+            case Text:
+                token_kind = text
             case Nothing:
-                throw diagnostics.diagnostic("E000105", "unimplemented (sev_compiler/frontend/lexer/lexer/src/runtime.sev)")
+                token_kind = None
             case _:
-                return error(lexical_error("LexemeMatch kind must be TokenKind or None", span))
+                return error(lexical_error("LexemeMatch kind must be string or None", span))
         normalized: string | None := None
         match slots[3]:
             case Text:
                 normalized = text
             case Nothing:
-                throw diagnostics.diagnostic("E000105", "unimplemented (sev_compiler/frontend/lexer/lexer/src/runtime.sev)")
+                normalized = None
             case _:
                 return error(lexical_error("LexemeMatch value must be string or None", span))
         return LexicalValue.Result(LexemeMatch(lexical_number(slots[0], span), token_kind, lexical_truth(slots[2], span), normalized))
@@ -448,18 +445,25 @@ def lexical_expression(frame: LexicalFrame, expression: model_syntax_function_fu
         case Name:
             return lexical_get(frame, name, span)
         case Member:
-            if lexical_path(object) == "TokenKind":
+            if name == "token_kind":
+                owner := lexical_path(object)
+                index := 0
+                for parameter in frame.type_names:
+                    if parameter == owner:
+                        owner = frame.type_values[index]
+                        break
+                    index += 1
                 for primitive in primitive_descriptors():
-                    kind ?= primitive.token_kind
-                    if kind != None and primitive.token_name == name:
-                        return LexicalValue.Category(kind)
-                symbol = SymbolLexeme([])
-                if symbol.token_name == name:
-                    return LexicalValue.Category(symbol.token_kind)
-                text = StringLexeme()
-                if text.formatted_token_name == name:
-                    return LexicalValue.Category(text.formatted_token_kind)
-                return error(lexical_error("unknown or structural token category " + name, span))
+                    if primitive.name == owner or (primitive.default_literal and primitive.literal_family == owner):
+                        return LexicalValue.Text(primitive.token_kind)
+                declaration ?= frame.rule.declaration
+                if declaration != None and owner in ["Self", declaration.name]:
+                    for field in declaration.fields:
+                        if field.name == "token_kind":
+                            value ?= field.default
+                            if value != None:
+                                return LexicalValue.Text(lexical_text(lexical_expression(frame, value), span))
+                    return LexicalValue.Text("Identifier")
             receiver = lexical_expression(frame, object)
             match receiver:
                 case BlockReference:
@@ -756,13 +760,13 @@ test "unique lexical with selects a body within a source window":
     location = lexeme_span(input, 0, 1)
     rule = lexical_constraint_fixture("Accepted", true, location)
     end = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_function_function.LiteralValue.IntegerValue("1")), location)
-    category = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("TokenKind"), location)
-    kind = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Member(category, "Integer"), location)
+    category = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("int"), location)
+    kind = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Member(category, "token_kind"), location)
     constructor = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("LexemeMatch"), location)
     call = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Call(constructor, [model_syntax_function_function.CallArgument(None, end, location), model_syntax_function_function.CallArgument(None, kind, location)]), location)
     rule.methods[0].body = model_syntax_block_block.Block([model_syntax_block_block.Statement.Return(call, location)])
     result = match_source_rules([rule], input, 0)
-    assert(result.matched and result.kind == TokenKind.Integer)
+    assert(result.matched and result.kind == "Integer")
     assert(result.end == 1)
     assert(lexeme_span(input, 0, result.end).start == 1)
 
@@ -830,3 +834,13 @@ def lexical_capture_value(frame: LexicalFrame, name: string, value: LexicalValue
             return error(lexical_error("value cannot initialize a block field", span))
     result.spans.append(span)
     return result
+
+
+test "lexical type parameters obtain token strings from their resolved type":
+    location = source.Span(source.SourceId(0), 0, 12)
+    rule = SourceLexicalRule("Example", [], location)
+    frame = LexicalFrame(rule, [100], type_names=["T"], type_values=["int"])
+    owner = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("T"), location)
+    member = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Member(owner, "token_kind"), location)
+    result = lexical_expression(frame, member)
+    assert(lexical_text(result, location) == "Integer")

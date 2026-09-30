@@ -2,14 +2,14 @@ import source
 import "package:syntax/function/function.sev" as callable
 import AbiId, ArtifactId, AssertionLocation, AssertionOrigin, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, CoverageKind, CoveragePoint, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, IndexedId, InferVarId, InterfaceId, Lexeme, LexemeTerm, LocalId, ModuleId, NamedId, OpId, PackageId, PrimitiveId, ProviderId, QualityRegion, RegionId, ScopeId, SourceFile, SourceId, SourceMap, Span, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TypeBinding, TypeConstructorBinding, TypeId, ValueId, VariantId, definition_from_key, load, named_definition, same_definition, semantic_digest, semantic_key, source_id, span, utf8_offset, virtual_source from "../../../../../syntax/generic/lexeme.sev"
 
-import TokenKind, TokenTerm from "package:syntax/generic/token.sev"
+import TokenTerm from "package:syntax/generic/token.sev"
 import primitives
 import syntax
 
 # To is the classified lexical object handed to the parser. Its original
 # spelling remains available even when its literal payload is normalized.
 class Token: TokenTerm
-    kind: TokenKind
+    kind: string
     span: source.Span
     lexeme: Lexeme
     syntaxes: list[syntax.OperatorSyntax] = []
@@ -41,7 +41,7 @@ def checked_token[To: TokenTerm](token: To) -> To:
     return token
 
 
-def token_from_lexeme(kind: TokenKind, lexeme: Lexeme, value: string | None = None, providers: list[primitives.PrimitiveDescriptor] | None = None) -> Token:
+def token_from_lexeme(kind: string, lexeme: Lexeme, value: string | None = None, providers: list[primitives.PrimitiveDescriptor] | None = None) -> Token:
     token = checked_token(Token(kind, lexeme.span, lexeme, value=value))
     available ?= providers
     if available != None:
@@ -63,4 +63,12 @@ def token_number(token: Token) -> string:
 
 
 def token_is_symbol(token: Token, spelling: string) -> bool:
-    return token.kind == TokenKind.Symbol and string(token) == spelling
+    return token.kind == "Symbol" and string(token) == spelling
+
+
+test "token categories are open strings with preserved source identity":
+    location = source.Span(source.SourceId(0), 0, 3)
+    token = token_from_lexeme("CustomLiteral", Lexeme("xyz", location), providers=[])
+    assert(token.kind == "CustomLiteral")
+    assert(token.span == location)
+    assert(token.literal == None)

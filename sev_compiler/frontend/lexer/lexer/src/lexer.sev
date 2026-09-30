@@ -2,7 +2,7 @@ import source
 import diagnostics
 import "token/mod.sev" as _dependency_mod
 import LexemeInput, LexemeMatch, LexicalRule, lexeme_input, lexeme_span, lexeme_text from "rule.sev"
-import AbiId, ArtifactId, AssertionLocation, AssertionOrigin, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, CoverageKind, CoveragePoint, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, IdentifierLexeme, IndexedId, InferVarId, InterfaceId, Lexeme, LexemeTerm, LocalId, ModuleId, NamedId, OpId, PackageId, PrimitiveId, ProviderId, QualityRegion, RegionId, ScopeId, SourceFile, SourceId, SourceMap, Span, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TokenKind, TokenTerm, TypeBinding, TypeConstructorBinding, TypeId, ValueId, VariantId, definition_from_key, load, named_definition, same_definition, semantic_digest, semantic_key, source_id, span, utf8_offset, virtual_source from "identifier.sev"
+import AbiId, ArtifactId, AssertionLocation, AssertionOrigin, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, CoverageKind, CoveragePoint, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, IdentifierLexeme, IndexedId, InferVarId, InterfaceId, Lexeme, LexemeTerm, LocalId, ModuleId, NamedId, OpId, PackageId, PrimitiveId, ProviderId, QualityRegion, RegionId, ScopeId, SourceFile, SourceId, SourceMap, Span, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TokenTerm, TypeBinding, TypeConstructorBinding, TypeId, ValueId, VariantId, definition_from_key, load, named_definition, same_definition, semantic_digest, semantic_key, source_id, span, utf8_offset, virtual_source from "identifier.sev"
 import NumericLexeme from "number.sev"
 import StringLexeme, block_string, decode_four, decode_three, decode_two, literal_codepoint, literal_escape, valid, width from "string.sev"
 import LexicalSymbol, SymbolLexeme, lexical_symbols, match_symbol from "symbol.sev"
@@ -57,11 +57,11 @@ test "generic lexical rule entry preserves concrete token values":
     assert(number.matched)
     if number.matched:
         assert(number.end == 2)
-        assert(number.kind == TokenKind.Integer)
+        assert(number.kind == "Integer")
     identifier = lex(IdentifierLexeme(), input, 3)
     assert(identifier.matched)
     if identifier.matched:
         assert(identifier.end == 7)
-        assert(identifier.kind == TokenKind.Identifier)
+        assert(identifier.kind == "Identifier")
     assert(not lex(NumericLexeme(), input, 3).matched)
     assert(not lex(IdentifierLexeme(), input, 7).matched)

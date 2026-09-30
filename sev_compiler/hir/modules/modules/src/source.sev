@@ -171,13 +171,13 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
     depth := 0
     index := 0
     for token in tokens:
-        if token.kind == lexer.TokenKind.Indent:
+        if token.kind == "Indent":
             depth += 1
-        elif token.kind == lexer.TokenKind.Dedent:
+        elif token.kind == "Dedent":
             depth -= 1
         if depth == 0 and lexer.token_word(token) == "from" and index + 2 < len(tokens) and lexer.token_word(tokens[index + 2]) == "import":
             child := ""
-            if tokens[index + 1].kind == lexer.TokenKind.String:
+            if tokens[index + 1].kind == "String":
                 child = import_source(resolution, file.path, string(tokens[index + 1]), sysroot)
             else:
                 child = dependency_source(resolution, file.path, lexer.token_word(tokens[index + 1]), sysroot)
@@ -189,17 +189,17 @@ def discover_source_syntax(input: source.SourceFile, active: list[string], files
                 if subject + 2 >= len(tokens) or lexer.token_word(tokens[subject + 1]) != "from":
                     return error(diagnostics.diagnostic("E000120", "expected `from` after `import *`"))
                 subject += 2
-                if tokens[subject].kind not in [lexer.TokenKind.String, lexer.TokenKind.Identifier]:
+                if tokens[subject].kind not in ["String", "Identifier"]:
                     return error(diagnostics.diagnostic("E000120", "expected a source or package after `import * from`"))
-            elif tokens[subject].kind != lexer.TokenKind.String:
+            elif tokens[subject].kind != "String":
                 cursor := subject
-                while cursor + 1 < len(tokens) and tokens[cursor].kind not in [lexer.TokenKind.Newline, lexer.TokenKind.Eof]:
+                while cursor + 1 < len(tokens) and tokens[cursor].kind not in ["Newline", "Eof"]:
                     if lexer.token_word(tokens[cursor]) == "from":
                         subject = cursor + 1
                         break
                     cursor += 1
             match tokens[subject].kind:
-                case String:
+                case "String":
                     child = import_source(resolution, file.path, string(tokens[subject]), sysroot)
                     discover_source_syntax(read_known_source(child, files), stack, files, registry, resolution, sysroot)
                 case _:

@@ -2,7 +2,7 @@ import diagnostics
 import primitives
 import syntax
 import "token/mod.sev" as _dependency_mod
-import LexemeInput, LexemeMatch, LexicalRule, TokenKind, lexeme_span from "rule.sev"
+import LexemeInput, LexemeMatch, LexicalRule, lexeme_span from "rule.sev"
 
 
 class NumericLexeme: LexicalRule

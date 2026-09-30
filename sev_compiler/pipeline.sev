@@ -25,9 +25,9 @@ def has_tests(location: string) -> bool:
     tokens = lexer.scan_bootstrap(source.load(location))
     depth := 0
     for token in tokens:
-        if token.kind == lexer.TokenKind.Indent:
+        if token.kind == "Indent":
             depth += 1
-        elif token.kind == lexer.TokenKind.Dedent:
+        elif token.kind == "Dedent":
             depth -= 1
         elif depth == 0 and lexer.token_word(token) == "test":
             return true

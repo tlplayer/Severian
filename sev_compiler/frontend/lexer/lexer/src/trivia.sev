@@ -1,6 +1,6 @@
 import diagnostics
 import "token/mod.sev" as _dependency_mod
-import LexemeInput, LexemeMatch, LexicalRule, TokenKind from "rule.sev"
+import LexemeInput, LexemeMatch, LexicalRule from "rule.sev"
 
 
 class TriviaLexeme: LexicalRule
@@ -10,7 +10,7 @@ class TriviaLexeme: LexicalRule
         if character == " " or character == "\t" or character == "\r":
             return LexemeMatch(start + 1, None)
         if character == "\n" or character == ";":
-            return LexemeMatch(start + 1, TokenKind.Newline)
+            return LexemeMatch(start + 1, "Newline")
         if character == "#":
             cursor := start
             while cursor < len(characters) and characters[cursor] != "\n":

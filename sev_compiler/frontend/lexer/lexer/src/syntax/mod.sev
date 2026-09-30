@@ -5,7 +5,7 @@ import diagnostics
 import RecordDeclaration from "../../../../../syntax/function/function.sev"
 import "../../../../../syntax/function/function.sev" as model_syntax_function_function
 import Token, token_is_symbol, token_number from "../token/mod.sev"
-import SourceLexicalRule, TokenKind, span from "../runtime.sev"
+import SourceLexicalRule, span from "../runtime.sev"
 
 
 class SyntaxProperty:
@@ -46,7 +46,7 @@ def symbol_syntaxes(operators: list[model_syntax_function_syntax.OperatorSyntax]
 
 def token_word(token: Token) -> string:
     match token.kind:
-        case Identifier:
+        case "Identifier":
             return string(token)
         case _:
             return ""
@@ -63,53 +63,53 @@ def discover_operator_descriptors(tokens: list[Token], registry: SyntaxRegistry)
             cursor += 2
             bases: list[string] = []
             in_bases := false
-            while cursor < len(tokens) and tokens[cursor].kind != Newline and tokens[cursor].kind != Eof:
+            while cursor < len(tokens) and tokens[cursor].kind != "Newline" and tokens[cursor].kind != "Eof":
                 if token_is_symbol(tokens[cursor], ":"):
                     in_bases = true
                 elif in_bases and token_word(tokens[cursor]) != "":
                     bases.append(token_word(tokens[cursor]))
                 cursor += 1
-            while cursor < len(tokens) and tokens[cursor].kind == Newline:
+            while cursor < len(tokens) and tokens[cursor].kind == "Newline":
                 cursor += 1
             properties: list[SyntaxProperty] = []
-            if cursor < len(tokens) and tokens[cursor].kind == Indent:
+            if cursor < len(tokens) and tokens[cursor].kind == "Indent":
                 cursor += 1
                 nested := 1
                 line_start := true
                 while cursor < len(tokens) and nested > 0:
                     current = tokens[cursor]
-                    if current.kind == Indent:
+                    if current.kind == "Indent":
                         nested += 1
-                    elif current.kind == Dedent:
+                    elif current.kind == "Dedent":
                         nested -= 1
                     if nested == 1 and line_start:
                         property_cursor := cursor
                         # Trait bodies may inherit a contract by naming it on
                         # its own line, just as declaration headers do.
-                        if token_word(current) != "" and cursor + 1 < len(tokens) and tokens[cursor + 1].kind == Newline:
+                        if token_word(current) != "" and cursor + 1 < len(tokens) and tokens[cursor + 1].kind == "Newline":
                             bases.append(token_word(current))
                         if token_word(current) == "property":
                             property_cursor += 1
                         if property_cursor + 1 < len(tokens) and (token_is_symbol(tokens[property_cursor + 1], ":") or token_is_symbol(tokens[property_cursor + 1], "=")):
                             property_name = token_word(tokens[property_cursor])
                             property_cursor += 1
-                            while property_cursor < len(tokens) and not token_is_symbol(tokens[property_cursor], "=") and tokens[property_cursor].kind != Newline and tokens[property_cursor].kind != Eof:
+                            while property_cursor < len(tokens) and not token_is_symbol(tokens[property_cursor], "=") and tokens[property_cursor].kind != "Newline" and tokens[property_cursor].kind != "Eof":
                                 property_cursor += 1
                             if property_cursor < len(tokens) and token_is_symbol(tokens[property_cursor], "="):
                                 property_cursor += 1
                                 values: list[Token] = []
-                                while property_cursor < len(tokens) and tokens[property_cursor].kind != Newline and tokens[property_cursor].kind != Eof:
+                                while property_cursor < len(tokens) and tokens[property_cursor].kind != "Newline" and tokens[property_cursor].kind != "Eof":
                                     values.append(tokens[property_cursor])
                                     property_cursor += 1
                                 properties.append(SyntaxProperty(property_name, values))
-                    line_start = current.kind == Newline or current.kind == Dedent
+                    line_start = current.kind == "Newline" or current.kind == "Dedent"
                     cursor += 1
             end = tokens[cursor].span.start if cursor < len(tokens) else tokens[-1].span.end
             registry.descriptors.append(OperatorDescriptor(name, bases, properties, token.span, grammar=word == "grammar", end=end))
             continue
-        if token.kind == Indent:
+        if token.kind == "Indent":
             depth += 1
-        elif token.kind == Dedent:
+        elif token.kind == "Dedent":
             depth -= 1
         cursor += 1
 
@@ -194,12 +194,12 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                 if property.name == "symbol":
                     symbol = ""
                     for token in property.tokens:
-                        if token.kind == TokenKind.String or token.kind == TokenKind.Symbol or token.kind == TokenKind.Identifier:
+                        if token.kind == "String" or token.kind == "Symbol" or token.kind == "Identifier":
                             symbol += string(token)
                         else:
                             return error(diagnostics.diagnostic_at("E000103", "expected a source symbol", descriptor.span))
                 elif property.name in ["closing", "separator"]:
-                    if len(property.tokens) != 1 or property.tokens[0].kind != TokenKind.String or string(property.tokens[0]) == "":
+                    if len(property.tokens) != 1 or property.tokens[0].kind != "String" or string(property.tokens[0]) == "":
                         return error(diagnostics.diagnostic_at("E000103", "delimiter properties require nonempty strings", descriptor.span))
                     if property.name == "closing":
                         closing = string(property.tokens[0])
@@ -213,7 +213,7 @@ def resolve_operator_descriptors(registry: SyntaxRegistry) -> unit | diagnostics
                     if len(property.tokens) != 1:
                         return error(diagnostics.diagnostic_at("E000103", "operator precedence must be a constant integer", descriptor.span))
                     match property.tokens[0].kind:
-                        case Integer:
+                        case "Integer":
                             precedence = int(token_number(property.tokens[0]))
                         case _:
                             if token_word(property.tokens[0]) == "absent":

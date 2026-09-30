@@ -3,7 +3,7 @@ import AbiId, ArtifactId, AttrValue, AttributeId, BindingId, BlockId, CompiledRe
 import Constructor, Conversion, ConversionKind, Size, TypeRef from "../generic/type.sev"
 import AssertionLocation, AssertionOrigin, CoverageKind, CoveragePoint, QualityRegion, SourceFile, SourceId, SourceMap, Span, load, source_id, span, utf8_offset, virtual_source from "../source.sev"
 
-import Lexeme, LexemeTerm, TokenKind, TokenTerm from "../generic/token.sev"
+import Lexeme, LexemeTerm, TokenTerm from "../generic/token.sev"
 
 enum PrimitiveCategory:
     Boolean
@@ -36,8 +36,6 @@ trait Primitive: Type + Y + L + MlirTypeProvider
     identity: PrimitiveId
     id: TypeId
     category: PrimitiveCategory
-    token_kind: TokenKind | None
-    token_name: string
     representation: PrimitiveRepresentation
 
 trait PrimitiveAlias[T]: Primitive

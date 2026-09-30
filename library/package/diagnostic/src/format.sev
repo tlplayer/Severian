@@ -26,7 +26,7 @@ def import_layout(tokens: list[lexer.Token], start: int) -> int:
     cursor := start
     while cursor < len(
         tokens,
-    ) and tokens[cursor].kind in [lexer.TokenKind.Newline, lexer.TokenKind.Indent, lexer.TokenKind.Dedent]:
+    ) and tokens[cursor].kind in ["Newline", "Indent", "Dedent"]:
         cursor += 1
     return cursor
 
@@ -39,12 +39,12 @@ def format_imports(text: string) -> string | Error:
     while index + 3 < len(tokens):
         token = tokens[index]
         start = int(token.span.start)
-        if token.kind != lexer.TokenKind.Identifier or string(
+        if token.kind != "Identifier" or string(
             token,
         ) != "from" or (start > 0 and text[start - 1:start] != "\n"):
             index += 1
             continue
-        if tokens[index + 1].kind != lexer.TokenKind.Identifier or string(
+        if tokens[index + 1].kind != "Identifier" or string(
             tokens[index + 2],
         ) != "import":
             index += 1
@@ -61,7 +61,7 @@ def format_imports(text: string) -> string | Error:
         valid := true
         end := start
         while cursor < len(tokens):
-            if tokens[cursor].kind != lexer.TokenKind.Identifier:
+            if tokens[cursor].kind != "Identifier":
                 valid = false
                 break
             member := string(tokens[cursor])
@@ -71,7 +71,7 @@ def format_imports(text: string) -> string | Error:
                 cursor += 1
                 if cursor >= len(
                     tokens,
-                ) or tokens[cursor].kind != lexer.TokenKind.Identifier:
+                ) or tokens[cursor].kind != "Identifier":
                     valid = false
                     break
                 member += " as " + string(tokens[cursor])
@@ -97,7 +97,7 @@ def format_imports(text: string) -> string | Error:
         else:
             valid = valid and cursor < len(
                 tokens,
-            ) and tokens[cursor].kind in [lexer.TokenKind.Newline, lexer.TokenKind.Eof]
+            ) and tokens[cursor].kind in ["Newline", "Eof"]
         if valid and len(members) > 0 and not text[start:end].contains("#"):
             parts.append(text[retained:start])
             parts.append(format_import_list(package_name, members, grouped))
@@ -136,7 +136,7 @@ def format_call_open(tokens: list[lexer.Token], index: int) -> bool:
         return false
     previous = tokens[index - 1]
     spelling = string(previous)
-    if previous.kind != lexer.TokenKind.Identifier and spelling not in [")", "]"]:
+    if previous.kind != "Identifier" and spelling not in [")", "]"]:
         return false
     if spelling in ["if", "elif", "else", "while", "for", "with", "match", "case", "return", "throw", "yield", "not", "and", "or", "in", "is", "as"]:
         return false
@@ -183,7 +183,7 @@ def format_call_pass(text: string, width: int) -> string | Error:
             token = tokens[cursor]
             spelling = string(token)
             # Literal spelling is opaque, even when it is exactly a delimiter.
-            if token.kind in [lexer.TokenKind.String, lexer.TokenKind.FormattedString, lexer.TokenKind.Character]:
+            if token.kind in ["String", "FormattedString", "Character"]:
                 cursor += 1
                 continue
             if spelling in ["(", "[", "{"]:

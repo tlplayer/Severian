@@ -152,6 +152,7 @@ class i8: SignedInteger :
     identity: PrimitiveId = I8Primitive().identity
     mlir: MlirTypeBinding = I8Primitive().mlir
     id: TypeId = I8Primitive().id
+    token_kind: string = I8Primitive().token_kind
     literal: LiteralSyntax | None = I8Primitive().literal
     literal_family: string = I8Primitive().literal_family
     literal_bindings: list[LiteralBinding] = I8Primitive().literal_bindings
@@ -171,6 +172,7 @@ class i16: SignedInteger :
     identity: PrimitiveId = I16Primitive().identity
     mlir: MlirTypeBinding = I16Primitive().mlir
     id: TypeId = I16Primitive().id
+    token_kind: string = I16Primitive().token_kind
     literal: LiteralSyntax | None = I16Primitive().literal
     literal_family: string = I16Primitive().literal_family
     literal_bindings: list[LiteralBinding] = I16Primitive().literal_bindings
@@ -190,6 +192,7 @@ class i32: SignedInteger :
     identity: PrimitiveId = I32Primitive().identity
     mlir: MlirTypeBinding = I32Primitive().mlir
     id: TypeId = I32Primitive().id
+    token_kind: string = I32Primitive().token_kind
     literal: LiteralSyntax | None = I32Primitive().literal
     literal_family: string = I32Primitive().literal_family
     literal_bindings: list[LiteralBinding] = I32Primitive().literal_bindings
@@ -209,6 +212,7 @@ class i64: SignedInteger :
     identity: PrimitiveId = I64Primitive().identity
     mlir: MlirTypeBinding = I64Primitive().mlir
     id: TypeId = I64Primitive().id
+    token_kind: string = I64Primitive().token_kind
     literal: LiteralSyntax | None = I64Primitive().literal
     literal_family: string = I64Primitive().literal_family
     literal_bindings: list[LiteralBinding] = I64Primitive().literal_bindings
@@ -228,6 +232,7 @@ class i128: SignedInteger :
     identity: PrimitiveId = I128Primitive().identity
     mlir: MlirTypeBinding = I128Primitive().mlir
     id: TypeId = I128Primitive().id
+    token_kind: string = I128Primitive().token_kind
     literal: LiteralSyntax | None = I128Primitive().literal
     literal_family: string = I128Primitive().literal_family
     literal_bindings: list[LiteralBinding] = I128Primitive().literal_bindings
@@ -247,6 +252,7 @@ class isize: SignedInteger :
     identity: PrimitiveId = I64Primitive().identity
     mlir: MlirTypeBinding = I64Primitive().mlir
     id: TypeId = I64Primitive().id
+    token_kind: string = I64Primitive().token_kind
     literal: LiteralSyntax | None = I64Primitive().literal
     literal_family: string = I64Primitive().literal_family
     literal_bindings: list[LiteralBinding] = I64Primitive().literal_bindings
@@ -266,6 +272,7 @@ class u8: UnsignedInteger :
     identity: PrimitiveId = U8Primitive().identity
     mlir: MlirTypeBinding = U8Primitive().mlir
     id: TypeId = U8Primitive().id
+    token_kind: string = U8Primitive().token_kind
     literal: LiteralSyntax | None = U8Primitive().literal
     literal_family: string = U8Primitive().literal_family
     literal_bindings: list[LiteralBinding] = U8Primitive().literal_bindings
@@ -285,6 +292,7 @@ class u16: UnsignedInteger :
     identity: PrimitiveId = U16Primitive().identity
     mlir: MlirTypeBinding = U16Primitive().mlir
     id: TypeId = U16Primitive().id
+    token_kind: string = U16Primitive().token_kind
     literal: LiteralSyntax | None = U16Primitive().literal
     literal_family: string = U16Primitive().literal_family
     literal_bindings: list[LiteralBinding] = U16Primitive().literal_bindings
@@ -304,6 +312,7 @@ class u32: UnsignedInteger :
     identity: PrimitiveId = U32Primitive().identity
     mlir: MlirTypeBinding = U32Primitive().mlir
     id: TypeId = U32Primitive().id
+    token_kind: string = U32Primitive().token_kind
     literal: LiteralSyntax | None = U32Primitive().literal
     literal_family: string = U32Primitive().literal_family
     literal_bindings: list[LiteralBinding] = U32Primitive().literal_bindings
@@ -323,6 +332,7 @@ class u64: UnsignedInteger :
     identity: PrimitiveId = U64Primitive().identity
     mlir: MlirTypeBinding = U64Primitive().mlir
     id: TypeId = U64Primitive().id
+    token_kind: string = U64Primitive().token_kind
     literal: LiteralSyntax | None = U64Primitive().literal
     literal_family: string = U64Primitive().literal_family
     literal_bindings: list[LiteralBinding] = U64Primitive().literal_bindings
@@ -342,6 +352,7 @@ class u128: UnsignedInteger :
     identity: PrimitiveId = U128Primitive().identity
     mlir: MlirTypeBinding = U128Primitive().mlir
     id: TypeId = U128Primitive().id
+    token_kind: string = U128Primitive().token_kind
     literal: LiteralSyntax | None = U128Primitive().literal
     literal_family: string = U128Primitive().literal_family
     literal_bindings: list[LiteralBinding] = U128Primitive().literal_bindings
@@ -361,6 +372,7 @@ class usize: UnsignedInteger :
     identity: PrimitiveId = U64Primitive().identity
     mlir: MlirTypeBinding = U64Primitive().mlir
     id: TypeId = U64Primitive().id
+    token_kind: string = U64Primitive().token_kind
     literal: LiteralSyntax | None = U64Primitive().literal
     literal_family: string = U64Primitive().literal_family
     literal_bindings: list[LiteralBinding] = U64Primitive().literal_bindings
@@ -422,6 +434,7 @@ class int: Integer:
     identity: PrimitiveId = I64Primitive().identity
     mlir: MlirTypeBinding = I64Primitive().mlir
     id: TypeId = I64Primitive().id
+    token_kind: string = I64Primitive().token_kind
     literal: LiteralSyntax | None = I64Primitive().literal
     literal_family: string = I64Primitive().literal_family
     literal_bindings: list[LiteralBinding] = I64Primitive().literal_bindings

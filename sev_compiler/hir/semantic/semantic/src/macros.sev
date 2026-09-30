@@ -5,7 +5,6 @@ import "../../../../syntax/function/function.sev" as model_syntax_function_funct
 import "../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import lexer
 import diagnostics
-from lexer import TokenKind
 import parser
 import source
 import "../../../../syntax/primitive/catalog.sev" as scalar
@@ -27,7 +26,7 @@ class ScalarMacro:
 def macro_identifier(input: parser.Parser) -> string:
     token = parser.parser_next(input)
     match token.kind:
-        case Identifier:
+        case "Identifier":
             return string(token)
         case _:
             throw Error("expected macro identifier")
@@ -74,28 +73,28 @@ def macro_definition(input: parser.Parser) -> ScalarMacro:
             throw Error("duplicate macro type binding")
         seen.append(binding)
     parser.parser_expect_symbol(input, ":", "expected macro body")
-    parser.parser_expect(input, Newline, "expected newline after macro")
+    parser.parser_expect(input, "Newline", "expected newline after macro")
     parser.parser_separators(input)
-    parser.parser_expect(input, Indent, "expected indented macro body")
+    parser.parser_expect(input, "Indent", "expected indented macro body")
     tokens: list[lexer.Token] = []
     functions: list[string] = []
     depth := 1
     while depth > 0:
         token = parser.parser_next(input)
-        if token.kind == Eof:
+        if token.kind == "Eof":
             throw Error("unterminated macro body")
-        if token.kind == Indent:
+        if token.kind == "Indent":
             depth += 1
-        elif token.kind == Dedent:
+        elif token.kind == "Dedent":
             depth -= 1
         if depth == 0:
             break
         if depth == 1:
             match token.kind:
-                case Identifier:
+                case "Identifier":
                     if string(token) == "def":
                         match parser.parser_peek(input).kind:
-                            case Identifier:
+                            case "Identifier":
                                 functions.append(string(parser.parser_peek(input)))
                             case _:
                                 throw Error("expected generated function name")
@@ -109,11 +108,11 @@ def macro_definition(input: parser.Parser) -> ScalarMacro:
 
 def macro_property(type: scalar.ScalarType, name: string, lexeme: lexer.Lexeme) -> lexer.Token:
     if name == "id":
-        return lexer.token_from_lexeme(lexer.TokenKind.Integer, lexeme, "" + string(type.id.index))
+        return lexer.token_from_lexeme("Integer", lexeme, "" + string(type.id.index))
     if name == "bits":
-        return lexer.token_from_lexeme(lexer.TokenKind.Integer, lexeme, "" + string(type.bits))
+        return lexer.token_from_lexeme("Integer", lexeme, "" + string(type.bits))
     if name == "signed":
-        return lexer.token_from_lexeme(lexer.TokenKind.Identifier, lexeme, "true" if type.signed else "false")
+        return lexer.token_from_lexeme("Identifier", lexeme, "true" if type.signed else "false")
     if type.representation == "float":
         throw Error("unsupported floating type " + name)
     lower = scalar.integer_minimum(type)
@@ -126,13 +125,13 @@ def macro_property(type: scalar.ScalarType, name: string, lexeme: lexer.Lexeme) 
     else:
         upper = string(1 << (int(type.bits) - (1 if type.signed else 0)))
     if name == "min":
-        return lexer.token_from_lexeme(lexer.TokenKind.Integer, lexeme, lower)
+        return lexer.token_from_lexeme("Integer", lexeme, lower)
     if name == "max":
-        return lexer.token_from_lexeme(lexer.TokenKind.Integer, lexeme, maximum)
+        return lexer.token_from_lexeme("Integer", lexeme, maximum)
     if name == "min_float":
-        return lexer.token_from_lexeme(lexer.TokenKind.Float, lexeme, lower + ".0")
+        return lexer.token_from_lexeme("Float", lexeme, lower + ".0")
     if name == "upper_float":
-        return lexer.token_from_lexeme(lexer.TokenKind.Float, lexeme, upper + ".0")
+        return lexer.token_from_lexeme("Float", lexeme, upper + ".0")
     throw Error("unsupported scalar type " + name)
 
 
@@ -226,28 +225,28 @@ def macro_instance(definition: ScalarMacro, types: list[scalar.ScalarType], outp
         cursor += 1
         replacement := token
         match token.kind:
-            case Identifier:
+            case "Identifier":
                 value = string(token)
                 index := 0
                 for binding in definition.bindings:
                     if value == binding:
-                        replacement = lexer.token_from_lexeme(lexer.TokenKind.Identifier, token.lexeme, types[index].name)
+                        replacement = lexer.token_from_lexeme("Identifier", token.lexeme, types[index].name)
                         if cursor + 1 < len(definition.tokens) and lexer.token_is_symbol(definition.tokens[cursor], "."):
                             match definition.tokens[cursor + 1].kind:
-                                case Identifier:
+                                case "Identifier":
                                     replacement = macro_property(types[index], string(definition.tokens[cursor + 1]), token.lexeme)
                                 case _:
                                     throw Error("expected scalar type property")
                             cursor += 2
                     index += 1
                 if value in definition.functions:
-                    replacement = lexer.token_from_lexeme(lexer.TokenKind.Identifier, token.lexeme, value + suffix)
+                    replacement = lexer.token_from_lexeme("Identifier", token.lexeme, value + suffix)
             case _:
                 throw Error("unimplemented (sev_compiler/hir/semantic/semantic/src/macros.sev)")
         tokens.append(replacement)
     end = definition.tokens[-1].span
     eof_span = source.Span(end.source, end.end, end.end)
-    tokens.append(lexer.token_from_lexeme(Eof, lexer.Lexeme("", eof_span)))
+    tokens.append(lexer.token_from_lexeme("Eof", lexer.Lexeme("", eof_span)))
     expanded = parser.parse(tokens)
     for item in expanded.items:
         match item:
@@ -307,7 +306,7 @@ def parse_module(tokens: list[lexer.Token], source_blocks: model_syntax_block_bl
     invoked: list[string] = []
     depth := 0
     line_start := true
-    while not parser.parser_at_simple(input, Eof):
+    while not parser.parser_at_simple(input, "Eof"):
         if depth == 0 and line_start and parser.parser_at_symbol(input, "->"):
             definition = macro_definition(input)
             for previous in definitions:
@@ -334,15 +333,15 @@ def parse_module(tokens: list[lexer.Token], source_blocks: model_syntax_block_bl
                     parser.parser_expect_symbol(input, "]", "expected end of macro family arguments")
                     parser.parser_expect_symbol(input, "(", "expected macro invocation")
                     parser.parser_expect_symbol(input, ")", "enumerative macros take no runtime arguments")
-                    parser.parser_expect(input, Newline, "macro invocation must occupy a statement")
+                    parser.parser_expect(input, "Newline", "macro invocation must occupy a statement")
                     invocation = true
         if not invocation:
             token = parser.parser_next(input)
-            if token.kind == Indent:
+            if token.kind == "Indent":
                 depth += 1
-            elif token.kind == Dedent:
+            elif token.kind == "Dedent":
                 depth -= 1
-            line_start = token.kind == Newline or token.kind == Dedent
+            line_start = token.kind == "Newline" or token.kind == "Dedent"
             ordinary.append(token)
     ordinary.append(parser.parser_next(input))
     result = parser.parse(ordinary, source_blocks)

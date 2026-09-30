@@ -27,7 +27,7 @@ import "../../block/case.sev" as _block_case
 import "../../block/class.sev" as _block_class
 import "../../block/trait.sev" as _block_trait
 import "../../block/enum.sev" as _block_enum
-import TokenKind, TokenTerm from "../../generic/token.sev"
+import TokenTerm from "../../generic/token.sev"
 
 import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider from "../../type/mlir.sev"
 import BackendId, BinaryOperation, CanonicalRewrite, DialectId, EffectSet, IrContext, LoweredOperation, LoweringCapability, LoweringRequirements, MlirObject, OperationDiagnostic, OperationId, OperationInterface, OperationRegistry, RegisteredOperation, RuntimeId, UnaryOperation, allocate_effect, attribute_id, backend_id, dialect_id, free_effect, hashing, io_effect, named_operation, no_effects, operation_id, provider_id, read_effect, runtime_id, scalar_boundary, scalar_operand_segments, scalar_requirement_names, scalar_requirements, throw_effect, write_effect from "../../function/lowering.sev"

@@ -1,5 +1,5 @@
 import Lexeme, LexemeTerm from "lexeme.sev"
-import TokenKind, TokenTerm from "token.sev"
+import TokenTerm from "token.sev"
 import DefId, ScopeId, TypeId from "../symbol/symbol.sev"
 
 # A symbol owns the matched spelling, classified token, and semantic context.

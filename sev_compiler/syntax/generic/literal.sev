@@ -1,4 +1,3 @@
-import TokenKind from "token.sev"
 
 enum LiteralSyntax:
     Integer
@@ -12,7 +11,7 @@ enum LiteralSyntax:
     Unit
 
 class LiteralBinding:
-    token: TokenKind
+    token: string
     spellings: list[string] = []
 
 

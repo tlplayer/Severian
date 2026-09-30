@@ -129,6 +129,7 @@ class f8e4m3fn: Floating :
     identity: PrimitiveId = F8E4M3FnPrimitive().identity
     mlir: MlirTypeBinding = F8E4M3FnPrimitive().mlir
     id: TypeId = F8E4M3FnPrimitive().id
+    token_kind: string = F8E4M3FnPrimitive().token_kind
     literal: LiteralSyntax | None = F8E4M3FnPrimitive().literal
     literal_family: string = F8E4M3FnPrimitive().literal_family
     literal_bindings: list[LiteralBinding] = F8E4M3FnPrimitive().literal_bindings
@@ -151,6 +152,7 @@ class f8e5m2: Floating :
     identity: PrimitiveId = F8E5M2Primitive().identity
     mlir: MlirTypeBinding = F8E5M2Primitive().mlir
     id: TypeId = F8E5M2Primitive().id
+    token_kind: string = F8E5M2Primitive().token_kind
     literal: LiteralSyntax | None = F8E5M2Primitive().literal
     literal_family: string = F8E5M2Primitive().literal_family
     literal_bindings: list[LiteralBinding] = F8E5M2Primitive().literal_bindings
@@ -173,6 +175,7 @@ class bf16: Floating :
     identity: PrimitiveId = BF16Primitive().identity
     mlir: MlirTypeBinding = BF16Primitive().mlir
     id: TypeId = BF16Primitive().id
+    token_kind: string = BF16Primitive().token_kind
     literal: LiteralSyntax | None = BF16Primitive().literal
     literal_family: string = BF16Primitive().literal_family
     literal_bindings: list[LiteralBinding] = BF16Primitive().literal_bindings
@@ -195,6 +198,7 @@ class f16: Floating :
     identity: PrimitiveId = F16Primitive().identity
     mlir: MlirTypeBinding = F16Primitive().mlir
     id: TypeId = F16Primitive().id
+    token_kind: string = F16Primitive().token_kind
     literal: LiteralSyntax | None = F16Primitive().literal
     literal_family: string = F16Primitive().literal_family
     literal_bindings: list[LiteralBinding] = F16Primitive().literal_bindings
@@ -217,6 +221,7 @@ class f32: Floating :
     identity: PrimitiveId = F32Primitive().identity
     mlir: MlirTypeBinding = F32Primitive().mlir
     id: TypeId = F32Primitive().id
+    token_kind: string = F32Primitive().token_kind
     literal: LiteralSyntax | None = F32Primitive().literal
     literal_family: string = F32Primitive().literal_family
     literal_bindings: list[LiteralBinding] = F32Primitive().literal_bindings
@@ -239,6 +244,7 @@ class f64: Floating :
     identity: PrimitiveId = F64Primitive().identity
     mlir: MlirTypeBinding = F64Primitive().mlir
     id: TypeId = F64Primitive().id
+    token_kind: string = F64Primitive().token_kind
     literal: LiteralSyntax | None = F64Primitive().literal
     literal_family: string = F64Primitive().literal_family
     literal_bindings: list[LiteralBinding] = F64Primitive().literal_bindings
@@ -261,6 +267,7 @@ class f128: Floating :
     identity: PrimitiveId = F128Primitive().identity
     mlir: MlirTypeBinding = F128Primitive().mlir
     id: TypeId = F128Primitive().id
+    token_kind: string = F128Primitive().token_kind
     literal: LiteralSyntax | None = F128Primitive().literal
     literal_family: string = F128Primitive().literal_family
     literal_bindings: list[LiteralBinding] = F128Primitive().literal_bindings
@@ -315,6 +322,7 @@ class float: Floating:
     identity: PrimitiveId = F64Primitive().identity
     mlir: MlirTypeBinding = F64Primitive().mlir
     id: TypeId = F64Primitive().id
+    token_kind: string = F64Primitive().token_kind
     literal: LiteralSyntax | None = F64Primitive().literal
     literal_family: string = F64Primitive().literal_family
     literal_bindings: list[LiteralBinding] = F64Primitive().literal_bindings

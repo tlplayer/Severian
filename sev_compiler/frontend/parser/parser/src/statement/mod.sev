@@ -10,7 +10,6 @@ import "../../../../../syntax/sentence/sentence.sev" as model_syntax_sentence_se
 import "../../../../../syntax/type/annotation.sev" as model_syntax_type_annotation
 import "../../../../../syntax/type/system.sev" as model_syntax_type_system
 import lexer
-from lexer import TokenKind
 import diagnostics
 from diagnostics import Diagnostic
 import source
@@ -63,7 +62,7 @@ def formatted_string_expression(value: string, span: source.Span, syntaxes: list
         expression_parser = Parser(interpolation_tokens)
         parsed_expression = parser_expression(expression_parser, 0)
         parser_separators(expression_parser)
-        if not parser_at_simple(expression_parser, Eof):
+        if not parser_at_simple(expression_parser, "Eof"):
             return error(diagnostics.Diagnostic("E000113", "unexpected token in formatted string interpolation", span))
         parts.append(model_syntax_function_function.Expression(model_syntax_function_function.Stringify(parsed_expression), span))
         cursor += 1
@@ -96,17 +95,14 @@ def parser_next(parser: Parser) -> lexer.Token:
     return token
 
 def parser_at_identifier(parser: Parser, expected: string) -> bool:
-    match parser_peek(parser).kind:
-        case Identifier:
-            return string(parser_peek(parser)) == expected
-        case _:
-            throw Error("unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
-    return false
+    token = parser_peek(parser)
+    return token.kind == "Identifier" and string(token) == expected
 
-def parser_at_simple(parser: Parser, expected: lexer.TokenKind) -> bool:
+
+def parser_at_simple(parser: Parser, expected: string) -> bool:
     return parser_peek(parser).kind == expected
 
-def parser_take(parser: Parser, expected: lexer.TokenKind) -> lexer.Token | None:
+def parser_take(parser: Parser, expected: string) -> lexer.Token | None:
     if parser_at_simple(parser, expected):
         return parser_next(parser)
     return None
@@ -116,14 +112,12 @@ def parser_fail(parser: Parser, message: string) -> diagnostics.Diagnostic:
 
 def parser_identifier(parser: Parser, message: string) -> tuple[string, source.Span] | diagnostics.Diagnostic:
     token = parser_next(parser)
-    match token.kind:
-        case Identifier:
-            return (string(token), token.span)
-        case _:
-            throw diagnostics.diagnostic("E000113", "unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
+    if token.kind == "Identifier":
+        return (string(token), token.span)
     return error(diagnostics.Diagnostic("E000120", message, token.span))
 
-def parser_expect(parser: Parser, expected: lexer.TokenKind, message: string) -> lexer.Token | diagnostics.Diagnostic:
+
+def parser_expect(parser: Parser, expected: string, message: string) -> lexer.Token | diagnostics.Diagnostic:
     token ?= parser_take(parser, expected)
     if token != None:
         return token
@@ -147,14 +141,14 @@ def parser_expect_symbol(parser: Parser, spelling: string, message: string) -> l
 
 
 def parser_separators(parser: Parser):
-    while parser_at_simple(parser, Newline) or parser_at_symbol(parser, ","):
+    while parser_at_simple(parser, "Newline") or parser_at_symbol(parser, ","):
         parser_next(parser)
 
 
 # Layout inside an explicit delimiter separates list items, not statements.
 # Keep the original tokens and spans; only the delimited parser consumes it.
 def parser_delimited_layout(parser: Parser):
-    while parser_at_simple(parser, Newline) or parser_at_simple(parser, Indent) or parser_at_simple(parser, Dedent):
+    while parser_at_simple(parser, "Newline") or parser_at_simple(parser, "Indent") or parser_at_simple(parser, "Dedent"):
         parser_next(parser)
 
 def parser_module(parser: Parser) -> model_hir_module_module.Module | diagnostics.Diagnostic:
@@ -165,7 +159,7 @@ def parser_module(parser: Parser) -> model_hir_module_module.Module | diagnostic
     if len(parser.tokens) > 0:
         result.block_declarations = parser.tokens[0].block_declarations[:]
     parser_separators(parser)
-    while not parser_at_simple(parser, Eof):
+    while not parser_at_simple(parser, "Eof"):
         if parser_declaration_syntax(parser).grammar_form == "Declaration":
             result.items.append(model_hir_module_module.Record(parser_named_declaration(parser, parser_declaration_syntax(parser))))
         elif parser_at_symbol(parser, "@"):
@@ -236,19 +230,19 @@ def parser_scalar_decorator(parser: Parser) -> model_syntax_function_syntax.Deco
             parser_next(parser)
         token = parser_next(parser)
         match token.kind:
-            case String:
+            case "String":
                 arguments.append(model_syntax_function_syntax.DecoratorArgument(argument_name, model_syntax_function_syntax.DecoratorValue.String(string(token)), token.span))
             case _:
                 return error(parser_fail(parser, "decorator requires string arguments"))
         if parser_take_symbol(parser, ",") == None:
             break
     end = parser_expect_symbol(parser, ")", "expected closing decorator parenthesis").span
-    parser_expect(parser, Newline, "expected newline after decorator")
+    parser_expect(parser, "Newline", "expected newline after decorator")
     return model_syntax_function_syntax.Decorator(name, arguments, source.Span(start.source, start.start, end.end))
 
 def parser_selective_imports(parser: Parser) -> list[model_syntax_function_syntax.ImportDeclaration] | diagnostics.Diagnostic:
     parser_next(parser)
-    locator = parser_at_simple(parser, String)
+    locator = parser_at_simple(parser, "String")
     package_name := ""
     if locator:
         package_name = string(parser_next(parser))
@@ -257,7 +251,7 @@ def parser_selective_imports(parser: Parser) -> list[model_syntax_function_synta
     if not parser_at_identifier(parser, "import"):
         return error(parser_fail(parser, "expected import after source package"))
     parser_next(parser)
-    multiline = parser_at_simple(parser, Newline)
+    multiline = parser_at_simple(parser, "Newline")
     if multiline:
         parser_delimited_layout(parser)
     grouped = parser_take_symbol(parser, "{") != None
@@ -299,7 +293,7 @@ def parser_selective_imports(parser: Parser) -> list[model_syntax_function_synta
 
 def parser_import_members(parser: Parser) -> list[model_syntax_function_syntax.ImportDeclaration] | diagnostics.Diagnostic:
     start = parser_next(parser).span
-    if parser_at_simple(parser, String):
+    if parser_at_simple(parser, "String"):
         locator = parser_next(parser)
         if not parser_at_identifier(parser, "as"):
             return error(parser_fail(parser, "file namespace imports require an explicit as alias"))
@@ -332,7 +326,7 @@ def parser_import_members(parser: Parser) -> list[model_syntax_function_syntax.I
         result.append(model_syntax_function_syntax.ImportDeclaration(model_syntax_function_syntax.ImportSubject.Name(names[0]), None, aliases[0], source.Span(start.source, start.start, parser_peek(parser).span.start)))
         return result
     parser_next(parser)
-    locator = parser_at_simple(parser, String)
+    locator = parser_at_simple(parser, "String")
     origin := ""
     if locator:
         origin = string(parser_next(parser))
@@ -409,17 +403,17 @@ def parser_declaration_constraints(parser: Parser, attachments: list[model_synta
     if not parser_at_identifier(parser, "with"):
         return constraints
     parser_next(parser)
-    while parser_take(parser, Newline) != None:
+    while parser_take(parser, "Newline") != None:
         continue
     if callable and not parser_at_symbol(parser, "{"):
         attachments.append(model_syntax_constraint_model.WithAttachment(model_syntax_constraint_model.AttachmentRole.Dispatch, parser_expression(parser, 0)))
         return constraints
     parser_expect_symbol(parser, "{", "expected { after declaration with")
-    multiline = parser_take(parser, Newline) != None
+    multiline = parser_take(parser, "Newline") != None
     if multiline:
-        parser_expect(parser, Indent, "expected indented declaration constraints")
+        parser_expect(parser, "Indent", "expected indented declaration constraints")
     parser_separators(parser)
-    while not parser_at_symbol(parser, "}") and not parser_at_simple(parser, Dedent):
+    while not parser_at_symbol(parser, "}") and not parser_at_simple(parser, "Dedent"):
         if callable and (parser_at_identifier(parser, "entry") or parser_at_identifier(parser, "fix") or parser_at_identifier(parser, "exit")):
             role := model_syntax_constraint_model.AttachmentRole.Entry
             if parser_at_identifier(parser, "fix"):
@@ -440,7 +434,7 @@ def parser_declaration_constraints(parser: Parser, attachments: list[model_synta
         parser_take_symbol(parser, ",")
         parser_separators(parser)
     if multiline:
-        parser_expect(parser, Dedent, "expected end of declaration constraints")
+        parser_expect(parser, "Dedent", "expected end of declaration constraints")
     parser_expect_symbol(parser, "}", "expected } after declaration constraints")
     return constraints
 
@@ -521,18 +515,18 @@ def parser_ownership_mode(parser: Parser) -> string:
 
 
 def parser_at_type_alias(parser: Parser) -> bool:
-    if parser_at_simple(parser, Integer):
+    if parser_at_simple(parser, "Integer"):
         return false
     cursor := parser.cursor[0]
     depth := 0
     while cursor < len(parser.tokens):
         token = parser.tokens[cursor]
         if depth == 0:
-            if token.kind == Newline or token.kind == Dedent or token.kind == Eof:
+            if token.kind == "Newline" or token.kind == "Dedent" or token.kind == "Eof":
                 return false
             if lexer.token_is_symbol(token, "=") or lexer.token_is_symbol(token, ":=") or lexer.token_is_symbol(token, ":") or lexer.token_is_symbol(token, ";"):
                 return false
-            if token.kind == Identifier and string(token) == "as":
+            if token.kind == "Identifier" and string(token) == "as":
                 return true
         if lexer.token_is_symbol(token, "[") or lexer.token_is_symbol(token, "(") or lexer.token_is_symbol(token, "{"):
             depth += 1
@@ -581,7 +575,7 @@ def parser_trait_declaration(parser: Parser, decorators: list[model_syntax_funct
         constraints.append(constraint)
     bases: list[model_syntax_type_annotation.TypeAnnotation] = []
     parser_expect_symbol(parser, ":", "expected trait bases or body")
-    if not parser_at_simple(parser, Newline):
+    if not parser_at_simple(parser, "Newline"):
         while true:
             bases.append(parser_type_annotation(parser))
             if parser_take_symbol(parser, "+") == None:
@@ -591,9 +585,9 @@ def parser_trait_declaration(parser: Parser, decorators: list[model_syntax_funct
     operators: list[model_syntax_function_syntax.OperatorDeclaration] = []
     methods: list[model_syntax_function_function.FunctionDeclaration] = []
     parser_separators(parser)
-    if parser_take(parser, Indent) != None:
+    if parser_take(parser, "Indent") != None:
         parser_separators(parser)
-        while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+        while not parser_at_simple(parser, "Dedent") and not parser_at_simple(parser, "Eof"):
             if parser_at_identifier(parser, "def"):
                 methods.append(parser_function_declaration(parser, []))
             elif parser_at_identifier(parser, "operator"):
@@ -627,7 +621,7 @@ def parser_trait_declaration(parser: Parser, decorators: list[model_syntax_funct
                 # A bare type in a trait body is an inherited contract.
                 bases.append(parser_type_annotation(parser))
             parser_separators(parser)
-        parser_expect(parser, Dedent, "expected end of trait")
+        parser_expect(parser, "Dedent", "expected end of trait")
     return model_syntax_function_syntax.TraitDeclaration(decorators, name, generic_parts[0], constraints, bases, properties, operators, source.Span(start.source, start.start, parser_peek(parser).span.start), methods=methods, compiler_descriptor=start_token.descriptor, grammar=start_token.grammar, type_defaults=defaults)
 
 
@@ -641,9 +635,9 @@ def parser_operator_declaration(parser: Parser) -> model_syntax_function_syntax.
         symbol = syntax.symbol
     else:
         match token.kind:
-            case Identifier:
+            case "Identifier":
                 symbol = string(token)
-            case Symbol:
+            case "Symbol":
                 symbol = string(token)
             case _:
                 return error(parser_fail(parser, "expected a registered operator symbol"))
@@ -700,9 +694,9 @@ def parser_destructor(operation: model_syntax_function_syntax.OperatorDeclaratio
 
 def parser_test_declaration(parser: Parser) -> model_syntax_function_syntax.TestDeclaration | diagnostics.Diagnostic:
     start = parser_next(parser).span
-    if parser_at_simple(parser, Newline):
+    if parser_at_simple(parser, "Newline"):
         parser_separators(parser)
-    if parser_at_symbol(parser, "[") or (not parser_at_identifier(parser, "with") and parser_peek(parser).kind == Identifier):
+    if parser_at_symbol(parser, "[") or (not parser_at_identifier(parser, "with") and parser_peek(parser).kind == "Identifier"):
         return parser_case_test(parser, start)
     modes: list[string] = []
     mode_arguments: list[model_syntax_function_syntax.TestModeArguments] = []
@@ -724,7 +718,7 @@ def parser_test_declaration(parser: Parser) -> model_syntax_function_syntax.Test
             parser_next(parser)
     name: string | None := None
     match parser_peek(parser).kind:
-        case String:
+        case "String":
             name = string(parser_next(parser))
         case _:
             throw diagnostics.diagnostic("E000113", "unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
@@ -745,13 +739,13 @@ def parser_test_declaration(parser: Parser) -> model_syntax_function_syntax.Test
         parser_next(parser)
     parser_expect_symbol(parser, ":", "expected colon after test")
     if "compiler" in modes:
-        parser_expect(parser, Newline, "expected newline after compiler test")
+        parser_expect(parser, "Newline", "expected newline after compiler test")
         parser_separators(parser)
-        parser_expect(parser, Indent, "expected compiler test body")
+        parser_expect(parser, "Indent", "expected compiler test body")
         cases: list[model_syntax_function_syntax.CompilerTestCase] = []
         setup: list[model_syntax_sentence_sentence.Statement] = []
         parser_separators(parser)
-        while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+        while not parser_at_simple(parser, "Dedent") and not parser_at_simple(parser, "Eof"):
             case_start = parser_peek(parser).span
             expectation: CompilerExpectation := Accept
             if parser_at_identifier(parser, "reject"):
@@ -762,30 +756,30 @@ def parser_test_declaration(parser: Parser) -> model_syntax_function_syntax.Test
                 continue
             parser_next(parser)
             parser_expect_symbol(parser, ":", "expected colon after compiler expectation")
-            parser_expect(parser, Newline, "expected newline after compiler case")
+            parser_expect(parser, "Newline", "expected newline after compiler case")
             parser_separators(parser)
-            parser_expect(parser, Indent, "expected compiler case body")
+            parser_expect(parser, "Indent", "expected compiler case body")
             tokens: list[lexer.Token] = []
             depth := 1
             delimiters := 0
             # A dedented closing delimiter still belongs to this case. An
             # unclosed expression must not swallow the following test case.
-            while depth > 0 or (delimiters > 0 and (parser_at_simple(parser, Newline) or parser_at_symbol(parser, ")") or parser_at_symbol(parser, "]") or parser_at_symbol(parser, "}"))):
+            while depth > 0 or (delimiters > 0 and (parser_at_simple(parser, "Newline") or parser_at_symbol(parser, ")") or parser_at_symbol(parser, "]") or parser_at_symbol(parser, "}"))):
                 token = parser_next(parser)
-                if token.kind == Eof:
+                if token.kind == "Eof":
                     return error(parser_fail(parser, "unterminated compiler case"))
                 if lexer.token_is_symbol(token, "(") or lexer.token_is_symbol(token, "[") or lexer.token_is_symbol(token, "{"):
                     delimiters += 1
                 elif lexer.token_is_symbol(token, ")") or lexer.token_is_symbol(token, "]") or lexer.token_is_symbol(token, "}"):
                     delimiters -= 1
-                if token.kind == Indent:
+                if token.kind == "Indent":
                     depth += 1
-                elif token.kind == Dedent:
+                elif token.kind == "Dedent":
                     depth -= 1
-                if depth > 0 or delimiters > 0 or token.kind != Dedent:
+                if depth > 0 or delimiters > 0 or token.kind != "Dedent":
                     tokens.append(token)
             end = parser_peek(parser).span
-            tokens.append(lexer.token_from_lexeme(Eof, lexer.Lexeme("", source.Span(end.source, end.start, end.start))))
+            tokens.append(lexer.token_from_lexeme("Eof", lexer.Lexeme("", source.Span(end.source, end.start, end.start))))
             if len(setup) != 0:
                 cases.append(model_syntax_function_syntax.CompilerTestCase(Accept, None, model_syntax_block_block.Block(setup[:]), case_start))
             parsed ?= parser_compiler_case(Parser(tokens), expectation, setup, case_start)
@@ -794,7 +788,7 @@ def parser_test_declaration(parser: Parser) -> model_syntax_function_syntax.Test
             if parsed is CompilerTestCase:
                 cases.append(parsed)
             parser_separators(parser)
-        end = parser_expect(parser, Dedent, "expected end of compiler test").span.end
+        end = parser_expect(parser, "Dedent", "expected end of compiler test").span.end
         return model_syntax_function_syntax.TestDeclaration(name, modes, model_syntax_block_block.Block(), cases, source.Span(start.source, start.start, end), mode_arguments=mode_arguments)
     block = parser_owned_body(parser, "test")
     return model_syntax_function_syntax.TestDeclaration(name, modes, block[0], [], source.Span(start.source, start.start, block[1]), mode_arguments=mode_arguments, contracts=contracts)
@@ -854,7 +848,7 @@ def parser_case_test(parser: Parser, start: source.Span) -> model_syntax_functio
     if not parser_at_identifier(parser, "cases"):
         return error(parser_fail(parser, "expected cases mode"))
     parser_next(parser)
-    if parser_peek(parser).kind == String:
+    if parser_peek(parser).kind == "String":
         label = string(parser_next(parser))
     if not product:
         parser_delimited_layout(parser)
@@ -890,7 +884,7 @@ def parser_compiler_case(parser: Parser, expectation: model_syntax_function_synt
     statements = setup[:]
     declarations: list[model_hir_module_module.Item] = []
     parser_separators(parser)
-    while not parser_at_simple(parser, Eof):
+    while not parser_at_simple(parser, "Eof"):
         if parser_declaration_syntax(parser).grammar_form == "Declaration":
             declarations.append(model_hir_module_module.Record(parser_named_declaration(parser, parser_declaration_syntax(parser))))
         elif parser_at_identifier(parser, "class"):
@@ -1021,7 +1015,7 @@ def parser_block_statement(parser: Parser) -> model_syntax_sentence_sentence.Sta
         return model_syntax_sentence_sentence.Statement.Throw(value, source.Span(start.source, start.start, value.span.end))
     if parser_at_identifier(parser, "return"):
         start = parser_next(parser).span
-        if parser_at_simple(parser, Newline) or parser_at_simple(parser, Dedent):
+        if parser_at_simple(parser, "Newline") or parser_at_simple(parser, "Dedent"):
             return model_syntax_sentence_sentence.Statement.Return(None, start)
         value = parser_expression(parser, 0)
         return model_syntax_sentence_sentence.Statement.Return(value, source.Span(start.source, start.start, value.span.end))
@@ -1042,12 +1036,12 @@ def parser_match_statement(parser: Parser) -> model_syntax_sentence_sentence.Sta
     start = parser_next(parser).span
     subject = parser_expression(parser, 0)
     parser_expect_symbol(parser, ":", "expected colon after match subject")
-    parser_expect(parser, Newline, "expected newline after match subject")
+    parser_expect(parser, "Newline", "expected newline after match subject")
     parser_separators(parser)
-    parser_expect(parser, Indent, "expected indented match arms")
+    parser_expect(parser, "Indent", "expected indented match arms")
     arms: list[model_syntax_sentence_sentence.MatchArm] = []
     parser_separators(parser)
-    while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+    while not parser_at_simple(parser, "Dedent") and not parser_at_simple(parser, "Eof"):
         arm_start = parser_peek(parser).span
         if not parser_at_identifier(parser, "case"):
             return error(parser_fail(parser, "expected case before match pattern"))
@@ -1060,7 +1054,7 @@ def parser_match_statement(parser: Parser) -> model_syntax_sentence_sentence.Sta
         else:
             pattern = parser_expression(parser, 0)
         parser_expect_symbol(parser, ":", "expected colon after match pattern")
-        if not parser_at_simple(parser, Newline):
+        if not parser_at_simple(parser, "Newline"):
             capture = "_"
             supplied ?= pattern
             if supplied != None:
@@ -1075,7 +1069,7 @@ def parser_match_statement(parser: Parser) -> model_syntax_sentence_sentence.Sta
         body = parser_owned_body(parser, "match arm")
         arms.append(model_syntax_sentence_sentence.MatchArm(body[0], binding_name=capture, annotation=annotation, span=arm_start, pattern=pattern))
         parser_separators(parser)
-    end = parser_expect(parser, Dedent, "expected end of match").span.end
+    end = parser_expect(parser, "Dedent", "expected end of match").span.end
     return model_syntax_sentence_sentence.Match(subject, arms, source.Span(start.source, start.start, end))
 
 def parser_simple_statement(parser: Parser) -> model_syntax_sentence_sentence.Statement | diagnostics.Diagnostic:
@@ -1092,14 +1086,14 @@ def parser_simple_statement(parser: Parser) -> model_syntax_sentence_sentence.St
         rhs = parser_expression(parser, 0)
         return model_syntax_sentence_sentence.FieldSet(value, rhs, value.span, update)
     if parser_take_symbol(parser, ":") != None:
-        parser_expect(parser, Newline, "expected newline after call block")
+        parser_expect(parser, "Newline", "expected newline after call block")
         statements: list[model_syntax_sentence_sentence.Statement] = [model_syntax_sentence_sentence.ExpressionStatement(value)]
-        if parser_take(parser, Indent) != None:
+        if parser_take(parser, "Indent") != None:
             parser_separators(parser)
-            while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+            while not parser_at_simple(parser, "Dedent") and not parser_at_simple(parser, "Eof"):
                 statements.append(parser_block_statement(parser))
                 parser_separators(parser)
-            parser_expect(parser, Dedent, "expected end of call block")
+            parser_expect(parser, "Dedent", "expected end of call block")
         condition = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), value.span)
         return model_syntax_sentence_sentence.Statement.If(condition, model_syntax_block_block.Block(statements), model_syntax_block_block.Block(), value.span)
     return model_syntax_sentence_sentence.ExpressionStatement(value)
@@ -1108,10 +1102,10 @@ def parser_looks_like_binding(parser: Parser) -> bool:
     if parser.cursor[0] + 1 >= len(parser.tokens):
         return false
     match parser.tokens[parser.cursor[0]].kind:
-        case Identifier:
+        case "Identifier":
             next = parser.tokens[parser.cursor[0] + 1]
             match next.kind:
-                case Identifier:
+                case "Identifier":
                     if parser.cursor[0] + 2 < len(parser.tokens):
                         return lexer.token_is_symbol(parser.tokens[parser.cursor[0] + 2], "=")
                 case _:
@@ -1126,7 +1120,7 @@ def parser_binding(parser: Parser) -> model_syntax_sentence_sentence.Binding | d
     name := parser_identifier(parser, "expected binding name")[0]
     annotation: model_syntax_type_annotation.TypeAnnotation | None := None
     match parser_peek(parser).kind:
-        case Identifier:
+        case "Identifier":
             annotation = model_syntax_type_annotation.named_type(name, [], start)
             name = parser_identifier(parser, "expected binding name after type")[0]
         case _:
@@ -1263,9 +1257,9 @@ def parse_postfix(parser: Parser) -> model_syntax_function_function.Expression |
     value := parser_primary(parser)
     continuation := false
     while true:
-        if parser_at_simple(parser, Newline):
+        if parser_at_simple(parser, "Newline"):
             cursor := parser.cursor[0] + 1
-            if cursor < len(parser.tokens) and parser.tokens[cursor].kind == Indent:
+            if cursor < len(parser.tokens) and parser.tokens[cursor].kind == "Indent":
                 cursor += 1
             if cursor < len(parser.tokens) and lexer.token_is_symbol(parser.tokens[cursor], "."):
                 continuation = continuation or cursor > parser.cursor[0] + 1
@@ -1357,9 +1351,9 @@ def parse_postfix(parser: Parser) -> model_syntax_function_function.Expression |
             break
     if continuation:
         cursor := parser.cursor[0]
-        while cursor < len(parser.tokens) and parser.tokens[cursor].kind == Newline:
+        while cursor < len(parser.tokens) and parser.tokens[cursor].kind == "Newline":
             cursor += 1
-        if cursor < len(parser.tokens) and parser.tokens[cursor].kind == Dedent:
+        if cursor < len(parser.tokens) and parser.tokens[cursor].kind == "Dedent":
             parser.cursor[0] = cursor + 1
     return value
 
@@ -1398,7 +1392,7 @@ def parse_primary(parser: Parser) -> model_syntax_function_function.Expression |
                 callee = model_syntax_function_function.Expression(model_syntax_function_function.Name(syntax.constructor), token.span)
             return model_syntax_function_function.Expression(model_syntax_function_function.Call(callee, arguments), span, grammar=syntax.definition)
     match token.kind:
-        case Identifier:
+        case "Identifier":
             value = string(token)
             if value == "throw":
                 raised = parse_expression(parser, 0)
@@ -1412,19 +1406,19 @@ def parse_primary(parser: Parser) -> model_syntax_function_function.Expression |
             if value == "absent":
                 return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.LiteralValue.AbsentValue), token.span, literal=lexer.token_literal(token))
             return model_syntax_function_function.Expression(model_syntax_function_function.Name(value), token.span)
-        case Integer:
+        case "Integer":
             value = lexer.token_number(token)
             return parser_numeric_suffix(parser, token, model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue(value)), token.span, literal=lexer.token_literal(token)))
-        case Float:
+        case "Float":
             value = lexer.token_number(token)
             return parser_numeric_suffix(parser, token, model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.FloatValue(value)), token.span, literal=lexer.token_literal(token)))
-        case Character:
+        case "Character":
             value = lexer.literal_codepoint(string(token))
             return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.CharacterValue(value)), token.span, literal=lexer.token_literal(token))
-        case String:
+        case "String":
             value = string(token)
             return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue(value)), token.span, literal=lexer.token_literal(token))
-        case FormattedString:
+        case "FormattedString":
             value = string(token)
             return formatted_string_expression(value, token.span, token.syntaxes, token.lexical_rules)
         case _:
@@ -1463,7 +1457,7 @@ def parse_primary(parser: Parser) -> model_syntax_function_function.Expression |
 
 def parser_numeric_suffix(parser: Parser, number: lexer.Token, value: model_syntax_function_function.Expression) -> model_syntax_function_function.Expression:
     suffix = parser_peek(parser)
-    if suffix.kind == TokenKind.Identifier and suffix.span.start == number.span.end:
+    if suffix.kind == "Identifier" and suffix.span.start == number.span.end:
         parser_next(parser)
         name = model_syntax_function_function.Expression(model_syntax_function_function.Name("literal_" + string(suffix)), suffix.span)
         span = source.Span(number.span.source, number.span.start, suffix.span.end)
@@ -1519,7 +1513,7 @@ def parser_type_arguments(parser: Parser) -> list[model_syntax_type_annotation.T
 
 
 def parse_type_primary(parser: Parser) -> model_syntax_type_annotation.TypeAnnotation | diagnostics.Diagnostic:
-    if parser_at_simple(parser, Integer):
+    if parser_at_simple(parser, "Integer"):
         token = parser_next(parser)
         return model_syntax_type_annotation.named_type(lexer.token_number(token), [], token.span)
     if parser_at_symbol(parser, "{"):
@@ -1545,7 +1539,7 @@ def token_operator(token: lexer.Token, fixity: model_syntax_function_syntax.Fixi
     # Formatted literals carry the registry for their embedded expressions;
     # that registry does not make the literal itself an operator.
     match token.kind:
-        case FormattedString:
+        case "FormattedString":
             return None
         case _:
             throw Error("unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
@@ -1579,7 +1573,7 @@ def parse(tokens: list[lexer.Token], source_blocks: model_syntax_block_block.Blo
 def parser_declaration_syntax(parser: Parser) -> model_syntax_function_syntax.OperatorSyntax:
     token = parser_peek(parser)
     for syntax in token.syntaxes:
-        if syntax.grammar_form == "Declaration" and string(token) == syntax.symbol and (token.kind == Identifier or token.kind == Symbol):
+        if syntax.grammar_form == "Declaration" and string(token) == syntax.symbol and (token.kind == "Identifier" or token.kind == Symbol):
             return syntax
     return model_syntax_function_syntax.OperatorSyntax("", model_syntax_function_syntax.Fixity.Prefix, 0, model_syntax_function_syntax.Associativity.None)
 
@@ -1588,13 +1582,13 @@ def parser_named_declaration(parser: Parser, syntax: model_syntax_function_synta
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected a declaration name")[0]
     parser_expect_symbol(parser, ":", "expected colon after declaration name")
-    parser_expect(parser, Newline, "expected newline after declaration name")
+    parser_expect(parser, "Newline", "expected newline after declaration name")
     parser_separators(parser)
-    parser_expect(parser, Indent, "expected indented declaration members")
+    parser_expect(parser, "Indent", "expected indented declaration members")
     alternatives: list[model_syntax_function_function.CallableAlternative] = []
     fields: list[model_syntax_function_function.FunctionParameter] = []
     parser_separators(parser)
-    while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+    while not parser_at_simple(parser, "Dedent") and not parser_at_simple(parser, "Eof"):
         member = parser_identifier(parser, "expected a declaration member")
         if syntax.declaration_members == "Fields":
             fields.append(parser_named_field(parser, member))
@@ -1617,9 +1611,9 @@ def parser_named_declaration(parser: Parser, syntax: model_syntax_function_synta
                     if parser_take_symbol(parser, "|") == None:
                         break
             alternatives.append(model_syntax_function_function.CallableAlternative(member[0], parameters, member[1], transitions=transitions))
-        parser_expect(parser, Newline, "expected newline after declaration member")
+        parser_expect(parser, "Newline", "expected newline after declaration member")
         parser_separators(parser)
-    end = parser_expect(parser, Dedent, "expected end of declaration").span.end
+    end = parser_expect(parser, "Dedent", "expected end of declaration").span.end
     if syntax.representation == "TaggedAggregate" and len(alternatives) == 0:
         return error(parser_fail(parser, "tagged type requires at least one alternative"))
     return model_syntax_function_function.RecordDeclaration(name, fields, [], source.Span(start.source, start.start, end), alternatives=alternatives, representation=syntax.representation, declaration_grammar=syntax.definition)
@@ -1637,14 +1631,14 @@ def parser_named_field(parser: Parser, field: tuple[string, source.Span]) -> mod
 def parser_field_constraints(parser: Parser) -> list[model_syntax_function_function.FieldConstraint] | diagnostics.Diagnostic:
     constraints: list[model_syntax_function_function.FieldConstraint] = []
     saved = parser.cursor[0]
-    while parser_at_simple(parser, Newline):
+    while parser_at_simple(parser, "Newline"):
         parser_next(parser)
     if parser_take_symbol(parser, "{") == None:
         parser.cursor[0] = saved
         return constraints
     parser_delimited_layout(parser)
     while not parser_at_symbol(parser, "}"):
-        if parser_at_simple(parser, Eof):
+        if parser_at_simple(parser, "Eof"):
             return error(parser_fail(parser, "expected } to close field constraints"))
         condition = parser_expression(parser, 0)
         parser_delimited_layout(parser)
@@ -1669,7 +1663,7 @@ def parser_sentence_declaration(parser: Parser) -> model_syntax_function_functio
     parameters: list[model_syntax_function_function.FunctionParameter] = []
     parser_delimited_layout(parser)
     while not parser_at_symbol(parser, "]"):
-        if parser_at_simple(parser, String):
+        if parser_at_simple(parser, "String"):
             fields.append(model_syntax_sentence_sentence.SentenceField.Literal(string(parser_next(parser))))
         else:
             capture = parser_identifier(parser, "expected a literal spelling or typed capture")
@@ -1729,7 +1723,7 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> model_
         generic_constraints = generic_parts[1]
     parser_expect_symbol(parser, ":", "expected colon after class name")
     traits: list[model_syntax_type_annotation.TypeAnnotation] = []
-    if not parser_at_simple(parser, Newline):
+    if not parser_at_simple(parser, "Newline"):
         while true:
             traits.append(parser_type_annotation(parser))
             if parser_take_symbol(parser, "+") == None:
@@ -1740,8 +1734,8 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> model_
     methods: list[model_syntax_function_function.FunctionDeclaration] = []
     operators: list[model_syntax_function_syntax.OperatorDeclaration] = []
     sentences: list[model_syntax_function_function.FunctionDeclaration] = []
-    if parser_take(parser, Indent) != None:
-        while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+    if parser_take(parser, "Indent") != None:
+        while not parser_at_simple(parser, "Dedent") and not parser_at_simple(parser, "Eof"):
             if parser_at_identifier(parser, "def"):
                 methods.append(parser_function_declaration(parser, []))
             elif parser_at_identifier(parser, "sentence"):
@@ -1766,7 +1760,7 @@ def parser_record_declaration(parser: Parser, extension: bool = false) -> model_
                     default = parser_expression(parser, 0)
                 fields.append(model_syntax_function_function.FunctionParameter(field[0], annotation, default, field[1], variadic=packed, field_constraints=constraints))
             parser_separators(parser)
-        parser_expect(parser, Dedent, "expected end of class")
+        parser_expect(parser, "Dedent", "expected end of class")
     return model_syntax_function_function.RecordDeclaration(record_name, fields, methods, source.Span(start.source, start.start, parser_peek(parser).span.start), traits=traits, operators=operators, type_parameters=parameters, constraints=generic_constraints, extension=extension, type_pack=pack[0] if len(pack) != 0 else "", type_defaults=defaults, extension_target=extension_target, sentences=sentences)
 
 
@@ -1774,14 +1768,14 @@ def parser_family_declaration(parser: Parser) -> model_syntax_function_syntax.Ty
     start = parser_next(parser).span
     name = parser_identifier(parser, "expected family name")[0]
     parser_expect_symbol(parser, ":", "expected family body")
-    parser_expect(parser, Newline, "expected family members")
-    parser_expect(parser, Indent, "expected indented family")
+    parser_expect(parser, "Newline", "expected family members")
+    parser_expect(parser, "Indent", "expected indented family")
     members: list[model_syntax_type_annotation.TypeAnnotation] = []
     parser_separators(parser)
-    while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+    while not parser_at_simple(parser, "Dedent") and not parser_at_simple(parser, "Eof"):
         members.append(parser_type_annotation(parser))
         parser_separators(parser)
-    parser_expect(parser, Dedent, "expected end of family")
+    parser_expect(parser, "Dedent", "expected end of family")
     return model_syntax_function_syntax.TypeDeclaration([], name, [], [], model_syntax_type_annotation.TypeAnnotation(model_syntax_type_annotation.Union(members), start), start)
 
 
@@ -1893,7 +1887,7 @@ def parser_branch_chain(parser: Parser) -> model_syntax_sentence_sentence.Statem
                     conditions.append(expression)
         header ?= discovered.header
         if header != None:
-            while parser_peek(parser).span.start < header.span.end and not parser_at_simple(parser, Eof):
+            while parser_peek(parser).span.start < header.span.end and not parser_at_simple(parser, "Eof"):
                 parser_next(parser)
     else:
         parser_next(parser)
@@ -1931,16 +1925,16 @@ def parser_owned_body(parser: Parser, owner: string) -> tuple[model_syntax_block
                 break
         if not found:
             return error(diagnostics.diagnostic_at("E000120", "body has no discovered introducing sentence", header_end))
-    parser_expect(parser, Newline, "expected newline after " + owner)
-    while parser_take(parser, Newline) != None:
+    parser_expect(parser, "Newline", "expected newline after " + owner)
+    while parser_take(parser, "Newline") != None:
         continue
-    start = parser_expect(parser, Indent, "expected indented " + owner + " body").span
+    start = parser_expect(parser, "Indent", "expected indented " + owner + " body").span
     statements: list[model_syntax_sentence_sentence.Statement] = []
     parser_separators(parser)
-    while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+    while not parser_at_simple(parser, "Dedent") and not parser_at_simple(parser, "Eof"):
         statements.append(parser_block_statement(parser))
         parser_separators(parser)
-    end = parser_expect(parser, Dedent, "expected end of " + owner + " body").span.end
+    end = parser_expect(parser, "Dedent", "expected end of " + owner + " body").span.end
     body.statements = statements
     if file != None:
         file.blocks[body.id.index] = body

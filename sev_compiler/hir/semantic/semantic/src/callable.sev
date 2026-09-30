@@ -1114,6 +1114,24 @@ def callable_expression_inner(state: CallableAnalysis, expression: model_syntax_
         case FieldReference:
             result_type = expression.type_id
         case Member:
+            if name == "token_kind" and callable_path(object) not in state.names:
+                annotation ?= callable_type_expression(object)
+                if annotation is model_syntax_type_annotation.TypeAnnotation:
+                    subject ?= callable_annotation(annotation, state.records, state.namespace, state.declarations)
+                    if subject is model_syntax_symbol_symbol.TypeId:
+                        category := "Identifier"
+                        primitive ?= scalar.primitive_descriptor(subject)
+                        if primitive != None:
+                            category = primitive.token_kind
+                        for record in state.records:
+                            if record.type_id.index == subject.index:
+                                for field in record.fields:
+                                    if field.name == "token_kind":
+                                        value ?= field.default
+                                        if value != None:
+                                            return callable_expression(state, value, model_syntax_primitive_declarations.string_type_id())
+                        literal = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue(category)), expression.span)
+                        return callable_expression(state, literal, expected)
             projecting = state.projecting
             state.projecting = true
             receiver = callable_expression(state, object, model_syntax_symbol_symbol.TypeId(0))
@@ -5295,3 +5313,15 @@ test "conditional constructor cannot silently fall back to its captures":
     block = model_syntax_block_block.Block(span=location)
     result ?= constructed_branch_condition(block)
     assert(result is diagnostics.Diagnostic)
+
+
+test "type token kind is a string property resolved through its type":
+    location = source.Span(source.SourceId(0), 0, 14)
+    owner = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("int"), location)
+    member = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Member(owner, "token_kind"), location)
+    value = callable_expression(CallableAnalysis(), member, model_syntax_primitive_declarations.string_type_id())
+    match value.kind:
+        case LiteralValue:
+            assert(value == model_syntax_literal_value.StringValue("Integer"))
+        case _:
+            assert(false)

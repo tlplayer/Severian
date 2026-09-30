@@ -69,7 +69,7 @@ def prelude_providers(file: source.SourceFile) -> list[model_syntax_function_syn
     input = parser.Parser(lexer.scan_bootstrap(file))
     result: list[model_syntax_function_syntax.ImportDeclaration] = []
     parser.parser_separators(input)
-    while not parser.parser_at_simple(input, lexer.TokenKind.Eof):
+    while not parser.parser_at_simple(input, "Eof"):
         if not parser.parser_at_identifier(input, "import"):
             return error(diagnostics.diagnostic("E000120", "prelude may only declare source imports"))
         result.append(parser.parser_import_declaration(input))

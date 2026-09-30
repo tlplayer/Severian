@@ -24,6 +24,7 @@ enum Size:
     Dynamic
 
 trait Type: Conversion
+    token_kind: string = "Identifier"
     name: string
     size: Size
     alignment: Size

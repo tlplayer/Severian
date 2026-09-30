@@ -2,7 +2,7 @@ import Lexeme, LexemeTerm, Span, Symbol, span from "lexeme.sev"
 
 
 trait TokenTerm:
-    kind: TokenKind
+    kind: string
     lexeme: Lexeme
     span: Span
 

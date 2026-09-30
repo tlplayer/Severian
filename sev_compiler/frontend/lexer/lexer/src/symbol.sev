@@ -2,7 +2,7 @@ import "../../../../syntax/function/syntax.sev" as model_syntax_function_syntax
 import profiling
 import diagnostics
 import "token/mod.sev" as _dependency_mod
-import LexemeInput, LexemeMatch, LexicalRule, TokenKind from "rule.sev"
+import LexemeInput, LexemeMatch, LexicalRule from "rule.sev"
 
 
 class LexicalSymbol:
@@ -57,8 +57,7 @@ def match_symbol(characters: list[string], cursor: int, symbols: list[LexicalSym
 
 class SymbolLexeme: LexicalRule
     symbols: list[LexicalSymbol]
-    token_name: string = "Symbol"
-    token_kind: TokenKind = TokenKind.Symbol
+    token_kind: string = "Symbol"
 
     def scan(input: LexemeInput, start: int) -> LexemeMatch | diagnostics.Diagnostic:
         symbol ?= match_symbol(input.characters, start, symbols)
