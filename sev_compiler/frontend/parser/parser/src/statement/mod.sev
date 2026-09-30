@@ -1,3 +1,5 @@
+import LiteralSyntax from "../../../../../syntax/generic/literal.sev"
+import BoolPrimitive, describe_primitive from "../../../../../syntax/primitive/catalog.sev"
 import branch_condition from "../../../../../syntax/block/if.sev"
 import "../../../../../hir/module/module.sev" as model_hir_module_module
 import "../../../../../syntax/block/block.sev" as model_syntax_block_block
@@ -1391,38 +1393,24 @@ def parse_primary(parser: Parser) -> model_syntax_function_function.Expression |
             if syntax.constructor != "":
                 callee = model_syntax_function_function.Expression(model_syntax_function_function.Name(syntax.constructor), token.span)
             return model_syntax_function_function.Expression(model_syntax_function_function.Call(callee, arguments), span, grammar=syntax.definition)
-    match token.kind:
-        case "Identifier":
-            value = string(token)
-            if value == "throw":
-                raised = parse_expression(parser, 0)
-                return model_syntax_function_function.Expression(model_syntax_function_function.ThrowValue(raised), source.Span(token.span.source, token.span.start, raised.span.end))
-            if value == "true":
-                return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(true)), token.span, literal=lexer.token_literal(token))
-            if value == "false":
-                return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.BooleanValue(false)), token.span, literal=lexer.token_literal(token))
-            if value == "None":
-                return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.LiteralValue.NoneValue), token.span, literal=lexer.token_literal(token))
-            if value == "absent":
-                return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.LiteralValue.AbsentValue), token.span, literal=lexer.token_literal(token))
-            return model_syntax_function_function.Expression(model_syntax_function_function.Name(value), token.span)
-        case "Integer":
-            value = lexer.token_number(token)
-            return parser_numeric_suffix(parser, token, model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.IntegerValue(value)), token.span, literal=lexer.token_literal(token)))
-        case "Float":
-            value = lexer.token_number(token)
-            return parser_numeric_suffix(parser, token, model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.FloatValue(value)), token.span, literal=lexer.token_literal(token)))
-        case "Character":
-            value = lexer.literal_codepoint(string(token))
-            return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.CharacterValue(value)), token.span, literal=lexer.token_literal(token))
-        case "String":
-            value = string(token)
-            return model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.StringValue(value)), token.span, literal=lexer.token_literal(token))
-        case "FormattedString":
-            value = string(token)
-            return formatted_string_expression(value, token.span, token.syntaxes, token.lexical_rules)
-        case _:
-            throw diagnostics.diagnostic("E000113", "unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
+    literal ?= token.literal
+    if literal != None:
+        expression = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(literal.value), token.span, literal=literal)
+        match literal.value:
+            case IntegerValue:
+                return parser_numeric_suffix(parser, token, expression)
+            case FloatValue:
+                return parser_numeric_suffix(parser, token, expression)
+            case _:
+                return expression
+    if token.kind == "Identifier":
+        value = string(token)
+        if value == "throw":
+            raised = parse_expression(parser, 0)
+            return model_syntax_function_function.Expression(model_syntax_function_function.ThrowValue(raised), source.Span(token.span.source, token.span.start, raised.span.end))
+        return model_syntax_function_function.Expression(model_syntax_function_function.Name(value), token.span)
+    if token.kind == "FormattedString":
+        return formatted_string_expression(string(token), token.span, token.syntaxes, token.lexical_rules)
     if lexer.token_is_symbol(token, "["):
         elements: list[model_syntax_function_function.Expression] = []
         parser_delimited_layout(parser)
@@ -1941,3 +1929,29 @@ def parser_owned_body(parser: Parser, owner: string) -> tuple[model_syntax_block
     else:
         body.span = source.Span(start.source, start.start, end)
     return (body, end)
+
+
+test "parser consumes declared literal values instead of keyword meanings":
+    input = source.virtual_source("declared-value.sev", "true")
+    tokens = lexer.scan_bootstrap(input)
+    provider = describe_primitive(BoolPrimitive())
+    provider.literal_syntaxes = [LiteralSyntax("Identifier", "true", model_syntax_literal_value.BooleanValue(false))]
+    tokens[0] = lexer.token_from_lexeme("Identifier", tokens[0].lexeme, providers=[provider])
+    expression = parser_expression(Parser(tokens), 0)
+    match expression.kind:
+        case LiteralValue:
+            assert(value == model_syntax_literal_value.BooleanValue(false))
+        case _:
+            assert(false)
+
+
+test "literal looking identifier has no built in meaning without a provider":
+    input = source.virtual_source("unprovided-value.sev", "true")
+    tokens = lexer.scan_bootstrap(input)
+    tokens[0] = lexer.token_from_lexeme("Identifier", tokens[0].lexeme, providers=[])
+    expression = parser_expression(Parser(tokens), 0)
+    match expression.kind:
+        case Name:
+            assert(name == "true")
+        case _:
+            assert(false)

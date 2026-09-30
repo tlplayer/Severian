@@ -1,4 +1,4 @@
-import BoolPrimitive, Constructor, LiteralBinding, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../declarations.sev"
+import BoolPrimitive, Constructor, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../declarations.sev"
 import Error from "../primitive.sev"
 
 import Bitwise, Equatable, Logical, Ordered from "../../function/trait.sev"
@@ -173,9 +173,8 @@ class bool: Boolean :
     mlir: MlirTypeBinding = BoolPrimitive().mlir
     id: TypeId = BoolPrimitive().id
     token_kind: string = BoolPrimitive().token_kind
-    literal: LiteralSyntax | None = BoolPrimitive().literal
     literal_family: string = BoolPrimitive().literal_family
-    literal_bindings: list[LiteralBinding] = BoolPrimitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = BoolPrimitive().literal_syntaxes
     name: string = "bool"
     size: byte = 1B
     alignment: byte = 1B

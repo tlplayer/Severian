@@ -1,5 +1,6 @@
+import LiteralValue from "../literal/value.sev"
 import array_mlir, byte_view_mlir, index_mlir, memref_mlir, ranked_memref_storage, scalar_mlir, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir from "mlir.sev"
-import AbiId, ArtifactId, AssertionLocation, AssertionOrigin, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, Constructor, Conversion, ConversionKind, CoverageKind, CoveragePoint, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, IndexedId, InferVarId, InterfaceId, Lexeme, LexemeTerm, LiteralBinding, LiteralConstruction, LiteralSyntax, LocalId, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, ModuleId, NamedId, OpId, PackageId, Primitive, PrimitiveAlias, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, ProviderId, QualityRegion, RegionId, ScopeId, Size, SourceFile, SourceId, SourceMap, Span, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TokenTerm, Type, TypeBinding, TypeConstructorBinding, TypeId, TypeRef, ValueId, VariantId, definition_from_key, load, named_definition, same_definition, semantic_digest, semantic_key, source_id, span, utf8_offset, virtual_source from "contract.sev"
+import AbiId, ArtifactId, AssertionLocation, AssertionOrigin, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, Constructor, Conversion, ConversionKind, CoverageKind, CoveragePoint, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, IndexedId, InferVarId, InterfaceId, Lexeme, LexemeTerm, LiteralSyntax, LiteralConstruction, LocalId, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, ModuleId, NamedId, OpId, PackageId, Primitive, PrimitiveAlias, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, ProviderId, QualityRegion, RegionId, ScopeId, Size, SourceFile, SourceId, SourceMap, Span, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TokenTerm, Type, TypeBinding, TypeConstructorBinding, TypeId, TypeRef, ValueId, VariantId, definition_from_key, load, named_definition, same_definition, semantic_digest, semantic_key, source_id, span, utf8_offset, virtual_source from "contract.sev"
 
 
 class BoolPrimitive: Primitive
@@ -12,10 +13,9 @@ class BoolPrimitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Boolean
     representation: PrimitiveRepresentation = PrimitiveRepresentation.BooleanBit
-    literal: LiteralSyntax | None = LiteralSyntax.Boolean
     token_kind: string = "Identifier"
     literal_family: string = ""
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Identifier", ["true", "false"])]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Identifier", "true", LiteralValue.BooleanValue(true)), LiteralSyntax("Identifier", "false", LiteralValue.BooleanValue(false))]
     default_literal: bool = true
 
 
@@ -33,10 +33,9 @@ class UnitPrimitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Unit
     representation: PrimitiveRepresentation = PrimitiveRepresentation.RecordAggregate
-    literal: LiteralSyntax | None = LiteralSyntax.Unit
     token_kind: string = "Identifier"
     literal_family: string = ""
-    literal_bindings: list[LiteralBinding] = []
+    literal_syntaxes: list[LiteralSyntax] = []
     default_literal: bool = true
 
 
@@ -54,10 +53,9 @@ class StringPrimitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.String
     representation: PrimitiveRepresentation = PrimitiveRepresentation.RecordAggregate
-    literal: LiteralSyntax | None = LiteralSyntax.String
     token_kind: string = "String"
     literal_family: string = ""
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("String")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("String")]
     default_literal: bool = true
 
 
@@ -75,10 +73,9 @@ class IndexPrimitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
-    literal: LiteralSyntax | None = LiteralSyntax.Integer
     token_kind: string = "Integer"
     literal_family: string = "int"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Integer")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
     default_literal: bool = false
 
 
@@ -96,10 +93,9 @@ class PointerPrimitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Pointer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
-    literal: LiteralSyntax | None = None
     token_kind: string = "Identifier"
     literal_family: string = ""
-    literal_bindings: list[LiteralBinding] = []
+    literal_syntaxes: list[LiteralSyntax] = []
     default_literal: bool = false
 
 
@@ -117,10 +113,9 @@ class NoneValuePrimitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Absence
     representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
-    literal: LiteralSyntax | None = LiteralSyntax.NoneValue
     token_kind: string = "Identifier"
     literal_family: string = ""
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Identifier", ["None"])]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Identifier", "None", LiteralValue.NoneValue)]
     default_literal: bool = true
 
 
@@ -138,10 +133,9 @@ class AbsentPrimitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Absence
     representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
-    literal: LiteralSyntax | None = LiteralSyntax.Absent
     token_kind: string = "Identifier"
     literal_family: string = ""
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Identifier", ["absent"])]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Identifier", "absent", LiteralValue.AbsentValue)]
     default_literal: bool = true
 
 
@@ -159,10 +153,9 @@ class F32Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(32)
-    literal: LiteralSyntax | None = LiteralSyntax.Float
     token_kind: string = "Float"
     literal_family: string = "float"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Float")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
     default_literal: bool = false
 
 
@@ -180,10 +173,9 @@ class F64Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(64)
-    literal: LiteralSyntax | None = LiteralSyntax.Float
     token_kind: string = "Float"
     literal_family: string = "float"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Float")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
     default_literal: bool = true
 
 
@@ -201,10 +193,9 @@ class U8Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, false)
-    literal: LiteralSyntax | None = LiteralSyntax.Integer
     token_kind: string = "Integer"
     literal_family: string = "int"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Integer")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
     default_literal: bool = false
 
 
@@ -222,10 +213,9 @@ class U16Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, false)
-    literal: LiteralSyntax | None = LiteralSyntax.Integer
     token_kind: string = "Integer"
     literal_family: string = "int"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Integer")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
     default_literal: bool = false
 
 
@@ -243,10 +233,9 @@ class U32Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, false)
-    literal: LiteralSyntax | None = LiteralSyntax.Integer
     token_kind: string = "Integer"
     literal_family: string = "int"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Integer")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
     default_literal: bool = false
 
 
@@ -264,10 +253,9 @@ class U64Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, false)
-    literal: LiteralSyntax | None = LiteralSyntax.Integer
     token_kind: string = "Integer"
     literal_family: string = "int"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Integer")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
     default_literal: bool = false
 
 
@@ -285,10 +273,9 @@ class CharPrimitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Char
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, false)
-    literal: LiteralSyntax | None = LiteralSyntax.Character
     token_kind: string = "Character"
     literal_family: string = ""
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Character")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Character")]
     default_literal: bool = true
 
 
@@ -306,10 +293,9 @@ class I8Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, true)
-    literal: LiteralSyntax | None = LiteralSyntax.Integer
     token_kind: string = "Integer"
     literal_family: string = "int"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Integer")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
     default_literal: bool = false
 
 
@@ -327,10 +313,9 @@ class I16Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, true)
-    literal: LiteralSyntax | None = LiteralSyntax.Integer
     token_kind: string = "Integer"
     literal_family: string = "int"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Integer")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
     default_literal: bool = false
 
 
@@ -348,10 +333,9 @@ class I32Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, true)
-    literal: LiteralSyntax | None = LiteralSyntax.Integer
     token_kind: string = "Integer"
     literal_family: string = "int"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Integer")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
     default_literal: bool = false
 
 
@@ -369,10 +353,9 @@ class I64Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
-    literal: LiteralSyntax | None = LiteralSyntax.Integer
     token_kind: string = "Integer"
     literal_family: string = "int"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Integer")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
     default_literal: bool = true
 
 
@@ -390,10 +373,9 @@ class I128Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, true)
-    literal: LiteralSyntax | None = LiteralSyntax.Integer
     token_kind: string = "Integer"
     literal_family: string = "int"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Integer")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
     default_literal: bool = false
 
 
@@ -411,10 +393,9 @@ class U128Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Integer
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, false)
-    literal: LiteralSyntax | None = LiteralSyntax.Integer
     token_kind: string = "Integer"
     literal_family: string = "int"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Integer")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
     default_literal: bool = false
 
 
@@ -432,10 +413,9 @@ class F16Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(16)
-    literal: LiteralSyntax | None = LiteralSyntax.Float
     token_kind: string = "Float"
     literal_family: string = "float"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Float")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
     default_literal: bool = false
 
 
@@ -453,10 +433,9 @@ class F128Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(128)
-    literal: LiteralSyntax | None = LiteralSyntax.Float
     token_kind: string = "Float"
     literal_family: string = "float"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Float")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
     default_literal: bool = false
 
 
@@ -474,10 +453,9 @@ class F8E4M3FnPrimitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(8, 4, 3, false)
-    literal: LiteralSyntax | None = LiteralSyntax.Float
     token_kind: string = "Float"
     literal_family: string = "float"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Float")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
     default_literal: bool = false
 
 
@@ -495,10 +473,9 @@ class F8E5M2Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(8, 5, 2, true)
-    literal: LiteralSyntax | None = LiteralSyntax.Float
     token_kind: string = "Float"
     literal_family: string = "float"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Float")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
     default_literal: bool = false
 
 
@@ -516,10 +493,9 @@ class BF16Primitive: Primitive
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.BrainFloatBits(16)
-    literal: LiteralSyntax | None = LiteralSyntax.Float
     token_kind: string = "Float"
     literal_family: string = "float"
-    literal_bindings: list[LiteralBinding] = [LiteralBinding("Float")]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
     default_literal: bool = false
 
 

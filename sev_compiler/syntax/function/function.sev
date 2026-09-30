@@ -8,7 +8,7 @@ import Associativity, BinaryOperator, Decorator, DecoratorValue, GenericConstrai
 import Grammar, MatchArm from "../sentence/sentence.sev"
 import B, Block, Callee, CfgBody, CfgStatement, Constant, Constructor, Conversion, ConversionKind, Conversions, Effects, Evaluation, LazyOperand, Lexeme, LexemeTerm, LocalDecl, Operand, Place, Projection, Rvalue, Size, SourceFile, SourceId, SourceMap, Span, SwitchCase, TokenTerm, TypeRef, array_mlir, byte_view_mlir, cfg_blocks, control_flow, empty_cfg, hashing, index_mlir, load, local_place, memref_mlir, ranked_memref_storage, scalar_mlir, source_id, span, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source from "../../mir/cfg/cfg.sev"
 import AttachmentRole, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, DispatchCandidate, DispatchFamily, ProofResult, WithAttachment from "../constraint/model.sev"
-import LiteralBinding, LiteralConstruction, LiteralSyntax, PrimitiveAlias, PrimitiveCategory, PrimitiveRepresentation from "../primitive/contract.sev"
+import LiteralSyntax, LiteralConstruction, PrimitiveAlias, PrimitiveCategory, PrimitiveRepresentation from "../primitive/contract.sev"
 import LiteralValue from "../literal/value.sev"
 
 # Callable identity, parameters, bodies, and expression use share one model.

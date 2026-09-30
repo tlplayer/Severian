@@ -1,26 +1,18 @@
+import LiteralValue from "../literal/value.sev"
 
-enum LiteralSyntax:
-    Integer
-    Float
-    Boolean
-    Character
-    String
-    Bytes
-    NoneValue
-    Absent
-    Unit
 
-class LiteralBinding:
-    token: string
+# One-token construction sentences. None captures the spelling recognized by
+# the type's lexical rule; a concrete token declares an exact source spelling.
+class LiteralSyntax:
+    token_kind: string
+    token: string | None = None
+    value: LiteralValue | None = None
     spellings: list[string] = []
 
 
-# Literal providers declare accepted source forms. Recognition and conversion
-# belong to implementations; this contract does not select precision or range.
 trait Literal:
-    literal: LiteralSyntax | None
     default_literal: bool
     literal_family: string
-    literal_bindings: list[LiteralBinding]
+    literal_syntaxes: list[LiteralSyntax]
 
 Literal as L

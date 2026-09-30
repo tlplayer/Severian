@@ -3,7 +3,7 @@ import "../../collections/array/src/storage.sev" as arrays
 import "../../collections/list/src/slice.sev" as _dependency_slice
 import "core.sev" as utf8_core
 import "../format/src/lib.sev" as formatting
-import LiteralBinding, LiteralSyntax, MlirTypeBinding, PrimitiveId, StringPrimitive, TypeId from "../../../../sev_compiler/syntax/primitive/declarations.sev"
+import LiteralSyntax, MlirTypeBinding, PrimitiveId, StringPrimitive, TypeId from "../../../../sev_compiler/syntax/primitive/declarations.sev"
 import Error from "../../../../sev_compiler/syntax/primitive/primitive.sev"
 
 class UnicodeError: Error
@@ -87,9 +87,8 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
     mlir: MlirTypeBinding = StringPrimitive().mlir
     id: TypeId = StringPrimitive().id
     token_kind: string = StringPrimitive().token_kind
-    literal: LiteralSyntax | None = StringPrimitive().literal
     literal_family: string = StringPrimitive().literal_family
-    literal_bindings: list[LiteralBinding] = StringPrimitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = StringPrimitive().literal_syntaxes
 
     storage: vector[char[T], N]
 

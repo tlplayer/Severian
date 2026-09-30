@@ -1,5 +1,5 @@
 import profiling
-import AbiId, AbsentPrimitive, ArtifactId, AssertionLocation, AssertionOrigin, AttrValue, AttributeId, BF16Primitive, BindingId, BlockId, BoolPrimitive, CharPrimitive, CompiledRegionId, CompilerId, Constructor, Conversion, ConversionKind, CoverageKind, CoveragePoint, DeclarationId, DefId, F128Primitive, F16Primitive, F32Primitive, F64Primitive, F8E4M3FnPrimitive, F8E5M2Primitive, FfiId, FunctionId, GenericParamId, HirId, I128Primitive, I16Primitive, I32Primitive, I64Primitive, I8Primitive, IndexPrimitive, IndexedId, InferVarId, InterfaceId, Lexeme, LexemeTerm, LiteralBinding, LiteralConstruction, LiteralSyntax, LocalId, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, ModuleId, NamedId, NoneValuePrimitive, OpId, PackageId, PointerPrimitive, Primitive, PrimitiveAlias, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, ProviderId, QualityRegion, RegionId, ScopeId, Size, SourceFile, SourceId, SourceMap, Span, StableId, StringPrimitive, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TokenTerm, Type, TypeBinding, TypeConstructorBinding, TypeId, TypeRef, U128Primitive, U16Primitive, U32Primitive, U64Primitive, U8Primitive, UnitPrimitive, ValueId, VariantId, array_mlir, byte_view_mlir, definition_from_key, f64_type_id, i64_type_id, index_mlir, index_type_id, load, memref_mlir, named_definition, ranked_memref_storage, same_definition, scalar_mlir, semantic_digest, semantic_key, source_id, span, struct_mlir, tensor_mlir, u64_type_id, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source from "declarations.sev"
+import AbiId, AbsentPrimitive, ArtifactId, AssertionLocation, AssertionOrigin, AttrValue, AttributeId, BF16Primitive, BindingId, BlockId, BoolPrimitive, CharPrimitive, CompiledRegionId, CompilerId, Constructor, Conversion, ConversionKind, CoverageKind, CoveragePoint, DeclarationId, DefId, F128Primitive, F16Primitive, F32Primitive, F64Primitive, F8E4M3FnPrimitive, F8E5M2Primitive, FfiId, FunctionId, GenericParamId, HirId, I128Primitive, I16Primitive, I32Primitive, I64Primitive, I8Primitive, IndexPrimitive, IndexedId, InferVarId, InterfaceId, Lexeme, LexemeTerm, LiteralSyntax, LiteralConstruction, LocalId, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, ModuleId, NamedId, NoneValuePrimitive, OpId, PackageId, PointerPrimitive, Primitive, PrimitiveAlias, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, ProviderId, QualityRegion, RegionId, ScopeId, Size, SourceFile, SourceId, SourceMap, Span, StableId, StringPrimitive, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TokenTerm, Type, TypeBinding, TypeConstructorBinding, TypeId, TypeRef, U128Primitive, U16Primitive, U32Primitive, U64Primitive, U8Primitive, UnitPrimitive, ValueId, VariantId, array_mlir, byte_view_mlir, definition_from_key, f64_type_id, i64_type_id, index_mlir, index_type_id, load, memref_mlir, named_definition, ranked_memref_storage, same_definition, scalar_mlir, semantic_digest, semantic_key, source_id, span, struct_mlir, tensor_mlir, u64_type_id, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source from "declarations.sev"
 
 class PrimitiveDescriptor: Primitive
     identity: PrimitiveId
@@ -10,16 +10,15 @@ class PrimitiveDescriptor: Primitive
     constructors: list[Constructor]
     category: PrimitiveCategory
     representation: PrimitiveRepresentation
-    literal: LiteralSyntax | None
     default_literal: bool
     literal_family: string = ""
-    literal_bindings: list[LiteralBinding] = []
+    literal_syntaxes: list[LiteralSyntax] = []
     mlir: MlirTypeBinding = MlirTypeBinding("", value=false)
     token_kind: string = "Identifier"
 
 
 def describe_primitive[T: Primitive](value: T) -> PrimitiveDescriptor:
-    return PrimitiveDescriptor(value.identity, value.id, value.name, value.size, value.alignment, value.constructors, value.category, value.representation, value.literal, value.default_literal, value.literal_family, value.literal_bindings, value.mlir, value.token_kind)
+    return PrimitiveDescriptor(value.identity, value.id, value.name, value.size, value.alignment, value.constructors, value.category, value.representation, value.default_literal, value.literal_family, value.literal_syntaxes, value.mlir, value.token_kind)
 
 
 PrimitiveCatalog: list[PrimitiveDescriptor] = []

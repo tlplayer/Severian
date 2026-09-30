@@ -1,4 +1,4 @@
-import I128Primitive, I16Primitive, I32Primitive, I64Primitive, I8Primitive, LiteralBinding, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId, U128Primitive, U16Primitive, U32Primitive, U64Primitive, U8Primitive from "../declarations.sev"
+import I128Primitive, I16Primitive, I32Primitive, I64Primitive, I8Primitive, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId, U128Primitive, U16Primitive, U32Primitive, U64Primitive, U8Primitive from "../declarations.sev"
 import Error from "../primitive.sev"
 
 import Bitwise, Equatable, Ordered, Truth from "../../function/trait.sev"
@@ -153,9 +153,8 @@ class i8: SignedInteger :
     mlir: MlirTypeBinding = I8Primitive().mlir
     id: TypeId = I8Primitive().id
     token_kind: string = I8Primitive().token_kind
-    literal: LiteralSyntax | None = I8Primitive().literal
     literal_family: string = I8Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = I8Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = I8Primitive().literal_syntaxes
     name: string = "i8"
     size: byte = 1B
     alignment: byte = 1B
@@ -173,9 +172,8 @@ class i16: SignedInteger :
     mlir: MlirTypeBinding = I16Primitive().mlir
     id: TypeId = I16Primitive().id
     token_kind: string = I16Primitive().token_kind
-    literal: LiteralSyntax | None = I16Primitive().literal
     literal_family: string = I16Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = I16Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = I16Primitive().literal_syntaxes
     name: string = "i16"
     size: byte = 2B
     alignment: byte = 2B
@@ -193,9 +191,8 @@ class i32: SignedInteger :
     mlir: MlirTypeBinding = I32Primitive().mlir
     id: TypeId = I32Primitive().id
     token_kind: string = I32Primitive().token_kind
-    literal: LiteralSyntax | None = I32Primitive().literal
     literal_family: string = I32Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = I32Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = I32Primitive().literal_syntaxes
     name: string = "i32"
     size: byte = 4B
     alignment: byte = 4B
@@ -213,9 +210,8 @@ class i64: SignedInteger :
     mlir: MlirTypeBinding = I64Primitive().mlir
     id: TypeId = I64Primitive().id
     token_kind: string = I64Primitive().token_kind
-    literal: LiteralSyntax | None = I64Primitive().literal
     literal_family: string = I64Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = I64Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = I64Primitive().literal_syntaxes
     name: string = "i64"
     size: byte = 8B
     alignment: byte = 8B
@@ -233,9 +229,8 @@ class i128: SignedInteger :
     mlir: MlirTypeBinding = I128Primitive().mlir
     id: TypeId = I128Primitive().id
     token_kind: string = I128Primitive().token_kind
-    literal: LiteralSyntax | None = I128Primitive().literal
     literal_family: string = I128Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = I128Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = I128Primitive().literal_syntaxes
     name: string = "i128"
     size: byte = 16B
     alignment: byte = 16B
@@ -253,9 +248,8 @@ class isize: SignedInteger :
     mlir: MlirTypeBinding = I64Primitive().mlir
     id: TypeId = I64Primitive().id
     token_kind: string = I64Primitive().token_kind
-    literal: LiteralSyntax | None = I64Primitive().literal
     literal_family: string = I64Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = I64Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = I64Primitive().literal_syntaxes
     name: string = "isize"
     size: byte = target.pointer_size
     alignment: byte = target.pointer_alignment
@@ -273,9 +267,8 @@ class u8: UnsignedInteger :
     mlir: MlirTypeBinding = U8Primitive().mlir
     id: TypeId = U8Primitive().id
     token_kind: string = U8Primitive().token_kind
-    literal: LiteralSyntax | None = U8Primitive().literal
     literal_family: string = U8Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = U8Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = U8Primitive().literal_syntaxes
     name: string = "u8"
     size: byte = 1B
     alignment: byte = 1B
@@ -293,9 +286,8 @@ class u16: UnsignedInteger :
     mlir: MlirTypeBinding = U16Primitive().mlir
     id: TypeId = U16Primitive().id
     token_kind: string = U16Primitive().token_kind
-    literal: LiteralSyntax | None = U16Primitive().literal
     literal_family: string = U16Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = U16Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = U16Primitive().literal_syntaxes
     name: string = "u16"
     size: byte = 2B
     alignment: byte = 2B
@@ -313,9 +305,8 @@ class u32: UnsignedInteger :
     mlir: MlirTypeBinding = U32Primitive().mlir
     id: TypeId = U32Primitive().id
     token_kind: string = U32Primitive().token_kind
-    literal: LiteralSyntax | None = U32Primitive().literal
     literal_family: string = U32Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = U32Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = U32Primitive().literal_syntaxes
     name: string = "u32"
     size: byte = 4B
     alignment: byte = 4B
@@ -333,9 +324,8 @@ class u64: UnsignedInteger :
     mlir: MlirTypeBinding = U64Primitive().mlir
     id: TypeId = U64Primitive().id
     token_kind: string = U64Primitive().token_kind
-    literal: LiteralSyntax | None = U64Primitive().literal
     literal_family: string = U64Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = U64Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = U64Primitive().literal_syntaxes
     name: string = "u64"
     size: byte = 8B
     alignment: byte = 8B
@@ -353,9 +343,8 @@ class u128: UnsignedInteger :
     mlir: MlirTypeBinding = U128Primitive().mlir
     id: TypeId = U128Primitive().id
     token_kind: string = U128Primitive().token_kind
-    literal: LiteralSyntax | None = U128Primitive().literal
     literal_family: string = U128Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = U128Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = U128Primitive().literal_syntaxes
     name: string = "u128"
     size: byte = 16B
     alignment: byte = 16B
@@ -373,9 +362,8 @@ class usize: UnsignedInteger :
     mlir: MlirTypeBinding = U64Primitive().mlir
     id: TypeId = U64Primitive().id
     token_kind: string = U64Primitive().token_kind
-    literal: LiteralSyntax | None = U64Primitive().literal
     literal_family: string = U64Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = U64Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = U64Primitive().literal_syntaxes
     name: string = "usize"
     size: byte = target.pointer_size
     alignment: byte = target.pointer_alignment
@@ -435,9 +423,8 @@ class int: Integer:
     mlir: MlirTypeBinding = I64Primitive().mlir
     id: TypeId = I64Primitive().id
     token_kind: string = I64Primitive().token_kind
-    literal: LiteralSyntax | None = I64Primitive().literal
     literal_family: string = I64Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = I64Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = I64Primitive().literal_syntaxes
 
     operator if(self) -> bool:
         return self != 0

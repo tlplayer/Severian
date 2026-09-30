@@ -1,4 +1,4 @@
-import BF16Primitive, F128Primitive, F16Primitive, F32Primitive, F64Primitive, F8E4M3FnPrimitive, F8E5M2Primitive, LiteralBinding, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../declarations.sev"
+import BF16Primitive, F128Primitive, F16Primitive, F32Primitive, F64Primitive, F8E4M3FnPrimitive, F8E5M2Primitive, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../declarations.sev"
 import Error from "../primitive.sev"
 
 import Equatable, Ordered, Truth from "../../function/trait.sev"
@@ -130,9 +130,8 @@ class f8e4m3fn: Floating :
     mlir: MlirTypeBinding = F8E4M3FnPrimitive().mlir
     id: TypeId = F8E4M3FnPrimitive().id
     token_kind: string = F8E4M3FnPrimitive().token_kind
-    literal: LiteralSyntax | None = F8E4M3FnPrimitive().literal
     literal_family: string = F8E4M3FnPrimitive().literal_family
-    literal_bindings: list[LiteralBinding] = F8E4M3FnPrimitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = F8E4M3FnPrimitive().literal_syntaxes
     name: string = "f8e4m3fn"
     size: byte = 1B
     alignment: byte = 1B
@@ -153,9 +152,8 @@ class f8e5m2: Floating :
     mlir: MlirTypeBinding = F8E5M2Primitive().mlir
     id: TypeId = F8E5M2Primitive().id
     token_kind: string = F8E5M2Primitive().token_kind
-    literal: LiteralSyntax | None = F8E5M2Primitive().literal
     literal_family: string = F8E5M2Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = F8E5M2Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = F8E5M2Primitive().literal_syntaxes
     name: string = "f8e5m2"
     size: byte = 1B
     alignment: byte = 1B
@@ -176,9 +174,8 @@ class bf16: Floating :
     mlir: MlirTypeBinding = BF16Primitive().mlir
     id: TypeId = BF16Primitive().id
     token_kind: string = BF16Primitive().token_kind
-    literal: LiteralSyntax | None = BF16Primitive().literal
     literal_family: string = BF16Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = BF16Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = BF16Primitive().literal_syntaxes
     name: string = "bf16"
     size: byte = 2B
     alignment: byte = 2B
@@ -199,9 +196,8 @@ class f16: Floating :
     mlir: MlirTypeBinding = F16Primitive().mlir
     id: TypeId = F16Primitive().id
     token_kind: string = F16Primitive().token_kind
-    literal: LiteralSyntax | None = F16Primitive().literal
     literal_family: string = F16Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = F16Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = F16Primitive().literal_syntaxes
     name: string = "f16"
     size: byte = 2B
     alignment: byte = 2B
@@ -222,9 +218,8 @@ class f32: Floating :
     mlir: MlirTypeBinding = F32Primitive().mlir
     id: TypeId = F32Primitive().id
     token_kind: string = F32Primitive().token_kind
-    literal: LiteralSyntax | None = F32Primitive().literal
     literal_family: string = F32Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = F32Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = F32Primitive().literal_syntaxes
     name: string = "f32"
     size: byte = 4B
     alignment: byte = 4B
@@ -245,9 +240,8 @@ class f64: Floating :
     mlir: MlirTypeBinding = F64Primitive().mlir
     id: TypeId = F64Primitive().id
     token_kind: string = F64Primitive().token_kind
-    literal: LiteralSyntax | None = F64Primitive().literal
     literal_family: string = F64Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = F64Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = F64Primitive().literal_syntaxes
     name: string = "f64"
     size: byte = 8B
     alignment: byte = 8B
@@ -268,9 +262,8 @@ class f128: Floating :
     mlir: MlirTypeBinding = F128Primitive().mlir
     id: TypeId = F128Primitive().id
     token_kind: string = F128Primitive().token_kind
-    literal: LiteralSyntax | None = F128Primitive().literal
     literal_family: string = F128Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = F128Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = F128Primitive().literal_syntaxes
     name: string = "f128"
     size: byte = 16B
     alignment: byte = 16B
@@ -323,9 +316,8 @@ class float: Floating:
     mlir: MlirTypeBinding = F64Primitive().mlir
     id: TypeId = F64Primitive().id
     token_kind: string = F64Primitive().token_kind
-    literal: LiteralSyntax | None = F64Primitive().literal
     literal_family: string = F64Primitive().literal_family
-    literal_bindings: list[LiteralBinding] = F64Primitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = F64Primitive().literal_syntaxes
 
     operator if(self) -> bool:
         return mlir(arith.cmpf, "une", self, self(0.0))

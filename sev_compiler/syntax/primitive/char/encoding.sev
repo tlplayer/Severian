@@ -74,3 +74,14 @@ test "UTF-8 decoding checks scalar encoding boundaries":
     assert(decode_three(239, 191, 191) == 65535)
     assert(decode_four(240, 144, 128, 128) == 65536)
     assert(decode_four(244, 143, 191, 191) == 1114111)
+
+
+def literal_codepoint(value: string) -> u32:
+    bytes = value.bytes()
+    if len(bytes) == 1:
+        return u32(bytes[0])
+    if len(bytes) == 2:
+        return u32(decode_two(int(bytes[0]), int(bytes[1])))
+    if len(bytes) == 3:
+        return u32(decode_three(int(bytes[0]), int(bytes[1]), int(bytes[2])))
+    return u32(decode_four(int(bytes[0]), int(bytes[1]), int(bytes[2]), int(bytes[3])))

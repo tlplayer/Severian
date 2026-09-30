@@ -1,4 +1,4 @@
-import CharPrimitive, LiteralBinding, LiteralSyntax, MlirTypeBinding, PrimitiveAlias, PrimitiveId, Type, TypeId from "../declarations.sev"
+import CharPrimitive, LiteralSyntax, MlirTypeBinding, PrimitiveAlias, PrimitiveId, Type, TypeId from "../declarations.sev"
 import "../primitive.sev" as _dependency_primitive
 
 import Equatable, Ordered from "../../function/trait.sev"
@@ -76,9 +76,8 @@ class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]:
     mlir: MlirTypeBinding = CharPrimitive().mlir
     id: TypeId = CharPrimitive().id
     token_kind: string = CharPrimitive().token_kind
-    literal: LiteralSyntax | None = CharPrimitive().literal
     literal_family: string = CharPrimitive().literal_family
-    literal_bindings: list[LiteralBinding] = CharPrimitive().literal_bindings
+    literal_syntaxes: list[LiteralSyntax] = CharPrimitive().literal_syntaxes
 
     storage: T
 

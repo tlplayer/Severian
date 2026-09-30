@@ -1050,7 +1050,7 @@ def callable_expression_inner(state: CallableAnalysis, expression: model_syntax_
                             if integer_spelling.compare(spelling, scalar.integer_minimum(storage)) < 0 or integer_spelling.compare(spelling, scalar.integer_maximum(storage)) > 0:
                                 return error(callable_diagnostic("integer literal is outside " + storage.name, expression.span))
                 case FloatValue:
-                    result_type = expected if scalar.scalar_representation(expected) == "float" else primitives.default_literal_type(primitives.LiteralSyntax.Float).id
+                    result_type = expected if scalar.scalar_representation(expected) == "float" else primitives.default_literal_type("float").id
                 case NoneValue:
                     result_type = model_syntax_primitive_declarations.none_type_id()
                 case AbsentValue:
