@@ -6,7 +6,6 @@ behavior before the optional test name:
 ```sev
 test:
 test "ordinary named test":
-test with property "generated values and shrinking":
 test with bench "warmup and measurement":
 test with chaos "fault injection":
 test with profile "runtime and allocation bounds" -> TestResult with

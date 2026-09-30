@@ -4,6 +4,7 @@ borrow      read without taking ownership
 borrow mut  temporarily obtain exclusive write access
 clone       create independent ownership
 move        transfer ownership
+mirror      efficient COW only COW for thing something changed
 
 The compiler prevents:
 - use after move

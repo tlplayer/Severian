@@ -5,7 +5,7 @@ DONT add python scripts that just test, add tests and have the rust compiler run
 PUT TESTS in the same file they test against with test blocks following the code. NOT A NEW FILE.
 UNLESS IT's an INTEG test against the package itself
 NO TASK SHOULD TAKE LONGER THAN 6 MINUTES if builds hold it back that's a problem of not implementing and handing off the build to the human. Humans build/run/create regression tests not agents. 
-Dont touch MD files, they just glob/pollute the namespace and you make bad decisions vs me. I'm not trying to insult you it's just what ends up occuring.
+Dont touch MD files, they just glob/pollute the namespace and you make bad decisions vs me. 
 
 IIF you are building rust can you run the rust compiler to validate the change. Dont run the severian build to validate that change. 
 ```

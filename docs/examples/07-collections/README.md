@@ -5,7 +5,6 @@ Start with storage and views, then growable ownership, then specialized collecti
 | Example | Collection | Covers |
 | --- | --- | --- |
 | [01-array.sev](01-array.sev) | `array[T, N]` | Fixed-size storage, indexing, copying |
-| [02-slice.sev](02-slice.sev) | `slice[T]` | Borrowed views and changes to the original storage |
 | [03-list.sev](03-list.sev) | `list[T]` | Growth, capacity, insertion, removal, iteration |
 | [04-deque.sev](04-deque.sev) | `deque[T]` | Adding and removing at both ends |
 | [05-vector.sev](05-vector.sev) | `vector[T, N]` | Numeric lanes, arithmetic, scaling, dot product |

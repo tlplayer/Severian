@@ -31,7 +31,7 @@ Example dependency (SIP-0003):
 ```
 
 ```sev
-import list from lists
+import list 
 values := list[int]()
 values.append(1)
 ```
