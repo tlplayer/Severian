@@ -1,0 +1,104 @@
+import Y from "generic/symbol.sev"
+
+
+# A reference to a syntax declaration, not an instance of the declared form.
+# Paths are relative to the syntax package root, independent of the input file.
+# Recognition reads the referenced declaration's grammar and captures.
+class SyntaxDeclaration: Y
+    path: string
+    name: string
+
+#TODO: one trait + with dispatch is working e2e replace this with that implementable interface on lexer
+def recognition_order() -> list[SyntaxDeclaration]:
+    # Stopgap master list. Preserve this order when visiting candidates within
+    # each source window; recursively recognize the declaration's captures.
+    # The global declaration applies once to the complete source window.
+    # Spellings, boundaries, constraints and construction stay in each provider.
+    return [
+        SyntaxDeclaration("block/global.sev", "global"),
+        SyntaxDeclaration("block/main.sev", "main"),
+        SyntaxDeclaration("block/function.sev", "function"),
+        SyntaxDeclaration("block/class.sev", "class"),
+        SyntaxDeclaration("block/trait.sev", "trait"),
+        SyntaxDeclaration("block/enum.sev", "enum"),
+        SyntaxDeclaration("block/if.sev", "if"),
+        SyntaxDeclaration("block/elif.sev", "elif"),
+        SyntaxDeclaration("block/else.sev", "else"),
+        SyntaxDeclaration("block/try.sev", "try"),
+        SyntaxDeclaration("block/catch.sev", "catch"),
+        SyntaxDeclaration("block/match.sev", "match"),
+        SyntaxDeclaration("block/case.sev", "case"),
+        SyntaxDeclaration("grammar/contracts.sev", "For"),
+        SyntaxDeclaration("grammar/contracts.sev", "While"),
+
+        SyntaxDeclaration("grammar/contracts.sev", "Return"),
+        SyntaxDeclaration("grammar/contracts.sev", "Throw"),
+        SyntaxDeclaration("grammar/contracts.sev", "Break"),
+        SyntaxDeclaration("grammar/contracts.sev", "Continue"),
+        SyntaxDeclaration("grammar/contracts.sev", "Conditional"),
+        SyntaxDeclaration("grammar/contracts.sev", "AddAssign"),
+        SyntaxDeclaration("grammar/contracts.sev", "SubtractAssign"),
+        SyntaxDeclaration("grammar/contracts.sev", "MultiplyAssign"),
+        SyntaxDeclaration("grammar/contracts.sev", "DivideAssign"),
+        SyntaxDeclaration("grammar/contracts.sev", "RemainderAssign"),
+        SyntaxDeclaration("grammar/contracts.sev", "Assign"),
+        SyntaxDeclaration("grammar/contracts.sev", "List"),
+        SyntaxDeclaration("grammar/contracts.sev", "Slice"),
+        SyntaxDeclaration("grammar/contracts.sev", "Index"),
+
+        # Quoted forms retain their contents as captures of their own grammar.
+        SyntaxDeclaration("primitive/declarations.sev", "StringPrimitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "CharPrimitive"),
+
+        SyntaxDeclaration("function/syntax.sev", "Power"),
+        SyntaxDeclaration("function/syntax.sev", "FloorDivide"),
+        SyntaxDeclaration("function/syntax.sev", "LeftShift"),
+        SyntaxDeclaration("function/syntax.sev", "RightShift"),
+        SyntaxDeclaration("function/syntax.sev", "LessEqual"),
+        SyntaxDeclaration("function/syntax.sev", "GreaterEqual"),
+        SyntaxDeclaration("function/syntax.sev", "NotEqual"),
+        SyntaxDeclaration("function/syntax.sev", "Equal"),
+        SyntaxDeclaration("function/syntax.sev", "Less"),
+        SyntaxDeclaration("function/syntax.sev", "Greater"),
+        SyntaxDeclaration("function/syntax.sev", "Add"),
+        SyntaxDeclaration("function/syntax.sev", "Subtract"),
+        SyntaxDeclaration("function/syntax.sev", "Multiply"),
+        SyntaxDeclaration("function/syntax.sev", "Divide"),
+        SyntaxDeclaration("function/syntax.sev", "Remainder"),
+        SyntaxDeclaration("function/syntax.sev", "Positive"),
+        SyntaxDeclaration("function/syntax.sev", "Negative"),
+        SyntaxDeclaration("function/syntax.sev", "Not"),
+        SyntaxDeclaration("function/syntax.sev", "Move"),
+        SyntaxDeclaration("function/syntax.sev", "BitwiseAnd"),
+        SyntaxDeclaration("function/syntax.sev", "BitwiseOr"),
+        SyntaxDeclaration("function/syntax.sev", "BitwiseXor"),
+        SyntaxDeclaration("function/syntax.sev", "Contains"),
+        SyntaxDeclaration("function/syntax.sev", "LogicalAnd"),
+        SyntaxDeclaration("function/syntax.sev", "LogicalOr"),
+
+        # Primitive declarations own both type names and literal contracts.
+        SyntaxDeclaration("primitive/declarations.sev", "BoolPrimitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "F64Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "F32Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "F16Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "F128Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "BF16Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "F8E4M3FnPrimitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "F8E5M2Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "I64Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "I8Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "I16Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "I32Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "I128Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "U8Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "U16Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "U32Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "U64Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "U128Primitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "IndexPrimitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "PointerPrimitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "UnitPrimitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "NoneValuePrimitive"),
+        SyntaxDeclaration("primitive/declarations.sev", "AbsentPrimitive"),
+        SyntaxDeclaration("symbol/symbol.sev", "Symbol"),
+    ]
