@@ -299,7 +299,7 @@ def macro_enumerate(definition: ScalarMacro, types: list[scalar.ScalarType], out
         macro_enumerate(definition, selected, output, environment)
 
 
-def parse_module(tokens: list[lexer.Token]) -> model_hir_module_module.Module | diagnostics.Diagnostic:
+def parse_module(tokens: list[lexer.Token], source_blocks: model_syntax_block_block.BlockFile | None = None) -> model_hir_module_module.Module | diagnostics.Diagnostic:
     input = parser.Parser(tokens)
     definitions: list[ScalarMacro] = []
     ordinary: list[lexer.Token] = []
@@ -345,7 +345,7 @@ def parse_module(tokens: list[lexer.Token]) -> model_hir_module_module.Module | 
             line_start = token.kind == Newline or token.kind == Dedent
             ordinary.append(token)
     ordinary.append(parser.parser_next(input))
-    result = parser.parse(ordinary)
+    result = parser.parse(ordinary, source_blocks)
     environment = family_definitions.SemanticDefinitions()
     for item in result.items:
         match item:

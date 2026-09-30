@@ -1,3 +1,6 @@
+import branch_condition from "../../../../syntax/block/if.sev"
+import BlockCaptureResolver, finish_provider_block from "package:parser/parser/src/providers.sev"
+import BlockCaptureValue, BlockFieldValue from "../../../../syntax/generic/block.sev"
 import "../../../modules/graph/model.sev" as model_frontend_modules_graph_model
 import "../../../../hir/module/module.sev" as model_hir_module_module
 import "../../../../syntax/block/block.sev" as model_syntax_block_block
@@ -97,6 +100,7 @@ class CallableAnalysis:
     attachments: list[model_syntax_constraint_model.WithAttachment] = []
     required_functions: list[model_syntax_symbol_symbol.DefId] = []
     body_cache: lazy_bodies.BodyCache = lazy_bodies.BodyCache()
+    source_blocks: list[model_syntax_block_block.BlockFile] = []
 
 
 class PreludeAnalysis:
@@ -209,7 +213,7 @@ def callable_closure_call(state: CallableAnalysis, closure: closures.Closure, re
                 parameter.type_id = argument.value.type_id
                 parameter.annotation = model_syntax_type_annotation.named_type(definitions.type_name(parameter.type_id, state.records), [], span)
         parameters.append(parameter)
-    local = CallableAnalysis(functions=state.functions, templates=state.templates, records=state.records, declarations=state.declarations, generics=state.generics, namespace=state.namespace, constants=state.constants, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, required_functions=state.required_functions, body_cache=state.body_cache)
+    local = CallableAnalysis(functions=state.functions, templates=state.templates, records=state.records, declarations=state.declarations, generics=state.generics, namespace=state.namespace, constants=state.constants, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, required_functions=state.required_functions, body_cache=state.body_cache, source_blocks=state.source_blocks)
     for parameter in parameters:
         local.names.append(parameter.name)
         local.types.append(parameter.type_id)
@@ -2398,9 +2402,12 @@ def callable_contract_checks(state: CallableAnalysis, output: model_syntax_block
             output.statements.append(callable_assertion(state, condition, None, condition.span, condition.span))
 
 
-def callable_block(state: CallableAnalysis, statements: list[model_syntax_sentence_sentence.Statement], result_type: model_syntax_symbol_symbol.TypeId, complete: bool = true, origin: source.Span | None = None) -> model_syntax_block_block.Block | diagnostics.Diagnostic:
-    output = model_syntax_block_block.Block()
-    output.span = origin
+def callable_block(state: CallableAnalysis, block: model_syntax_block_block.Block, result_type: model_syntax_symbol_symbol.TypeId, complete: bool = true) -> model_syntax_block_block.Block | diagnostics.Diagnostic:
+    output = resolve_owned_block(state, block)
+    # The constructed block owns the input body as well as its source identity.
+    # Snapshot before emitting typed statements into the same block contract.
+    statements = output.statements[:]
+    output.statements = []
     resource_start = int(len(state.resources))
     defer_start = int(len(state.deferred))
     returned := false
@@ -2420,7 +2427,7 @@ def callable_block(state: CallableAnalysis, statements: list[model_syntax_senten
             case Unsafe:
                 local = callable_scope(state)
                 local.unsafe_depth += 1
-                typed = callable_block(local, body.statements, result_type, false, origin=body.span)
+                typed = callable_block(local, body, result_type, false)
                 for binding in local.dead:
                     if binding < len(state.names) and binding not in state.dead:
                         state.dead.append(binding)
@@ -2643,10 +2650,16 @@ def callable_block(state: CallableAnalysis, statements: list[model_syntax_senten
                     resolved_operands.append(callable_expression(state, operand, model_syntax_symbol_symbol.TypeId(0)))
                 resolved_bodies: list[model_syntax_block_block.Block] = []
                 for body in bodies:
-                    resolved_bodies.append(callable_block(callable_scope(state), body.statements, result_type, false, origin=body.span))
+                    resolved_bodies.append(callable_block(callable_scope(state), body, result_type, false))
                 output.statements.append(model_syntax_sentence_sentence.GrammarApply(syntax, resolved_operands, resolved_bodies, span, exits))
             case If:
-                resolved = callable_truth(state, condition)
+                # Select before entering either branch: captures belong to the
+                # surrounding scope, before branch-local refinements exist.
+                constructed = resolve_owned_block(state, then_block)
+                source_condition := condition
+                if constructed.context.requires_provider:
+                    source_condition = constructed_branch_condition(constructed)
+                resolved = callable_truth(state, source_condition)
                 then_state = callable_scope(state)
                 else_state = callable_scope(state)
                 match resolved.kind:
@@ -2658,8 +2671,8 @@ def callable_block(state: CallableAnalysis, statements: list[model_syntax_senten
                                 throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/semantic/src/callable.sev)")
                     case _:
                         throw diagnostics.diagnostic("E000200", "unimplemented (sev_compiler/frontend/semantic/semantic/src/callable.sev)")
-                then_typed = callable_block(then_state, then_block.statements, result_type, false, origin=then_block.span)
-                else_typed = callable_block(else_state, else_block.statements, result_type, false, origin=else_block.span)
+                then_typed = callable_block(then_state, constructed, result_type, false)
+                else_typed = callable_block(else_state, else_block, result_type, false)
                 callable_join_transitions(state, then_state, else_state)
                 then_exits = callable_terminates(then_typed)
                 else_exits = callable_terminates(else_typed)
@@ -2727,7 +2740,7 @@ def callable_block(state: CallableAnalysis, statements: list[model_syntax_senten
                         tail = arm.body
                     else:
                         tail = model_syntax_block_block.Block([model_syntax_sentence_sentence.Statement.If(arm.condition, arm.body, tail, span)])
-                typed = callable_block(local, tail.statements, result_type, false, origin=tail.span)
+                typed = callable_block(local, tail, result_type, false)
                 output.statements.append(model_syntax_sentence_sentence.BindingStatement(binding))
                 for nested in typed.statements:
                     output.statements.append(nested)
@@ -2752,7 +2765,7 @@ def callable_block(state: CallableAnalysis, statements: list[model_syntax_senten
                 local.loop_depth += 1
                 local.loop_defer_start = int(len(local.deferred))
                 local.loop_resource_start = int(len(local.resources))
-                typed = callable_block(local, body.statements, result_type, false, origin=body.span)
+                typed = callable_block(local, body, result_type, false)
                 output.statements.append(callable_control(state, "While", [resolved], [typed], span))
             case Break:
                 if state.loop_depth == 0:
@@ -2792,11 +2805,11 @@ def callable_block(state: CallableAnalysis, statements: list[model_syntax_senten
             span = source.Span(source.SourceId(0), 0, 0)
             value = callable_expression(state, model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_literal_value.NoneValue()), span), result_type)
             output.statements.append(callable_control(state, "Return", [value], [], span, true))
-            return output
+            return retain_owned_block(state, output)
         if result_type.index != 2:
             return error(callable_diagnostic("scalar function can reach its end without returning a value", None))
         output.statements.append(callable_control(state, "Return", [], [], source.Span(source.SourceId(0), 0, 0), true))
-    return output
+    return retain_owned_block(state, output)
 
 
 def callable_signature(declaration: model_syntax_function_function.FunctionDeclaration, ordinal: int, records: list[model_syntax_function_function.RecordDeclaration] = [], declarations: definitions.SemanticDefinitions = definitions.SemanticDefinitions()) -> model_syntax_function_function.FunctionDeclaration | diagnostics.Diagnostic:
@@ -2919,7 +2932,7 @@ def callable_signature(declaration: model_syntax_function_function.FunctionDecla
 def callable_check_compiler_case(state: CallableAnalysis, block: model_syntax_block_block.Block) -> bool | diagnostics.Diagnostic:
     state.test_context = true
     index = int(len(state.functions))
-    callable_block(state, block.statements, model_syntax_primitive_declarations.unit_type_id(), origin=block.span)
+    callable_block(state, block, model_syntax_primitive_declarations.unit_type_id())
     cursor := index
     # Pack calls may append signatures. Check their bodies too, without leaking
     # either successful or rejected specializations into the surrounding module.
@@ -2945,7 +2958,10 @@ def analyze_registered_callables(module: model_hir_module_module.Module, include
     module = test_modes.expand(module, include_tests, initializer_namespace, policies, source_files)
     registered = definitions.register_declarations(module, prepared[0].declarations if len(prepared) > 0 else environment, len(prepared) > 0)
     measured = semantic_stage(measured, "declarations")
-    state = CallableAnalysis(functions=visible[:], declarations=registered, namespace=initializer_namespace, source_files=source_files, excluded_functions=module.excluded_functions, prelude_sources=module.prelude_sources)
+    state = CallableAnalysis(functions=visible[:], declarations=registered, namespace=initializer_namespace, source_files=source_files, excluded_functions=module.excluded_functions, prelude_sources=module.prelude_sources, source_blocks=module.source_blocks)
+    for file in state.source_blocks:
+        if len(file.blocks) > 0:
+            resolve_owned_block(state, file.blocks[0])
     existing_records := 0
     existing_functions := int(len(visible))
     existing_generics := 0
@@ -3381,7 +3397,7 @@ def callable_owner_method(state: CallableAnalysis, owner: model_syntax_symbol_sy
 
 
 def callable_scope(state: CallableAnalysis) -> CallableAnalysis:
-    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, return_type=state.return_type, catching_error=state.catching_error, mock_functions=state.mock_functions[:], attachments=state.attachments[:], required_functions=state.required_functions, body_cache=state.body_cache)
+    return CallableAnalysis(state.names[:], state.types[:], state.functions, next_id=state.next_id, namespace=state.namespace, mutables=state.mutables[:], constants=state.constants, templates=state.templates, records=state.records, owner=state.owner, loop_depth=state.loop_depth, declarations=state.declarations, generics=state.generics, contract=state.contract, refinements=state.refinements[:], transitions=state.transitions[:], dead=state.dead[:], resources=state.resources[:], drop_cache=state.drop_cache, deferred=state.deferred[:], loop_defer_start=state.loop_defer_start, loop_resource_start=state.loop_resource_start, destructor=state.destructor, test_context=state.test_context, unsafe_depth=state.unsafe_depth, loans=state.loans[:], readonly=state.readonly[:], borrowed_parameters=state.borrowed_parameters[:], result_mode=state.result_mode, result_origin=state.result_origin, uninitialized=state.uninitialized[:], moved_elements=state.moved_elements[:], projecting=state.projecting, initializing=state.initializing, parameter_effects=state.parameter_effects, closures=state.closures, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, return_type=state.return_type, catching_error=state.catching_error, mock_functions=state.mock_functions[:], attachments=state.attachments[:], required_functions=state.required_functions, body_cache=state.body_cache, source_blocks=state.source_blocks)
 
 
 def callable_terminates(block: model_syntax_block_block.Block) -> bool:
@@ -3455,7 +3471,8 @@ def callable_iteration(state: CallableAnalysis, name: string, iterable: model_sy
     statements: list[model_syntax_sentence_sentence.Statement] = [model_syntax_sentence_sentence.BindingStatement(iteration)]
     for statement in body.statements:
         statements.append(statement)
-    loop_body = callable_block(local, statements, result_type, false)
+    body.statements = statements
+    loop_body = callable_block(local, body, result_type, false)
     advance = callable_control(state, "Assign", [cursor, next], [], span)
     output.statements.append(callable_control(state, "For", [condition], [loop_body, model_syntax_block_block.Block([advance])], span))
     remaining: list[loans.Loan] = []
@@ -3477,7 +3494,7 @@ def callable_body(state: CallableAnalysis, function: model_syntax_function_funct
                     arguments.append(binding.type_id)
                 state = callable_generic_environment(state, template, arguments)
                 state.contract = None
-    local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, required_functions=state.required_functions, body_cache=state.body_cache)
+    local = CallableAnalysis(functions=state.functions, constants=state.constants, templates=state.templates, records=state.records, owner=callable_owner(state, function), declarations=state.declarations, generics=state.generics, contract=state.contract, source_files=state.source_files, excluded_functions=state.excluded_functions, prelude_sources=state.prelude_sources, function_index=state.function_index, generic_index=state.generic_index, template_index=state.template_index, registered_methods=state.registered_methods, required_functions=state.required_functions, body_cache=state.body_cache, source_blocks=state.source_blocks)
     local.destructor = function.name.ends_with(".drop")
     if local.destructor and (function.result_type.index != 2 or len(function.parameters) != 1):
         return error(callable_diagnostic("destructor must take only self and return non-throwing unit", function.span))
@@ -3519,10 +3536,11 @@ def callable_body(state: CallableAnalysis, function: model_syntax_function_funct
         entry.span = body.span
         callable_contract_checks(local, entry, model_syntax_constraint_model.AttachmentRole.Entry)
         callable_contract_checks(local, entry, model_syntax_constraint_model.AttachmentRole.Fix)
-        resolved = callable_block(local, body.statements, function.result_type, origin=body.span)
+        resolved = callable_block(local, body, function.result_type)
         for statement in resolved.statements:
             entry.statements.append(statement)
-        return entry
+        resolved.statements = entry.statements
+        return retain_owned_block(state, resolved)
     return model_syntax_block_block.Block()
 
 
@@ -4808,7 +4826,7 @@ def callable_pack_iteration(state: CallableAnalysis, name: string, pack: Callabl
         expanded = packs.expand_block(body, "", 0, names, replacements, prefix)
         binding = model_syntax_sentence_sentence.Binding(replacement, None, value, false, false, span)
         output.statements.append(model_syntax_sentence_sentence.BindingStatement(callable_binding(state, binding)))
-        typed = callable_block(state, expanded.statements, result_type, false, origin=expanded.span)
+        typed = callable_block(state, expanded, result_type, false)
         for statement in typed.statements:
             output.statements.append(statement)
         index += 1
@@ -4916,7 +4934,7 @@ def callable_match_expression(state: CallableAnalysis, subject: model_syntax_fun
         statements = arm.body.statements
         if len(statements) == 0:
             return error(callable_diagnostic("match expression arm requires a final value", span))
-        body = callable_block(scoped, statements[:-1], model_syntax_primitive_declarations.unit_type_id(), false)
+        body = callable_block(scoped, model_syntax_block_block.Block(statements[:-1], span=arm.body.span), model_syntax_primitive_declarations.unit_type_id(), false)
         if callable_terminates(body):
             return error(callable_diagnostic("match expression arm must reach its final value", span))
         last := statements[-1]
@@ -5143,3 +5161,137 @@ def callable_same_owner(state: CallableAnalysis, left: model_syntax_symbol_symbo
                 if target.type_id.index == right.index and expansion.same(owner.definition, target.definition):
                     return true
     return false
+
+
+class SemanticBlockCaptures: BlockCaptureResolver
+    state: CallableAnalysis
+
+    def check(capture: BlockCaptureValue) -> bool | diagnostics.Diagnostic:
+        kind = model_syntax_type_annotation.simple_type_name(capture.annotation)
+        if kind in ["Symbol", "TypeAnnotation", "FunctionParameter"]:
+            return true
+        expected = model_syntax_symbol_symbol.TypeId(0)
+        if kind != "Expression":
+            expected = callable_annotation(capture.annotation, self.state.records, self.state.namespace, self.state.declarations)
+        index := 0
+        for expression in capture.expressions:
+            checked = callable_expression_checked(callable_scope(self.state), expression, model_syntax_symbol_symbol.TypeId(0))
+            if expected.index != 0 and checked.type_id.index != expected.index:
+                return false
+            capture.expressions[index] = checked
+            index += 1
+        return true
+
+
+test "block captures resolve parameter types in their owning scope":
+    location = source.Span(source.SourceId(0), 10, 14)
+    expected = model_syntax_type_annotation.named_type("bool", [], location)
+    expression = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("condition"), location)
+    state = CallableAnalysis(names=["condition"], types=[model_syntax_primitive_declarations.bool_type_id()], mutables=[false])
+    capture = BlockCaptureValue("condition", expected, spans=[location], expressions=[expression])
+    assert(SemanticBlockCaptures(state).check(capture))
+    other = CallableAnalysis(names=["condition"], types=[model_syntax_primitive_declarations.i64_type_id()], mutables=[false])
+    mismatch = BlockCaptureValue("condition", expected, spans=[location], expressions=[expression])
+    assert(not SemanticBlockCaptures(other).check(mismatch))
+
+
+test "unbound block capture is a scope diagnostic":
+    location = source.Span(source.SourceId(0), 0, 7)
+    expression = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("missing"), location)
+    capture = BlockCaptureValue("condition", model_syntax_type_annotation.named_type("bool", [], location), spans=[location], expressions=[expression])
+    result ?= SemanticBlockCaptures(CallableAnalysis()).check(capture)
+    assert(result is diagnostics.Diagnostic)
+
+
+# Selection runs at block entry, while parameters, locals and refinements are
+# still the live owning scope. SourceBlockId locates storage, not source text.
+def resolve_owned_block(state: CallableAnalysis, block: model_syntax_block_block.Block) -> model_syntax_block_block.Block | diagnostics.Diagnostic:
+    location ?= block.span
+    if location == None or not block.context.requires_provider:
+        return block
+    if block.context.constructor != None:
+        return block
+    if location != None:
+        for file in state.source_blocks:
+            if file.source.index == location.source.index:
+                finish_provider_block(file, block, SemanticBlockCaptures(state), state.source_files)
+                return file.blocks[block.id.index]
+    return error(callable_diagnostic("provider block has no owning source unit", block.span))
+
+
+def retain_owned_block(state: CallableAnalysis, block: model_syntax_block_block.Block) -> model_syntax_block_block.Block:
+    location ?= block.span
+    identity ?= block.context.identity
+    if location != None and identity != None:
+        for file in state.source_blocks:
+            if file.source.index == location.source.index:
+                file.blocks[identity.index] = block
+                return block
+    return block
+
+
+test "semantic bodies preserve provider identity in the owning block table":
+    location = source.Span(source.SourceId(3), 0, 20)
+    root = model_syntax_block_block.Block(id=model_syntax_block_block.SourceBlockId(0), span=location)
+    body = model_syntax_block_block.Block(id=model_syntax_block_block.SourceBlockId(1), parent=root.id, span=location)
+    body.context.identity = body.id
+    body.context.provider = model_syntax_symbol_symbol.named_definition("provider.sev", "block", "example")
+    file = model_syntax_block_block.BlockFile("body.sev", location.source, [root, body])
+    state = CallableAnalysis(source_blocks=[file])
+    typed = callable_block(state, body, model_syntax_primitive_declarations.unit_type_id(), false)
+    assert(typed.id == body.id)
+    assert(typed.context.provider == body.context.provider)
+    assert(file.blocks[1].id == typed.id)
+    assert(file.blocks[1].context.provider == typed.context.provider)
+
+
+test "block captures observe local shadowing at entry":
+    location = source.Span(source.SourceId(0), 0, 5)
+    expression = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("value"), location)
+    state = CallableAnalysis(names=["value", "value"], types=[model_syntax_primitive_declarations.i64_type_id(), model_syntax_primitive_declarations.bool_type_id()], mutables=[false, false])
+    capture = BlockCaptureValue("condition", model_syntax_type_annotation.named_type("bool", [], location), spans=[location], expressions=[expression])
+    assert(SemanticBlockCaptures(state).check(capture))
+
+
+test "semantic block entry consumes its owned statements":
+    location = source.Span(source.SourceId(3), 10, 20)
+    body = model_syntax_block_block.Block([model_syntax_sentence_sentence.Statement.Break(location)], span=location)
+    result ?= callable_block(CallableAnalysis(), body, model_syntax_primitive_declarations.unit_type_id(), false)
+    assert(result is diagnostics.Diagnostic)
+
+
+test "synthetic semantic block retains its source span":
+    location = source.Span(source.SourceId(3), 10, 20)
+    body = model_syntax_block_block.Block(span=location)
+    typed = callable_block(CallableAnalysis(), body, model_syntax_primitive_declarations.unit_type_id(), false)
+    assert(typed.span == location)
+    assert(typed.context.identity == None)
+
+
+# The constructor's field is authoritative. Captures are inputs to construction,
+# so they cannot substitute for a field the selected constructor did not produce.
+def constructed_branch_condition(block: model_syntax_block_block.Block) -> model_syntax_function_function.Expression | diagnostics.Diagnostic:
+    location ?= block.span
+    if location != None:
+        for field in block.context.fields:
+            if field.name == "conditions":
+                return branch_condition(field.value.expressions, location)
+    return error(callable_diagnostic("conditional block constructor must initialize conditions", block.span))
+
+
+test "semantic branch uses constructed fields instead of original captures":
+    location = source.Span(source.SourceId(0), 0, 10)
+    original = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("original"), location)
+    replacement = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.Name("replacement"), location)
+    annotation = model_syntax_type_annotation.named_type("bool", [], location)
+    block = model_syntax_block_block.Block(span=location)
+    block.context.values.append(BlockCaptureValue("conditions", annotation, expressions=[original]))
+    block.context.fields.append(BlockFieldValue("conditions", BlockCaptureValue("conditions", annotation, expressions=[replacement])))
+    assert(constructed_branch_condition(block) == replacement)
+
+
+test "conditional constructor cannot silently fall back to its captures":
+    location = source.Span(source.SourceId(0), 0, 10)
+    block = model_syntax_block_block.Block(span=location)
+    result ?= constructed_branch_condition(block)
+    assert(result is diagnostics.Diagnostic)

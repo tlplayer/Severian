@@ -7,11 +7,16 @@ import LexemeInput, LexemeMatch, LexicalRule, lexeme_span, lexeme_text from "rul
 import Symbol, TokenKind, callable, is_digit, span from "identifier.sev"
 import "../../../../syntax/constraint/model.sev" as constraints
 import admissible_dispatch_candidates from "../../../../syntax/constraint/dispatch.sev"
+import BlockCaptureValue, BlockFieldValue from "../../../../syntax/generic/block.sev"
 
 
 # Imported rules retain universal source bodies. This evaluator has no parser
 # dependency and grants no filesystem, process, or CFG capability to a rule.
 enum LexicalValue:
+    Capture(value: BlockCaptureValue)
+    Sequence(values: list[LexicalValue])
+    BlockReference(block: model_syntax_block_block.Block)
+    Syntax(expression: model_syntax_function_function.Expression)
     Number(number: int)
     Text(text: string)
     Truth(truth: bool)
@@ -88,6 +93,10 @@ class LexicalFrame:
     names: list[string] = []
     values: list[LexicalValue] = []
     depth: int = 0
+    type_names: list[string] = []
+    type_values: list[string] = []
+    receiver: model_syntax_block_block.Block | None = None
+    read_only: bool = false
 
 
 class LexicalFlow:
@@ -126,6 +135,18 @@ def lexical_text(value: LexicalValue, span: source.Span) -> string | diagnostics
 
 def lexical_truth(value: LexicalValue, span: source.Span) -> bool | diagnostics.Diagnostic:
     match value:
+        case Capture:
+            if len(value.expressions) == 1 and not value.variadic:
+                match value.expressions[0].kind:
+                    case LiteralValue:
+                        match value:
+                            case BooleanValue:
+                                return value
+                            case _:
+                                return error(lexical_error("capture is not a boolean constant", span))
+                    case _:
+                        return error(lexical_error("dispatch value is not available at compile time", span))
+            return error(lexical_error("expected one boolean capture", span))
         case Truth:
             return truth
         case _:
@@ -133,6 +154,9 @@ def lexical_truth(value: LexicalValue, span: source.Span) -> bool | diagnostics.
 
 
 def lexical_get(frame: LexicalFrame, name: string, span: source.Span) -> LexicalValue | diagnostics.Diagnostic:
+    receiver ?= frame.receiver
+    if name == "self" and receiver != None:
+        return LexicalValue.BlockReference(receiver)
     index := 0
     for known in frame.names:
         if known == name:
@@ -268,7 +292,12 @@ def lexical_invoke(parent: LexicalFrame, name: string, arguments: list[LexicalVa
         if method.name == name:
             if len(method.parameters) != len(arguments):
                 return error(lexical_error("wrong argument count for " + name, span))
-            frame = LexicalFrame(parent.rule, parent.budget, depth=parent.depth + 1)
+            frame = LexicalFrame(parent.rule, parent.budget, depth=parent.depth + 1, type_names=parent.type_names, type_values=parent.type_values, receiver=parent.receiver, read_only=parent.read_only)
+            inherited_index := 0
+            for inherited_name in parent.names:
+                if inherited_name.starts_with("self."):
+                    lexical_set(frame, inherited_name, parent.values[inherited_index])
+                inherited_index += 1
             index := 0
             for parameter in method.parameters:
                 lexical_set(frame, parameter.name, arguments[index])
@@ -327,6 +356,10 @@ def lexical_call(frame: LexicalFrame, callee: model_syntax_function_function.Exp
         return LexicalValue.Result(LexemeMatch(lexical_number(slots[0], span), token_kind, lexical_truth(slots[2], span), normalized))
     if path == "len" and len(values) == 1:
         match values[0]:
+            case Capture:
+                return LexicalValue.Number(int(len(value.spans)))
+            case Sequence:
+                return LexicalValue.Number(int(len(values)))
             case Text:
                 return LexicalValue.Number(int(len(text.characters())))
             case Characters:
@@ -405,6 +438,9 @@ def lexical_call(frame: LexicalFrame, callee: model_syntax_function_function.Exp
 def lexical_expression(frame: LexicalFrame, expression: model_syntax_function_function.Expression) -> LexicalValue | diagnostics.Diagnostic:
     lexical_tick(frame, expression.span)
     span = expression.span
+    path = lexical_path(expression)
+    if path != "" and path in frame.names:
+        return lexical_get(frame, path, span)
     match expression.kind:
         case LiteralValue:
             match value:
@@ -425,6 +461,11 @@ def lexical_expression(frame: LexicalFrame, expression: model_syntax_function_fu
                 return LexicalValue.Category(lexical_category(name, span))
             receiver = lexical_expression(frame, object)
             match receiver:
+                case BlockReference:
+                    for field in block.context.fields:
+                        if field.name == name:
+                            return LexicalValue.Capture(field.value)
+                    return error(lexical_error("uninitialized block field " + name, span))
                 case Input:
                     if name == "characters":
                         return LexicalValue.Characters(input.characters)
@@ -441,6 +482,15 @@ def lexical_expression(frame: LexicalFrame, expression: model_syntax_function_fu
         case Subscript:
             receiver = lexical_expression(frame, object)
             position := lexical_number(lexical_expression(frame, index), span)
+            match receiver:
+                case Sequence:
+                    if position < 0:
+                        position += len(values)
+                    if position < 0 or position >= len(values):
+                        return error(lexical_error("sequence index is out of bounds", span))
+                    return values[position]
+                case _:
+                    position = position
             sequence: list[string] := []
             match receiver:
                 case Characters:
@@ -464,6 +514,16 @@ def lexical_expression(frame: LexicalFrame, expression: model_syntax_function_fu
                 return LexicalValue.Number(lexical_number(value, span))
             return error(lexical_error("unsupported unary operator", span))
         case Binary:
+            if operator.symbol == "is" or operator.symbol == "is not":
+                subject = lexical_path(left)
+                expected = lexical_path(right)
+                index := 0
+                for name in frame.type_names:
+                    if name == subject:
+                        accepted = frame.type_values[index] == expected
+                        return LexicalValue.Truth(accepted if operator.symbol == "is" else not accepted)
+                    index += 1
+                return error(lexical_error("type predicate requires a resolved subject", span))
             lhs = lexical_expression(frame, left)
             if operator.symbol == "and":
                 return LexicalValue.Truth(lexical_truth(lhs, span) and lexical_truth(lexical_expression(frame, right), span))
@@ -474,17 +534,41 @@ def lexical_expression(frame: LexicalFrame, expression: model_syntax_function_fu
             if lexical_truth(lexical_expression(frame, condition), span):
                 return lexical_expression(frame, then_value)
             return lexical_expression(frame, else_value)
+        case ListLiteral:
+            values: list[LexicalValue] = []
+            for element in elements:
+                values.append(lexical_expression(frame, element))
+            return LexicalValue.Sequence(values)
         case _:
             return error(lexical_error("unsupported expression", span))
 
 
 def lexical_block(frame: LexicalFrame, block: model_syntax_block_block.Block) -> LexicalFlow | diagnostics.Diagnostic:
     for statement in block.statements:
+        lexical_tick(frame, frame.rule.span)
         match statement:
             case BindingStatement:
                 lexical_set(frame, binding.name, lexical_expression(frame, binding.value))
             case FieldSet:
                 name = lexical_path(target)
+                receiver ?= frame.receiver
+                if name.starts_with("self.") and receiver != None:
+                    if frame.read_only:
+                        return error(lexical_error("dispatch predicates cannot mutate a block", span))
+                    replacement = lexical_expression(frame, value)
+                    if update != None:
+                        return error(lexical_error("compound block field updates require a resolved operation", span))
+                    field_value = lexical_capture_value(frame, name[5:], replacement, span)
+                    found := false
+                    index := 0
+                    for field in receiver.context.fields:
+                        if field.name == name[5:]:
+                            receiver.context.fields[index] = BlockFieldValue(name[5:], field_value)
+                            found = true
+                        index += 1
+                    if not found:
+                        receiver.context.fields.append(BlockFieldValue(name[5:], field_value))
+                    continue
                 if name == "" or "." in name:
                     return error(lexical_error("only local bindings can be updated", span))
                 replacement := lexical_expression(frame, value)
@@ -507,6 +591,17 @@ def lexical_block(frame: LexicalFrame, block: model_syntax_block_block.Block) ->
                     return flow
             case While:
                 while lexical_truth(lexical_expression(frame, condition), span):
+                    lexical_tick(frame, span)
+                    flow = lexical_block(frame, body)
+                    if flow.returned:
+                        return flow
+                    if flow.breaking:
+                        break
+            case ForEach:
+                sequence = lexical_sequence(lexical_expression(frame, iterable), span)
+                for item in sequence:
+                    lexical_tick(frame, span)
+                    lexical_set(frame, name, item)
                     flow = lexical_block(frame, body)
                     if flow.returned:
                         return flow
@@ -669,3 +764,68 @@ test "unique lexical with selects a body within a source window":
     assert(result.matched and result.kind == TokenKind.Integer)
     assert(result.end == 1)
     assert(lexeme_span(input, 0, result.end).start == 1)
+
+
+def lexical_sequence(value: LexicalValue, span: source.Span) -> list[LexicalValue] | diagnostics.Diagnostic:
+    match value:
+        case Sequence:
+            return values
+        case Capture:
+            result: list[LexicalValue] = []
+            for index in range(int(len(value.spans))):
+                item = BlockCaptureValue(value.name, value.annotation, spans=[value.spans[index]])
+                if len(value.expressions) > index:
+                    item.expressions.append(value.expressions[index])
+                if len(value.types) > index:
+                    item.types.append(value.types[index])
+                if len(value.parameters) > index:
+                    item.parameters.append(value.parameters[index])
+                if len(value.symbols) > index:
+                    item.symbols.append(value.symbols[index])
+                result.append(LexicalValue.Capture(item))
+            return result
+        case _:
+            return error(lexical_error("expected a sequence", span))
+
+
+def lexical_capture_value(frame: LexicalFrame, name: string, value: LexicalValue, span: source.Span) -> BlockCaptureValue | diagnostics.Diagnostic:
+    annotation = model_syntax_type_annotation.named_type("Expression", [], span)
+    declaration ?= frame.rule.declaration
+    if declaration != None:
+        found := false
+        for field in declaration.fields:
+            if field.name == name:
+                annotation = field.annotation
+                found = true
+        if not found:
+            return error(lexical_error("undeclared block field " + name, span))
+    result = BlockCaptureValue(name, annotation)
+    match value:
+        case Capture:
+            return value
+        case Sequence:
+            for item in values:
+                part = lexical_capture_value(frame, name, item, span)
+                for expression in part.expressions:
+                    result.expressions.append(expression)
+                for typ in part.types:
+                    result.types.append(typ)
+                for parameter in part.parameters:
+                    result.parameters.append(parameter)
+                for symbol in part.symbols:
+                    result.symbols.append(symbol)
+                for location in part.spans:
+                    result.spans.append(location)
+            return result
+        case Syntax:
+            result.expressions.append(expression)
+        case Number:
+            result.expressions.append(model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_function_function.LiteralValue.IntegerValue(string(number))), span))
+        case Truth:
+            result.expressions.append(model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_function_function.LiteralValue.BooleanValue(truth)), span))
+        case Text:
+            result.expressions.append(model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(model_syntax_function_function.LiteralValue.StringValue(text)), span))
+        case _:
+            return error(lexical_error("value cannot initialize a block field", span))
+    result.spans.append(span)
+    return result

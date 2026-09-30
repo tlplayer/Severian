@@ -1,6 +1,8 @@
 import lexer
 import source
 import diagnostics
+import ParsedBlockCaptures, finish_provider_block, resolve_provider_blocks from "providers.sev"
+import Parser, parser_module from "statement/mod.sev"
 import declared_source_block, global_source_block, resolve_block_syntax from "package:syntax/block/block.sev"
 import AbiId, Add, ArtifactId, AssertionLocation, AssertionOrigin, Associativity, AttachmentRole, AttrValue, AttributeId, B, BackendId, BinaryOperation, BinaryOperator, Binding, BindingId, BitwiseAnd, BitwiseOr, BitwiseXor, Block, BlockFile, BlockId, BlockKind, BlockLayout, BlockSentence, BlockSyntax, BlockTerm, BlockTermRole, BoundaryModifier, CallArgument, CallType, CallableAlternative, CallableOrigin, Callee, CanonicalRewrite, Capture, CfgBody, CfgEdge, CfgExit, CfgStatement, CfgTerminator, CompileRoute, CompiledRegionId, CompilerCapability, CompilerExpectation, CompilerId, CompilerTestCase, Constant, Constraint, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, Constructor, Contains, Conversion, ConversionKind, Conversions, CoverageKind, CoveragePoint, DeclarationId, Decorator, DecoratorArgument, DecoratorValue, DefId, DialectId, DispatchCandidate, DispatchFamily, Divide, EffectSet, Effects, Equal, Evaluation, Expression, ExpressionConversion, ExpressionConversionKind, ExpressionKind, ExternalCall, FfiId, FieldConstraint, Fixity, FloorDivide, FunctionDeclaration, FunctionId, FunctionLinkage, FunctionParameter, GenericConstraint, GenericParamId, Grammar, Greater, GreaterEqual, HirId, ImportDeclaration, ImportSubject, IndexedId, InferVarId, InferenceContext, InterfaceId, IrContext, LazyOperand, LeftShift, Less, LessEqual, Lexeme, LexemeTerm, LiteralBinding, LiteralConstruction, LiteralSyntax, LiteralValue, LocalDecl, LocalId, LogicalAnd, LogicalOr, LoweredFloatFormat, LoweredOperation, LoweredType, LoweringCapability, LoweringRequirements, MatchArm, MlirObject, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, MockFunction, ModuleId, Move, Multiply, NamedId, Negative, Not, NotEqual, OpId, Operand, Operation, OperationDiagnostic, OperationId, OperationInterface, OperationOrigin, OperationRegistry, Operator, OperatorDeclaration, OperatorDomain, OperatorParameter, OperatorSignature, OperatorSyntax, PackageId, Place, Positive, Power, Primitive, PrimitiveAlias, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Projection, ProofResult, PropertyDeclaration, ProviderId, QualityRegion, RecordDeclaration, RegionId, RegisteredOperation, Remainder, ResolvedCallee, RightShift, RuntimeId, Rvalue, ScalarOperation, ScopeId, SemanticObject, Sentence, SentenceDefinition, SentenceField, SentenceId, SentenceMatch, Signature, Size, SourceBlockId, SourceFile, SourceId, SourceMap, Span, StableId, Statement, Substitution, Subtract, SwitchCase, Symbol, SymbolId, SymbolKind, SymbolName, Term, TermRole, TestCaseRow, TestDeclaration, TestExpectation, TestMode, TestModeArguments, TestStream, TokenKind, TokenTerm, TraitDeclaration, TraitRef, TyInterner, Type, TypeAnnotation, TypeAnnotationKind, TypeBinding, TypeConstraint, TypeConstructorBinding, TypeDeclaration, TypeId, TypeKind, TypePattern, TypeRef, UnaryOperation, UnaryOperator, UnifyError, ValueId, VariantId, WithAttachment, Y, accepts_shape, allocate_effect, annotation_key, array_mlir, attribute_id, backend_id, byte_view_mlir, callable_key, cfg_blocks, control_flow, declared_mlir_binding, definition_from_key, dialect_id, empty_cfg, free_effect, hashing, index_mlir, insert_type, io_effect, iteration_sentences, load, local_place, match_sentence, memref_mlir, named_definition, named_operation, named_type, no_effects, operation_id, operator_syntax, outcome_variants, provider_id, ranked_memref_storage, read_effect, record_mlir_binding, resolve_expression, resolve_sentence, resolved_function, runtime_id, same_constructor, same_definition, same_parameters, scalar_boundary, scalar_mlir, scalar_operand_segments, scalar_requirement_names, scalar_requirements, semantic_digest, semantic_key, simple_type_name, source_id, span, standard_block_syntax, struct_mlir, tensor_mlir, test_mode_name, throw_effect, type_children, union_variants, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source, write_effect from "package:syntax/block/block.sev"
 
@@ -24,6 +26,14 @@ def append_block_sentence(file: BlockFile, owner: SourceBlockId, terms: list[Blo
 
 def open_source_block(file: BlockFile, parent: SourceBlockId, header: BlockSentence, syntaxes: list[BlockSyntax]) -> SourceBlockId:
     block = declared_source_block(file, parent, header, syntaxes)
+    block.context.identity = block.id
+    block.context.parent = parent
+    owner = file.blocks[parent.index]
+    if len(owner.subblocks) > 0 and len(owner.sentences) >= 2:
+        previous = file.blocks[owner.subblocks[-1].index]
+        previous_header ?= previous.header
+        if previous_header != None and previous_header.id == owner.sentences[-2].id:
+            block.previous = previous.id
     file.blocks.append(block)
     file.blocks[parent.index].subblocks.append(block.id)
     return block.id
@@ -46,8 +56,9 @@ def close_source_block(file: BlockFile, id: SourceBlockId, end: u32):
         file.blocks[id.index].span = source.Span(span.source, span.start, end)
 
 
-def parse_blocks(file: source.SourceFile, syntaxes: list[BlockSyntax], rules: list[lexer.SourceLexicalRule] = []) -> BlockFile | diagnostics.Diagnostic:
+def parse_blocks(file: source.SourceFile, syntaxes: list[BlockSyntax], rules: list[lexer.SourceLexicalRule] = [], providers: list[RecordDeclaration] = [], registered_tokens: list[lexer.Token] = [], sources: list[source.SourceFile] = [], defer: bool = false) -> BlockFile | diagnostics.Diagnostic:
     root = global_source_block(file)
+    root.context.identity = root.id
     result = BlockFile(file.path, file.id, [root])
     owners = [SourceBlockId(0)]
     # False entries describe indentation inside a continued expression.
@@ -55,7 +66,8 @@ def parse_blocks(file: source.SourceFile, syntaxes: list[BlockSyntax], rules: li
     delimiters: list[string] = []
     terms: list[BlockTerm] = []
     pending: BlockSentence | None := None
-    for token in lexer.scan_bootstrap(file, rules):
+    tokens = registered_tokens if len(registered_tokens) > 0 else lexer.scan_bootstrap(file, rules)
+    for token in tokens:
         if token.kind == lexer.TokenKind.Indent:
             structural = len(delimiters) == 0
             indentation.append(structural)
@@ -107,6 +119,7 @@ def parse_blocks(file: source.SourceFile, syntaxes: list[BlockSyntax], rules: li
     finish_source_header(result, owners[-1], pending, syntaxes)
     while len(owners) > 1:
         close_source_block(result, owners.pop(), u32(len(file.characters)))
+    resolve_provider_blocks(result, tokens, providers, sources, defer)
     return result
 
 
@@ -184,3 +197,182 @@ test "control headers without bodies do not create declaration blocks":
     file = source.virtual_source("header.sev", "if ready\n")
     blocks = parse_blocks(file, standard_block_syntax())
     assert(len(blocks.blocks) == 1)
+
+
+def block_provider_fixture(name: string, spelling: string) -> RecordDeclaration:
+    definition = source.virtual_source(name + ".sev", "class " + name + ": Y + B\n    values: list[bool] = []\n    context: BlockContext = BlockContext()\n    span: Span | None = None\n    sentences: list[BlockSentence] = []\n    subblocks: list[SourceBlockId] = []\n    parent: B\n    sentence construct[\"" + spelling + "\", values...: bool, \":\"]() -> B with len(values) > 0:\n        self.values = values\n        return self\n")
+    parsed = parser_module(Parser(lexer.scan_bootstrap(definition)))
+    match parsed.items[0]:
+        case Record:
+            return declaration
+        case _:
+            throw Error("expected block provider fixture")
+
+
+test "source windows retain selected provider and constructed typed fields":
+    provider = block_provider_fixture("Custom", "custom")
+    file = source.virtual_source("consumer.sev", "custom true:\n    finish()\n")
+    blocks = parse_blocks(file, [], providers=[provider])
+    assert(len(blocks.blocks) == 2)
+    block = blocks.blocks[1]
+    assert(block.syntax_name == "Custom")
+    assert(block.context.provider != None and block.context.constructor != None)
+    assert(len(block.context.values) == 1 and len(block.context.fields) == 1)
+    assert(block.context.fields[0].name == "values")
+    assert(len(block.context.values[0].expressions) == 1)
+    assert(block.context.values[0].spans[0].start == 7)
+
+
+test "block provider overlap is diagnosed before constructing either body":
+    file = source.virtual_source("ambiguous.sev", "custom true:\n    finish()\n")
+    first = block_provider_fixture("First", "custom")
+    second = block_provider_fixture("Second", "custom")
+    result ?= parse_blocks(file, [], providers=[first, second])
+    assert(result is diagnostics.Diagnostic)
+
+
+test "selected block constructor failure is not a dispatch retry":
+    file = source.virtual_source("failed-constructor.sev", "custom true:\n    finish()\n")
+    provider = block_provider_fixture("Broken", "custom")
+    provider.sentences[0].body = Block()
+    result ?= parse_blocks(file, [], providers=[provider])
+    assert(result is diagnostics.Diagnostic)
+
+
+test "block constructors execute locals and branches through the shared interpreter":
+    provider = block_provider_fixture("Conditional", "custom")
+    original ?= provider.sentences[0].body
+    assert(original != None)
+    if original != None:
+        condition = Expression(ExpressionKind.LiteralValue(LiteralValue.BooleanValue(true)), provider.span)
+        provider.sentences[0].body = Block([Statement.If(condition, original, Block(), provider.span)])
+        file = source.virtual_source("conditional-constructor.sev", "custom true:\n    finish()\n")
+        blocks = parse_blocks(file, [], providers=[provider])
+        assert(len(blocks.blocks[1].context.fields) == 1)
+
+
+test "source capture parsing keeps wide integer spelling":
+    provider = block_provider_fixture("Wide", "custom")
+    provider.sentences[0].parameters[0].annotation = named_type("u128", [], provider.span)
+    file = source.virtual_source("wide-capture.sev", "custom 340282366920938463463374607431768211455:\n    finish()\n")
+    blocks = parse_blocks(file, [], providers=[provider])
+    expression = blocks.blocks[1].context.values[0].expressions[0]
+    match expression.kind:
+        case LiteralValue:
+            match value:
+                case IntegerValue:
+                    assert(spelling == "340282366920938463463374607431768211455")
+                case _:
+                    assert(false)
+        case _:
+            assert(false)
+
+
+test "parsed callable and nested bodies retain discovered block identities":
+    file = source.virtual_source("owned-bodies.sev", "def main():\n    if true:\n        return\n")
+    blocks = parse_blocks(file, standard_block_syntax())
+    parsed = parser_module(Parser(lexer.scan_bootstrap(file), source_blocks=blocks))
+    assert(len(parsed.source_blocks) == 1)
+    match parsed.items[0]:
+        case Function:
+            body ?= declaration.body
+            assert(body != None)
+            if body != None:
+                assert(body.id == blocks.blocks[1].id)
+                assert(body.header != None)
+                match body.statements[0]:
+                    case If:
+                        assert(then_block.id == blocks.blocks[2].id)
+                        assert(then_block.parent == body.id)
+                        assert(then_block.header != None)
+                    case _:
+                        assert(false)
+        case _:
+            assert(false)
+
+
+test "deferred provider selection constructs the discovered block through shared dispatch":
+    provider = block_provider_fixture("Custom", "custom")
+    file = source.virtual_source("deferred.sev", "custom true:\n    finish()\n")
+    blocks = parse_blocks(file, [], providers=[provider], defer=true)
+    body = blocks.blocks[1]
+    assert(body.context.constructor == None)
+    assert(len(body.context.fields) == 0)
+    finish_provider_block(blocks, body, ParsedBlockCaptures(), [])
+    selected = blocks.blocks[1]
+    assert(selected.id == body.id and selected.parent == body.parent)
+    assert(selected.header == body.header and selected.span == body.span)
+    assert(selected.context.constructor != None)
+    assert(selected.syntax_name == "Custom")
+    assert(len(selected.context.fields) == 1)
+    assert(selected.context.fields[0].name == "values")
+    assert(len(selected.context.fields[0].value.expressions) == 1)
+
+
+test "deferred provider ambiguity never executes a constructor":
+    file = source.virtual_source("deferred-ambiguous.sev", "custom true:\n    finish()\n")
+    first = block_provider_fixture("First", "custom")
+    second = block_provider_fixture("Second", "custom")
+    blocks = parse_blocks(file, [], providers=[first, second], defer=true)
+    result ?= finish_provider_block(blocks, blocks.blocks[1], ParsedBlockCaptures(), [])
+    assert(result is diagnostics.Diagnostic)
+    assert(blocks.blocks[1].context.constructor == None)
+    assert(len(blocks.blocks[1].context.fields) == 0)
+
+
+test "deferred selected constructor failure remains a diagnostic":
+    file = source.virtual_source("deferred-failed.sev", "custom true:\n    finish()\n")
+    provider = block_provider_fixture("Broken", "custom")
+    provider.sentences[0].body = Block()
+    blocks = parse_blocks(file, [], providers=[provider], defer=true)
+    result ?= finish_provider_block(blocks, blocks.blocks[1], ParsedBlockCaptures(), [])
+    assert(result is diagnostics.Diagnostic)
+
+
+test "provider branch headers use declared repeated captures":
+    provider = block_provider_fixture("Conditional", "if")
+    file = source.virtual_source("declared-branch.sev", "def main():\n    if true, false:\n        return\n")
+    tokens = lexer.scan_bootstrap(file)
+    blocks = parse_blocks(file, standard_block_syntax(), providers=[provider], registered_tokens=tokens, defer=true)
+    parsed = parser_module(Parser(tokens, source_blocks=blocks))
+    match parsed.items[0]:
+        case Function:
+            body ?= declaration.body
+            assert(body != None)
+            if body != None:
+                match body.statements[0]:
+                    case If:
+                        assert(then_block.id == blocks.blocks[2].id)
+                        assert(len(then_block.context.candidates) == 1)
+                        assert(len(then_block.context.candidates[0].captures[0].expressions) == 2)
+                        match condition.kind:
+                            case Conditional:
+                                assert(true)
+                            case _:
+                                assert(false)
+                    case _:
+                        assert(false)
+        case _:
+            assert(false)
+
+
+test "owned body selects its introducing sentence before nested bodies":
+    file = source.virtual_source("nested-owners.sev", "def main():\n    if true:\n        if false:\n            return\n    return\n")
+    tokens = lexer.scan_bootstrap(file)
+    blocks = parse_blocks(file, standard_block_syntax(), registered_tokens=tokens)
+    parsed = parser_module(Parser(tokens, source_blocks=blocks))
+    match parsed.items[0]:
+        case Function:
+            body ?= declaration.body
+            assert(body != None)
+            if body != None:
+                assert(body.id == blocks.blocks[1].id)
+                assert(len(body.statements) == 2)
+                match body.statements[0]:
+                    case If:
+                        assert(then_block.id == blocks.blocks[2].id)
+                        assert(len(then_block.statements) == 1)
+                    case _:
+                        assert(false)
+        case _:
+            assert(false)

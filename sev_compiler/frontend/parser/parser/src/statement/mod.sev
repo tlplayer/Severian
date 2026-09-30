@@ -1,3 +1,4 @@
+import branch_condition from "../../../../../syntax/block/if.sev"
 import "../../../../../hir/module/module.sev" as model_hir_module_module
 import "../../../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../../../syntax/constraint/model.sev" as model_syntax_constraint_model
@@ -81,6 +82,7 @@ def formatted_string_expression(value: string, span: source.Span, syntaxes: list
 class Parser:
     tokens: list[lexer.Token]
     cursor: list[int] = [0]
+    source_blocks: model_syntax_block_block.BlockFile | None = None
 
 
 # The shared cursor belongs to the parser state. Recursive parsing uses
@@ -157,6 +159,9 @@ def parser_delimited_layout(parser: Parser):
 
 def parser_module(parser: Parser) -> model_hir_module_module.Module | diagnostics.Diagnostic:
     result = model_hir_module_module.Module([])
+    source_blocks ?= parser.source_blocks
+    if source_blocks != None:
+        result.source_blocks.append(source_blocks)
     if len(parser.tokens) > 0:
         result.block_declarations = parser.tokens[0].block_declarations[:]
     parser_separators(parser)
@@ -496,7 +501,7 @@ def parser_function_declaration(parser: Parser, decorators: list[model_syntax_fu
     body: model_syntax_block_block.Block | None := None
     end := result.span.end
     if parser_take_symbol(parser, ":") != None:
-        block = parser_indented_block(parser, "function")
+        block = parser_owned_body(parser, "function")
         body = block[0]
         end = block[1]
     return model_syntax_function_function.FunctionDeclaration(decorators, name, generics, constraints, parameters, result, body, source.Span(start.source, start.start, end), result_mode=result_mode, type_defaults=defaults, attachments=attachments)
@@ -675,7 +680,7 @@ def parser_operator_declaration(parser: Parser) -> model_syntax_function_syntax.
         constraints.append(constraint)
     body: model_syntax_block_block.Block | None := None
     if parser_take_symbol(parser, ":") != None:
-        body = parser_indented_block(parser, "operator")[0]
+        body = parser_owned_body(parser, "operator")[0]
     receiver := len(parameters) < 2
     if len(parameters) == 1 and parameters[0].name == "self":
         syntax = model_syntax_function_syntax.OperatorSyntax(symbol, model_syntax_function_syntax.Fixity.Prefix, 10, model_syntax_function_syntax.Associativity.Right, domain=syntax.domain, grammar_name=syntax.grammar_name)
@@ -791,7 +796,7 @@ def parser_test_declaration(parser: Parser) -> model_syntax_function_syntax.Test
             parser_separators(parser)
         end = parser_expect(parser, Dedent, "expected end of compiler test").span.end
         return model_syntax_function_syntax.TestDeclaration(name, modes, model_syntax_block_block.Block(), cases, source.Span(start.source, start.start, end), mode_arguments=mode_arguments)
-    block = parser_indented_block(parser, "test")
+    block = parser_owned_body(parser, "test")
     return model_syntax_function_syntax.TestDeclaration(name, modes, block[0], [], source.Span(start.source, start.start, block[1]), mode_arguments=mode_arguments, contracts=contracts)
 
 
@@ -877,7 +882,7 @@ def parser_case_test(parser: Parser, start: source.Span) -> model_syntax_functio
     if len(rows) == 0:
         return error(parser_fail(parser, "case table must contain at least one case"))
     parser_expect_symbol(parser, ":", "expected colon after cases")
-    body = parser_indented_block(parser, "cases")
+    body = parser_owned_body(parser, "cases")
     return model_syntax_function_syntax.TestDeclaration(label, [], body[0], [], source.Span(start.source, start.start, body[1]), case_names=names, case_rows=rows)
 
 
@@ -925,18 +930,6 @@ def parser_compiler_case(parser: Parser, expectation: model_syntax_function_synt
         parser_separators(parser)
     return model_syntax_function_syntax.CompilerTestCase(expectation, None, model_syntax_block_block.Block(statements), span, declarations=declarations)
 
-def parser_indented_block(parser: Parser, owner: string) -> tuple[model_syntax_block_block.Block, u32] | diagnostics.Diagnostic:
-    parser_expect(parser, Newline, "expected newline after " + owner)
-    while parser_take(parser, Newline) != None:
-        throw diagnostics.diagnostic("E000113", "unimplemented (sev_compiler/frontend/parser/parser/src/statement/mod.sev)")
-    start = parser_expect(parser, Indent, "expected indented " + owner + " body").span
-    statements: list[model_syntax_sentence_sentence.Statement] = []
-    parser_separators(parser)
-    while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
-        statements.append(parser_block_statement(parser))
-        parser_separators(parser)
-    end = parser_expect(parser, Dedent, "expected end of " + owner + " body").span.end
-    return (model_syntax_block_block.Block(statements, [], [], source.Span(start.source, start.start, end)), end)
 
 
 class LoopInitializer:
@@ -972,13 +965,13 @@ def parser_block_statement(parser: Parser) -> model_syntax_sentence_sentence.Sta
     if parser_at_identifier(parser, "unsafe"):
         start = parser_next(parser).span
         parser_expect_symbol(parser, ":", "expected colon after unsafe")
-        body = parser_indented_block(parser, "unsafe")
+        body = parser_owned_body(parser, "unsafe")
         return model_syntax_sentence_sentence.Unsafe(body[0], source.Span(start.source, start.start, body[1]))
     if parser_at_identifier(parser, "reject") or parser_at_identifier(parser, "accept"):
         rejected = parser_at_identifier(parser, "reject")
         start = parser_next(parser).span
         parser_expect_symbol(parser, ":", "expected colon after compiler expectation")
-        body = parser_indented_block(parser, "compiler expectation")
+        body = parser_owned_body(parser, "compiler expectation")
         return model_syntax_sentence_sentence.CompilerCheck(rejected, body[0], source.Span(start.source, start.start, body[1]))
     if parser_at_identifier(parser, "drop"):
         start = parser_next(parser).span
@@ -991,7 +984,7 @@ def parser_block_statement(parser: Parser) -> model_syntax_sentence_sentence.Sta
             if syntax.grammar_form == "ConditionBody":
                 operands.append(parser_expression(parser, 0))
             parser_expect_symbol(parser, ":", "expected colon after grammar operands")
-            body = parser_indented_block(parser, syntax.grammar_name)
+            body = parser_owned_body(parser, syntax.grammar_name)
             return model_syntax_sentence_sentence.GrammarApply(syntax, operands, [body[0]], source.Span(start.source, start.start, body[1]), false)
     if parser_at_identifier(parser, "match"):
         return parser_match_statement(parser)
@@ -1000,7 +993,7 @@ def parser_block_statement(parser: Parser) -> model_syntax_sentence_sentence.Sta
         condition = parser_expression(parser, 0)
         initializer = parser_loop_initializer(parser)
         parser_expect_symbol(parser, ":", "expected colon after while condition")
-        body = parser_indented_block(parser, "while")
+        body = parser_owned_body(parser, "while")
         span = source.Span(start.source, start.start, body[1])
         loop: model_syntax_sentence_sentence.Statement = model_syntax_sentence_sentence.Statement.While(condition, body[0], span)
         return parser_initialized_loop(loop, initializer, span)
@@ -1017,11 +1010,11 @@ def parser_block_statement(parser: Parser) -> model_syntax_sentence_sentence.Sta
         iterable = parser_expression(parser, 0)
         initializer = parser_loop_initializer(parser)
         parser_expect_symbol(parser, ":", "expected colon after iterable")
-        body = parser_indented_block(parser, "for")
+        body = parser_owned_body(parser, "for")
         span = source.Span(start.source, start.start, body[1])
         return parser_initialized_loop(model_syntax_sentence_sentence.ForEach(name, iterable, body[0], span), initializer, span)
     if parser_at_identifier(parser, "if"):
-        return parser_conditional(parser)
+        return parser_branch_chain(parser)
     if parser_at_identifier(parser, "throw"):
         start = parser_next(parser).span
         value = parser_expression(parser, 0)
@@ -1079,7 +1072,7 @@ def parser_match_statement(parser: Parser) -> model_syntax_sentence_sentence.Sta
             annotation = parser_type_annotation(parser)
             pattern = None
             parser_expect_symbol(parser, ":", "expected colon after capture type")
-        body = parser_indented_block(parser, "match arm")
+        body = parser_owned_body(parser, "match arm")
         arms.append(model_syntax_sentence_sentence.MatchArm(body[0], binding_name=capture, annotation=annotation, span=arm_start, pattern=pattern))
         parser_separators(parser)
     end = parser_expect(parser, Dedent, "expected end of match").span.end
@@ -1577,8 +1570,8 @@ def precedence(operator: model_syntax_function_syntax.OperatorSyntax) -> int:
     return int(operator.precedence)
 
 
-def parse(tokens: list[lexer.Token]) -> model_hir_module_module.Module | diagnostics.Diagnostic:
-    return parser_module(Parser(tokens))
+def parse(tokens: list[lexer.Token], source_blocks: model_syntax_block_block.BlockFile | None = None) -> model_hir_module_module.Module | diagnostics.Diagnostic:
+    return parser_module(Parser(tokens, source_blocks=source_blocks))
 
 
 # Named declaration syntax is supplied by a G contract. The structural parser
@@ -1703,7 +1696,7 @@ def parser_sentence_declaration(parser: Parser) -> model_syntax_function_functio
     attachments: list[model_syntax_constraint_model.WithAttachment] = []
     constraints = parser_declaration_constraints(parser, attachments, true)
     parser_expect_symbol(parser, ":", "expected sentence body")
-    body = parser_indented_block(parser, "sentence")
+    body = parser_owned_body(parser, "sentence")
     grammar = model_syntax_sentence_sentence.Grammar(fields, repetitions)
     return model_syntax_function_function.FunctionDeclaration(name=name, parameters=parameters, constraints=constraints, result=result, body=body[0], span=source.Span(start.source, start.start, body[1]), attachments=attachments, sentence=grammar)
 
@@ -1808,23 +1801,6 @@ def parser_grammar_declaration(parser: Parser) -> model_syntax_grammar_grammar.G
     return error(parser_fail(parser, "grammar requires a lowering body"))
 
 
-def parser_conditional(parser: Parser) -> model_syntax_sentence_sentence.Statement | diagnostics.Diagnostic:
-    start = parser_next(parser).span
-    condition = parser_expression(parser, 0)
-    parser_expect_symbol(parser, ":", "expected colon after if condition")
-    taken = parser_indented_block(parser, "if")
-    otherwise := model_syntax_block_block.Block()
-    end := taken[1]
-    if parser_at_identifier(parser, "elif"):
-        otherwise.statements.append(parser_conditional(parser))
-        end = parser_peek(parser).span.start
-    elif parser_at_identifier(parser, "else"):
-        parser_next(parser)
-        parser_expect_symbol(parser, ":", "expected colon after else")
-        rejected = parser_indented_block(parser, "else")
-        otherwise = rejected[0]
-        end = rejected[1]
-    return model_syntax_sentence_sentence.Statement.If(condition, taken[0], otherwise, source.Span(start.source, start.start, end))
 
 
 test "file namespace imports preserve CFG aliases":
@@ -1892,3 +1868,82 @@ test "duplicate sentence capture names are diagnosed":
     input = source.virtual_source("duplicate-capture.sev", "class Example: Y + B\n    sentence example[\"example\", value: bool, value: bool]():\n        return\n")
     parsed ?= parser_module(Parser(lexer.scan_bootstrap(input)))
     assert(parsed is diagnostics.Diagnostic)
+
+# Provider headers were already partitioned by their declared sentences. Only
+# bootstrap source, which defines those providers, needs expression parsing here.
+def parser_branch_chain(parser: Parser) -> model_syntax_sentence_sentence.Statement | diagnostics.Diagnostic:
+    start = parser_peek(parser).span
+    file ?= parser.source_blocks
+    discovered: model_syntax_block_block.Block | None := None
+    if file != None:
+        for block in file.blocks:
+            header ?= block.header
+            if header != None and header.span.start == start.start and header.span.source == start.source:
+                discovered = block
+                break
+    conditions: list[model_syntax_function_function.Expression] = []
+    if discovered != None and discovered.context.requires_provider:
+        if len(discovered.context.candidates) == 0:
+            return error(parser_fail(parser, "no declared branch matches its header"))
+        # Preserve capture expressions for dependency discovery. Selection and
+        # the authoritative condition come from construction in semantic scope.
+        for candidate in discovered.context.candidates:
+            for capture in candidate.captures:
+                for expression in capture.expressions:
+                    conditions.append(expression)
+        header ?= discovered.header
+        if header != None:
+            while parser_peek(parser).span.start < header.span.end and not parser_at_simple(parser, Eof):
+                parser_next(parser)
+    else:
+        parser_next(parser)
+        conditions.append(parser_expression(parser, 0))
+        while parser_take_symbol(parser, ",") != None:
+            conditions.append(parser_expression(parser, 0))
+        parser_expect_symbol(parser, ":", "expected colon after branch conditions")
+    taken = parser_owned_body(parser, "branch")
+    otherwise := model_syntax_block_block.Block()
+    end := taken[1]
+    if parser_at_identifier(parser, "elif"):
+        otherwise.statements.append(parser_branch_chain(parser))
+        end = parser_peek(parser).span.start
+    elif parser_at_identifier(parser, "else"):
+        parser_next(parser)
+        parser_expect_symbol(parser, ":", "expected colon after alternative branch")
+        rejected = parser_owned_body(parser, "alternative branch")
+        otherwise = rejected[0]
+        end = rejected[1]
+    condition = branch_condition(conditions, start)
+    return model_syntax_sentence_sentence.Statement.If(condition, taken[0], otherwise, source.Span(start.source, start.start, end))
+
+
+def parser_owned_body(parser: Parser, owner: string) -> tuple[model_syntax_block_block.Block, u32] | diagnostics.Diagnostic:
+    header_end = parser.tokens[parser.cursor[0] - 1].span
+    file ?= parser.source_blocks
+    body = model_syntax_block_block.Block()
+    if file != None:
+        found := false
+        for candidate in file.blocks:
+            header ?= candidate.header
+            if header != None and header.span.source == header_end.source and header.span.end == header_end.end:
+                body = candidate
+                found = true
+                break
+        if not found:
+            return error(diagnostics.diagnostic_at("E000120", "body has no discovered introducing sentence", header_end))
+    parser_expect(parser, Newline, "expected newline after " + owner)
+    while parser_take(parser, Newline) != None:
+        continue
+    start = parser_expect(parser, Indent, "expected indented " + owner + " body").span
+    statements: list[model_syntax_sentence_sentence.Statement] = []
+    parser_separators(parser)
+    while not parser_at_simple(parser, Dedent) and not parser_at_simple(parser, Eof):
+        statements.append(parser_block_statement(parser))
+        parser_separators(parser)
+    end = parser_expect(parser, Dedent, "expected end of " + owner + " body").span.end
+    body.statements = statements
+    if file != None:
+        file.blocks[body.id.index] = body
+    else:
+        body.span = source.Span(start.source, start.start, end)
+    return (body, end)

@@ -1,6 +1,8 @@
 import source
 import DefId, ScopeId, ValueId from "../symbol/symbol.sev"
-import Capture, Statement from "../sentence/sentence.sev"
+import Capture from "../sentence/sentence.sev"
+import Expression, FunctionParameter, FunctionDeclaration, RecordDeclaration from "../function/function.sev"
+import TypeAnnotation from "../type/annotation.sev"
 
 class SourceBlockId:
     index: u32
@@ -34,11 +36,36 @@ class BlockContext:
     scope: ScopeId | None = None
     parent: SourceBlockId | None = None
     captures: list[Capture] = []
-    contents: list[Statement] = []
+    values: list[BlockCaptureValue] = []
+    fields: list[BlockFieldValue] = []
+    candidates: list[BlockProviderCandidate] = []
+    requires_provider: bool = false
 
     def require_resolved():
         if self.identity == None or self.provider == None or self.constructor == None or self.scope == None:
             throw Error("block resolution requires identity, provider, constructor and scope")
+
+
+class BlockCaptureValue:
+    name: string
+    annotation: TypeAnnotation
+    spans: list[source.Span] = []
+    expressions: list[Expression] = []
+    types: list[TypeAnnotation] = []
+    parameters: list[FunctionParameter] = []
+    symbols: list[string] = []
+    variadic: bool = false
+
+
+class BlockProviderCandidate:
+    owner: RecordDeclaration
+    constructor: FunctionDeclaration
+    captures: list[BlockCaptureValue]
+
+
+class BlockFieldValue:
+    name: string
+    value: BlockCaptureValue
 
 
 # Provider lowering uses explicit compiler context instead of free cfg/lower

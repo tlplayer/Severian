@@ -10,6 +10,7 @@ import G, GrammarDeclaration, GrammarInstruction, GrammarPrimitive, GrammarSlotK
 import QualityRegion from "../../syntax/source.sev"
 import SemanticHierarchy from "hierarchy.sev"
 import ConstraintObligation from "../../syntax/constraint/model.sev"
+import BlockFile from "../../syntax/block/block.sev"
 
 
 enum Item:
@@ -58,6 +59,7 @@ class Module:
     hierarchy: SemanticHierarchy = SemanticHierarchy()
     obligations: list[ConstraintObligation] = []
     block_declarations: list[RecordDeclaration] = []
+    source_blocks: list[BlockFile] = []
 
 
 class Program:

@@ -260,7 +260,10 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
     discover_lexical_rules(files, registry)
     discover_block_declarations(files, registry)
     registered = registered_source(input, files)
-    parsed = macros.parse_module(lexer.scan_registered(lexical_source(registered, registry, false), registry))
+    consumer = lexical_source(registered, registry, false)
+    tokens = lexer.scan_registered(consumer, registry)
+    blocks = parser.parse_blocks(consumer, parser.standard_block_syntax(), providers=registry.block_declarations, registered_tokens=tokens, sources=files, defer=true)
+    parsed = macros.parse_module(tokens, blocks)
     try:
         unit = package.semantic_source_unit(resolution, path)
         parsed = semantic_identity.stamp_module(parsed, package.semantic_unit_key(unit))
@@ -272,6 +275,7 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
         import_selection.require_name(required, "*")
     result = model_hir_module_module.empty_module()
     result.block_declarations = parsed.block_declarations[:]
+    result.source_blocks = parsed.source_blocks[:]
     aliases: list[string] = []
     for item in parsed.items:
         match item:
@@ -293,6 +297,8 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         child_path = import_source(resolution, path, locator, sysroot)
                         requested = import_selection.imported_requirements(required, alias, selected_name)
                         child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot, prefixes, requested)
+                        for blocks in child.source_blocks:
+                            result.source_blocks.append(blocks)
                         for child_item in import_selection.select_imported_items(child, child_prefix, requested, narrow):
                             append_imported_item(result, child_item)
                         if selected_name != None:
@@ -320,6 +326,8 @@ def load_source_module(input: source.SourceFile, prefix: string, active: list[st
                         requested = import_selection.imported_requirements(required, imported_name if source_name == None else alias, name if source_name != None and name != "*" else None)
                         child = load_source_module(read_known_source(child_path, files), child_prefix, stack, false, files, registry, resolution, sysroot, prefixes, requested)
                         selected := source_name == None or name == "*"
+                        for blocks in child.source_blocks:
+                            result.source_blocks.append(blocks)
                         for child_item in import_selection.select_imported_items(child, child_prefix, requested, narrow):
                             append_imported_item(result, child_item)
                             if source_name != None and name != "*":

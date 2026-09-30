@@ -219,6 +219,8 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
                 append_selected_import(aliases, library, namespace, selected_name, exposed)
                 for item in aliases.items:
                     library.items.append(item)
+            for blocks in library.source_blocks:
+                parsed.source_blocks.append(blocks)
             for item in library.items:
                 match item:
                     case Function:
@@ -264,6 +266,8 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     if not subject_loaded:
         initializer_namespace = "__subject." if include_tests else ""
         application = load_source_module(input, initializer_namespace, [], true, files, registry, resolution, root)
+        for blocks in application.source_blocks:
+            parsed.source_blocks.append(blocks)
         for item in application.items:
             parsed.items.append(item)
     if emit == "library" and len(resolution.packages) > 0:
@@ -300,6 +304,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
     parsed.block_declarations = registry.block_declarations[:]
     typed = semantic.analyze_registered_callables(parsed, include_tests, [], [], [], definitions.SemanticDefinitions(), initializer_namespace, files, prepared, captured)
     typed.block_declarations = parsed.block_declarations[:]
+    typed.source_blocks = parsed.source_blocks[:]
     if archive_output != "":
         try:
             prelude_package.finish(archive_output, captured)
