@@ -16,6 +16,8 @@ class SourceFile:
     id: SourceId
     path: string
     text: string
+    #Know what files and symbols are coming from outside the file
+    imports: dict[string,list[string]]()
     characters: list[string]
     # Derived lazily, shared by repeated tooling span queries, never archived.
     byte_offsets: list[int] = []
@@ -35,8 +37,8 @@ def span(source: SourceId, start: u32, end: u32) -> Span:
 def virtual_source(path: string, text: string) -> SourceFile:
     return SourceFile(SourceId(0), path, text)
 
-
-def utf8_offset(file: SourceFile, offset: u32) -> u32 | Error:
+#UTF-8 offset
+def offset(file: SourceFile, offset: u32) -> u32 | Error:
     if offset > len(file.characters):
         throw Error("source offset is out of bounds")
     if len(file.byte_offsets) == 0:
