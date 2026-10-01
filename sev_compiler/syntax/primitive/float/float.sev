@@ -1,5 +1,6 @@
 import BF16Primitive, F128Primitive, F16Primitive, F32Primitive, F64Primitive, F8E4M3FnPrimitive, F8E5M2Primitive, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../declarations.sev"
 import Error from "../primitive.sev"
+import Lexeme from "../../generic/lexeme.sev"
 
 import Equatable, Ordered, Truth from "../../function/trait.sev"
 
@@ -318,6 +319,56 @@ class float: Floating:
     token_kind: string = F64Primitive().token_kind
     literal_family: string = F64Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = F64Primitive().literal_syntaxes
+
+    grammar literal[spelling: Lexeme]() -> float with float.literal_valid(spelling.text):
+        digits := ""
+        for current in spelling.text:
+            if current != '_':
+                digits += string(current)
+        return digits.parse_float[float]()
+
+    # Check the complete spelling without converting or imposing a width.
+    def literal_valid(spelling: string) -> bool:
+        length = len(spelling)
+        if length == 0:
+            return false
+        offset := 0
+        if spelling[0] == '+' or spelling[0] == '-':
+            offset = 1
+        decimal := false
+        exponent := false
+        mantissa_digit := false
+        exponent_digit := false
+        previous_digit := false
+        while offset < length:
+            current = spelling[offset]
+            if current >= '0' and current <= '9':
+                previous_digit = true
+                if exponent:
+                    exponent_digit = true
+                else:
+                    mantissa_digit = true
+            elif current == '_':
+                if not previous_digit or offset + 1 == length:
+                    return false
+                following = spelling[offset + 1]
+                if following < '0' or following > '9':
+                    return false
+                previous_digit = false
+            elif current == '.' and not decimal and not exponent:
+                decimal = true
+                previous_digit = false
+            elif (current == 'e' or current == 'E') and not exponent and mantissa_digit:
+                exponent = true
+                previous_digit = false
+                if offset + 1 < length:
+                    following = spelling[offset + 1]
+                    if following == '+' or following == '-':
+                        offset += 1
+            else:
+                return false
+            offset += 1
+        return mantissa_digit and (decimal or exponent) and (not exponent or exponent_digit)
 
     operator if(self) -> bool:
         return mlir(arith.cmpf, "une", self, self(0.0))

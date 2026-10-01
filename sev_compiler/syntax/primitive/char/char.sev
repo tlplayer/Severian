@@ -1,5 +1,6 @@
 import CharPrimitive, LiteralSyntax, MlirTypeBinding, PrimitiveAlias, PrimitiveId, Type, TypeId from "../declarations.sev"
 import "../primitive.sev" as _dependency_primitive
+import Lexeme from "../../generic/lexeme.sev"
 
 import Equatable, Ordered from "../../function/trait.sev"
 
@@ -80,6 +81,18 @@ class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]:
     literal_syntaxes: list[LiteralSyntax] = CharPrimitive().literal_syntaxes
 
     storage: T
+
+    grammar literal[spelling: Lexeme]() -> char with char.literal_valid(spelling.text):
+        value = string.literal_value(spelling.text, "'")
+        if value is None:
+            throw TypeConversionError("invalid character literal")
+        return value[0]
+
+    def literal_valid(spelling: string) -> bool:
+        value = string.literal_value(spelling, "'")
+        if value is None:
+            return false
+        return len(value) == 1
 
     def char(value: T) -> char[T]:
         if T is u32:

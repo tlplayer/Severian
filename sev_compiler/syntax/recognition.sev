@@ -47,8 +47,8 @@ def recognition_order() -> list[SyntaxDeclaration]:
         SyntaxDeclaration("grammar/contracts.sev", "Index"),
 
         # Quoted forms retain their contents as captures of their own grammar.
-        SyntaxDeclaration("primitive/declarations.sev", "StringPrimitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "CharPrimitive"),
+        SyntaxDeclaration("../../library/core/string/src/string.sev", "string"),
+        SyntaxDeclaration("primitive/char/char.sev", "char"),
 
         SyntaxDeclaration("function/syntax.sev", "Power"),
         SyntaxDeclaration("function/syntax.sev", "FloorDivide"),
@@ -78,7 +78,7 @@ def recognition_order() -> list[SyntaxDeclaration]:
 
         # Primitive declarations own both type names and literal contracts.
         SyntaxDeclaration("primitive/bool/bool.sev", "bool"),
-        SyntaxDeclaration("primitive/declarations.sev", "F64Primitive"),
+        SyntaxDeclaration("primitive/float/float.sev", "float"),
         SyntaxDeclaration("primitive/declarations.sev", "F32Primitive"),
         SyntaxDeclaration("primitive/declarations.sev", "F16Primitive"),
         SyntaxDeclaration("primitive/declarations.sev", "F128Primitive"),

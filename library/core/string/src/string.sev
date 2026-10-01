@@ -5,6 +5,7 @@ import "core.sev" as utf8_core
 import "../format/src/lib.sev" as formatting
 import LiteralSyntax, MlirTypeBinding, PrimitiveId, StringPrimitive, TypeId from "../../../../sev_compiler/syntax/primitive/declarations.sev"
 import Error from "../../../../sev_compiler/syntax/primitive/primitive.sev"
+import Lexeme from "../../../../sev_compiler/syntax/generic/lexeme.sev"
 
 class UnicodeError: Error
     message: string
@@ -91,6 +92,135 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
     literal_syntaxes: list[LiteralSyntax] = StringPrimitive().literal_syntaxes
 
     storage: vector[char[T], N]
+
+    grammar literal[spelling: Lexeme]() -> string with string.literal_value(spelling.text, "\"") != None:
+        value = string.literal_value(spelling.text, "\"")
+        if value is None:
+            throw ValueError("invalid string literal")
+        return value
+
+    grammar block_literal[spelling: Lexeme]() -> string with string.block_literal_valid(spelling.text):
+        delimiter = spelling.text[:3]
+        # Remove source indentation before decoding escaped newlines/tabs.
+        content = string.literal_dedent(spelling.text[3:len(spelling.text) - 3])
+        value = string.literal_value(delimiter + content + delimiter, delimiter)
+        if value is None:
+            throw ValueError("invalid block string literal")
+        return value
+
+    def block_literal_valid(spelling: string) -> bool:
+        delimiter = spelling[:3]
+        if delimiter != "\"\"\"" and delimiter != "'''":
+            return false
+        return string.literal_value(spelling, delimiter) != None
+
+    def literal_dedent(content: string) -> string:
+        if not content.starts_with("\n"):
+            return content
+        lines = content[1:].split("\n")
+        margin := -1
+        for line in lines:
+            if line.strip() == "":
+                continue
+            width := 0
+            for current in line:
+                if current == ' ':
+                    width += 1
+                elif current == '\t':
+                    width += 4
+                else:
+                    break
+            if margin < 0 or width < margin:
+                margin = width
+        result := ""
+        for index in range(len(lines)):
+            line = lines[index]
+            if line.strip() != "":
+                offset := 0
+                removed := 0
+                while offset < len(line) and removed < margin:
+                    removed += 4 if line[offset] == '\t' else 1
+                    offset += 1
+                if removed > margin:
+                    result += " " * (removed - margin)
+                result += line[offset:]
+            if index + 1 < len(lines):
+                result += "\n"
+        return result
+
+    # Decode a complete quoted spelling. Character grammar uses the same
+    # escape rules, then requires exactly one Unicode scalar.
+    def literal_value(spelling: string, delimiter: string) -> string | None:
+        width = len(delimiter)
+        length = len(spelling)
+        if width == 0 or length < width * 2:
+            return None
+        if not spelling.starts_with(delimiter) or not spelling.ends_with(delimiter):
+            return None
+        end = length - width
+        offset := width
+        value := ""
+        while offset < end:
+            if spelling[offset:offset + width] == delimiter:
+                return None
+            current = spelling[offset]
+            if width == 1 and (current == '\n' or current == '\r'):
+                return None
+            if current != '\\':
+                value += string(current)
+                offset += 1
+                continue
+            offset += 1
+            if offset == end:
+                return None
+            escaped = spelling[offset]
+            if escaped == 'n':
+                value += "\n"
+            elif escaped == 'r':
+                value += "\r"
+            elif escaped == 't':
+                value += "\t"
+            elif escaped == '0':
+                value += "\0"
+            elif escaped == '\\' or escaped == '\'' or escaped == '"':
+                value += string(escaped)
+            elif escaped == 'x' or escaped == 'u' or escaped == 'U':
+                count := 2 if escaped == 'x' else (4 if escaped == 'u' else 8)
+                start := offset + 1
+                braced = escaped == 'u' and start < end and spelling[start] == '{'
+                if braced:
+                    start += 1
+                    stop := start
+                    while stop < end and spelling[stop] != '}':
+                        stop += 1
+                    count = stop - start
+                    if stop == end or count == 0 or count > 6:
+                        return None
+                if start + count > end:
+                    return None
+                scalar: u32 = 0
+                for digit in spelling[start:start + count]:
+                    number: u32
+                    if digit >= '0' and digit <= '9':
+                        number = u32(digit) - u32('0')
+                    elif digit >= 'a' and digit <= 'f':
+                        number = u32(digit) - u32('a') + 10
+                    elif digit >= 'A' and digit <= 'F':
+                        number = u32(digit) - u32('A') + 10
+                    else:
+                        return None
+                    scalar = scalar * 16 + number
+                if scalar > 0x10ffff or (scalar >= 0xd800 and scalar <= 0xdfff):
+                    return None
+                value += string(char(scalar))
+                offset = start + count
+                if braced:
+                    offset += 1
+                continue
+            else:
+                return None
+            offset += 1
+        return value
 
     def string():
         storage = vector[char[T], N]()
