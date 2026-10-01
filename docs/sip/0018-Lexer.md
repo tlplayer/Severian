@@ -147,7 +147,6 @@ inside if parse out the throw operator, Error() class constructor sentece etc.
 
 
 
-
 2. mismatch between token and meaning
 ```sev
 #resolves to an int 

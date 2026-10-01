@@ -77,7 +77,7 @@ def recognition_order() -> list[SyntaxDeclaration]:
         SyntaxDeclaration("function/syntax.sev", "LogicalOr"),
 
         # Primitive declarations own both type names and literal contracts.
-        SyntaxDeclaration("primitive/declarations.sev", "BoolPrimitive"),
+        SyntaxDeclaration("primitive/bool/bool.sev", "bool"),
         SyntaxDeclaration("primitive/declarations.sev", "F64Primitive"),
         SyntaxDeclaration("primitive/declarations.sev", "F32Primitive"),
         SyntaxDeclaration("primitive/declarations.sev", "F16Primitive"),

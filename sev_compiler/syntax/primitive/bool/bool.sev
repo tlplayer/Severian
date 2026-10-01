@@ -185,6 +185,12 @@ class bool: Boolean :
     default_literal: bool = BoolPrimitive().default_literal
     constructors: list[Constructor] = :conversions
 
+    grammar true["true"]() -> bool:
+        return true
+
+    grammar false["false"]() -> bool:
+        return false
+
     '''
     ## Truth-value operators
 
