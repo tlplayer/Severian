@@ -1,5 +1,6 @@
 import I128Primitive, I16Primitive, I32Primitive, I64Primitive, I8Primitive, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId, U128Primitive, U16Primitive, U32Primitive, U64Primitive, U8Primitive from "../declarations.sev"
 import Error from "../primitive.sev"
+import Lexeme from "../../generic/lexeme.sev"
 
 import Bitwise, Equatable, Ordered, Truth from "../../function/trait.sev"
 
@@ -425,6 +426,69 @@ class int: Integer:
     token_kind: string = I64Primitive().token_kind
     literal_family: string = I64Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = I64Primitive().literal_syntaxes
+
+    # Capture the complete numeric spelling, including its original span.
+    # A float or unit spelling must not be accepted as an integer prefix.
+    grammar literal[spelling: Lexeme]() -> int with int.literal_base(spelling.text) != 0:
+        base = int.literal_base(spelling.text)
+        offset := 0
+        digits := ""
+        if spelling.text[0] == '-' or spelling.text[0] == '+':
+            digits = string(spelling.text[0])
+            offset = 1
+        if base != 10:
+            offset += 2
+        for current in spelling.text[offset:]:
+            if current != '_':
+                digits += string(current)
+        return digits.parse_integer[int](base=base)
+
+    # Recognition checks syntax only; range and concrete type selection belong
+    # to construction. Zero means this complete spelling is not an integer.
+    def literal_base(spelling: string) -> u8:
+        length = len(spelling)
+        if length == 0:
+            return 0
+        offset := 0
+        if spelling[0] == '-' or spelling[0] == '+':
+            offset = 1
+        if offset == length:
+            return 0
+
+        base: u8 = 10
+        if offset + 1 < length and spelling[offset] == '0':
+            prefix = spelling[offset + 1]
+            if prefix == 'x' or prefix == 'X':
+                base = 16
+            elif prefix == 'o' or prefix == 'O':
+                base = 8
+            elif prefix == 'b' or prefix == 'B':
+                base = 2
+            if base != 10:
+                offset += 2
+
+        previous_digit := false
+        while offset < length:
+            current = spelling[offset]
+            if current == '_':
+                if not previous_digit:
+                    return 0
+                previous_digit = false
+            else:
+                digit: u8
+                if current >= '0' and current <= '9':
+                    digit = u8(current) - u8('0')
+                elif current >= 'a' and current <= 'f':
+                    digit = u8(current) - u8('a') + 10
+                elif current >= 'A' and current <= 'F':
+                    digit = u8(current) - u8('A') + 10
+                else:
+                    return 0
+                if digit >= base:
+                    return 0
+                previous_digit = true
+            offset += 1
+        return base if previous_digit else 0
 
     operator if(self) -> bool:
         return self != 0

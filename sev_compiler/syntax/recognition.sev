@@ -85,7 +85,7 @@ def recognition_order() -> list[SyntaxDeclaration]:
         SyntaxDeclaration("primitive/declarations.sev", "BF16Primitive"),
         SyntaxDeclaration("primitive/declarations.sev", "F8E4M3FnPrimitive"),
         SyntaxDeclaration("primitive/declarations.sev", "F8E5M2Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "I64Primitive"),
+        SyntaxDeclaration("primitive/int/int.sev", "int"),
         SyntaxDeclaration("primitive/declarations.sev", "I8Primitive"),
         SyntaxDeclaration("primitive/declarations.sev", "I16Primitive"),
         SyntaxDeclaration("primitive/declarations.sev", "I32Primitive"),

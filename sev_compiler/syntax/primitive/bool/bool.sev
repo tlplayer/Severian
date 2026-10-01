@@ -185,9 +185,11 @@ class bool: Boolean :
     default_literal: bool = BoolPrimitive().default_literal
     constructors: list[Constructor] = :conversions
 
+    #Literal true for lexer to convert tokens that look like "true" in .sev code to true
     grammar true["true"]() -> bool:
         return true
 
+    #Literal false for lexer to see
     grammar false["false"]() -> bool:
         return false
 
