@@ -3,6 +3,9 @@ import DefId, ScopeId, ValueId from "../symbol/symbol.sev"
 import Capture from "../sentence/sentence.sev"
 import Expression, FunctionParameter, FunctionDeclaration, RecordDeclaration from "../function/function.sev"
 import TypeAnnotation from "../type/annotation.sev"
+import Lexeme from "lexeme.sev"
+import Diagnostic from "../grammar/contracts.sev"
+import LexicalDiagnostic from "../error/diagnostic.sev"
 
 class SourceBlockId:
     index: u32
@@ -86,7 +89,56 @@ trait B:
     span: source.Span | None
     sentences: list[BlockSentence]
     subblocks: list[SourceBlockId]
+    indentation_unit: string = "    "
+
+    # Indentation is a string spelling with block-owned structural meaning.
+    grammar indentation[spelling: Lexeme]() -> string with spelling.text == self.indentation_unit:
+        return spelling.text
+
+    def indentation_level(prefix: Lexeme) -> int | Diagnostic:
+        width = len(self.indentation_unit)
+        if width == 0 or len(prefix.text) % width != 0:
+            return LexicalDiagnostic("indentation must contain complete block indentation units", prefix.span, "syntax.block.indentation")
+        offset := 0
+        while offset < len(prefix.text):
+            if prefix.text[offset:offset + width] != self.indentation_unit:
+                return LexicalDiagnostic("indentation does not match the block indentation spelling", prefix.span, "syntax.block.indentation")
+            offset += width
+        return int(len(prefix.text) // width)
+
+    # Called for the first substantive body line, after the owning block has
+    # identified its header. Blank lines and quoted contents are not prefixes.
+    def body_indentation(parent_level: int, prefix: Lexeme) -> int | Diagnostic:
+        level = self.indentation_level(prefix)
+        if level is Diagnostic:
+            return level
+        if parent_level < 0 or level != parent_level + 1:
+            return LexicalDiagnostic("block body must begin one indentation level below its header", prefix.span, "syntax.block.indentation")
+        return level
 
 
 trait ExecutableBlock: B
     def lower(cfg: BlockLowering)
+
+
+test "blocks own four space indentation and relative body depth":
+    class IndentedBlock: B
+        context: BlockContext = BlockContext()
+        span: source.Span | None = None
+        sentences: list[BlockSentence] = []
+        subblocks: list[SourceBlockId] = []
+
+    def prefix(text: string) -> Lexeme:
+        return Lexeme(text, source.Span(source.SourceId(0), 0, u32(len(text))))
+
+    block = IndentedBlock()
+    assert(block.indentation_level(prefix("")) == 0)
+    assert(block.indentation_level(prefix("    ")) == 1)
+    assert(block.indentation_level(prefix("        ")) == 2)
+    assert(block.body_indentation(0, prefix("    ")) == 1)
+    assert(block.body_indentation(1, prefix("        ")) == 2)
+    assert(block.body_indentation(0, prefix("        ")) is Diagnostic)
+    assert(block.indentation_level(prefix("  ")) is Diagnostic)
+    assert(block.indentation_level(prefix("      ")) is Diagnostic)
+    assert(block.indentation_level(prefix("\t")) is Diagnostic)
+    assert(block.indentation_level(prefix("   x")) is Diagnostic)

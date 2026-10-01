@@ -7,7 +7,6 @@ import "../../syntax/recognition.sev" as syntax
 import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
 import Lexeme from "../../syntax/generic/lexeme.sev"
 import Y from "../../syntax/generic/symbol.sev"
-import TokenTerm from "../../syntax/generic/token.sev"
 import Span from "../source/source.sev"
 
 
@@ -18,31 +17,20 @@ trait Lexer:
     def lex(input: SourceFile) -> list[LexicalMatch] | list[Diagnostic]
 
 
-class EndOfFile: Y
-
-
-class BoundaryToken: TokenTerm
-    kind: string
-    lexeme: Lexeme
-    span: Span
-
-
 class RegistryLexer: Lexer
     def lex(input: SourceFile) -> list[LexicalMatch] | list[Diagnostic]:
         grammars = syntax.registry()
         window = source_window(input)
-        matches = recognize_window(window, grammars)
+        matches = recognize_window(window, grammars, include_boundary=true)
         if matches is Diagnostic:
             return [matches]
-        boundary = Span(input.id, window.end, window.end)
-        lexeme = Lexeme("", boundary)
-        matches.append(LexicalMatch(EndOfFile(), lexeme, BoundaryToken("EndOfFile", lexeme, boundary), []))
         return matches
 
 
-def recognize_window(input: Window, grammars: list[(Y, RegisteredGrammar)]) -> list[LexicalMatch] | Diagnostic:
+def recognize_window(input: Window, grammars: list[(Y, RegisteredGrammar)], include_boundary: bool = false) -> list[LexicalMatch] | Diagnostic:
     matches: list[LexicalMatch] = []
-    while not input.finished():
+    while not input.finished() or include_boundary:
+        at_boundary = input.finished()
         candidates: list[LexicalMatch] = []
         longest := input.cursor
         for label, sequence in grammars:
@@ -55,7 +43,7 @@ def recognize_window(input: Window, grammars: list[(Y, RegisteredGrammar)]) -> l
             if candidate == None:
                 continue
             span = candidate.lexeme.span
-            if probe.cursor != input.cursor or span.source != input.source.id or span.start != input.cursor or span.end <= span.start or span.end > input.end:
+            if probe.cursor != input.cursor or span.source != input.source.id or span.start != input.cursor or span.end < span.start or span.end > input.end or (span.end == span.start and not at_boundary):
                 return LexicalDiagnostic("grammar returned an invalid consumed source range", input.span(), "lexer.recognize")
             if candidate.lexeme.text != input.source.text[span.start:span.end]:
                 return LexicalDiagnostic("grammar changed the original matched source spelling", span, "lexer.recognize")
@@ -65,6 +53,8 @@ def recognize_window(input: Window, grammars: list[(Y, RegisteredGrammar)]) -> l
             elif span.end == longest:
                 candidates.append(candidate)
         if len(candidates) == 0:
+            if at_boundary:
+                return matches
             return LexicalDiagnostic("no registered grammar recognizes this source", Span(input.source.id, input.cursor, input.cursor + 1), "lexer.recognize")
         if len(candidates) != 1:
             return LexicalDiagnostic("ambiguous grammar declarations match this source", candidates[0].lexeme.span, "lexer.select")
@@ -84,10 +74,35 @@ def recognize_window(input: Window, grammars: list[(Y, RegisteredGrammar)]) -> l
             capture.matches = nested
         input.advance(longest - input.cursor)
         matches.append(selected)
+        # A boundary match is visited once. Empty matches elsewhere remain
+        # invalid, and nested captures never receive the root boundary pass.
+        if at_boundary:
+            return matches
     return matches
 
 
 import virtual_source from "../source/source.sev"
+
+
+test "registered source boundary matches once and only in the root boundary pass":
+    class Boundary: Y
+        def recognize(input: Window) -> LexicalMatch | None:
+            if not input.finished() or input.end != len(input.source.characters):
+                return None
+            lexeme = Lexeme("", Span(input.source.id, input.cursor, input.cursor))
+            return LexicalMatch(self, lexeme, None, [])
+
+    boundary = Boundary()
+    rules = [(boundary, RegisteredGrammar(boundary, Y, boundary.recognize))]
+    source = virtual_source("empty.sev", "")
+    matches = recognize_window(source_window(source), rules, include_boundary=true)
+    assert(matches is list[LexicalMatch])
+    assert(len(matches) == 1)
+    assert(matches[0].lexeme.text == "")
+    assert(matches[0].lexeme.span.start == 0 and matches[0].lexeme.span.end == 0)
+    assert(recognize_window(source_window(source), rules) == [])
+    assert(recognize_window(source_window(source), [rules[0], rules[0]], include_boundary=true) is Diagnostic)
+    assert(recognize_window(source_window(source), [], include_boundary=true) == [])
 
 
 

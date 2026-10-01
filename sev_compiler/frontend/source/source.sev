@@ -1,5 +1,9 @@
 import file
 
+# Presence-only source value; no character payload or recognition behavior.
+class EOF: Y
+
+
 class SourceId:
     index: u32
 
