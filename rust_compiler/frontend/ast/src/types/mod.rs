@@ -471,6 +471,7 @@ pub enum SentenceElement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SentenceDeclaration {
+    pub lexical: bool,
     pub fields: Vec<SentenceElement>,
     pub function: FunctionDeclaration,
 }

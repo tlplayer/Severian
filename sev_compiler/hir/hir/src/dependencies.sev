@@ -64,6 +64,24 @@ class BlockGraph:
     # Prelude is an explicit set of visible declarations, never a compiler model.
     prelude: list[PreludeBlock] = []
     primitives: list[PrimitiveBlock] = []
+    types: list[TypeDeclaration] = []
+    expressions: list[Expression] = []
+
+    def print() -> string:
+        result := ""
+        visited: list[BlockAddress] = []
+        for unit in range(len(self.units)):
+            result += self.units[unit].module + "/" + self.units[unit].submodule + ":\n"
+            for block in self.units[unit].file.blocks:
+                if block.parent == None:
+                    result += print_block_graph(self, BlockAddress(unit, block.id), "  ", [], visited)
+            for block in self.units[unit].file.blocks:
+                address = BlockAddress(unit, block.id)
+                if not contains_block(visited, address):
+                    result += print_block_graph(self, address, "  ", [], visited)
+        for declaration in self.types:
+            result += "type " + declaration.name + "\n"
+        return result
 
 
 class BlockSelection:
@@ -81,6 +99,38 @@ def contains_block(values: list[BlockAddress], value: BlockAddress) -> bool:
         if same_block(existing, value):
             return true
     return false
+
+
+def print_block_graph(graph: BlockGraph, address: BlockAddress, indent: string, active: list[BlockAddress], visited: list[BlockAddress]) -> string:
+    identity = string(address.unit) + ":" + string(address.block.index)
+    if contains_block(active, address):
+        return indent + "-> " + identity + " [cycle]\n"
+    if contains_block(visited, address):
+        return indent + "-> " + identity + " [shared]\n"
+    if address.unit < 0 or address.unit >= len(graph.units):
+        return indent + "-> " + identity + " [missing unit]\n"
+    file = graph.units[address.unit].file
+    if address.block.index >= len(file.blocks):
+        return indent + "-> " + identity + " [missing block]\n"
+    block = file.blocks[address.block.index]
+    label = block.name if block.name != "" else block.syntax_name
+    result = indent + "|- " + label + " [" + identity + "]\n"
+    visited.append(address)
+    path = active[:]
+    path.append(address)
+    children: list[BlockAddress] = []
+    for child in block.subblocks:
+        children.append(BlockAddress(address.unit, child))
+    for child in file.blocks:
+        candidate = BlockAddress(address.unit, child.id)
+        if child.parent == block.id and not contains_block(children, candidate):
+            children.append(candidate)
+    for child in children:
+        result += print_block_graph(graph, child, indent + "|  ", path, visited)
+    for dependency in graph.dependencies:
+        if same_block(dependency.consumer, address):
+            result += print_block_graph(graph, dependency.provider, indent + "|  ", path, visited)
+    return result
 
 
 def checked_block(graph: BlockGraph, address: BlockAddress) -> Block:
@@ -264,6 +314,17 @@ def resolve_block_literal(graph: BlockGraph, consumer: BlockAddress, kind: strin
             return None
         parent ?= checked_block(graph, current).parent
         scope = BlockAddress(current.unit, parent) if parent != None else None
+
+
+test "block graph printing marks cycles and shared submodules":
+    graph = BlockGraph()
+    first = index_block_file(graph, BlockUnit("main.sev", "app", "app", "main", BlockFile("main.sev", source.SourceId(0), [Block([], id=SourceBlockId(0), name="global")])))
+    second = index_block_file(graph, BlockUnit("helper.sev", "app", "app", "helper", BlockFile("helper.sev", source.SourceId(1), [Block([], id=SourceBlockId(0), name="helper")])))
+    caller = BlockAddress(first, SourceBlockId(0))
+    helper = BlockAddress(second, SourceBlockId(0))
+    graph.dependencies.append(BlockDependency(caller, helper))
+    graph.dependencies.append(BlockDependency(helper, caller))
+    assert(graph.print() == "app/main:\n  |- global [0:0]\n  |  |- helper [1:0]\n  |  |  -> 0:0 [cycle]\napp/helper:\n  -> 1:0 [shared]\n")
 
 
 test "block reachability follows cycles without consuming sibling bodies":

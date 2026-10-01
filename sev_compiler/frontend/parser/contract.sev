@@ -1,0 +1,20 @@
+import TokenTerm from "../../syntax/generic/token.sev"
+import Block from "../../syntax/block/block.sev"
+import TypeDeclaration from "../../syntax/function/syntax.sev"
+import Diagnostic from "../../syntax/grammar/contracts.sev"
+import Expression from "../../syntax/function/function.sev"
+
+
+class GrammarResolution:
+    blocks: list[Block] = []
+    types: list[TypeDeclaration] = []
+    expressions: list[Expression] = []
+
+
+class GrammarMatch:
+    consumed: int
+    # Only the selected candidate may construct HIR.
+    construct: () -> GrammarResolution | Diagnostic
+
+
+((list[TokenTerm]) -> GrammarMatch | None | Diagnostic) as GrammarMatcher

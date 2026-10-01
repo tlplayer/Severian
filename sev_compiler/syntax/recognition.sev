@@ -1,9 +1,12 @@
 import Y from "generic/symbol.sev"
 import Diagnostic from "grammar/contracts.sev"
-import Window from "../frontend/lexer/window.sev"
-import LexicalMatch from "../frontend/lexer/recognize.sev"
+import SourceWindow, Window from "../frontend/lexer/window.sev"
+import LexicalMatch, recognize_declared from "../frontend/lexer/recognize.sev"
+import Lexeme from "generic/lexeme.sev"
+import Span from "../frontend/source/source.sev"
 import T from "generic/type.sev"
-import SentenceField from "sentence/sentence.sev"
+import SentenceField, TermRole from "sentence/sentence.sev"
+import GrammarMatcher from "../frontend/parser/contract.sev"
 
 
 # Registration retains the owner's arrangement, recognition, and type contract.
@@ -12,10 +15,12 @@ class RegisteredGrammar:
     result: T
     recognize: (Window) -> LexicalMatch | None | Diagnostic
     sequence: list[SentenceField] = []
+    match_tokens: GrammarMatcher | None = None
+    token_form: bool = false
 
 
 # Grammar declarations register here when their owning declarations are loaded.
-# The compiler's declaration-to-registration lowering remains to be connected.
+# The compiler appends declaration-generated entries to this initializer.
 registered_grammars: list[(Y, RegisteredGrammar)] = []
 
 
@@ -23,6 +28,7 @@ def register(label: Y, sequence: RegisteredGrammar):
     registered_grammars.append((label, sequence))
 
 
+@compiler_grammar_registry
 def registry(result: T | None = None) -> list[(Y, RegisteredGrammar)]:
     entries: list[(Y, RegisteredGrammar)] = []
     for label, sequence in registered_grammars:

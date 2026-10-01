@@ -8,23 +8,19 @@ import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
 import Lexeme from "../../syntax/generic/lexeme.sev"
 import Y from "../../syntax/generic/symbol.sev"
 import Span from "../source/source.sev"
+import TokenStream from "stream.sev"
+import lexer from "tokenize.sev"
 
 
 trait Lexer:
-    # Obtain registered grammars directly from syntax.registry().
-    # Revisit that order for captured windows until reaching terminal matches.
-    # Coordinate recognition and advance the window after accepting a match.
-    def lex(input: SourceFile) -> list[LexicalMatch] | list[Diagnostic]
+    # Resolve source spellings using registered token forms.
+    # Grammar selection and HIR construction belong to the parser.
+    def lex(input: SourceFile) -> TokenStream | list[Diagnostic]
 
 
 class RegistryLexer: Lexer
-    def lex(input: SourceFile) -> list[LexicalMatch] | list[Diagnostic]:
-        grammars = syntax.registry()
-        window = source_window(input)
-        matches = recognize_window(window, grammars, include_boundary=true)
-        if matches is Diagnostic:
-            return [matches]
-        return matches
+    def lex(input: SourceFile) -> TokenStream | list[Diagnostic]:
+        return lexer(input)
 
 
 def recognize_window(input: Window, grammars: list[(Y, RegisteredGrammar)], include_boundary: bool = false) -> list[LexicalMatch] | Diagnostic:

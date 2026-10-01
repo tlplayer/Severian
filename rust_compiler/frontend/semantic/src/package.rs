@@ -13,6 +13,7 @@ use severian_universal::{
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) mod generic;
+mod grammar;
 pub mod imports;
 #[cfg(test)]
 mod tests;
@@ -119,6 +120,16 @@ pub struct ClassDecl {
     pub fields: Vec<severian_ast::PropertyDeclaration>,
     pub constructors: Vec<severian_ast::FunctionDeclaration>,
     pub methods: Vec<severian_ast::FunctionDeclaration>,
+    pub sentences: Vec<severian_ast::SentenceDeclaration>,
+}
+
+/// A grammar's declaration identity and source contract, collected without
+/// constructing its owner or evaluating its construction body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrammarRegistration {
+    pub label: DefId,
+    pub owner: DefId,
+    pub declaration: severian_ast::SentenceDeclaration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,9 +200,21 @@ pub struct ProgramIndex {
     pub exports: BTreeMap<ModuleId, ExportMap>,
     pub methods: BTreeMap<String, Vec<MethodDecl>>,
     pub fields: BTreeMap<String, Vec<FieldDecl>>,
+    /// Dependency-first module order, then owner and grammar source order.
+    pub grammars: Vec<GrammarRegistration>,
 }
 
 impl ProgramIndex {
+    /// Declaration-level registry; querying it never executes grammar bodies.
+    pub fn grammar_registry<'a>(
+        &'a self,
+        result: Option<&'a TypeAnnotation>,
+    ) -> impl Iterator<Item = &'a GrammarRegistration> + 'a {
+        self.grammars.iter().filter(move |entry| {
+            result.is_none_or(|expected| annotation_matches(&entry.declaration.function.result, expected))
+        })
+    }
+
     pub fn function_definition(
         &self,
         module: ModuleId,
@@ -265,6 +288,7 @@ fn analyze_package_impl(
 ) -> Result<TypedProgram, Diagnostic> {
     severian_modules::validate_import_policy(module_graph)?;
     let lowered_module_graph = lower_extensions(module_graph)?;
+    let lowered_module_graph = grammar::lower_registrations(&lowered_module_graph)?;
     let lowered_module_graph = lower_trait_typed_parameters(&lowered_module_graph);
     let module_graph = &lowered_module_graph;
     let mut types = universal.types.clone();
@@ -2076,6 +2100,7 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                         fields: declaration.fields.clone(),
                         constructors: declaration.constructors.clone(),
                         methods: declaration.methods.clone(),
+                        sentences: declaration.sentences.clone(),
                     }),
                 ),
                 Item::Enum(declaration) => item_identity(
@@ -2126,6 +2151,22 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                 visibility,
                 kind,
             };
+            if let Item::Class(class) = item {
+                for (ordinal, declaration) in class.sentences.iter().enumerate() {
+                    let label = DefId {
+                        package: id.package,
+                        module: id.module,
+                        declaration: DeclarationId(stable_hash(&format!(
+                            "grammar:{}:{}:{ordinal}", class.name, declaration.function.name,
+                        ))),
+                    };
+                    index.grammars.push(GrammarRegistration {
+                        label,
+                        owner: id,
+                        declaration: declaration.clone(),
+                    });
+                }
+            }
             index.definitions.insert(id, definition);
             items.push(id);
             insert_binding(
@@ -2150,6 +2191,65 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
         index.exports.insert(module.id, exports);
     }
     Ok(index)
+}
+
+#[cfg(test)]
+mod grammar_registration_tests {
+    use super::*;
+
+    fn graph() -> ModuleGraph {
+        let source = severian_source::SourceFile::virtual_source(
+            "grammar-registration.sev",
+            "class first:\n    grammar literal[\"first\"]() -> F:\n        return must_not_execute()\nclass second:\n    grammar literal[\"second\", value: Lexeme]() -> B with accepted(value):\n        return must_not_execute(value)\n",
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        ModuleGraph {
+            policies: BTreeMap::new(),
+            modules: vec![severian_modules::ResolvedModule {
+                id: ModuleId(1),
+                package: PackageId(0),
+                path: "grammar-registration.sev".into(),
+                source,
+                ast,
+                imports: Vec::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn class_grammars_register_automatically_during_declaration_collection() {
+        let graph = graph();
+        let index = collect_declarations(&graph).unwrap();
+        let entries = index.grammar_registry(None).collect::<Vec<_>>();
+        assert_eq!(entries.len(), 2);
+        assert_ne!(entries[0].label, entries[1].label);
+        assert_ne!(entries[0].owner, entries[1].owner);
+        assert_eq!(index.definitions[&entries[0].owner].name, "first");
+        assert_eq!(index.definitions[&entries[1].owner].name, "second");
+        assert_eq!(entries[1].declaration.function.constraints.len(), 1);
+        assert_eq!(entries[1].declaration.function.parameters[0].annotation.simple_name(), Some("Lexeme"));
+        assert!(entries[1].declaration.function.body.is_some());
+        let DefKind::Class(owner) = &index.definitions[&entries[1].owner].kind else {
+            panic!("expected grammar owner");
+        };
+        assert_eq!(owner.sentences[0], entries[1].declaration);
+        let rebuilt = collect_declarations(&graph).unwrap();
+        assert_eq!(index.grammars, rebuilt.grammars);
+    }
+
+    #[test]
+    fn grammar_registry_filters_result_contracts_independently_of_query_span() {
+        let index = collect_declarations(&graph()).unwrap();
+        let location = severian_source::Span::new(severian_source::SourceId(99), 20, 21);
+        for result in ["F", "B"] {
+            let expected = TypeAnnotation::named(result, Vec::new(), location);
+            let entries = index.grammar_registry(Some(&expected)).collect::<Vec<_>>();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].declaration.function.result.simple_name(), Some(result));
+        }
+        let missing = TypeAnnotation::named("Unknown", Vec::new(), location);
+        assert_eq!(index.grammar_registry(Some(&missing)).count(), 0);
+    }
 }
 
 fn compatible_trait_redeclaration(left: &TraitDecl, right: &TraitDecl) -> bool {

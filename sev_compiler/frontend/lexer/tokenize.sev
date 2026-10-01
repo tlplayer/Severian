@@ -1,0 +1,70 @@
+import SourceFile, Span from "../source/source.sev"
+import SourceWindow from "window.sev"
+import TokenStream from "stream.sev"
+import Token, TokenForm from "../../syntax/generic/token.sev"
+import Lexeme from "../../syntax/generic/lexeme.sev"
+import Diagnostic from "../../syntax/grammar/contracts.sev"
+import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
+import SentenceField from "../../syntax/sentence/sentence.sev"
+import "../../syntax/recognition.sev" as syntax
+
+
+def lexer(input: SourceFile) -> TokenStream | list[Diagnostic]:
+    grammars = syntax.registry()
+    tokens: list[Token] = []
+    cursor: u32 = 0
+    end = u32(len(input.characters))
+    while cursor < end:
+        candidates: list[Token] = []
+        longest := cursor
+        for label, grammar in grammars:
+            name = label.name if label is syntax.SyntaxDeclaration else "Y"
+            forms = label.token_forms[:]
+            for field in ([] if grammar.token_form else grammar.sequence):
+                match field:
+                    case Literal:
+                        forms.append(TokenForm(spelling, spelling))
+                    case Capture:
+                        continue
+            matches: list[Token] = []
+            for form in forms:
+                stop := end if form.spelling == None else cursor + u32(len(form.spelling))
+                while stop > cursor and stop <= end:
+                    span = Span(input.id, cursor, stop)
+                    lexeme = Lexeme(input.text[cursor:stop], span)
+                    if (form.spelling == None or lexeme.text == form.spelling) and (form.accepts == None or form.accepts(lexeme)):
+                        matches.append(Token(form.kind, lexeme, span, [name]))
+                        break
+                    if form.spelling != None:
+                        break
+                    stop -= 1
+            # Compiler-generated lexical declarations include quoted captures;
+            # their delimiters and contents form one atomic token.
+            if grammar.token_form:
+                probe = SourceWindow(input, 0, end, cursor)
+                matched = grammar.recognize(probe)
+                if matched is Diagnostic:
+                    return [matched]
+                if probe.cursor != cursor:
+                    return [LexicalDiagnostic("token recognition changed the source cursor", Span(input.id, cursor, cursor), "lexer.tokens")]
+                if matched != None:
+                    matches.append(Token(name, matched.lexeme, matched.lexeme.span, [name]))
+            for token in matches:
+                span = token.span
+                if span.source != input.id or span.start != cursor or span.end <= cursor or span.end > end or token.lexeme.text != input.text[cursor:span.end]:
+                    return [LexicalDiagnostic("token form returned an invalid source range", Span(input.id, cursor, cursor), "lexer.tokens")]
+                if span.end > longest:
+                    candidates = [token]
+                    longest = span.end
+                elif span.end == longest:
+                    candidates.append(token)
+        if len(candidates) == 0:
+            return [LexicalDiagnostic("no declared token form recognizes this source", Span(input.id, cursor, cursor + 1), "lexer.tokens")]
+        selected = candidates[0]
+        for candidate in candidates[1:]:
+            for declaration in candidate.declarations:
+                if declaration not in selected.declarations:
+                    selected.declarations.append(declaration)
+        tokens.append(selected)
+        cursor = longest
+    return TokenStream(input, tokens)

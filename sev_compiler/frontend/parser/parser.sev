@@ -1,0 +1,81 @@
+import TokenStream from "../lexer/stream.sev"
+import TokenTerm from "../../syntax/generic/token.sev"
+import GrammarMatch from "contract.sev"
+import Diagnostic from "../../syntax/grammar/contracts.sev"
+import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
+import BlockFile, SourceBlockId, global_source_block from "../../syntax/block/block.sev"
+import BlockGraph, BlockUnit, index_block_file from "../../hir/hir/src/dependencies.sev"
+import "../../syntax/recognition.sev" as syntax
+
+
+def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
+    grammars = syntax.registry()
+    root = global_source_block(input.source)
+    file = BlockFile(input.source.path, input.source.id, [root])
+    graph = BlockGraph()
+    terms: list[TokenTerm] = []
+    for token in input.tokens:
+        terms.append(token)
+    cursor := 0
+    while cursor < len(terms):
+        candidates: list[GrammarMatch] = []
+        for label, grammar in grammars:
+            if grammar.match_tokens == None:
+                continue
+            candidate = grammar.match_tokens(terms[cursor:])
+            if candidate is Diagnostic:
+                return [candidate]
+            if candidate != None:
+                if candidate.consumed <= 0 or candidate.consumed > len(terms) - cursor:
+                    return [LexicalDiagnostic("grammar returned an invalid token consumption range", terms[cursor].span, "parser.grammar")]
+                candidates.append(candidate)
+        if len(candidates) == 0:
+            return [LexicalDiagnostic("no registered grammar resolves this token sequence", terms[cursor].span, "parser.grammar")]
+        if len(candidates) != 1:
+            return [LexicalDiagnostic("multiple grammar implementations accept this token sequence", terms[cursor].span, "parser.grammar")]
+        selected = candidates[0]
+        resolved = selected.construct()
+        if resolved is Diagnostic:
+            return [resolved]
+        identities: dict[u32, SourceBlockId] = {}
+        for block in resolved.blocks:
+            if block.id.index in identities:
+                return [LexicalDiagnostic("grammar constructed duplicate local block identities", terms[cursor].span, "parser.hir")]
+            identities[block.id.index] = SourceBlockId(u32(len(file.blocks) + len(identities)))
+        for block in resolved.blocks:
+            block.id = identities[block.id.index]
+            if block.parent == None:
+                block.parent = root.id
+                root.subblocks.append(block.id)
+            elif block.parent.index in identities:
+                block.parent = identities[block.parent.index]
+            else:
+                return [LexicalDiagnostic("grammar constructed an unknown parent block reference", terms[cursor].span, "parser.hir")]
+            children: list[SourceBlockId] = []
+            for child in block.subblocks:
+                if child.index not in identities:
+                    return [LexicalDiagnostic("grammar constructed an unknown child block reference", terms[cursor].span, "parser.hir")]
+                children.append(identities[child.index])
+            block.subblocks = children
+            block.context.identity = block.id
+            block.context.parent = block.parent
+            file.blocks.append(block)
+        graph.types.extend(resolved.types)
+        graph.expressions.extend(resolved.expressions)
+        cursor += selected.consumed
+    file.blocks[0] = root
+    index_block_file(graph, BlockUnit(input.source.path, "", input.source.path, "global", file))
+    return graph
+
+
+def print(input: BlockGraph) -> string:
+    return input.print()
+
+
+test "empty token stream produces a global HIR block":
+    import virtual_source from "../source/source.sev"
+    graph = parser(TokenStream(virtual_source("empty.sev", ""), []))
+    assert(graph is BlockGraph)
+    assert(len(graph.units) == 1)
+    assert(len(graph.units[0].file.blocks) == 1)
+    assert(graph.units[0].file.blocks[0].syntax_name == "global")

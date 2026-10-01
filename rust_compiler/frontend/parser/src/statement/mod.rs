@@ -2055,6 +2055,7 @@ impl Parser<'_> {
     }
 
     fn sentence_declaration(&mut self) -> Result<severian_ast::SentenceDeclaration, Diagnostic> {
+        let lexical = self.at_identifier("grammar");
         let start = self.next().span;
         let (name, _) = self.identifier("expected a sentence name")?;
         self.expect(&TokenKind::LeftBracket, "expected sentence grammar")?;
@@ -2095,6 +2096,7 @@ impl Parser<'_> {
         self.expect(&TokenKind::Colon, "expected sentence body")?;
         let (body, end) = self.indented_block("sentence")?;
         Ok(severian_ast::SentenceDeclaration {
+            lexical,
             fields,
             function: FunctionDeclaration {
                 decorators: Vec::new(), compile_time: false, name,

@@ -2,7 +2,8 @@ import Diagnostic from "../../syntax/grammar/contracts.sev"
 import Lexeme from "../../syntax/generic/lexeme.sev"
 import Y from "../../syntax/generic/symbol.sev"
 import TokenTerm from "../../syntax/generic/token.sev"
-import Window from "window.sev"
+import SourceWindow, Window from "window.sev"
+import Span from "../source/source.sev"
 
 
 class LexicalCapture:
@@ -26,3 +27,66 @@ trait Recognizer:
         input: Window,
         syntax: Y
     ) -> LexicalMatch | None | Diagnostic
+
+
+# Compiler-generated wrappers supply the declaration's fixed parts and lexical
+# predicate. Construction bodies are deliberately absent from this operation.
+def recognize_declared(input: Window, label: Y, prefix: string, suffix: string, capture: string, accepts: (Lexeme) -> bool) -> LexicalMatch | None | Diagnostic:
+    start = input.cursor
+    capture_start = start + u32(len(prefix))
+    if capture_start > input.end or input.source.text[start:capture_start] != prefix:
+        return None
+    if capture == "":
+        if not lexical_boundary(input, capture_start):
+            return None
+        lexeme = Lexeme(prefix, Span(input.source.id, start, capture_start))
+        if not accepts(lexeme):
+            return None
+        return LexicalMatch(label, lexeme, None, [])
+    end := input.end
+    while end >= capture_start + len(suffix):
+        capture_end = end - u32(len(suffix))
+        if input.source.text[capture_end:end] == suffix and lexical_boundary(input, end):
+            lexeme = Lexeme(input.source.text[capture_start:capture_end], Span(input.source.id, capture_start, capture_end))
+            if accepts(lexeme):
+                window = SourceWindow(input.source, capture_start, capture_end, capture_start)
+                matched = Lexeme(input.source.text[start:end], Span(input.source.id, start, end))
+                return LexicalMatch(label, matched, None, [LexicalCapture(capture, window, terminal=true)])
+        if end == capture_start + len(suffix):
+            break
+        end -= 1
+    return None
+
+
+def lexical_boundary(input: Window, end: u32) -> bool:
+    if end == input.cursor or end == input.end:
+        return true
+    previous = input.source.characters[end - 1]
+    following = input.source.characters[end]
+    return not ((previous.is_alphanumeric() or previous == "_") and (following.is_alphanumeric() or following == "_"))
+
+
+
+
+test "generated recognition preserves raw captures and whole word boundaries":
+    import virtual_source from "../source/source.sev"
+    import source_window from "window.sev"
+    import SyntaxDeclaration from "../../syntax/recognition.sev"
+
+    def accept(value: Lexeme) -> bool:
+        return value.text == "λ" or value.text == "true"
+
+    label = SyntaxDeclaration("fixture.sev", "Fixture.literal")
+    input = source_window(virtual_source("capture.sev", "{λ}"))
+    matched = recognize_declared(input, label, "{", "}", "value", accept)
+    assert(matched is LexicalMatch)
+    assert(matched.lexeme.text == "{λ}")
+    assert(matched.captures[0].window.text() == "λ")
+    assert(matched.captures[0].window.start == 1)
+    assert(matched.captures[0].window.end == 2)
+    assert(matched.captures[0].terminal)
+    assert(input.cursor == 0)
+    word = source_window(virtual_source("word.sev", "true"))
+    assert(recognize_declared(word, label, "true", "", "", accept) is LexicalMatch)
+    longer = source_window(virtual_source("identifier.sev", "true_value"))
+    assert(recognize_declared(longer, label, "true", "", "", accept) == None)

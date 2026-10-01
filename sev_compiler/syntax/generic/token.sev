@@ -6,3 +6,16 @@ trait TokenTerm:
     lexeme: Lexeme
     span: Span
 
+
+class TokenForm:
+    kind: string
+    spelling: string | None = None
+    accepts: ((Lexeme) -> bool) | None = None
+
+
+class Token: TokenTerm
+    kind: string
+    lexeme: Lexeme
+    span: Span
+    # Applicable declarations remain candidates until grammar resolution.
+    declarations: list[string] = []
