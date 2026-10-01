@@ -222,3 +222,53 @@ The apparent keyword, colon, and comment marker remain inside the string’s quo
 | Recognition progress | Empty matches cannot create an infinite loop. |
 | Syntax extension | A supplied declaration enables a new form without modifying lexer dispatch code. |
 
+## Todo
+
+[] Grammar is defined on the objects which are at play example: 
+```sev
+# on the int class 
+grammar incorrect[x:int, "=",potential_numeric: string](x:int,) -> int | Error:
+    if potential_numeric.is_alphabetic:
+        throw Error(f"Parser error, grammar of assigning {x}:{potential_numeric}")
+```
+
+Reasoning, lexing/parsing is modular on the players at play the lexer just goes hey who can parse this?
+The grammar implementers say I can for this sequence, oh this is an error here you go. 
+vs.
+
+Parser owning all the information for all current and future types. Grammar on the objects makes it modular.
+
+[] Grammar is discovered by the lexer
+
+Basically, stop gap until we get trait dispatch with clauses for inter value routing to functionality
+
+```
+pseudo code
+
+grammar label[sequence...](sequence...) -> Lexeme | T | B | Error:
+    syntax.register(label,sequence)
+    ....
+
+grammar is a way to register easily all the parser/lexer operations for classes which implement G. 
+G can be refined more over time. 
+
+
+inside lexer
+# Whole registry
+grammars = syntax.registry()
+
+function_grammer = syntax.registry(F)
+block_grammer = syntax.registry(B)
+...
+
+for label, sequence in grammars:
+    ...
+It then parses 
+```
+
+[] Add tests that follow our examples explicitly like
+test "basic lex":
+    lexer.lex("""
+    if true:
+        return 0
+    """)

@@ -7,4 +7,4 @@ trait Lexer:
     # Obtain declarations from syntax.recognition_order() in its declared order.
     # Revisit that order for captured windows until reaching terminal matches.
     # Coordinate recognition and advance the window after accepting a match.
-    def lex(input: SourceFile) -> list[LexicalMatch] | Diagnostic
+    def lex(input: SourceFile) -> list[LexicalMatch] | List[Diagnostic]
