@@ -1,0 +1,21 @@
+import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../contract.sev"
+
+
+class UnitPrimitive: Primitive
+    mlir: MlirTypeBinding = MlirTypeBinding("", value=false)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(2))
+    id: TypeId = TypeId(2)
+    name: string = "unit"
+    size: Size = Size.Fixed(0)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Unit
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.RecordAggregate
+    token_kind: string = "Identifier"
+    literal_family: string = ""
+    literal_syntaxes: list[LiteralSyntax] = []
+    default_literal: bool = true
+
+
+def unit_type_id() -> TypeId:
+    return UnitPrimitive().id

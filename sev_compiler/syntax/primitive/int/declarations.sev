@@ -1,0 +1,226 @@
+import index_mlir, scalar_mlir from "../mlir.sev"
+import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../contract.sev"
+
+
+class IndexPrimitive: Primitive
+    mlir: MlirTypeBinding = index_mlir()
+    identity: PrimitiveId = PrimitiveId(DeclarationId(4))
+    id: TypeId = TypeId(4)
+    name: string = "index"
+    size: Size = Size.Pointer
+    alignment: Size = Size.Pointer
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
+    token_kind: string = "Integer"
+    literal_family: string = "int"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
+    default_literal: bool = false
+
+
+def index_type_id() -> TypeId:
+    return IndexPrimitive().id
+
+
+class U8Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i8", "integer", 8, false)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(108))
+    id: TypeId = TypeId(108)
+    name: string = "u8"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, false)
+    token_kind: string = "Integer"
+    literal_family: string = "int"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
+    default_literal: bool = false
+
+
+def u8_type_id() -> TypeId:
+    return U8Primitive().id
+
+
+class U16Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i16", "integer", 16, false)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(516))
+    id: TypeId = TypeId(516)
+    name: string = "u16"
+    size: Size = Size.Fixed(2)
+    alignment: Size = Size.Fixed(2)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, false)
+    token_kind: string = "Integer"
+    literal_family: string = "int"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
+    default_literal: bool = false
+
+
+def u16_type_id() -> TypeId:
+    return U16Primitive().id
+
+
+class U32Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i32", "integer", 32, false)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(532))
+    id: TypeId = TypeId(532)
+    name: string = "u32"
+    size: Size = Size.Fixed(4)
+    alignment: Size = Size.Fixed(4)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, false)
+    token_kind: string = "Integer"
+    literal_family: string = "int"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
+    default_literal: bool = false
+
+
+def u32_type_id() -> TypeId:
+    return U32Primitive().id
+
+
+class U64Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i64", "integer", 64, false)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(564))
+    id: TypeId = TypeId(564)
+    name: string = "u64"
+    size: Size = Size.Fixed(8)
+    alignment: Size = Size.Fixed(8)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, false)
+    token_kind: string = "Integer"
+    literal_family: string = "int"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
+    default_literal: bool = false
+
+
+def u64_type_id() -> TypeId:
+    return U64Primitive().id
+
+
+class I8Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i8", "integer", 8, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(8))
+    id: TypeId = TypeId(8)
+    name: string = "i8"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, true)
+    token_kind: string = "Integer"
+    literal_family: string = "int"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
+    default_literal: bool = false
+
+
+def i8_type_id() -> TypeId:
+    return I8Primitive().id
+
+
+class I16Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i16", "integer", 16, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(16))
+    id: TypeId = TypeId(16)
+    name: string = "i16"
+    size: Size = Size.Fixed(2)
+    alignment: Size = Size.Fixed(2)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, true)
+    token_kind: string = "Integer"
+    literal_family: string = "int"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
+    default_literal: bool = false
+
+
+def i16_type_id() -> TypeId:
+    return I16Primitive().id
+
+
+class I32Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i32", "integer", 32, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(32))
+    id: TypeId = TypeId(32)
+    name: string = "i32"
+    size: Size = Size.Fixed(4)
+    alignment: Size = Size.Fixed(4)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, true)
+    token_kind: string = "Integer"
+    literal_family: string = "int"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
+    default_literal: bool = false
+
+
+def i32_type_id() -> TypeId:
+    return I32Primitive().id
+
+
+class I64Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i64", "integer", 64, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(64))
+    id: TypeId = TypeId(64)
+    name: string = "i64"
+    size: Size = Size.Fixed(8)
+    alignment: Size = Size.Fixed(8)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
+    token_kind: string = "Integer"
+    literal_family: string = "int"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
+    default_literal: bool = true
+
+
+def i64_type_id() -> TypeId:
+    return I64Primitive().id
+
+
+class I128Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i128", "integer", 128, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(128))
+    id: TypeId = TypeId(128)
+    name: string = "i128"
+    size: Size = Size.Fixed(16)
+    alignment: Size = Size.Fixed(16)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, true)
+    token_kind: string = "Integer"
+    literal_family: string = "int"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
+    default_literal: bool = false
+
+
+def i128_type_id() -> TypeId:
+    return I128Primitive().id
+
+
+class U128Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i128", "integer", 128, false)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(628))
+    id: TypeId = TypeId(628)
+    name: string = "u128"
+    size: Size = Size.Fixed(16)
+    alignment: Size = Size.Fixed(16)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Integer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, false)
+    token_kind: string = "Integer"
+    literal_family: string = "int"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Integer")]
+    default_literal: bool = false
+
+
+def u128_type_id() -> TypeId:
+    return U128Primitive().id
+
+
+test "I64Primitive owns its lexical category":
+    assert(I64Primitive().token_kind == "Integer")

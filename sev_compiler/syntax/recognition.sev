@@ -1,3 +1,9 @@
+import CaptureContract, DeclarationSource, DeclaredConstraint, DeclaredGrammarField, GrammarCallable, GrammarDeclarationContract from "grammar/declaration.sev"
+import TypeAnnotation, TypeAnnotationKind from "type/annotation.sev"
+import DefId, DeclarationId, SourceId from "source.sev"
+import CapturedGrammar, GrammarContext, capture_one, capture_many, captures_ready, context_field, context_value, match_declared_sentence from "../frontend/parser/sequence.sev"
+import GrammarValue, grammar_value from "grammar/resolution.sev"
+import ProofResult from "constraint/model.sev"
 import Y from "generic/symbol.sev"
 import Diagnostic from "grammar/contracts.sev"
 import SourceWindow, Window from "../frontend/lexer/window.sev"
@@ -6,17 +12,27 @@ import Lexeme from "generic/lexeme.sev"
 import Span from "../frontend/source/source.sev"
 import T from "generic/type.sev"
 import SentenceField, TermRole from "sentence/sentence.sev"
-import GrammarMatcher from "../frontend/parser/contract.sev"
+import GrammarMatcher, GrammarMatch from "../frontend/parser/contract.sev"
+import TokenTerm from "generic/token.sev"
+import match_declared_token from "../frontend/parser/match.sev"
 
 
 # Registration retains the owner's arrangement, recognition, and type contract.
 class RegisteredGrammar:
     syntax: Y
-    result: T
-    recognize: (Window) -> LexicalMatch | None | Diagnostic
+    result: T | None
+    recognize: ((Window) -> LexicalMatch | None | Diagnostic) | None
     sequence: list[SentenceField] = []
     match_tokens: GrammarMatcher | None = None
     token_form: bool = false
+    capture_types: list[T] = []
+    repetitions: list[int] = []
+    accepts: ((list[CapturedGrammar], GrammarContext) -> ProofResult | Diagnostic) | None = None
+    construct: ((list[CapturedGrammar], GrammarContext) -> GrammarValue | Diagnostic) | None = None
+    declaration: GrammarDeclarationContract | None = None
+
+    def has_parser_adapter() -> bool:
+        return self.match_tokens != None or self.construct != None
 
 
 # Grammar declarations register here when their owning declarations are loaded.
@@ -32,9 +48,19 @@ def register(label: Y, sequence: RegisteredGrammar):
 def registry(result: T | None = None) -> list[(Y, RegisteredGrammar)]:
     entries: list[(Y, RegisteredGrammar)] = []
     for label, sequence in registered_grammars:
+        # Optional exact lookup is retained for legacy adapters. Discovery uses
+        # registry() and reads declaration.result; matching owns applicability.
         if result == None or sequence.result == result:
             entries.append((label, sequence))
     return entries
+
+
+def grammar_declaration(definition: DefId) -> GrammarDeclarationContract | None:
+    for label, grammar in registry():
+        declaration = grammar.declaration
+        if declaration != None and declaration.callable.definition == definition:
+            return declaration
+    return None
 
 
 # A reference to a syntax declaration, not an instance of the declared form.
@@ -115,27 +141,27 @@ def recognition_order() -> list[SyntaxDeclaration]:
         # Primitive declarations own both type names and literal contracts.
         SyntaxDeclaration("primitive/bool/bool.sev", "bool"),
         SyntaxDeclaration("primitive/float/float.sev", "float"),
-        SyntaxDeclaration("primitive/declarations.sev", "F32Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "F16Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "F128Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "BF16Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "F8E4M3FnPrimitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "F8E5M2Primitive"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "F32Primitive"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "F16Primitive"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "F128Primitive"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "BF16Primitive"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "F8E4M3FnPrimitive"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "F8E5M2Primitive"),
         SyntaxDeclaration("primitive/int/int.sev", "int"),
-        SyntaxDeclaration("primitive/declarations.sev", "I8Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "I16Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "I32Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "I128Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "U8Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "U16Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "U32Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "U64Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "U128Primitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "IndexPrimitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "PointerPrimitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "UnitPrimitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "NoneValuePrimitive"),
-        SyntaxDeclaration("primitive/declarations.sev", "AbsentPrimitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "I8Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "I16Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "I32Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "I128Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "U8Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "U16Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "U32Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "U64Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "U128Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "IndexPrimitive"),
+        SyntaxDeclaration("primitive/pointer/declarations.sev", "PointerPrimitive"),
+        SyntaxDeclaration("primitive/unit/declarations.sev", "UnitPrimitive"),
+        SyntaxDeclaration("symbols/none.sev", "NoneValuePrimitive"),
+        SyntaxDeclaration("symbols/absent.sev", "AbsentPrimitive"),
         SyntaxDeclaration("symbol/symbol.sev", "Symbol"),
     ]
 

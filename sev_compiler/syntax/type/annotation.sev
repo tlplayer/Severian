@@ -9,6 +9,10 @@ class TypeAnnotation:
 enum TypeAnnotationKind:
     Named(name: string, arguments: list[TypeAnnotation])
     Union(members: list[TypeAnnotation])
+    Function(parameters: list[TypeAnnotation], result: TypeAnnotation)
+    DimensionConstant(value: u64)
+    DimensionRuntime(index: u32)
+    ShapeSpread(parameter: string)
 
 
 def named_type(name: string, arguments: list[TypeAnnotation], span: Span) -> TypeAnnotation:
@@ -20,6 +24,6 @@ def simple_type_name(annotation: TypeAnnotation) -> string | None:
         case Named:
             if len(arguments) == 0:
                 return name
-        case Union:
+        case _:
             return None
     return None

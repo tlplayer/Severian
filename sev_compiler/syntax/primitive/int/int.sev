@@ -1,4 +1,5 @@
-import I128Primitive, I16Primitive, I32Primitive, I64Primitive, I8Primitive, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId, U128Primitive, U16Primitive, U32Primitive, U64Primitive, U8Primitive from "../declarations.sev"
+import I128Primitive, I16Primitive, I32Primitive, I64Primitive, I8Primitive, U128Primitive, U16Primitive, U32Primitive, U64Primitive, U8Primitive from "declarations.sev"
+import LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../contract.sev"
 import Error from "../primitive.sev"
 import Lexeme from "../../generic/lexeme.sev"
 

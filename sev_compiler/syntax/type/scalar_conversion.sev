@@ -1,4 +1,6 @@
-import TypeId, f128_type_id, f32_type_id, f64_type_id, i128_type_id, i16_type_id, i32_type_id, i64_type_id, i8_type_id, u128_type_id, u16_type_id, u32_type_id, u64_type_id from "package:primitives/declarations.sev"
+import TypeId from "package:primitives/contract.sev"
+import f128_type_id, f32_type_id, f64_type_id from "package:primitives/float/declarations.sev"
+import i128_type_id, i16_type_id, i32_type_id, i64_type_id, i8_type_id, u128_type_id, u16_type_id, u32_type_id, u64_type_id from "package:primitives/int/declarations.sev"
 import scalar_representation, scalar_type from "../primitive/primitive/src/lib.sev"
 
 

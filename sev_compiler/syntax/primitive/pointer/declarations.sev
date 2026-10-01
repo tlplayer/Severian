@@ -1,0 +1,26 @@
+import scalar_mlir from "../mlir.sev"
+import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../contract.sev"
+
+
+class PointerPrimitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("!llvm.ptr", "pointer")
+    identity: PrimitiveId = PrimitiveId(DeclarationId(5))
+    id: TypeId = TypeId(5)
+    name: string = "pointer"
+    size: Size = Size.Pointer
+    alignment: Size = Size.Pointer
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Pointer
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
+    token_kind: string = "Identifier"
+    literal_family: string = ""
+    literal_syntaxes: list[LiteralSyntax] = []
+    default_literal: bool = false
+
+
+def pointer_type_id() -> TypeId:
+    return PointerPrimitive().id
+
+
+test "PointerPrimitive owns its lexical category":
+    assert(PointerPrimitive().token_kind == "Identifier")

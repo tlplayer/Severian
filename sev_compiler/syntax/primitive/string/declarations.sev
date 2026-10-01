@@ -1,0 +1,26 @@
+import byte_view_mlir from "../mlir.sev"
+import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../contract.sev"
+
+
+class StringPrimitive: Primitive
+    mlir: MlirTypeBinding = byte_view_mlir()
+    identity: PrimitiveId = PrimitiveId(DeclarationId(3))
+    id: TypeId = TypeId(3)
+    name: string = "string"
+    size: Size = Size.Pointer
+    alignment: Size = Size.Pointer
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.String
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.RecordAggregate
+    token_kind: string = "String"
+    literal_family: string = ""
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("String")]
+    default_literal: bool = true
+
+
+def string_type_id() -> TypeId:
+    return StringPrimitive().id
+
+
+test "StringPrimitive owns its lexical category":
+    assert(StringPrimitive().token_kind == "String")

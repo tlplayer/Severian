@@ -1,0 +1,23 @@
+import LiteralValue from "../../literal/value.sev"
+import scalar_mlir from "../mlir.sev"
+import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../contract.sev"
+
+
+class BoolPrimitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("i1", "integer", 1)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(1))
+    id: TypeId = TypeId(1)
+    name: string = "bool"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Boolean
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.BooleanBit
+    token_kind: string = "Identifier"
+    literal_family: string = ""
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Identifier", "true", LiteralValue.BooleanValue(true)), LiteralSyntax("Identifier", "false", LiteralValue.BooleanValue(false))]
+    default_literal: bool = true
+
+
+def bool_type_id() -> TypeId:
+    return BoolPrimitive().id

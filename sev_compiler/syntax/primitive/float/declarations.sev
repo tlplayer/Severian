@@ -1,0 +1,146 @@
+import scalar_mlir from "../mlir.sev"
+import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../contract.sev"
+
+
+class F32Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f32", "ieee_float", 32, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(163))
+    id: TypeId = TypeId(163)
+    name: string = "f32"
+    size: Size = Size.Fixed(4)
+    alignment: Size = Size.Fixed(4)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(32)
+    token_kind: string = "Float"
+    literal_family: string = "float"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
+    default_literal: bool = false
+
+
+def f32_type_id() -> TypeId:
+    return F32Primitive().id
+
+
+class F64Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f64", "ieee_float", 64, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(164))
+    id: TypeId = TypeId(164)
+    name: string = "f64"
+    size: Size = Size.Fixed(8)
+    alignment: Size = Size.Fixed(8)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(64)
+    token_kind: string = "Float"
+    literal_family: string = "float"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
+    default_literal: bool = true
+
+
+def f64_type_id() -> TypeId:
+    return F64Primitive().id
+
+
+class F16Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f16", "ieee_float", 16, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(162))
+    id: TypeId = TypeId(162)
+    name: string = "f16"
+    size: Size = Size.Fixed(2)
+    alignment: Size = Size.Fixed(2)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(16)
+    token_kind: string = "Float"
+    literal_family: string = "float"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
+    default_literal: bool = false
+
+
+def f16_type_id() -> TypeId:
+    return F16Primitive().id
+
+
+class F128Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f128", "ieee_float", 128, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(168))
+    id: TypeId = TypeId(168)
+    name: string = "f128"
+    size: Size = Size.Fixed(16)
+    alignment: Size = Size.Fixed(16)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IeeeFloatBits(128)
+    token_kind: string = "Float"
+    literal_family: string = "float"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
+    default_literal: bool = false
+
+
+def f128_type_id() -> TypeId:
+    return F128Primitive().id
+
+
+class F8E4M3FnPrimitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f8E4M3FN", "f8e4m3fn", 8, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(180))
+    id: TypeId = TypeId(180)
+    name: string = "f8e4m3fn"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(8, 4, 3, false)
+    token_kind: string = "Float"
+    literal_family: string = "float"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
+    default_literal: bool = false
+
+
+def f8e4m3fn_type_id() -> TypeId:
+    return F8E4M3FnPrimitive().id
+
+
+class F8E5M2Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("f8E5M2", "f8e5m2", 8, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(181))
+    id: TypeId = TypeId(181)
+    name: string = "f8e5m2"
+    size: Size = Size.Fixed(1)
+    alignment: Size = Size.Fixed(1)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(8, 5, 2, true)
+    token_kind: string = "Float"
+    literal_family: string = "float"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
+    default_literal: bool = false
+
+
+def f8e5m2_type_id() -> TypeId:
+    return F8E5M2Primitive().id
+
+
+class BF16Primitive: Primitive
+    mlir: MlirTypeBinding = scalar_mlir("bf16", "brain_float", 16, true)
+    identity: PrimitiveId = PrimitiveId(DeclarationId(182))
+    id: TypeId = TypeId(182)
+    name: string = "bf16"
+    size: Size = Size.Fixed(2)
+    alignment: Size = Size.Fixed(2)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Float
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.BrainFloatBits(16)
+    token_kind: string = "Float"
+    literal_family: string = "float"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Float")]
+    default_literal: bool = false
+
+
+def bf16_type_id() -> TypeId:
+    return BF16Primitive().id
+
+
+test "F64Primitive owns its lexical category":
+    assert(F64Primitive().token_kind == "Float")

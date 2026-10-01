@@ -1,4 +1,5 @@
-import CharPrimitive, LiteralSyntax, MlirTypeBinding, PrimitiveAlias, PrimitiveId, Type, TypeId from "../declarations.sev"
+import CharPrimitive from "declarations.sev"
+import LiteralSyntax, MlirTypeBinding, PrimitiveAlias, PrimitiveId, Type, TypeId from "../contract.sev"
 import "../primitive.sev" as _dependency_primitive
 import Lexeme from "../../generic/lexeme.sev"
 import Equatable, Ordered from "../../function/trait.sev"

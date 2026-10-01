@@ -18,6 +18,12 @@ Current compilers follow a narrowing funnel for simplicity. This is good for pro
 Severian will needs to define it's syntax within itself. Usually this is hidden in IR in other languages and frankly results in a desync between
 interface/implementation details of the language. For example, str/string/byte-strings are all represented in hidden c whereas if they were written in the same structure that classes etc. were written in it would enable easier fixing/modifications and shows a better compiler pipeline.
 
+## Structure
+
+package is what's used to assembly/create the output artifacts
+
+ These package.pkg/debug/build/<compiler pipeline step>/<error,lint,warning,etc.> will tell us what's wrong with our builds at which step to better fix bugs and get a hollistic picture. 
+
 ### Phases of the Compiler
 
 ### Syntax
@@ -64,16 +70,14 @@ print(1)
 
 
 ### Frontend
-
-Source: Loads the source text and other imports into collections 
-Parsing: groups items into blocks 
-lexer: groups items into lexemes
-modules:??? Maybe move to HIR
-semantic: 
+Syntax: define token parsing, block, sentence, operations, types, and values 
+Source: Loads the source text and other imports as needed  
+lexer: Converts source text into tokens and lexemes from syntax's definition
+Parsing: Groups blocks, sub blocks, sentence, operations, types, and values per syntax resulting in block IR
 
 ### HIR
 
-The HIR graph contains the refined output from applying the rules/information from syntax onto source outputting a graph of ops/sentences/blocks/modules etc. into a graph of objects we can begin to understand and apply rules onto to catch bugs. These package.pkg/debug/build/<compiler pipeline step>/<error,lint,warning,etc.> will tell us what's wrong with our builds at which step to better fix bugs and get a hollistic picture. 
+The HIR graph contains the refined output from applying the rules/information from syntax onto source outputting a graph of values/types/operation/sentences/blocks/modules etc. into a graph of objects we can begin to understand and apply rules onto to catch bugs.
 
 
 ### MIR

@@ -1,5 +1,7 @@
 {
-  "language": { "explicit-imports": true },
+  "language": {
+    "explicit-imports": true
+  },
   "package": {
     "name": "sev-compiler-syntax",
     "version": "0.1.0",
@@ -19,7 +21,7 @@
       "package": "sev-compiler-primitives"
     },
     "diagnostics": {
-      "path": "diagnostics",
+      "path": "error",
       "package": "sev-compiler-diagnostics"
     }
   }

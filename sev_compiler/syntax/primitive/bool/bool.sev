@@ -1,4 +1,5 @@
-import BoolPrimitive, Constructor, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../declarations.sev"
+import BoolPrimitive from "declarations.sev"
+import Constructor, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../contract.sev"
 import Error from "../primitive.sev"
 
 import Bitwise, Equatable, Logical, Ordered from "../../function/trait.sev"
