@@ -1,0 +1,15 @@
+import Diagnostic, DiagnosticType, ErrorType from "../grammar/contracts.sev"
+import Span from "../../frontend/source/source.sev"
+
+
+class LexicalDiagnostic: Diagnostic
+    note: string
+    span: Span
+    step: string
+    type: DiagnosticType = DiagnosticType.C
+    category: int = 1
+    code: int = 1
+    help: string = "Inspect the grammar and the indicated source region."
+    remediation: string = "Correct the source or the owning grammar declaration."
+    prefix: string | absent = absent
+    persistence: ErrorType = ErrorType.Permanent

@@ -272,3 +272,4 @@ test "basic lex":
     if true:
         return 0
     """)
+    ...

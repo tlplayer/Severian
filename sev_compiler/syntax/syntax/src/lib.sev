@@ -33,4 +33,4 @@ import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider from "../../type/mli
 import BackendId, BinaryOperation, CanonicalRewrite, DialectId, EffectSet, IrContext, LoweredOperation, LoweringCapability, LoweringRequirements, MlirObject, OperationDiagnostic, OperationId, OperationInterface, OperationRegistry, RegisteredOperation, RuntimeId, UnaryOperation, allocate_effect, attribute_id, backend_id, dialect_id, free_effect, hashing, io_effect, named_operation, no_effects, operation_id, provider_id, read_effect, runtime_id, scalar_boundary, scalar_operand_segments, scalar_requirement_names, scalar_requirements, throw_effect, write_effect from "../../function/lowering.sev"
 
 import C, Container, E, F, G, HashKey, K, Key, L, Literal, N, O, S, T, Type, V, Value, W from "../../generic/generic.sev"
-import SyntaxDeclaration, recognition_order from "../../recognition.sev"
+import RegisteredGrammar, SyntaxDeclaration, recognition_order, register, registry from "../../recognition.sev"

@@ -1,4 +1,34 @@
 import Y from "generic/symbol.sev"
+import Diagnostic from "grammar/contracts.sev"
+import Window from "../frontend/lexer/window.sev"
+import LexicalMatch from "../frontend/lexer/recognize.sev"
+import T from "generic/type.sev"
+import SentenceField from "sentence/sentence.sev"
+
+
+# Registration retains the owner's arrangement, recognition, and type contract.
+class RegisteredGrammar:
+    syntax: Y
+    result: T
+    recognize: (Window) -> LexicalMatch | None | Diagnostic
+    sequence: list[SentenceField] = []
+
+
+# Grammar declarations register here when their owning declarations are loaded.
+# The compiler's declaration-to-registration lowering remains to be connected.
+registered_grammars: list[(Y, RegisteredGrammar)] = []
+
+
+def register(label: Y, sequence: RegisteredGrammar):
+    registered_grammars.append((label, sequence))
+
+
+def registry(result: T | None = None) -> list[(Y, RegisteredGrammar)]:
+    entries: list[(Y, RegisteredGrammar)] = []
+    for label, sequence in registered_grammars:
+        if result == None or sequence.result == result:
+            entries.append((label, sequence))
+    return entries
 
 
 # A reference to a syntax declaration, not an instance of the declared form.
@@ -102,3 +132,38 @@ def recognition_order() -> list[SyntaxDeclaration]:
         SyntaxDeclaration("primitive/declarations.sev", "AbsentPrimitive"),
         SyntaxDeclaration("symbol/symbol.sev", "Symbol"),
     ]
+
+
+import F from "generic/terms.sev"
+import B from "generic/block.sev"
+
+
+def registry_test_no_match(input: Window) -> LexicalMatch | None | Diagnostic:
+    return None
+
+
+test "registry exposes all grammars and filters by the requested type contract":
+    before = len(registry())
+    before_functions = len(registry(F))
+    before_blocks = len(registry(B))
+    function_label = SyntaxDeclaration("registry-test.sev", "function")
+    block_label = SyntaxDeclaration("registry-test.sev", "block")
+    function_sequence = RegisteredGrammar(function_label, F, registry_test_no_match, [SentenceField.Literal("call")])
+    block_sequence = RegisteredGrammar(block_label, B, registry_test_no_match, [SentenceField.Literal("block")])
+
+    register(function_label, function_sequence)
+    register(block_label, block_sequence)
+
+    grammars = registry()
+    assert(len(grammars) == before + 2)
+    label, sequence = grammars[before]
+    assert(label == function_label)
+    assert(sequence.sequence == [SentenceField.Literal("call")])
+    assert(len(registry(F)) == before_functions + 1)
+    assert(len(registry(B)) == before_blocks + 1)
+    for label, sequence in registry(F):
+        assert(sequence.result == F)
+    for label, sequence in registry(B):
+        assert(sequence.result == B)
+    grammars.append((block_label, block_sequence))
+    assert(len(registry()) == before + 2)

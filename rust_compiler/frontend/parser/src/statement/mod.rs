@@ -2160,7 +2160,7 @@ impl Parser<'_> {
                 } else {
                     methods.push(function);
                 }
-            } else if self.at_identifier("sentence") {
+            } else if self.at_identifier("sentence") || self.at_identifier("grammar") {
                 sentences.push(self.sentence_declaration()?);
                 member_has_body = true;
             } else if self.at_identifier("operator") {
@@ -5303,6 +5303,24 @@ mod named_operator_tests {
 #[cfg(test)]
 mod block_sentence_tests {
     use super::*;
+
+    #[test]
+    fn class_grammar_preserves_literal_and_constrained_capture() {
+        let source = SourceFile::virtual_source(
+            "grammars.sev",
+            "class sample:\n    grammar zero[\"0\"]() -> int:\n        return 0\n    grammar literal[spelling: Lexeme]() -> int with valid(spelling):\n        return convert(spelling)\n",
+        );
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let Item::Class(class) = &module.items[0] else { panic!("expected class") };
+        assert_eq!(class.sentences.len(), 2);
+        assert_eq!(class.sentences[0].fields, vec![severian_ast::SentenceElement::Literal("0".into())]);
+        let grammar = &class.sentences[1];
+        assert_eq!(grammar.fields, vec![severian_ast::SentenceElement::Capture(0)]);
+        assert_eq!(grammar.function.parameters[0].annotation.simple_name(), Some("Lexeme"));
+        assert_eq!(grammar.function.result.simple_name(), Some("int"));
+        assert_eq!(grammar.function.constraints.len(), 1);
+        assert!(grammar.function.body.is_some());
+    }
 
     #[test]
     fn sentence_members_preserve_grammar_captures_constraints_and_body() {
