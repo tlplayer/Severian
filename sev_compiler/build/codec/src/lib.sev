@@ -329,7 +329,7 @@ def model_sources() -> list[string]:
         "sev_compiler/syntax/constraint/model.sev",
         "sev_compiler/syntax/constraint/proof.sev",
         "sev_compiler/syntax/constraint/refinement.sev",
-        "sev_compiler/syntax/diagnostics/diagnostics/src/lib.sev",
+        "sev_compiler/syntax/error/diagnostic.sev",
         "sev_compiler/syntax/function/function.sev",
         "sev_compiler/syntax/function/lowering.sev",
         "sev_compiler/syntax/function/syntax.sev",

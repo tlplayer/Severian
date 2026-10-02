@@ -1,4 +1,4 @@
-import SourceFile, Span from "../source/source.sev"
+import SourceFile, Span, virtual_source from "../source/source.sev"
 import SourceWindow from "window.sev"
 import TokenStream from "stream.sev"
 import Token, TokenForm from "../../syntax/generic/token.sev"
@@ -101,7 +101,6 @@ def lexer(input: SourceFile) -> TokenStream | list[Diagnostic]:
 
 
 test "lexer emits the equal symbol declared by syntax":
-    import virtual_source from "../source/source.sev"
 
     source = virtual_source("equal.sev", "=")
     result = lexer(source)
@@ -120,13 +119,12 @@ test "lexer emits the equal symbol declared by syntax":
 
 
 test "lexer emits every fixed symbol with its longest spelling":
-    import virtual_source from "../source/source.sev"
 
     examples = [
         ("=", "EQUAL"),
         (":=", "COLON_EQUAL"),
         ("?=", "QUESTION_EQUAL"),
-        ("==", "EQUAL_EQUAL"),
+        ("==", "EQUALITY"),
         ("!=", "NOT_EQUAL"),
         ("<", "LESS"),
         ("<=", "LESS_EQUAL"),
@@ -189,7 +187,6 @@ test "lexer emits every fixed symbol with its longest spelling":
 
 
 test "quoted and structural forms retain their complete source":
-    import virtual_source from "../source/source.sev"
 
     examples = [
         ("\"a # += λ\"", "STRING"),
@@ -221,7 +218,6 @@ test "quoted and structural forms retain their complete source":
 
 
 test "spacing does not merge symbols and comments end at the newline":
-    import virtual_source from "../source/source.sev"
 
     result = lexer(virtual_source("spacing.sev", "  > =\t# comment\r\n\t+=..."))
     assert(result is TokenStream)
@@ -234,7 +230,6 @@ test "spacing does not merge symbols and comments end at the newline":
 
 
 test "adjacent quoted literals stop at their own closing delimiter":
-    import virtual_source from "../source/source.sev"
 
     result = lexer(virtual_source("adjacent.sev", "\"a\"\"b\""))
     assert(result is TokenStream)
@@ -244,14 +239,12 @@ test "adjacent quoted literals stop at their own closing delimiter":
 
 
 test "unterminated literals and invalid character widths report diagnostics":
-    import virtual_source from "../source/source.sev"
 
     for spelling in ["\"open", "'open", "\"\"\"open", "'''open", "f\"open", "f\"\"\"open", "''", "'ab'", "\"line\nbreak\""]:
         assert(lexer(virtual_source("invalid.sev", spelling)) is list[Diagnostic])
 
 
 test "empty input has one classified end boundary":
-    import virtual_source from "../source/source.sev"
 
     source = virtual_source("empty.sev", "")
     result = lexer(source)

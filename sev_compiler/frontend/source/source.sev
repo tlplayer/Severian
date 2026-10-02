@@ -1,7 +1,10 @@
 import file
+import Y from "../../syntax/generic/symbol.sev"
+import TokenForm from "../../syntax/generic/token.sev"
 
-# Presence-only source value; no character payload or recognition behavior.
+# End boundary has no character payload.
 class EOF: Y
+    token_forms: list[TokenForm] = [TokenForm("EOF", "", boundary=true)]
 
 
 class SourceId:
@@ -21,7 +24,7 @@ class SourceFile:
     path: string
     text: string
     #Know what files and symbols are coming from outside the file
-    imports: dict[string,list[string]]()
+    imports: dict[string, list[string]] = dict[string, list[string]]()
     characters: list[string]
     # Derived lazily, shared by repeated tooling span queries, never archived.
     byte_offsets: list[int] = []
@@ -30,7 +33,7 @@ class SourceFile:
         self.id = id
         self.path = path
         self.text = text
-        characters = text.characters()
+        self.characters = text.characters()
 
 def source_id(index: u32) -> SourceId:
     return SourceId(index)

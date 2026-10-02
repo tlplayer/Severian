@@ -68,7 +68,7 @@
       "package": "package"
     },
     "diagnostics": {
-      "path": "syntax/diagnostics",
+      "path": "syntax/error",
       "package": "sev-compiler-diagnostics"
     },
     "lexer": {
