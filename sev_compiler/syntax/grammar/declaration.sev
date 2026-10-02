@@ -1,0 +1,53 @@
+import DefId, Span from "../source.sev"
+import TypeAnnotation from "../type/annotation.sev"
+
+
+# References point into the compiler's declaration index. Source snapshots keep
+# predicates and bodies inspectable without evaluating or reparsing them here.
+class DeclarationSource:
+    text: string
+    span: Span
+
+
+class GrammarCallable:
+    definition: DefId
+    owner: DefId
+    source: DeclarationSource
+
+
+class CaptureContract:
+    name: string
+    annotation: TypeAnnotation
+    repeated: bool
+    immutable_reference: bool
+    source: DeclarationSource
+    default: DeclarationSource | None = None
+
+
+enum DeclaredGrammarField:
+    Literal(spelling: string)
+    Capture(index: int)
+
+
+enum DeclaredConstraint:
+    Parameter(parameter: string, bound: TypeAnnotation, source: DeclarationSource)
+    VariadicPack(parameter: string, source: DeclarationSource)
+    Predicate(source: DeclarationSource)
+
+
+class GrammarDeclarationContract:
+    callable: GrammarCallable
+    owner_source: DeclarationSource
+    lexical: bool
+    sequence: list[DeclaredGrammarField]
+    captures: list[CaptureContract]
+    result: TypeAnnotation
+    owner_parameters: list[string]
+    callable_parameters: list[string]
+    owner_defaults: list[TypeAnnotation | None]
+    owner_constraints: list[DeclaredConstraint]
+    constraints: list[DeclaredConstraint]
+    receiver_fields: list[CaptureContract]
+    implements: list[TypeAnnotation]
+    # Entry/exit contracts and decorators remain in the referenced callable AST.
+    # The registry exposes declarations; specialization/dispatch consumes them.

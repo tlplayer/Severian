@@ -1,3 +1,4 @@
+import ProofResult from "../../syntax/constraint/model.sev"
 import TokenTerm from "../../syntax/generic/token.sev"
 import Block from "../../syntax/block/block.sev"
 import TypeDeclaration from "../../syntax/function/syntax.sev"
@@ -9,12 +10,41 @@ class GrammarResolution:
     blocks: list[Block] = []
     types: list[TypeDeclaration] = []
     expressions: list[Expression] = []
+    nodes: list[ResolvedGrammarNode] = []
 
 
 class GrammarMatch:
     consumed: int
     # Only the selected candidate may construct HIR.
     construct: () -> GrammarResolution | Diagnostic
+    cached: GrammarResolution | Diagnostic | None = None
+    check: (() -> ProofResult | Diagnostic) | None = None
+    captures: list[CapturedGrammar] = []
+    selected: bool = false
+    resolving: bool = false
+    identity: string = ""
+
+    def admissible() -> ProofResult | Diagnostic:
+        if self.check == None:
+            return ProofResult.Proven
+        return self.check()
+
+    def resolve() -> GrammarResolution | Diagnostic:
+        if self.cached != None:
+            return self.cached
+        if not self.selected:
+            throw Error("grammar construction requires a selected interpretation")
+        if self.resolving:
+            throw Error("cyclic grammar construction")
+        self.resolving = true
+        self.cached = self.construct()
+        self.resolving = false
+        return self.cached
 
 
 ((list[TokenTerm]) -> GrammarMatch | None | Diagnostic) as GrammarMatcher
+
+
+import GrammarValue, ResolvedGrammarNode from "../../syntax/grammar/resolution.sev"
+
+import CapturedGrammar from "sequence.sev"

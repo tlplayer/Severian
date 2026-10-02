@@ -1,0 +1,53 @@
+import B, SourceBlockId from "../generic/block.sev"
+import TypeDeclaration from "../function/syntax.sev"
+import Expression from "../function/function.sev"
+import Span from "../source.sev"
+import Diagnostic from "contracts.sev"
+import LexicalDiagnostic from "../error/diagnostic.sev"
+
+
+# A heterogeneous collection retains each payload's concrete type through its
+# implementation. Adding a grammar result does not extend a compiler union.
+trait GrammarValue:
+    def read[T](span: Span) -> T | Diagnostic
+    def block() -> B | None
+    def type_declaration() -> TypeDeclaration | None
+    def expression() -> Expression | None
+
+
+class GrammarValueOf[T]: GrammarValue
+    value: T
+
+    def read[R](span: Span) -> R | Diagnostic:
+        if self.value is R:
+            return self.value
+        return LexicalDiagnostic("grammar result does not implement the capture contract", span, "parser.capture")
+
+    def block() -> B | None:
+        if self.value is B:
+            return self.value
+        return None
+
+    def type_declaration() -> TypeDeclaration | None:
+        if self.value is TypeDeclaration:
+            return self.value
+        return None
+
+    def expression() -> Expression | None:
+        if self.value is Expression:
+            return self.value
+        return None
+
+
+def grammar_value[T](value: T) -> GrammarValue | Diagnostic:
+    if value is Diagnostic:
+        return value
+    return GrammarValueOf[T](value)
+
+
+class ResolvedGrammarNode:
+    value: GrammarValue
+    span: Span
+    declaration: string
+    children: list[ResolvedGrammarNode] = []
+    owner: SourceBlockId | None = None

@@ -1,69 +1,151 @@
+import "../../syntax/recognition.sev" as syntax
+import "../../syntax/block/global.sev" as _global_grammar
 import TokenStream from "../lexer/stream.sev"
 import TokenTerm from "../../syntax/generic/token.sev"
+import Lexeme from "../../syntax/generic/lexeme.sev"
+import B from "../../syntax/generic/block.sev"
 import GrammarMatch from "contract.sev"
+import GrammarContext, match_contract from "sequence.sev"
+import ResolvedGrammarNode from "../../syntax/grammar/resolution.sev"
 import Diagnostic from "../../syntax/grammar/contracts.sev"
 import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
-import BlockFile, SourceBlockId, global_source_block from "../../syntax/block/block.sev"
+import Block, BlockFile, SourceBlockId, global_source_block from "../../syntax/block/block.sev"
 import BlockGraph, BlockUnit, index_block_file from "../../hir/hir/src/dependencies.sev"
-import "../../syntax/recognition.sev" as syntax
+import Span, virtual_source from "../source/source.sev"
+
+
+class TokenLine:
+    tokens: list[TokenTerm]
+    prefix: Lexeme
+
+
+# A quoted token is atomic even when its lexeme contains line breaks.
+# Structural line breaks and horizontal spacing retain their source windows.
+def token_lines(input: TokenStream) -> list[TokenLine]:
+    lines: list[TokenLine] = []
+    terms: list[TokenTerm] = []
+    prefix := ""
+    start: u32 = 0
+    for token in input.tokens:
+        spelling = token.lexeme.text
+        if spelling == "\n" or spelling == "\r\n":
+            if len(terms) > 0:
+                lines.append(TokenLine(terms, Lexeme(prefix, Span(input.source.id, start, start + u32(len(prefix))))))
+            terms = []
+            prefix = ""
+            start = token.span.end
+        elif spelling == " " or spelling == "\t" or spelling == "\r":
+            if len(terms) == 0:
+                prefix += spelling
+        else:
+            terms.append(token)
+    if len(terms) > 0:
+        lines.append(TokenLine(terms, Lexeme(prefix, Span(input.source.id, start, start + u32(len(prefix))))))
+    return lines
+
+
+def attach_node(node: ResolvedGrammarNode, owner: SourceBlockId):
+    node.owner = owner
+    for child in node.children:
+        attach_node(child, owner)
 
 
 def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
-    grammars = syntax.registry()
     root = global_source_block(input.source)
+    root.context.identity = root.id
     file = BlockFile(input.source.path, input.source.id, [root])
     graph = BlockGraph()
-    terms: list[TokenTerm] = []
-    for token in input.tokens:
-        terms.append(token)
-    cursor := 0
-    while cursor < len(terms):
-        candidates: list[GrammarMatch] = []
-        for label, grammar in grammars:
-            if grammar.match_tokens == None:
-                continue
-            candidate = grammar.match_tokens(terms[cursor:])
-            if candidate is Diagnostic:
-                return [candidate]
-            if candidate != None:
-                if candidate.consumed <= 0 or candidate.consumed > len(terms) - cursor:
-                    return [LexicalDiagnostic("grammar returned an invalid token consumption range", terms[cursor].span, "parser.grammar")]
-                candidates.append(candidate)
-        if len(candidates) == 0:
-            return [LexicalDiagnostic("no registered grammar resolves this token sequence", terms[cursor].span, "parser.grammar")]
-        if len(candidates) != 1:
-            return [LexicalDiagnostic("multiple grammar implementations accept this token sequence", terms[cursor].span, "parser.grammar")]
-        selected = candidates[0]
-        resolved = selected.construct()
+    root_providers: list[syntax.RegisteredGrammar] = []
+    root_context = GrammarContext(body=root)
+    for label, grammar in syntax.registry(B):
+        if len(grammar.sequence) == 0 and grammar.construct != None:
+            if grammar.accepts == None or grammar.accepts([], root_context):
+                root_providers.append(grammar)
+    if len(root_providers) > 1:
+        return [LexicalDiagnostic("multiple grammars provide the global block", root.span, "parser.block")]
+    provider: B = root
+    if len(root_providers) == 1:
+        constructed = root_providers[0].construct([], root_context)
+        if constructed is Diagnostic:
+            return [constructed]
+        if not (constructed is B):
+            return [LexicalDiagnostic("global grammar did not construct a block", root.span, "parser.block")]
+        provider = constructed
+        provider.context = root.context
+        provider.span = root.span
+        provider.subblocks = root.subblocks
+    providers: list[B] = [provider]
+    ancestry: list[int] = [0]
+    previous: dict[int, B] = {}
+    pending: int | None = None
+    for line in token_lines(input):
+        parent_index = ancestry[-1]
+        level = providers[parent_index].indentation_level(line.prefix)
+        if level is Diagnostic:
+            return [level]
+        if pending != None:
+            expected = providers[pending].body_indentation(int(len(ancestry)) - 1, line.prefix)
+            if expected is Diagnostic:
+                return [expected]
+            ancestry.append(pending)
+            pending = None
+        else:
+            if level >= len(ancestry):
+                return [LexicalDiagnostic("indentation has no owning block grammar", line.prefix.span, "parser.block")]
+            while len(ancestry) > level + 1:
+                ancestry.pop()
+        parent_index = ancestry[-1]
+        parent = providers[parent_index]
+        for ancestor in ancestry:
+            location = file.blocks[ancestor].span
+            if location != None:
+                location.end = line.tokens[-1].span.end
+                file.blocks[ancestor].span = location
+                providers[ancestor].span = location
+        body = Block()
+        context = GrammarContext(parent, body, previous[parent_index] if parent_index in previous else None)
+        candidates = match_contract(line.tokens, None, context)
+        if candidates is Diagnostic:
+            return [candidates]
+        complete: list[GrammarMatch] = []
+        for candidate in candidates:
+            if candidate.consumed <= 0 or candidate.consumed > len(line.tokens):
+                return [LexicalDiagnostic("grammar returned invalid token consumption", line.tokens[0].span, "parser.grammar")]
+            if candidate.consumed == len(line.tokens):
+                complete.append(candidate)
+        if len(complete) == 0:
+            return [LexicalDiagnostic("no registered grammar resolves this token sequence", line.tokens[0].span, "parser.grammar")]
+        if len(complete) != 1:
+            return [LexicalDiagnostic("multiple grammar implementations accept this token sequence", line.tokens[0].span, "parser.grammar")]
+        resolved = complete[0].resolve()
         if resolved is Diagnostic:
             return [resolved]
-        identities: dict[u32, SourceBlockId] = {}
-        for block in resolved.blocks:
-            if block.id.index in identities:
-                return [LexicalDiagnostic("grammar constructed duplicate local block identities", terms[cursor].span, "parser.hir")]
-            identities[block.id.index] = SourceBlockId(u32(len(file.blocks) + len(identities)))
-        for block in resolved.blocks:
-            block.id = identities[block.id.index]
-            if block.parent == None:
-                block.parent = root.id
-                root.subblocks.append(block.id)
-            elif block.parent.index in identities:
-                block.parent = identities[block.parent.index]
+        for node in resolved.nodes:
+            value = node.value
+            if value is B:
+                body.id = SourceBlockId(u32(len(file.blocks)))
+                body.parent = file.blocks[parent_index].id
+                body.context = value.context
+                body.context.identity = body.id
+                body.context.parent = body.parent
+                body.span = node.span
+                body.syntax_name = node.declaration
+                value.span = node.span
+                value.context = body.context
+                value.subblocks = body.subblocks
+                file.blocks[parent_index].subblocks.append(body.id)
+                file.blocks.append(body)
+                providers.append(value)
+                previous[parent_index] = value
+                pending = int(body.id.index)
+                attach_node(node, body.id)
             else:
-                return [LexicalDiagnostic("grammar constructed an unknown parent block reference", terms[cursor].span, "parser.hir")]
-            children: list[SourceBlockId] = []
-            for child in block.subblocks:
-                if child.index not in identities:
-                    return [LexicalDiagnostic("grammar constructed an unknown child block reference", terms[cursor].span, "parser.hir")]
-                children.append(identities[child.index])
-            block.subblocks = children
-            block.context.identity = block.id
-            block.context.parent = block.parent
-            file.blocks.append(block)
+                attach_node(node, file.blocks[parent_index].id)
+            graph.nodes.append(node)
         graph.types.extend(resolved.types)
         graph.expressions.extend(resolved.expressions)
-        cursor += selected.consumed
-    file.blocks[0] = root
+    if pending != None:
+        return [LexicalDiagnostic("block header requires an indented body", file.blocks[pending].span, "parser.block")]
     index_block_file(graph, BlockUnit(input.source.path, "", input.source.path, "global", file))
     return graph
 
@@ -73,9 +155,41 @@ def print(input: BlockGraph) -> string:
 
 
 test "empty token stream produces a global HIR block":
-    import virtual_source from "../source/source.sev"
     graph = parser(TokenStream(virtual_source("empty.sev", ""), []))
     assert(graph is BlockGraph)
     assert(len(graph.units) == 1)
     assert(len(graph.units[0].file.blocks) == 1)
     assert(graph.units[0].file.blocks[0].syntax_name == "global")
+
+
+import lexer from "../lexer/tokenize.sev"
+import "../../syntax/block/if.sev" as _if_grammar
+import "../../syntax/primitive/bool/bool.sev" as _bool_grammar
+import "../../syntax/primitive/char/char.sev" as _character_grammar
+
+
+test "declared nested if blocks preserve concrete conditions and ownership":
+    tokens = lexer(virtual_source("nested.sev", "if true:\n    if false:\n        true\n"))
+    assert(tokens is TokenStream)
+    graph = parser(tokens)
+    assert(graph is BlockGraph)
+    blocks = graph.units[0].file.blocks
+    assert(len(blocks) == 3)
+    assert(blocks[1].parent == blocks[0].id)
+    assert(blocks[2].parent == blocks[1].id)
+    assert(blocks[0].subblocks == [blocks[1].id])
+    assert(blocks[1].subblocks == [blocks[2].id])
+    assert(graph.nodes[0].children[0].value == true)
+    assert(graph.nodes[1].children[0].value == false)
+    assert(graph.nodes[2].value == true)
+    assert(graph.nodes[2].owner == blocks[2].id)
+    assert(graph.nodes[2].span.start == 31)
+
+
+test "a declared block rejects an absent or incorrectly indented body":
+    missing = lexer(virtual_source("missing.sev", "if true:\n"))
+    assert(missing is TokenStream)
+    assert(parser(missing) is list[Diagnostic])
+    malformed = lexer(virtual_source("indent.sev", "if true:\n  true\n"))
+    assert(malformed is TokenStream)
+    assert(parser(malformed) is list[Diagnostic])

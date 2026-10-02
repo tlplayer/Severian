@@ -32,6 +32,8 @@ def recognize_window(input: Window, grammars: list[(Y, RegisteredGrammar)], incl
         for label, sequence in grammars:
             # Each probe gets its own cursor. Trying a declaration cannot move
             # the caller or execute construction/evaluation of its result.
+            if sequence.recognize == None:
+                continue
             probe = SourceWindow(input.source, input.start, input.end, input.cursor)
             candidate = sequence.recognize(probe)
             if candidate is Diagnostic:
