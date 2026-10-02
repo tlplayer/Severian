@@ -1,0 +1,17 @@
+import SourceFile from "../source.sev"
+
+
+def recognize_keyword(source: SourceFile, start: u32, spelling: string) -> u32 | None:
+    end = start + u32(len(spelling))
+    length = u32(len(source.characters))
+    if start > length or end > length or source.text[start:end] != spelling:
+        return None
+    if start > 0:
+        previous = source.characters[start - 1]
+        if previous.is_alphanumeric() or previous == "_":
+            return None
+    if end < length:
+        following = source.characters[end]
+        if following.is_alphanumeric() or following == "_":
+            return None
+    return end

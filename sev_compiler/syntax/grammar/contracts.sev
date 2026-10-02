@@ -1,11 +1,50 @@
+import Error from "../primitive/error/contract.sev"
+import For from "../block/for.sev"
+import Throw from "../keywords/throw.sev"
+import Diagnostic, DiagnosticType, ErrorType from "../primitive/error/diagnostic.sev"
 import G from "../generic/grammar.sev"
+import Y from "../generic/symbol.sev"
+import Associativity, Fixity, ScalarOperation from "../function/syntax.sev"
+import Plus as PlusSymbol from "../symbol/plus.sev"
+import Minus as MinusSymbol from "../symbol/minus.sev"
+import NotKeyword from "../keywords/not.sev"
+import Bang as BangSymbol from "../symbol/bang.sev"
+import CopyKeyword from "../keywords/copy.sev"
+import MoveKeyword from "../keywords/move.sev"
+import Pipe as PipeSymbol from "../symbol/pipe.sev"
+import Ampersand as AmpersandSymbol from "../symbol/ampersand.sev"
+import Caret as CaretSymbol from "../symbol/caret.sev"
+import LeftShift as LeftShiftSymbol from "../symbol/left_shift.sev"
+import RightShift as RightShiftSymbol from "../symbol/right_shift.sev"
+import Star as StarSymbol from "../symbol/star.sev"
+import Slash as SlashSymbol from "../symbol/slash.sev"
+import FloorDivide as FloorDivideSymbol from "../symbol/floor_divide.sev"
+import Percent as PercentSymbol from "../symbol/percent.sev"
+import Power as PowerSymbol from "../symbol/power.sev"
+import Equality as EqualitySymbol from "../symbol/equality.sev"
+import NotEqual as NotEqualSymbol from "../symbol/not_equal.sev"
+import Less as LessSymbol from "../symbol/less.sev"
+import LessEqual as LessEqualSymbol from "../symbol/less_equal.sev"
+import Greater as GreaterSymbol from "../symbol/greater.sev"
+import GreaterEqual as GreaterEqualSymbol from "../symbol/greater_equal.sev"
+import InKeyword from "../keywords/in.sev"
+import AndKeyword from "../keywords/and.sev"
+import OrKeyword from "../keywords/or.sev"
+import IfKeyword from "../block/if.sev"
+import While from "../block/while.sev"
+import PlusEqual as PlusEqualSymbol from "../symbol/plus_equal.sev"
+import MinusEqual as MinusEqualSymbol from "../symbol/minus_equal.sev"
+import StarEqual as StarEqualSymbol from "../symbol/star_equal.sev"
+import SlashEqual as SlashEqualSymbol from "../symbol/slash_equal.sev"
+import PercentEqual as PercentEqualSymbol from "../symbol/percent_equal.sev"
+import Is from "../keywords/is.sev"
 
 
 trait Positive: G
-    symbol: Y = +
+    symbol: Y = PlusSymbol()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
-    associativity: Associativity = Right
+    associativity: Associativity = Associativity.Right
     operations: {T: ScalarOperation} = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("addi"),
         f32 | f64: ScalarOperation("addf"),
@@ -13,10 +52,10 @@ trait Positive: G
 
 
 trait Negative: G
-    symbol: Y = -
+    symbol: Y = MinusSymbol()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
-    associativity: Associativity = Right
+    associativity: Associativity = Associativity.Right
     operations: {T: ScalarOperation} = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("subi"),
         f32 | f64: ScalarOperation("negf", direct=true),
@@ -24,80 +63,80 @@ trait Negative: G
 
 
 trait Not: G
-    symbol: Y = not
+    symbol: Y = NotKeyword()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
-    associativity: Associativity = Right
+    associativity: Associativity = Associativity.Right
     operations: {T: ScalarOperation} = {
         bool: ScalarOperation("xori", identity=1),
     }
 
 
 trait Bang: G
-    symbol: Y = !
+    symbol: Y = BangSymbol()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
-    associativity: Associativity = Right
+    associativity: Associativity = Associativity.Right
     operations: {T: ScalarOperation} = {
         bool: ScalarOperation("xori", identity=1),
     }
 
 
 trait Copy: G
-    symbol: Y = copy
+    symbol: Y = CopyKeyword()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
-    associativity: Associativity = Right
+    associativity: Associativity = Associativity.Right
     operations: {T: ScalarOperation} = {}
 
 
 trait Move: G
-    symbol: Y = move
+    symbol: Y = MoveKeyword()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
-    associativity: Associativity = Right
+    associativity: Associativity = Associativity.Right
 
 
 trait BitwiseOr: G
-    symbol: Y = |
+    symbol: Y = PipeSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 4
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
 
 
 trait BitwiseAnd: G
-    symbol: Y = &
+    symbol: Y = AmpersandSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 6
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
 
 
 trait BitwiseXor: G
-    symbol: Y = ^
+    symbol: Y = CaretSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 5
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
 
 
 trait LeftShift: G
-    symbol: Y = <<
+    symbol: Y = LeftShiftSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
 
 
 trait RightShift: G
-    symbol: Y = >>
+    symbol: Y = RightShiftSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
 
 
 trait Add: G
-    symbol: Y = +
+    symbol: Y = PlusSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
     operations: {T: ScalarOperation} = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("addi"),
         f32 | f64: ScalarOperation("addf"),
@@ -105,10 +144,10 @@ trait Add: G
 
 
 trait Subtract: G
-    symbol: Y = -
+    symbol: Y = MinusSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
     operations: {T: ScalarOperation} = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("subi"),
         f32 | f64: ScalarOperation("subf"),
@@ -116,10 +155,10 @@ trait Subtract: G
 
 
 trait Multiply: G
-    symbol: Y = *
+    symbol: Y = StarSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
     operations: {T: ScalarOperation} = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("muli"),
         f32 | f64: ScalarOperation("mulf"),
@@ -127,41 +166,41 @@ trait Multiply: G
 
 
 trait Divide: G
-    symbol: Y = /
+    symbol: Y = SlashSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
     operations: {T: ScalarOperation} = {
         f32 | f64: ScalarOperation("divf"),
     }
 
 
 trait FloorDivide: G
-    symbol: Y = //
+    symbol: Y = FloorDivideSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
 
 
 trait Remainder: G
-    symbol: Y = %
+    symbol: Y = PercentSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
 
 
 trait Power: G
-    symbol: Y = **
+    symbol: Y = PowerSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 9
-    associativity: Associativity = Right
+    associativity: Associativity = Associativity.Right
 
 
 trait Equal: G
-    symbol: Y = ==
+    symbol: Y = EqualitySymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
-    associativity: Associativity = None
+    associativity: Associativity = Associativity.None
     operations: {T: ScalarOperation} = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index | bool: ScalarOperation("cmpi", predicate=0),
         f32 | f64: ScalarOperation("cmpf", predicate=1),
@@ -169,10 +208,10 @@ trait Equal: G
 
 
 trait NotEqual: G
-    symbol: Y = !=
+    symbol: Y = NotEqualSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
-    associativity: Associativity = None
+    associativity: Associativity = Associativity.None
     operations: {T: ScalarOperation} = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index | bool: ScalarOperation("cmpi", predicate=1),
         f32 | f64: ScalarOperation("cmpf", predicate=13),
@@ -180,10 +219,10 @@ trait NotEqual: G
 
 
 trait Less: G
-    symbol: Y = <
+    symbol: Y = LessSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
-    associativity: Associativity = None
+    associativity: Associativity = Associativity.None
     operations: {T: ScalarOperation} = {
         i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=2),
         u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=6),
@@ -192,10 +231,10 @@ trait Less: G
 
 
 trait LessEqual: G
-    symbol: Y = <=
+    symbol: Y = LessEqualSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
-    associativity: Associativity = None
+    associativity: Associativity = Associativity.None
     operations: {T: ScalarOperation} = {
         i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=3),
         u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=7),
@@ -204,10 +243,10 @@ trait LessEqual: G
 
 
 trait Greater: G
-    symbol: Y = >
+    symbol: Y = GreaterSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
-    associativity: Associativity = None
+    associativity: Associativity = Associativity.None
     operations: {T: ScalarOperation} = {
         i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=4),
         u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=8),
@@ -216,10 +255,10 @@ trait Greater: G
 
 
 trait GreaterEqual: G
-    symbol: Y = >=
+    symbol: Y = GreaterEqualSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
-    associativity: Associativity = None
+    associativity: Associativity = Associativity.None
     operations: {T: ScalarOperation} = {
         i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=5),
         u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=9),
@@ -228,17 +267,17 @@ trait GreaterEqual: G
 
 
 trait Contains: G
-    symbol: Y = in
+    symbol: Y = InKeyword()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
-    associativity: Associativity = None
+    associativity: Associativity = Associativity.None
 
 
 trait LogicalAnd: G
-    symbol: Y = and
+    symbol: Y = AndKeyword()
     fixity: Fixity = Fixity.Infix
     precedence: int = 2
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
     right: Operand = Lazy[bool]
     short_circuit: bool = true
 
@@ -247,10 +286,10 @@ trait LogicalAnd: G
 
 
 trait LogicalOr: G
-    symbol: Y = or
+    symbol: Y = OrKeyword()
     fixity: Fixity = Fixity.Infix
     precedence: int = 1
-    associativity: Associativity = Left
+    associativity: Associativity = Associativity.Left
     right: Operand = Lazy[bool]
     short_circuit: bool = true
 
@@ -259,7 +298,7 @@ trait LogicalOr: G
 
 
 trait If: G
-    symbol: Y = if
+    symbol: Y = IfKeyword()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     control_flow: ControlFlow = Branch
@@ -276,28 +315,6 @@ trait If: G
         cfg.at(otherwise)
         lower(else_body)
         cfg.fallthrough(exit)
-        cfg.at(exit)
-
-
-trait While: G
-    symbol: Y = while
-    fixity: Fixity = Fixity.Prefix
-    precedence: int = 10
-    control_flow: ControlFlow = Loop
-
-    def semantic(condition: Ex, body: B):
-        header = cfg.block()
-        execute = cfg.block()
-        exit = cfg.block()
-        cfg.goto(header)
-        cfg.at(header)
-        value = lower(condition)
-        cfg.branch(value, execute, exit)
-        cfg.begin_loop(header, exit)
-        cfg.at(execute)
-        lower(body)
-        cfg.fallthrough(header)
-        cfg.end_loop()
         cfg.at(exit)
 
 
@@ -355,7 +372,7 @@ trait Assign: G
 
 
 trait AddAssign: G
-    symbol: Y = +=
+    symbol: Y = PlusEqualSymbol()
     form: GrammarForm = GrammarForm.Assignment
     operation: string = "+"
     control_flow: ControlFlow = Mutation
@@ -369,7 +386,7 @@ trait AddAssign: G
 
 
 trait SubtractAssign: G
-    symbol: Y = -=
+    symbol: Y = MinusEqualSymbol()
     form: GrammarForm = GrammarForm.Assignment
     operation: string = "-"
     control_flow: ControlFlow = Mutation
@@ -383,7 +400,7 @@ trait SubtractAssign: G
 
 
 trait MultiplyAssign: G
-    symbol: Y = *=
+    symbol: Y = StarEqualSymbol()
     form: GrammarForm = GrammarForm.Assignment
     operation: string = "*"
     control_flow: ControlFlow = Mutation
@@ -397,7 +414,7 @@ trait MultiplyAssign: G
 
 
 trait DivideAssign: G
-    symbol: Y = /=
+    symbol: Y = SlashEqualSymbol()
     form: GrammarForm = GrammarForm.Assignment
     operation: string = "/"
     control_flow: ControlFlow = Mutation
@@ -411,7 +428,7 @@ trait DivideAssign: G
 
 
 trait RemainderAssign: G
-    symbol: Y = %=
+    symbol: Y = PercentEqualSymbol()
     form: GrammarForm = GrammarForm.Assignment
     operation: string = "%"
     control_flow: ControlFlow = Mutation
@@ -424,51 +441,7 @@ trait RemainderAssign: G
         store(target, updated)
 
 
-enum DiagnosticType:
-    E {0} # Error: execution cannot proceed normally
-    C {1} # Compiler: Could not compile the application
-    U {2} # User error ie the format/input is bad and caused this
-    W {3} # Warning: valid but suspicious/problematic
-    N {4} # Note: supporting context
-    H {5} # Help: suggested action
-    L {6} # Lint: The format/code quality is diminished from this
-
-enum ErrorType:
-    Transient # After a time this might succeed again
-    Permanent # This will not succeed even after waiting
-    Panic # This cannot recover or succeed
-
-trait Diagnostic:
-    type: DiagnosticType
-    category: int {0 <= category <= 999}
-    code: int {0 <= code <= 999}
-    note: string {10 <= len(note) <= 200}
-    help: string {10 <= len(help) <= 200}
-    remediation: string {10 <= len(remediation) <= 200}
-    prefix: string | absent
-    persistence: ErrorType
-
-
-
-trait Error: Diagnostic
-
     
-
-
-
-trait Is: G
-    symbol: Y = is
-    fixity: Fixity = Fixity.Infix
-    precedence: int = 3
-    associativity: Associativity = None
-
-
-trait Throw: G
-    control_flow: ControlFlow = Error
-
-    def semantic(value: Ex):
-        result = lower(value)
-        cfg.throw(result)
 
 
 trait Outcome: G
@@ -509,35 +482,8 @@ trait Index: G
     storage: string = "element_set"
 
 
-trait Slice: G
-    access: string = "slice_at"
-
-
 trait Iteration: G
     start: string = "iteration_start"
     condition: string = "iteration_more"
     access: string = "element_at"
     advance: string = "iteration_next"
-
-
-trait For: G
-    control_flow: ControlFlow = Loop
-
-    def semantic(condition: Ex, body: B, advance: B):
-        header = cfg.block()
-        execute = cfg.block()
-        step = cfg.block()
-        exit = cfg.block()
-        cfg.goto(header)
-        cfg.at(header)
-        value = lower(condition)
-        cfg.branch(value, execute, exit)
-        cfg.begin_loop(step, exit)
-        cfg.at(execute)
-        lower(body)
-        cfg.fallthrough(step)
-        cfg.at(step)
-        lower(advance)
-        cfg.fallthrough(header)
-        cfg.end_loop()
-        cfg.at(exit)

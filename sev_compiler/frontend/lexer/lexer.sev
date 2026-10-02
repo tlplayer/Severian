@@ -1,5 +1,5 @@
 import SourceFile from "../source/source.sev"
-import Diagnostic from "../../syntax/grammar/contracts.sev"
+import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import LexicalMatch from "recognize.sev"
 import SourceWindow, Window, source_window from "window.sev"
 import RegisteredGrammar from "../../syntax/recognition.sev"

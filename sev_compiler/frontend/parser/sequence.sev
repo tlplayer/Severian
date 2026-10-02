@@ -5,7 +5,7 @@ import B from "../../syntax/generic/block.sev"
 import Block from "../../syntax/block/block.sev"
 import T from "../../syntax/generic/type.sev"
 import Span from "../source/source.sev"
-import Diagnostic from "../../syntax/grammar/contracts.sev"
+import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
 import "../../syntax/recognition.sev" as syntax
 

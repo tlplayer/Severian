@@ -1,4 +1,4 @@
-import Diagnostic from "../../syntax/grammar/contracts.sev"
+import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import Lexeme from "../../syntax/generic/lexeme.sev"
 import Y from "../../syntax/generic/symbol.sev"
 import TokenTerm from "../../syntax/generic/token.sev"

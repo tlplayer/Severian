@@ -5,6 +5,19 @@ import ValueId from "../symbol/symbol.sev"
 import Block from "block.sev"
 
 
+import TokenForm from "../generic/token.sev"
+import SourceFile from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+
+
+def recognize_if(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "if")
+
+
+class IfKeyword: Y
+    token_forms: list[TokenForm] = [TokenForm("IF", "if", recognize=recognize_if)]
+
+
 # The sentence belongs to the implementing block, including its CFG behavior.
 class if: Y + B + ExecutableBlock
     context: BlockContext = BlockContext()

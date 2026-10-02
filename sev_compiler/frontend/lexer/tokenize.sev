@@ -3,7 +3,7 @@ import SourceWindow from "window.sev"
 import TokenStream from "stream.sev"
 import Token, TokenForm from "../../syntax/generic/token.sev"
 import Lexeme from "../../syntax/generic/lexeme.sev"
-import Diagnostic from "../../syntax/grammar/contracts.sev"
+import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
 import SentenceField from "../../syntax/sentence/sentence.sev"
 import "../../syntax/recognition.sev" as syntax

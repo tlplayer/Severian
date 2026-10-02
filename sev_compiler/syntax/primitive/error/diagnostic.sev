@@ -1,0 +1,11 @@
+
+
+trait Diagnostic: Error
+    type: ErrorType
+    category: int {0 <= category <= 999}
+    code: int {0 <= code <= 999}
+    note: string {10 <= len(note) <= 200}
+    help: string {10 <= len(help) <= 200}
+    remediation: string {10 <= len(remediation) <= 200}
+    prefix: string | absent
+    persistence: ErrorPersistence

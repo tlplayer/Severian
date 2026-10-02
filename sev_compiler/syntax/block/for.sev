@@ -1,0 +1,38 @@
+import B from "../generic/block.sev"
+import G from "../generic/grammar.sev"
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import SourceFile from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+
+
+def recognize_for(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "for")
+
+
+class ForKeyword: Y
+    token_forms: list[TokenForm] = [TokenForm("FOR", "for", recognize=recognize_for)]
+
+
+trait For: G
+    symbol: Y = ForKeyword()
+    control_flow: ControlFlow = Loop
+
+    def semantic(condition: Ex, body: B, advance: B):
+        header = cfg.block()
+        execute = cfg.block()
+        step = cfg.block()
+        exit = cfg.block()
+        cfg.goto(header)
+        cfg.at(header)
+        value = lower(condition)
+        cfg.branch(value, execute, exit)
+        cfg.begin_loop(step, exit)
+        cfg.at(execute)
+        lower(body)
+        cfg.fallthrough(step)
+        cfg.at(step)
+        lower(advance)
+        cfg.fallthrough(header)
+        cfg.end_loop()
+        cfg.at(exit)

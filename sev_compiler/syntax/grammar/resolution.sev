@@ -2,7 +2,7 @@ import B, SourceBlockId from "../generic/block.sev"
 import TypeDeclaration from "../function/syntax.sev"
 import Expression from "../function/function.sev"
 import Span from "../source.sev"
-import Diagnostic from "contracts.sev"
+import Diagnostic from "../primitive/error/diagnostic.sev"
 import LexicalDiagnostic from "../error/diagnostic.sev"
 
 

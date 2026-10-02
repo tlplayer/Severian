@@ -2,7 +2,7 @@ import ProofResult from "../../syntax/constraint/model.sev"
 import TokenTerm from "../../syntax/generic/token.sev"
 import Block from "../../syntax/block/block.sev"
 import TypeDeclaration from "../../syntax/function/syntax.sev"
-import Diagnostic from "../../syntax/grammar/contracts.sev"
+import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import Expression from "../../syntax/function/function.sev"
 
 

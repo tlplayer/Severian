@@ -4,7 +4,7 @@ import Capture from "../sentence/sentence.sev"
 import Expression, FunctionParameter, FunctionDeclaration, RecordDeclaration from "../function/function.sev"
 import TypeAnnotation from "../type/annotation.sev"
 import Lexeme from "lexeme.sev"
-import Diagnostic from "../grammar/contracts.sev"
+import Diagnostic from "../primitive/error/diagnostic.sev"
 import LexicalDiagnostic from "../error/diagnostic.sev"
 
 class SourceBlockId:

@@ -1,0 +1,37 @@
+import G from "../generic/grammar.sev"
+import Fixity from "../function/syntax.sev"
+import B from "../generic/block.sev"
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import SourceFile from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+
+
+def recognize_while(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "while")
+
+
+class WhileKeyword: Y
+    token_forms: list[TokenForm] = [TokenForm("WHILE", "while", recognize=recognize_while)]
+
+
+trait While: G
+    symbol: Y = WhileKeyword()
+    fixity: Fixity = Fixity.Prefix
+    precedence: int = 10
+    control_flow: ControlFlow = Loop
+
+    def semantic(condition: Ex, body: B):
+        header = cfg.block()
+        execute = cfg.block()
+        exit = cfg.block()
+        cfg.goto(header)
+        cfg.at(header)
+        value = lower(condition)
+        cfg.branch(value, execute, exit)
+        cfg.begin_loop(header, exit)
+        cfg.at(execute)
+        lower(body)
+        cfg.fallthrough(header)
+        cfg.end_loop()
+        cfg.at(exit)

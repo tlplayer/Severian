@@ -1,5 +1,5 @@
 import SourceFile from "../source.sev"
-import Diagnostic from "../grammar/contracts.sev"
+import Diagnostic from "../primitive/error/diagnostic.sev"
 import Lexeme, LexemeTerm, Span, Symbol, span from "lexeme.sev"
 
 

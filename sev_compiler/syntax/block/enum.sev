@@ -4,6 +4,19 @@ import source
 import Symbol from "../symbol/symbol.sev"
 import TypeAnnotation from "../type/annotation.sev"
 
+import TokenForm from "../generic/token.sev"
+import SourceFile from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+
+
+def recognize_enum(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "enum")
+
+
+class EnumKeyword: Y
+    token_forms: list[TokenForm] = [TokenForm("ENUM", "enum", recognize=recognize_enum)]
+
+
 class enum: Y + B
     context: BlockContext = BlockContext()
     span: source.Span | None = None

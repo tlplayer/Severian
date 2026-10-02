@@ -1,3 +1,5 @@
+import ForKeyword from "block/for.sev"
+import ThrowKeyword from "keywords/throw.sev"
 import CaptureContract, DeclarationSource, DeclaredConstraint, DeclaredGrammarField, GrammarCallable, GrammarDeclarationContract from "grammar/declaration.sev"
 import TypeAnnotation, TypeAnnotationKind from "type/annotation.sev"
 import DefId, DeclarationId, SourceId from "source.sev"
@@ -5,7 +7,7 @@ import CapturedGrammar, GrammarContext, capture_one, capture_many, captures_read
 import GrammarValue, grammar_value from "grammar/resolution.sev"
 import ProofResult from "constraint/model.sev"
 import Y from "generic/symbol.sev"
-import Diagnostic from "grammar/contracts.sev"
+import Diagnostic from "primitive/error/diagnostic.sev"
 import SourceWindow, Window from "../frontend/lexer/window.sev"
 import LexicalMatch, recognize_declared from "../frontend/lexer/recognize.sev"
 import Lexeme from "generic/lexeme.sev"
@@ -20,7 +22,7 @@ import match_declared_token from "../frontend/parser/match.sev"
 import Equal from "symbol/equal.sev"
 import ColonEqual from "symbol/colon_equal.sev"
 import QuestionEqual from "symbol/question_equal.sev"
-import EqualEqual from "symbol/equal_equal.sev"
+import Equality from "symbol/equality.sev"
 import NotEqual from "symbol/not_equal.sev"
 import Less from "symbol/less.sev"
 import LessEqual from "symbol/less_equal.sev"
@@ -68,6 +70,18 @@ import At from "symbol/at.sev"
 import StringSymbol, Character, BlockString, FormattedString, FormattedBlockString, Comment, Indent, Space, Newline, EndOfFile from "symbol/forms.sev"
 
 
+import NotKeyword from "keywords/not.sev"
+import CopyKeyword from "keywords/copy.sev"
+import MoveKeyword from "keywords/move.sev"
+import InKeyword from "keywords/in.sev"
+import AndKeyword from "keywords/and.sev"
+import OrKeyword from "keywords/or.sev"
+import IfKeyword from "block/if.sev"
+import WhileKeyword from "block/while.sev"
+import IsKeyword from "keywords/is.sev"
+import EnumKeyword from "block/enum.sev"
+
+
 # Registration retains the owner's arrangement, recognition, and type contract.
 class RegisteredGrammar:
     syntax: Y
@@ -89,10 +103,22 @@ class RegisteredGrammar:
 # Grammar declarations register here when their owning declarations are loaded.
 # The compiler appends declaration-generated entries to this initializer.
 registered_grammars: list[(Y, RegisteredGrammar)] = [
+    (ForKeyword(), RegisteredGrammar(ForKeyword(), None, None, token_form=true)),
+    (ThrowKeyword(), RegisteredGrammar(ThrowKeyword(), None, None, token_form=true)),
+    (NotKeyword(), RegisteredGrammar(NotKeyword(), None, None, token_form=true)),
+    (CopyKeyword(), RegisteredGrammar(CopyKeyword(), None, None, token_form=true)),
+    (MoveKeyword(), RegisteredGrammar(MoveKeyword(), None, None, token_form=true)),
+    (InKeyword(), RegisteredGrammar(InKeyword(), None, None, token_form=true)),
+    (AndKeyword(), RegisteredGrammar(AndKeyword(), None, None, token_form=true)),
+    (OrKeyword(), RegisteredGrammar(OrKeyword(), None, None, token_form=true)),
+    (IfKeyword(), RegisteredGrammar(IfKeyword(), None, None, token_form=true)),
+    (WhileKeyword(), RegisteredGrammar(WhileKeyword(), None, None, token_form=true)),
+    (IsKeyword(), RegisteredGrammar(IsKeyword(), None, None, token_form=true)),
+    (EnumKeyword(), RegisteredGrammar(EnumKeyword(), None, None, token_form=true)),
     (Equal(), RegisteredGrammar(Equal(), None, None, token_form=true)),
     (ColonEqual(), RegisteredGrammar(ColonEqual(), None, None, token_form=true)),
     (QuestionEqual(), RegisteredGrammar(QuestionEqual(), None, None, token_form=true)),
-    (EqualEqual(), RegisteredGrammar(EqualEqual(), None, None, token_form=true)),
+    (Equality(), RegisteredGrammar(Equality(), None, None, token_form=true)),
     (NotEqual(), RegisteredGrammar(NotEqual(), None, None, token_form=true)),
     (Less(), RegisteredGrammar(Less(), None, None, token_form=true)),
     (LessEqual(), RegisteredGrammar(LessEqual(), None, None, token_form=true)),
@@ -200,11 +226,11 @@ def recognition_order() -> list[SyntaxDeclaration]:
         SyntaxDeclaration("block/catch.sev", "catch"),
         SyntaxDeclaration("block/match.sev", "match"),
         SyntaxDeclaration("block/case.sev", "case"),
-        SyntaxDeclaration("grammar/contracts.sev", "For"),
-        SyntaxDeclaration("grammar/contracts.sev", "While"),
+        SyntaxDeclaration("block/for.sev", "For"),
+        SyntaxDeclaration("block/while.sev", "While"),
 
         SyntaxDeclaration("grammar/contracts.sev", "Return"),
-        SyntaxDeclaration("grammar/contracts.sev", "Throw"),
+        SyntaxDeclaration("keywords/throw.sev", "Throw"),
         SyntaxDeclaration("grammar/contracts.sev", "Break"),
         SyntaxDeclaration("grammar/contracts.sev", "Continue"),
         SyntaxDeclaration("grammar/contracts.sev", "Conditional"),

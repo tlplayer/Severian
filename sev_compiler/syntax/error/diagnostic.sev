@@ -1,4 +1,4 @@
-import Diagnostic, DiagnosticType, ErrorType from "../grammar/contracts.sev"
+import Diagnostic, DiagnosticType, ErrorType from "../primitive/error/diagnostic.sev"
 import Span from "../../frontend/source/source.sev"
 
 
