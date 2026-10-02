@@ -130,6 +130,9 @@ pub struct GrammarRegistration {
     pub label: DefId,
     pub owner: DefId,
     pub declaration: severian_ast::SentenceDeclaration,
+    /// Complete lexical owner contract, including generic defaults, receiver
+    /// fields, inherited contracts, and owner constraints.
+    pub owner_declaration: severian_ast::ClassDeclaration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,6 +216,12 @@ impl ProgramIndex {
         self.grammars.iter().filter(move |entry| {
             result.is_none_or(|expected| annotation_matches(&entry.declaration.function.result, expected))
         })
+    }
+
+    /// Resolve the callable/owner reference carried by the source registry.
+    /// This returns declaration AST; it never invokes an executable adapter.
+    pub fn grammar_declaration(&self, label: DefId) -> Option<&GrammarRegistration> {
+        self.grammars.iter().find(|entry| entry.label == label)
     }
 
     pub fn function_definition(
@@ -2164,6 +2173,7 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                         label,
                         owner: id,
                         declaration: declaration.clone(),
+                        owner_declaration: class.clone(),
                     });
                 }
             }

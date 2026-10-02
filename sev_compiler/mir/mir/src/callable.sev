@@ -8,7 +8,11 @@ import "../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../syntax/function/syntax.sev" as model_syntax_function_syntax
 import "../../../syntax/literal/value.sev" as model_syntax_literal_value
-import "../../../syntax/primitive/declarations.sev" as model_syntax_primitive_declarations
+import bool_type_id from "../../../syntax/primitive/bool/declarations.sev"
+import i64_type_id from "../../../syntax/primitive/int/declarations.sev"
+import pointer_type_id from "../../../syntax/primitive/pointer/declarations.sev"
+import unit_type_id from "../../../syntax/primitive/unit/declarations.sev"
+import char_type_id from "../../../syntax/primitive/char/declarations.sev"
 import "../../../syntax/source.sev" as model_syntax_source
 import "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import "../../../syntax/type/annotation.sev" as model_syntax_type_annotation
@@ -46,7 +50,7 @@ def mir_check_expected_error(module: model_hir_module_module.Module, context: cf
                 if variant.index == expected.type_id.index:
                     variant_index = index
                 index += 1
-    matches := mir_value(module, model_syntax_primitive_declarations.bool_type_id())
+    matches := mir_value(module, bool_type_id())
     if variant_index < 0:
         cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.BooleanValue(false), matches))
     else:
@@ -81,7 +85,7 @@ def mir_expression(module: model_hir_module_module.Module, context: cfg.Executio
     previous = context.origin
     context.origin = cfg.source_origin(context, expression.span)
     lowered = mir_expression_value(module, context, scope, expression)
-    if len(module.quality_files) > 0 and expression.type_id.index == model_syntax_primitive_declarations.bool_type_id().index:
+    if len(module.quality_files) > 0 and expression.type_id.index == bool_type_id().index:
         match expression.kind:
             case LiteralValue:
                 # Constants do not represent a runtime coverage decision.
@@ -109,7 +113,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
         case AddressOf:
             return callable_mir_place(module, context, scope, value)
         case TypeLayout:
-            result = mir_value(module, model_syntax_primitive_declarations.i64_type_id())
+            result = mir_value(module, i64_type_id())
             cfg.append(context, model_syntax_function_function.Operation.TypeLayout(subject, alignment, result))
             return result
         case BlockValue:
@@ -131,7 +135,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
             elements_values: list[model_syntax_symbol_symbol.ValueId] = []
             for element in elements:
                 elements_values.append(mir_expression(module, context, scope, element))
-            count = mir_value(module, model_syntax_primitive_declarations.i64_type_id())
+            count = mir_value(module, i64_type_id())
             cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.IntegerValue(string(len(elements))), count))
             exemplar := count
             if len(elements_values) != 0:
@@ -143,7 +147,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
             result = mir_expression(module, context, local, construction)
             position := 0
             for value in elements_values:
-                index = mir_value(module, model_syntax_primitive_declarations.i64_type_id())
+                index = mir_value(module, i64_type_id())
                 cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.IntegerValue(string(position)), index))
                 local = CallableMirScope(scope.bindings, scope.loops, [result, index, value], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names, scope.error_targets, scope.error_expectations)
                 mir_expression(module, context, local, storage)
@@ -158,22 +162,22 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
             if storage_types.owned_record(expression.type_id, module.records):
                 handle = aggregate.allocate(module, context, scope.aggregates, expression.type_id)
                 members = aggregate.fields(scope.aggregates, handle)
-                tag = mir_value(module, model_syntax_primitive_declarations.i64_type_id())
+                tag = mir_value(module, i64_type_id())
                 cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.IntegerValue(string(variant)), tag))
                 cfg.append(context, model_syntax_function_function.Operation.Store(members[0], tag))
                 aggregate.store(module, context, scope.aggregates, members[variant + 1], payload)
                 return handle
-            address = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+            address = mir_value(module, pointer_type_id())
             cfg.append(context, model_syntax_function_function.Operation.Allocate(expression.type_id, address))
             empty = mir_value(module, expression.type_id)
             cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.NoneValue(), empty))
             cfg.append(context, model_syntax_function_function.Operation.Store(address, empty))
-            tag = mir_value(module, model_syntax_primitive_declarations.i64_type_id())
+            tag = mir_value(module, i64_type_id())
             cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.IntegerValue(string(variant)), tag))
-            tag_address = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+            tag_address = mir_value(module, pointer_type_id())
             cfg.append(context, model_syntax_function_function.Operation.FieldAddress(address, expression.type_id, 0, tag_address))
             cfg.append(context, model_syntax_function_function.Operation.Store(tag_address, tag))
-            payload_address = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+            payload_address = mir_value(module, pointer_type_id())
             cfg.append(context, model_syntax_function_function.Operation.FieldAddress(address, expression.type_id, variant + 1, payload_address))
             cfg.append(context, model_syntax_function_function.Operation.Store(payload_address, payload))
             result = mir_value(module, expression.type_id)
@@ -242,7 +246,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
                                     aggregate.store(module, context, scope.aggregates, members[index], value)
                                 index += 1
                 return handle
-            address = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+            address = mir_value(module, pointer_type_id())
             cfg.append(context, model_syntax_function_function.Operation.Allocate(expression.type_id, address))
             for argument in fields:
                 value = mir_expression(module, context, scope, argument.value)
@@ -251,7 +255,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
                         index := 0
                         for field in record.fields:
                             if argument.name == field.name:
-                                target = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+                                target = mir_value(module, pointer_type_id())
                                 cfg.append(context, model_syntax_function_function.Operation.FieldAddress(address, expression.type_id, index, target))
                                 cfg.append(context, model_syntax_function_function.Operation.Store(target, value))
                             index += 1
@@ -367,7 +371,7 @@ def callable_inline_receiver_value(module: model_hir_module_module.Module, conte
         return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", span))
     continuation = cfg.block(context)
     result := mir_value(module, function.result_type)
-    if function.result_type.index != model_syntax_primitive_declarations.unit_type_id().index:
+    if function.result_type.index != unit_type_id().index:
         result = aggregate.parameter(module, context, scope.aggregates, function.result_type, continuation)
     local = CallableMirScope(return_target=continuation, inline_functions=scope.inline_functions[:], aggregates=scope.aggregates)
     local.inline_functions.append(identity)
@@ -394,8 +398,8 @@ def callable_inline_receiver_value(module: model_hir_module_module.Module, conte
                     if storage_types.owned_record(parameter.type_id, module.records):
                         local.borrowed_records.append(index)
                 else:
-                    type_id = model_syntax_primitive_declarations.pointer_type_id() if storage_types.indirect_value(parameter.type_id, module.records) else parameter.type_id
-                    cell = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+                    type_id = pointer_type_id() if storage_types.indirect_value(parameter.type_id, module.records) else parameter.type_id
+                    cell = mir_value(module, pointer_type_id())
                     cfg.append(context, model_syntax_function_function.Operation.Allocate(type_id, cell))
                     cfg.append(context, model_syntax_function_function.Operation.Store(cell, evaluated[argument_index]))
                     local.bindings.append(cell)
@@ -412,7 +416,7 @@ def callable_inline_receiver_value(module: model_hir_module_module.Module, conte
         mir_block(module, context, body, local)
     origin = cfg.origin(module, "Return", span)
     if cfg.open(context):
-        if function.result_type.index == model_syntax_primitive_declarations.unit_type_id().index:
+        if function.result_type.index == unit_type_id().index:
             cfg.fallthrough(context, continuation, origin)
         else:
             cfg.terminate(context, model_mir_cfg_branch.CfgExit.Dead, origin)
@@ -484,15 +488,15 @@ def mir_block_contents(module: model_hir_module_module.Module, context: cfg.Exec
                         scope.bindings.append(destination)
                     continue
                 if storage_types.indirect_value(binding.type_id, module.records):
-                    address = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+                    address = mir_value(module, pointer_type_id())
                     cfg.append(context, model_syntax_function_function.Operation.Allocate(binding.type_id, address))
                     cfg.append(context, model_syntax_function_function.Operation.Store(address, value))
                     value = address
                 if binding.update:
                     cfg.append(context, model_syntax_function_function.Operation.Store(scope.bindings[binding.id.index], value))
                 else:
-                    cell = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
-                    stored_type = model_syntax_primitive_declarations.pointer_type_id() if storage_types.indirect_value(binding.type_id, module.records) else binding.type_id
+                    cell = mir_value(module, pointer_type_id())
+                    stored_type = pointer_type_id() if storage_types.indirect_value(binding.type_id, module.records) else binding.type_id
                     cfg.append(context, model_syntax_function_function.Operation.Allocate(stored_type, cell))
                     cfg.append(context, model_syntax_function_function.Operation.Store(cell, value))
                     scope.bindings.append(cell)
@@ -578,7 +582,7 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
         region = model_hir_module_hierarchy.hierarchy_region(module.hierarchy, trait.definition, model_syntax_block_block.Block([], span=trait.span), origin=trait.span)
         module.hierarchy.blocks[region.index].kind = model_syntax_block_block.BlockKind.Trait
     scope = CallableMirScope()
-    context := cfg.ExecutionContext(model_mir_cfg_cfg.empty_cfg(model_syntax_primitive_declarations.unit_type_id(), module.initializer), source_block=module.initializer)
+    context := cfg.ExecutionContext(model_mir_cfg_cfg.empty_cfg(unit_type_id(), module.initializer), source_block=module.initializer)
     context.origin = model_syntax_block_block.OperationOrigin(module.initializer.span, model_syntax_block_block.SourceBlockId(0), initializer, [model_syntax_block_block.CallableOrigin(initializer, "$initializer", module.initializer.span)])
     context.body.origin = context.origin
     context.body.blocks[context.body.entry].origin = context.origin
@@ -674,7 +678,7 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
                 cell = aggregate.parameter(module, context, local.aggregates, type_id, context.body.entry)
                 local.bindings.append(cell)
                 continue
-            stored_type = model_syntax_primitive_declarations.pointer_type_id() if storage_types.indirect_value(type_id, module.records) and boundary.scalar_boundary(function, "mlir") == "" else type_id
+            stored_type = pointer_type_id() if storage_types.indirect_value(type_id, module.records) and boundary.scalar_boundary(function, "mlir") == "" else type_id
             parameter_value = mir_value(module, stored_type)
             function.values.append(parameter_value)
             if len(module.debug_files) > 0 and len(function.parameters) >= len(function.values):
@@ -685,7 +689,7 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
                         mode = modifier.name
                     cfg.append(context, model_syntax_function_function.Operation.DebugValue(parameter.name, parameter_value, parameter.span, int(len(function.values)), mode, false, stored_type))
                     cfg.append(context, model_syntax_function_function.Operation.DebugOwnership(parameter.name, mode, parameter.span))
-            cell = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+            cell = mir_value(module, pointer_type_id())
             cfg.append(context, model_syntax_function_function.Operation.Allocate(stored_type, cell))
             cfg.append(context, model_syntax_function_function.Operation.Store(cell, parameter_value))
             local.bindings.append(cell)
@@ -741,7 +745,7 @@ def callable_mir_place(module: model_hir_module_module.Module, context: cfg.Exec
             if storage_types.owned_record(expression.type_id, module.records):
                 return scope.bindings[binding.index]
             if storage_types.indirect_value(expression.type_id, module.records):
-                address = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+                address = mir_value(module, pointer_type_id())
                 cfg.append(context, model_syntax_function_function.Operation.Load(scope.bindings[binding.index], address))
                 return address
             return scope.bindings[binding.index]
@@ -749,14 +753,14 @@ def callable_mir_place(module: model_hir_module_module.Module, context: cfg.Exec
             base = callable_mir_place(module, context, scope, object)
             if storage_types.owned_record(object.type_id, module.records):
                 return aggregate.fields(scope.aggregates, base)[index]
-            result = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+            result = mir_value(module, pointer_type_id())
             cfg.append(context, model_syntax_function_function.Operation.FieldAddress(base, object.type_id, index, result))
             return result
         case _:
             value = mir_expression(module, context, scope, expression)
             if storage_types.owned_record(expression.type_id, module.records):
                 return value
-            address = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+            address = mir_value(module, pointer_type_id())
             cfg.append(context, model_syntax_function_function.Operation.Allocate(expression.type_id, address))
             cfg.append(context, model_syntax_function_function.Operation.Store(address, value))
             return address
@@ -920,7 +924,7 @@ def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScop
                 return Nothing
             if name == "cfg.branch" and len(inputs) == 3:
                 condition = semantic_runtime(inputs[0], expression.span)
-                if module.values[condition.index].type_id.index != model_syntax_primitive_declarations.bool_type_id().index:
+                if module.values[condition.index].type_id.index != bool_type_id().index:
                     return error(diagnostics.Diagnostic("E000231", "CFG branch condition requires bool", expression.span))
                 taken = model_mir_cfg_branch.CfgEdge(semantic_block(inputs[1], expression.span))
                 otherwise = model_mir_cfg_branch.CfgEdge(semantic_block(inputs[2], expression.span))
@@ -956,14 +960,14 @@ def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScop
                 elif storage_types.owned_record(module.values[raised.index].type_id, module.records):
                     # An unhandled outcome has no return boundary. Terminate
                     # here without letting its lowering-only handle escape.
-                    failed = mir_value(module, model_syntax_primitive_declarations.bool_type_id())
+                    failed = mir_value(module, bool_type_id())
                     cfg.append(frame.context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.BooleanValue(false), failed))
                     cfg.append(frame.context, model_syntax_function_function.Operation.Assert(failed, None, model_syntax_source.AssertionOrigin(0, 0, 0, None)))
                     # Keep one return form for the ownership pass. The assert
                     # always traps, so this continuation cannot execute.
                     if scope.return_target >= 0:
                         cfg.terminate(frame.context, model_mir_cfg_branch.CfgExit.Jump(model_mir_cfg_branch.CfgEdge(scope.return_target, [])), frame.origin)
-                    elif frame.context.body.return_type.index == model_syntax_primitive_declarations.unit_type_id().index:
+                    elif frame.context.body.return_type.index == unit_type_id().index:
                         cfg.terminate(frame.context, model_mir_cfg_branch.CfgExit.Finish(None), frame.origin)
                     else:
                         return error(diagnostics.Diagnostic("E000230", "CFG error outcome does not match function boundary", expression.span))
@@ -983,10 +987,10 @@ def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScop
                                 if storage_types.owned_record(type_id, module.records):
                                     field = aggregate.fields(scope.aggregates, input)[index + 1]
                                     return RuntimeValue(aggregate.load(module, frame.context, field, variant))
-                                address = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+                                address = mir_value(module, pointer_type_id())
                                 cfg.append(frame.context, model_syntax_function_function.Operation.Allocate(type_id, address))
                                 cfg.append(frame.context, model_syntax_function_function.Operation.Store(address, input))
-                                field = mir_value(module, model_syntax_primitive_declarations.pointer_type_id())
+                                field = mir_value(module, pointer_type_id())
                                 cfg.append(frame.context, model_syntax_function_function.Operation.FieldAddress(address, type_id, index + 1, field))
                                 result = mir_value(module, variant)
                                 cfg.append(frame.context, model_syntax_function_function.Operation.Load(field, result))
@@ -1163,8 +1167,8 @@ def callable_string_literal(module: model_hir_module_module.Module, context: cfg
     leaves = storage_types.value_fields(type_id, module.records)
     buffer = mir_value(module, leaves[0])
     cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.StringValue(text), buffer))
-    count = mir_value(module, model_syntax_primitive_declarations.i64_type_id())
-    size = len(text.characters()) if storage_types.string_element(type_id, module.records).index == model_syntax_primitive_declarations.char_type_id().index else len(text.bytes())
+    count = mir_value(module, i64_type_id())
+    size = len(text.characters()) if storage_types.string_element(type_id, module.records).index == char_type_id().index else len(text.bytes())
     cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.IntegerValue(string(size)), count))
     result = aggregate.allocate(module, context, scope.aggregates, type_id)
     aggregate.write_values(module, context, scope.aggregates, result, [buffer, count], [0])

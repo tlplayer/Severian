@@ -1,0 +1,27 @@
+{
+  "package": {
+    "name": "sev-compiler-parser",
+    "version": "0.1.0",
+    "edition": "2026"
+  },
+  "lib": {
+    "path": "parser.sev"
+  },
+  "language": {
+    "explicit-imports": true
+  },
+  "dependencies": {
+    "source": {
+      "path": "../source",
+      "package": "sev-compiler-source"
+    },
+    "syntax": {
+      "path": "../../syntax",
+      "package": "sev-compiler-syntax"
+    },
+    "hir": {
+      "path": "../../hir",
+      "package": "sev-compiler-hir"
+    }
+  }
+}

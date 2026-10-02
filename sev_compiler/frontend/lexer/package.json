@@ -1,0 +1,23 @@
+{
+  "package": {
+    "name": "sev-compiler-lexer",
+    "version": "0.1.0",
+    "edition": "2026"
+  },
+  "lib": {
+    "path": "lexer.sev"
+  },
+  "language": {
+    "explicit-imports": true
+  },
+  "dependencies": {
+    "source": {
+      "path": "../source",
+      "package": "sev-compiler-source"
+    },
+    "syntax": {
+      "path": "../../syntax",
+      "package": "sev-compiler-syntax"
+    }
+  }
+}

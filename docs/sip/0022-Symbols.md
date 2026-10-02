@@ -1,4 +1,4 @@
-SIP-0000: Lexer
+SIP-0022: Symbols
 
 Status: Draft | Accepted | Implementing | Implemented | Rejected | Superseded
 Type: Language | Compiler | Runtime | Tooling | Package | Interop | Process

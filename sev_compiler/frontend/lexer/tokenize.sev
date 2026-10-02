@@ -20,12 +20,21 @@ def lexer(input: SourceFile) -> TokenStream | list[Diagnostic]:
         for label, grammar in grammars:
             name = label.name if label is syntax.SyntaxDeclaration else "Y"
             forms = label.token_forms[:]
-            for field in ([] if grammar.token_form else grammar.sequence):
-                match field:
-                    case Literal:
-                        forms.append(TokenForm(spelling, spelling))
-                    case Capture:
-                        continue
+            if not grammar.token_form:
+                if grammar.declaration != None:
+                    for field in grammar.declaration.sequence:
+                        match field:
+                            case Literal:
+                                forms.append(TokenForm(spelling, spelling))
+                            case Capture:
+                                continue
+                else:
+                    for field in grammar.sequence:
+                        match field:
+                            case Literal:
+                                forms.append(TokenForm(spelling, spelling))
+                            case Capture:
+                                continue
             matches: list[Token] = []
             for form in forms:
                 stop := end if form.spelling == None else cursor + u32(len(form.spelling))
@@ -40,7 +49,7 @@ def lexer(input: SourceFile) -> TokenStream | list[Diagnostic]:
                     stop -= 1
             # Compiler-generated lexical declarations include quoted captures;
             # their delimiters and contents form one atomic token.
-            if grammar.token_form:
+            if grammar.token_form and grammar.recognize != None:
                 probe = SourceWindow(input, 0, end, cursor)
                 matched = grammar.recognize(probe)
                 if matched is Diagnostic:
@@ -68,3 +77,22 @@ def lexer(input: SourceFile) -> TokenStream | list[Diagnostic]:
         tokens.append(selected)
         cursor = longest
     return TokenStream(input, tokens)
+
+
+test "lexer emits the equal symbol declared by syntax":
+    import virtual_source from "../source/source.sev"
+
+    source = virtual_source("equal.sev", "=")
+    result = lexer(source)
+    assert(result is TokenStream)
+    assert(len(result.tokens) == 1)
+
+    token = result.tokens[0]
+    assert(token.kind == "EQUAL")
+    assert(token.lexeme.text == "=")
+    assert(token.span.source == source.id)
+    assert(token.span.start == 0 and token.span.end == 1)
+    assert(token.lexeme.span == token.span)
+    assert(result.print() == "<line:1.=><EOF>")
+    print(token.kind + " " + token.lexeme.text)
+    print(result.print())
