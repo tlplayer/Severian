@@ -4,7 +4,7 @@ import LexicalMatch from "recognize.sev"
 import SourceWindow, Window, source_window from "window.sev"
 import RegisteredGrammar from "../../syntax/recognition.sev"
 import "../../syntax/recognition.sev" as syntax
-import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
+import LexicalDiagnostic from "diagnostic.sev"
 import Lexeme from "../../syntax/generic/lexeme.sev"
 import Y from "../../syntax/generic/symbol.sev"
 import Span from "../source/source.sev"

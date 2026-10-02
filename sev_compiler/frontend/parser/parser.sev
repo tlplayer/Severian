@@ -8,7 +8,7 @@ import GrammarMatch from "contract.sev"
 import GrammarContext, match_contract from "sequence.sev"
 import ResolvedGrammarNode from "../../syntax/grammar/resolution.sev"
 import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
-import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
+import ParserDiagnostic from "diagnostic.sev"
 import Block, BlockFile, SourceBlockId, global_source_block from "../../syntax/block/block.sev"
 import BlockGraph, BlockUnit, index_block_file from "../../hir/hir/src/dependencies.sev"
 import Span, virtual_source from "../source/source.sev"
@@ -64,14 +64,14 @@ def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
             if grammar.accepts == None or grammar.accepts([], root_context):
                 root_providers.append(grammar)
     if len(root_providers) > 1:
-        return [LexicalDiagnostic("multiple grammars provide the global block", root.span, "parser.block")]
+        return [ParserDiagnostic("multiple grammars provide the global block", root.span, "parser.block")]
     provider: B = root
     if len(root_providers) == 1:
         constructed = root_providers[0].construct([], root_context)
         if constructed is Diagnostic:
             return [constructed]
         if not (constructed is B):
-            return [LexicalDiagnostic("global grammar did not construct a block", root.span, "parser.block")]
+            return [ParserDiagnostic("global grammar did not construct a block", root.span, "parser.block")]
         provider = constructed
         provider.context = root.context
         provider.span = root.span
@@ -93,7 +93,7 @@ def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
             pending = None
         else:
             if level >= len(ancestry):
-                return [LexicalDiagnostic("indentation has no owning block grammar", line.prefix.span, "parser.block")]
+                return [ParserDiagnostic("indentation has no owning block grammar", line.prefix.span, "parser.block")]
             while len(ancestry) > level + 1:
                 ancestry.pop()
         parent_index = ancestry[-1]
@@ -112,13 +112,13 @@ def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
         complete: list[GrammarMatch] = []
         for candidate in candidates:
             if candidate.consumed <= 0 or candidate.consumed > len(line.tokens):
-                return [LexicalDiagnostic("grammar returned invalid token consumption", line.tokens[0].span, "parser.grammar")]
+                return [ParserDiagnostic("grammar returned invalid token consumption", line.tokens[0].span, "parser.grammar")]
             if candidate.consumed == len(line.tokens):
                 complete.append(candidate)
         if len(complete) == 0:
-            return [LexicalDiagnostic("no registered grammar resolves this token sequence", line.tokens[0].span, "parser.grammar")]
+            return [ParserDiagnostic("no registered grammar resolves this token sequence", line.tokens[0].span, "parser.grammar")]
         if len(complete) != 1:
-            return [LexicalDiagnostic("multiple grammar implementations accept this token sequence", line.tokens[0].span, "parser.grammar")]
+            return [ParserDiagnostic("multiple grammar implementations accept this token sequence", line.tokens[0].span, "parser.grammar")]
         resolved = complete[0].resolve()
         if resolved is Diagnostic:
             return [resolved]
@@ -147,7 +147,7 @@ def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
         graph.types.extend(resolved.types)
         graph.expressions.extend(resolved.expressions)
     if pending != None:
-        return [LexicalDiagnostic("block header requires an indented body", file.blocks[pending].span, "parser.block")]
+        return [ParserDiagnostic("block header requires an indented body", file.blocks[pending].span, "parser.block")]
     index_block_file(graph, BlockUnit(input.source.path, "", input.source.path, "global", file))
     return graph
 

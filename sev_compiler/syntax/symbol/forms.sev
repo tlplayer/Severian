@@ -2,7 +2,7 @@ import Y from "../generic/symbol.sev"
 import TokenForm from "../generic/token.sev"
 import SourceFile, Span from "../source.sev"
 import Diagnostic from "../primitive/error/diagnostic.sev"
-import LexicalDiagnostic from "../error/diagnostic.sev"
+import LexicalDiagnostic from "../../frontend/lexer/diagnostic.sev"
 
 
 # Recognition returns an absolute Unicode scalar offset. Construction and

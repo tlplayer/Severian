@@ -21,7 +21,7 @@
       "package": "sev-compiler-primitives"
     },
     "diagnostics": {
-      "path": "error",
+      "path": "primitive/error",
       "package": "sev-compiler-diagnostics"
     }
   }

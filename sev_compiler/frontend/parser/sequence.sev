@@ -6,7 +6,7 @@ import Block from "../../syntax/block/block.sev"
 import T from "../../syntax/generic/type.sev"
 import Span from "../source/source.sev"
 import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
-import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
+import ParserDiagnostic from "diagnostic.sev"
 import "../../syntax/recognition.sev" as syntax
 
 
@@ -59,7 +59,7 @@ def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, co
     if len(input) == 0:
         return []
     if not (grammar.syntax is syntax.SyntaxDeclaration):
-        return LexicalDiagnostic("sequence grammar requires a declaration identity", input[0].span, "parser.grammar")
+        return ParserDiagnostic("sequence grammar requires a declaration identity", input[0].span, "parser.grammar")
     key = grammar.syntax.path + ":" + grammar.syntax.name + ":" + string(input[0].span.start)
     if key in active:
         return []
@@ -89,7 +89,7 @@ def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, co
                                 return candidates
                             for candidate in candidates:
                                 if candidate.consumed <= 0 or candidate.consumed > len(input) - partial.cursor:
-                                    return LexicalDiagnostic("capture did not make bounded progress", input[partial.cursor].span, "parser.capture")
+                                    return ParserDiagnostic("capture did not make bounded progress", input[partial.cursor].span, "parser.capture")
                                 captures = partial.captures[:]
                                 captures[-1] = CapturedGrammar(name, captures[-1].matches + [candidate])
                                 next_frontier.append(SequenceState(partial.cursor + candidate.consumed, captures))
@@ -116,9 +116,9 @@ def construct_sequence(grammar: syntax.RegisteredGrammar, captures: list[Capture
     if admissible is Diagnostic:
         return admissible
     if admissible != ProofResult.Proven:
-        return LexicalDiagnostic("selected grammar constraints are not established", span, "parser.constraint")
+        return ParserDiagnostic("selected grammar constraints are not established", span, "parser.constraint")
     if grammar.construct == None:
-        return LexicalDiagnostic("grammar has no construction callable", span, "parser.construct")
+        return ParserDiagnostic("grammar has no construction callable", span, "parser.construct")
     value = grammar.construct(captures, context)
     if value is Diagnostic:
         return value
@@ -218,7 +218,7 @@ def select_grammar(candidates: list[GrammarMatch], span: Span) -> GrammarMatch |
                     survivors.append(candidate)
         live = survivors
         if len(live) == 0:
-            return LexicalDiagnostic("no grammar satisfies the supplied captures and constraints", span, "parser.select")
+            return ParserDiagnostic("no grammar satisfies the supplied captures and constraints", span, "parser.select")
         progress := false
         for capture in live[0].captures:
             for child in capture.matches:
@@ -250,12 +250,12 @@ def select_grammar(candidates: list[GrammarMatch], span: Span) -> GrammarMatch |
         if progress:
             continue
         if len(live) != 1:
-            return LexicalDiagnostic("multiple grammar interpretations remain admissible", span, "parser.select")
+            return ParserDiagnostic("multiple grammar interpretations remain admissible", span, "parser.select")
         proof = live[0].admissible()
         if proof is Diagnostic:
             return proof
         if proof != ProofResult.Proven:
-            return LexicalDiagnostic("grammar constraints require unresolved capture or context facts", span, "parser.constraint")
+            return ParserDiagnostic("grammar constraints require unresolved capture or context facts", span, "parser.constraint")
         live[0].selected = true
         return live[0]
 

@@ -1,6 +1,6 @@
 import SourceFile, Span from "../source/source.sev"
 import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
-import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
+import LexicalDiagnostic from "diagnostic.sev"
 
 
 trait Window:

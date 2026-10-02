@@ -15,7 +15,7 @@
       "package": "sev-compiler-source"
     },
     "diagnostics": {
-      "path": "../../syntax/error",
+      "path": "../../syntax/primitive/error",
       "package": "sev-compiler-diagnostics"
     }
   }

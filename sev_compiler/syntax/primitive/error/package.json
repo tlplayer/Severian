@@ -6,11 +6,5 @@
   },
   "lib": {
     "path": "diagnostic.sev"
-  },
-  "dependencies": {
-    "source": {
-      "path": "../../frontend/source",
-      "package": "sev-compiler-source"
-    }
   }
 }

@@ -1,0 +1,16 @@
+import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
+import ErrorType, ErrorPersistence from "../../syntax/primitive/error/error.sev"
+import Span from "../source/source.sev"
+
+
+class ParserDiagnostic: Diagnostic
+    note: string
+    span: Span
+    step: string
+    type: ErrorType = ErrorType.C
+    category: int = 1
+    code: int = 1
+    help: string = "Inspect the grammar and the indicated token sequence."
+    remediation: string = "Correct the token arrangement or the owning grammar declaration."
+    prefix: string | absent = absent
+    persistence: ErrorPersistence = ErrorPersistence.Permanent

@@ -1,3 +1,4 @@
+import Error, ErrorType, ErrorPersistence from "error.sev"
 
 
 trait Diagnostic: Error

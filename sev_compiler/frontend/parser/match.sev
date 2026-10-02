@@ -5,7 +5,7 @@ import Token, TokenTerm from "../../syntax/generic/token.sev"
 import Lexeme from "../../syntax/generic/lexeme.sev"
 import Span from "../source/source.sev"
 import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
-import LexicalDiagnostic from "../../syntax/error/diagnostic.sev"
+import ParserDiagnostic from "diagnostic.sev"
 import GrammarMatch, GrammarResolution, GrammarValue from "contract.sev"
 import Block from "../../syntax/block/block.sev"
 import TypeDeclaration from "../../syntax/function/syntax.sev"
@@ -26,7 +26,7 @@ def match_declared_token(input: list[TokenTerm], label: string, construct: (Lexe
         start = u32(len(prefix))
         end = u32(len(spelling.text) - len(suffix))
         if start > end:
-            return LexicalDiagnostic("capture escaped its token", token.span, "parser.capture")
+            return ParserDiagnostic("capture escaped its token", token.span, "parser.capture")
         spelling = Lexeme(spelling.text[start:end], Span(token.span.source, token.span.start + start, token.span.start + end))
 
     return GrammarMatch(1, lambda: finish_declared_token(construct, spelling, token.span, label), identity=label + ":" + string(token.span.start) + ":" + string(token.span.end))

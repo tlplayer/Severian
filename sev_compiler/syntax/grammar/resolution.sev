@@ -3,7 +3,7 @@ import TypeDeclaration from "../function/syntax.sev"
 import Expression from "../function/function.sev"
 import Span from "../source.sev"
 import Diagnostic from "../primitive/error/diagnostic.sev"
-import LexicalDiagnostic from "../error/diagnostic.sev"
+import ParserDiagnostic from "../../frontend/parser/diagnostic.sev"
 
 
 # A heterogeneous collection retains each payload's concrete type through its
@@ -21,7 +21,7 @@ class GrammarValueOf[T]: GrammarValue
     def read[R](span: Span) -> R | Diagnostic:
         if self.value is R:
             return self.value
-        return LexicalDiagnostic("grammar result does not implement the capture contract", span, "parser.capture")
+        return ParserDiagnostic("grammar result does not implement the capture contract", span, "parser.capture")
 
     def block() -> B | None:
         if self.value is B:

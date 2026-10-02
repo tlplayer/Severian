@@ -60,7 +60,7 @@
       "package": "sev-mlir-backend"
     },
     "diagnostics": {
-      "path": "../syntax/error",
+      "path": "../syntax/primitive/error",
       "package": "sev-compiler-diagnostics"
     },
     "lexer": {
