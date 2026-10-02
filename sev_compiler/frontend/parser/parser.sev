@@ -28,13 +28,15 @@ def token_lines(input: TokenStream) -> list[TokenLine]:
     start: u32 = 0
     for token in input.tokens:
         spelling = token.lexeme.text
-        if spelling == "\n" or spelling == "\r\n":
+        if token.kind == "NEWLINE" or spelling == "\n" or spelling == "\r\n":
             if len(terms) > 0:
                 lines.append(TokenLine(terms, Lexeme(prefix, Span(input.source.id, start, start + u32(len(prefix))))))
             terms = []
             prefix = ""
             start = token.span.end
-        elif spelling == " " or spelling == "\t" or spelling == "\r":
+        elif token.kind == "COMMENT":
+            continue
+        elif token.kind == "INDENT" or token.kind == "SPACE" or spelling == " " or spelling == "\t" or spelling == "\r":
             if len(terms) == 0:
                 prefix += spelling
         else:

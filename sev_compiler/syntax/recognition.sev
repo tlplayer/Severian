@@ -17,6 +17,57 @@ import TokenTerm from "generic/token.sev"
 import match_declared_token from "../frontend/parser/match.sev"
 
 
+import Equal from "symbol/equal.sev"
+import ColonEqual from "symbol/colon_equal.sev"
+import QuestionEqual from "symbol/question_equal.sev"
+import EqualEqual from "symbol/equal_equal.sev"
+import NotEqual from "symbol/not_equal.sev"
+import Less from "symbol/less.sev"
+import LessEqual from "symbol/less_equal.sev"
+import Greater from "symbol/greater.sev"
+import GreaterEqual from "symbol/greater_equal.sev"
+import Plus from "symbol/plus.sev"
+import Minus from "symbol/minus.sev"
+import Star from "symbol/star.sev"
+import Slash from "symbol/slash.sev"
+import FloorDivide from "symbol/floor_divide.sev"
+import Percent from "symbol/percent.sev"
+import Power from "symbol/power.sev"
+import PlusEqual from "symbol/plus_equal.sev"
+import MinusEqual from "symbol/minus_equal.sev"
+import StarEqual from "symbol/star_equal.sev"
+import SlashEqual from "symbol/slash_equal.sev"
+import FloorDivideEqual from "symbol/floor_divide_equal.sev"
+import PercentEqual from "symbol/percent_equal.sev"
+import Ampersand from "symbol/ampersand.sev"
+import Pipe from "symbol/pipe.sev"
+import Caret from "symbol/caret.sev"
+import Bang from "symbol/bang.sev"
+import LeftShift from "symbol/left_shift.sev"
+import RightShift from "symbol/right_shift.sev"
+import AmpersandEqual from "symbol/ampersand_equal.sev"
+import PipeEqual from "symbol/pipe_equal.sev"
+import CaretEqual from "symbol/caret_equal.sev"
+import LeftShiftEqual from "symbol/left_shift_equal.sev"
+import RightShiftEqual from "symbol/right_shift_equal.sev"
+import Arrow from "symbol/arrow.sev"
+import ApproxArrow from "symbol/approx_arrow.sev"
+import Conversion from "symbol/conversion.sev"
+import LeftParen from "symbol/left_paren.sev"
+import RightParen from "symbol/right_paren.sev"
+import LeftBracket from "symbol/left_bracket.sev"
+import RightBracket from "symbol/right_bracket.sev"
+import LeftBrace from "symbol/left_brace.sev"
+import RightBrace from "symbol/right_brace.sev"
+import Colon from "symbol/colon.sev"
+import Comma from "symbol/comma.sev"
+import Dot from "symbol/dot.sev"
+import Range from "symbol/range.sev"
+import Ellipsis from "symbol/ellipsis.sev"
+import At from "symbol/at.sev"
+import StringSymbol, Character, BlockString, FormattedString, FormattedBlockString, Comment, Indent, Space, Newline, EndOfFile from "symbol/forms.sev"
+
+
 # Registration retains the owner's arrangement, recognition, and type contract.
 class RegisteredGrammar:
     syntax: Y
@@ -37,7 +88,66 @@ class RegisteredGrammar:
 
 # Grammar declarations register here when their owning declarations are loaded.
 # The compiler appends declaration-generated entries to this initializer.
-registered_grammars: list[(Y, RegisteredGrammar)] = []
+registered_grammars: list[(Y, RegisteredGrammar)] = [
+    (Equal(), RegisteredGrammar(Equal(), None, None, token_form=true)),
+    (ColonEqual(), RegisteredGrammar(ColonEqual(), None, None, token_form=true)),
+    (QuestionEqual(), RegisteredGrammar(QuestionEqual(), None, None, token_form=true)),
+    (EqualEqual(), RegisteredGrammar(EqualEqual(), None, None, token_form=true)),
+    (NotEqual(), RegisteredGrammar(NotEqual(), None, None, token_form=true)),
+    (Less(), RegisteredGrammar(Less(), None, None, token_form=true)),
+    (LessEqual(), RegisteredGrammar(LessEqual(), None, None, token_form=true)),
+    (Greater(), RegisteredGrammar(Greater(), None, None, token_form=true)),
+    (GreaterEqual(), RegisteredGrammar(GreaterEqual(), None, None, token_form=true)),
+    (Plus(), RegisteredGrammar(Plus(), None, None, token_form=true)),
+    (Minus(), RegisteredGrammar(Minus(), None, None, token_form=true)),
+    (Star(), RegisteredGrammar(Star(), None, None, token_form=true)),
+    (Slash(), RegisteredGrammar(Slash(), None, None, token_form=true)),
+    (FloorDivide(), RegisteredGrammar(FloorDivide(), None, None, token_form=true)),
+    (Percent(), RegisteredGrammar(Percent(), None, None, token_form=true)),
+    (Power(), RegisteredGrammar(Power(), None, None, token_form=true)),
+    (PlusEqual(), RegisteredGrammar(PlusEqual(), None, None, token_form=true)),
+    (MinusEqual(), RegisteredGrammar(MinusEqual(), None, None, token_form=true)),
+    (StarEqual(), RegisteredGrammar(StarEqual(), None, None, token_form=true)),
+    (SlashEqual(), RegisteredGrammar(SlashEqual(), None, None, token_form=true)),
+    (FloorDivideEqual(), RegisteredGrammar(FloorDivideEqual(), None, None, token_form=true)),
+    (PercentEqual(), RegisteredGrammar(PercentEqual(), None, None, token_form=true)),
+    (Ampersand(), RegisteredGrammar(Ampersand(), None, None, token_form=true)),
+    (Pipe(), RegisteredGrammar(Pipe(), None, None, token_form=true)),
+    (Caret(), RegisteredGrammar(Caret(), None, None, token_form=true)),
+    (Bang(), RegisteredGrammar(Bang(), None, None, token_form=true)),
+    (LeftShift(), RegisteredGrammar(LeftShift(), None, None, token_form=true)),
+    (RightShift(), RegisteredGrammar(RightShift(), None, None, token_form=true)),
+    (AmpersandEqual(), RegisteredGrammar(AmpersandEqual(), None, None, token_form=true)),
+    (PipeEqual(), RegisteredGrammar(PipeEqual(), None, None, token_form=true)),
+    (CaretEqual(), RegisteredGrammar(CaretEqual(), None, None, token_form=true)),
+    (LeftShiftEqual(), RegisteredGrammar(LeftShiftEqual(), None, None, token_form=true)),
+    (RightShiftEqual(), RegisteredGrammar(RightShiftEqual(), None, None, token_form=true)),
+    (Arrow(), RegisteredGrammar(Arrow(), None, None, token_form=true)),
+    (ApproxArrow(), RegisteredGrammar(ApproxArrow(), None, None, token_form=true)),
+    (Conversion(), RegisteredGrammar(Conversion(), None, None, token_form=true)),
+    (LeftParen(), RegisteredGrammar(LeftParen(), None, None, token_form=true)),
+    (RightParen(), RegisteredGrammar(RightParen(), None, None, token_form=true)),
+    (LeftBracket(), RegisteredGrammar(LeftBracket(), None, None, token_form=true)),
+    (RightBracket(), RegisteredGrammar(RightBracket(), None, None, token_form=true)),
+    (LeftBrace(), RegisteredGrammar(LeftBrace(), None, None, token_form=true)),
+    (RightBrace(), RegisteredGrammar(RightBrace(), None, None, token_form=true)),
+    (Colon(), RegisteredGrammar(Colon(), None, None, token_form=true)),
+    (Comma(), RegisteredGrammar(Comma(), None, None, token_form=true)),
+    (Dot(), RegisteredGrammar(Dot(), None, None, token_form=true)),
+    (Range(), RegisteredGrammar(Range(), None, None, token_form=true)),
+    (Ellipsis(), RegisteredGrammar(Ellipsis(), None, None, token_form=true)),
+    (At(), RegisteredGrammar(At(), None, None, token_form=true)),
+    (StringSymbol(), RegisteredGrammar(StringSymbol(), None, None, token_form=true)),
+    (Character(), RegisteredGrammar(Character(), None, None, token_form=true)),
+    (BlockString(), RegisteredGrammar(BlockString(), None, None, token_form=true)),
+    (FormattedString(), RegisteredGrammar(FormattedString(), None, None, token_form=true)),
+    (FormattedBlockString(), RegisteredGrammar(FormattedBlockString(), None, None, token_form=true)),
+    (Comment(), RegisteredGrammar(Comment(), None, None, token_form=true)),
+    (Indent(), RegisteredGrammar(Indent(), None, None, token_form=true)),
+    (Space(), RegisteredGrammar(Space(), None, None, token_form=true)),
+    (Newline(), RegisteredGrammar(Newline(), None, None, token_form=true)),
+    (EndOfFile(), RegisteredGrammar(EndOfFile(), None, None, token_form=true)),
+]
 
 
 def register(label: Y, sequence: RegisteredGrammar):

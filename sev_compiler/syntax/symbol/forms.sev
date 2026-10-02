@@ -1,0 +1,145 @@
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import SourceFile, Span from "../source.sev"
+import Diagnostic from "../grammar/contracts.sev"
+import LexicalDiagnostic from "../error/diagnostic.sev"
+
+
+# Recognition returns an absolute Unicode scalar offset. Construction and
+# decoding belong to the selected language grammar.
+def quoted_end(source: SourceFile, start: u32, prefix: string, delimiter: string, formatted: bool = false, character: bool = false) -> u32 | None | Diagnostic:
+    text = source.text
+    end = u32(len(source.characters))
+    opening = prefix + delimiter
+    if text[start:start + len(opening)] != opening:
+        return None
+    if len(delimiter) == 1 and text[start + len(prefix):start + len(prefix) + 3] == delimiter + delimiter + delimiter:
+        return None
+    cursor = start + u32(len(opening))
+    depth := 0
+    while cursor < end:
+        value = source.characters[cursor]
+        if depth == 0 and text[cursor:cursor + len(delimiter)] == delimiter:
+            if character and not char.literal_valid(text[start:cursor + 1]):
+                return LexicalDiagnostic("character literal requires one character or escape", Span(source.id, start, cursor + 1), "lexer.tokens")
+            return cursor + u32(len(delimiter))
+        if len(delimiter) == 1 and (value == "\n" or value == "\r"):
+            return LexicalDiagnostic("line ending in quoted literal", Span(source.id, start, cursor), "lexer.tokens")
+        if value == "\\":
+            if cursor + 1 >= end:
+                break
+            cursor += 2
+            continue
+        if formatted:
+            if depth == 0 and (text[cursor:cursor + 2] == "{{" or text[cursor:cursor + 2] == "}}"):
+                cursor += 2
+                continue
+            if depth > 0 and (value == "\"" or value == "'"):
+                nested_delimiter = value
+                if text[cursor:cursor + 3] == value + value + value:
+                    nested_delimiter = value + value + value
+                nested = quoted_end(source, cursor, "", nested_delimiter)
+                if nested is Diagnostic:
+                    return nested
+                if nested != None:
+                    cursor = nested
+                    continue
+            if value == "{":
+                depth += 1
+            elif value == "}":
+                if depth == 0:
+                    return LexicalDiagnostic("unmatched closing brace in formatted literal", Span(source.id, cursor, cursor + 1), "lexer.tokens")
+                depth -= 1
+        cursor += 1
+    return LexicalDiagnostic("unterminated quoted literal", Span(source.id, start, end), "lexer.tokens")
+
+
+def string_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
+    return quoted_end(source, start, "", "\"")
+
+
+def character_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
+    return quoted_end(source, start, "", "'", character=true)
+
+
+def block_string_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
+    if source.text[start:start + 3] == "'''":
+        return quoted_end(source, start, "", "'''")
+    return quoted_end(source, start, "", "\"\"\"")
+
+
+def formatted_string_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
+    return quoted_end(source, start, "f", "\"", formatted=true)
+
+
+def formatted_block_string_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
+    return quoted_end(source, start, "f", "\"\"\"", formatted=true)
+
+
+def comment_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
+    end = u32(len(source.characters))
+    if start == end or source.characters[start] != "#":
+        return None
+    cursor = start + 1
+    while cursor < end and source.characters[cursor] != "\n" and source.characters[cursor] != "\r":
+        cursor += 1
+    return cursor
+
+
+def whitespace_end(source: SourceFile, start: u32, leading: bool) -> u32 | None | Diagnostic:
+    at_line_start = start == 0 or source.characters[start - 1] == "\n" or source.characters[start - 1] == "\r"
+    if leading != at_line_start:
+        return None
+    cursor = start
+    end = u32(len(source.characters))
+    while cursor < end and (source.characters[cursor] == " " or source.characters[cursor] == "\t"):
+        cursor += 1
+    return cursor if cursor > start else None
+
+
+def indent_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
+    return whitespace_end(source, start, true)
+
+
+def space_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
+    return whitespace_end(source, start, false)
+
+
+class StringSymbol: Y
+    token_forms: list[TokenForm] = [TokenForm("STRING", recognize=string_end)]
+
+
+class Character: Y
+    token_forms: list[TokenForm] = [TokenForm("CHARACTER", recognize=character_end)]
+
+
+class BlockString: Y
+    token_forms: list[TokenForm] = [TokenForm("BLOCK_STRING", recognize=block_string_end)]
+
+
+class FormattedString: Y
+    token_forms: list[TokenForm] = [TokenForm("FORMATTED_STRING", recognize=formatted_string_end)]
+
+
+class FormattedBlockString: Y
+    token_forms: list[TokenForm] = [TokenForm("FORMATTED_BLOCK_STRING", recognize=formatted_block_string_end)]
+
+
+class Comment: Y
+    token_forms: list[TokenForm] = [TokenForm("COMMENT", recognize=comment_end)]
+
+
+class Indent: Y
+    token_forms: list[TokenForm] = [TokenForm("INDENT", recognize=indent_end)]
+
+
+class Space: Y
+    token_forms: list[TokenForm] = [TokenForm("SPACE", recognize=space_end)]
+
+
+class Newline: Y
+    token_forms: list[TokenForm] = [TokenForm("NEWLINE", "\r\n"), TokenForm("NEWLINE", "\n"), TokenForm("NEWLINE", "\r")]
+
+
+class EndOfFile: Y
+    token_forms: list[TokenForm] = [TokenForm("EOF", "", boundary=true)]

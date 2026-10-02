@@ -1,0 +1,6 @@
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+
+
+class Equality: Y
+    token_forms: list[TokenForm] = [TokenForm("EQUALITY", "==")]

@@ -1,3 +1,5 @@
+import SourceFile from "../source.sev"
+import Diagnostic from "../grammar/contracts.sev"
 import Lexeme, LexemeTerm, Span, Symbol, span from "lexeme.sev"
 
 
@@ -11,6 +13,8 @@ class TokenForm:
     kind: string
     spelling: string | None = None
     accepts: ((Lexeme) -> bool) | None = None
+    recognize: ((SourceFile, u32) -> u32 | None | Diagnostic) | None = None
+    boundary: bool = false
 
 
 class Token: TokenTerm

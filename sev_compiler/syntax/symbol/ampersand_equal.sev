@@ -1,0 +1,6 @@
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+
+
+class AmpersandEqual: Y
+    token_forms: list[TokenForm] = [TokenForm("AMPERSAND_EQUAL", "&=")]
