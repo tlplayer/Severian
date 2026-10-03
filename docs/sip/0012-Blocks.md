@@ -10,7 +10,33 @@ Superseded by:
 
 ## Appendix
 
--- all terms, file formats, variables, classes, functions, traits in a table
+| Block |
+|---|
+| `global` |
+| `main` |
+| `def` |
+| `operator` |
+| `class` |
+| `trait` |
+| `enum` |
+| `extend` |
+| `test` |
+| `if` |
+| `elif` |
+| `else` |
+| `for` |
+| `while` |
+| `match` |
+| `switch` |
+| `case` |
+| `try` |
+| `catch` |
+| `with` |
+| `unsafe` |
+
+## Block
+
+A block implements B and establishes a semantic region. Its implementing declaration defines its grammar, contents, bindings, context, and applicable execution behavior. HIR preserves the resolved block and its relationships. 
 
 ## Examples
 
