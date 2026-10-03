@@ -129,7 +129,7 @@ test "blocks own four space indentation and relative body depth":
         subblocks: list[SourceBlockId] = []
 
     def prefix(text: string) -> Lexeme:
-        return Lexeme(text, source.Span(source.SourceId(0), 0, u32(len(text))))
+        return Lexeme(text, source.Span(0, 0, u32(len(text))))
 
     block = IndentedBlock()
     assert(block.indentation_level(prefix("")) == 0)

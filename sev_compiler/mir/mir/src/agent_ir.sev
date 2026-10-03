@@ -22,7 +22,7 @@ def identity(id: model_syntax_symbol_symbol.DefId) -> string:
 
 def span_json(span: source.Span, files: list[source.SourceFile]) -> string | Error:
     for file in files:
-        if file.id.index == span.source.index:
+        if file.id == span.source_id:
             if span.end < span.start:
                 throw Error("reversed source span in Agent IR")
             return "{\"path\":" + quoted(file.path) + ",\"start\":" + string(source.utf8_offset(file, span.start)) + ",\"end\":" + string(source.utf8_offset(file, span.end)) + "}"
@@ -250,7 +250,7 @@ def operation_json(operation: model_syntax_function_function.Operation, module: 
             fields = ",\"type\":" + string(type_id.index)
             results.append(result)
         case Constant:
-            literal = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(value), source.Span(source.SourceId(0), 0, 0))
+            literal = model_syntax_function_function.Expression(model_syntax_function_function.ExpressionKind.LiteralValue(value), source.Span(0, 0, 0))
             fields = ",\"value\":" + metadata_value(literal)
             results.append(result)
         case Load:

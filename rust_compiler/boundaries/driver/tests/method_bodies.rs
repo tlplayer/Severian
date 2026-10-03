@@ -547,21 +547,19 @@ fn constructor_cleanup_only_visits_initialized_fields() {
     run(
         r#"@c(symbol = "__sev_storage_live_bytes")
 def live_bytes() -> int
-class SourceId:
-    index: u32
 class SourceFile:
-    id: SourceId
+    id: u32
     path: string
     text: string
     characters: list[string]
-    def SourceFile(source_id: SourceId, source_path: string, source_text: string):
+    def SourceFile(source_id: u32, source_path: string, source_text: string):
         id = source_id
         path = source_path
         text = source_text
         characters = source_text.characters()
 
 def work():
-    source = SourceFile(SourceId(u32(0)), string(12), string(42))
+    source = SourceFile(0, string(12), string(42))
     assert(source.characters.join("") == "42")
     assert(source.path == "12")
     print(source.text)

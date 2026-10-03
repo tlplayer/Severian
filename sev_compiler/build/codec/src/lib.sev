@@ -200,7 +200,7 @@ def resolve(codec: Codec, value: string, namespace: string) -> string | Error:
         model = codec.models[int(len(codec.models)) - index - 1]
         if model.name == value or model.name == namespace + "." + value:
             return model.name
-    if value in ["SourceId", "Span", "SourceFile"]:
+    if value in ["Span", "SourceFile"]:
         return "source." + value
     parts = value.split(".")
     member = parts[-1]
@@ -280,9 +280,15 @@ def ensure(codec: Codec, value: string) -> unit | Error:
                     child = resolve(codec, field.type, model.namespace)
                     encode.append("    " + put(codec, child, "value." + field.name))
                     read_field(codec, decode, child, index)
-                    args.append(("" if value == "source.SourceFile" else field.name + "=") + "field_" + string(index))
-                if codec.mode == "interface" and value == "source.SourceId":
-                    decode.append("    if len(input.source_ids) > 0:\n        if field_0 >= len(input.source_ids):\n            throw Error(\"semantic interface has a dangling source identity\")\n        return source.SourceId(index=u32(input.source_ids[field_0]))")
+                    argument = "field_" + string(index)
+                    source_identity = (field.name in ["source", "source_id"] and child in ["u32", "u32 | None"]) or (value == "source.SourceFile" and field.name == "id")
+                    if codec.mode == "interface" and source_identity:
+                        mapped = "source_" + string(index)
+                        decode.append("    " + mapped + ": " + child + " = " + argument)
+                        condition = " and " + argument + " != None" if child == "u32 | None" else ""
+                        decode.append("    if len(input.source_ids) > 0" + condition + ":\n        if " + argument + " >= len(input.source_ids):\n            throw Error(\"semantic interface has a dangling source identity\")\n        " + mapped + " = u32(input.source_ids[" + argument + "])")
+                        argument = mapped
+                    args.append(("" if value == "source.SourceFile" else field.name + "=") + argument)
                 decode.append("    return " + value + "(" + args.join(", ") + ")")
             else:
                 encode.append("    match value:")

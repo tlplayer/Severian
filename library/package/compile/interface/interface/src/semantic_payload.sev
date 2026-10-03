@@ -15,18 +15,18 @@ def item_source(item: model_hir_module_module.Item) -> int:
         case Function:
             span ?= declaration.span
             if span != None:
-                return int(span.source.index)
+                return int(span.source_id)
             return -1
         case Trait:
-            return int(declaration.span.source.index)
+            return int(declaration.span.source_id)
         case Record:
-            return int(declaration.span.source.index)
+            return int(declaration.span.source_id)
         case Type:
-            return int(declaration.span.source.index)
+            return int(declaration.span.source_id)
         case OperatorItem:
-            return int(declaration.span.source.index)
+            return int(declaration.span.source_id)
         case BindingItem:
-            return int(binding.span.source.index)
+            return int(binding.span.source_id)
         case _:
             return -1
 
@@ -61,11 +61,11 @@ def encode(module: model_hir_module_module.Module, registry: lexer.SyntaxRegistr
             throw Error("semantic interface export has no declaration: " + name)
     descriptors: list[lexer.OperatorDescriptor] = []
     for descriptor in registry.descriptors:
-        if int(descriptor.span.source.index) not in module.prelude_sources:
+        if int(descriptor.span.source_id) not in module.prelude_sources:
             descriptors.append(descriptor)
     rules: list[lexer.SourceLexicalRule] = []
     for rule in registry.rules:
-        if int(rule.span.source.index) not in module.prelude_sources:
+        if int(rule.span.source_id) not in module.prelude_sources:
             rules.append(rule)
     syntax = lexer.SyntaxRegistry([], descriptors, rules=rules)
     output = ["severian-semantic-3", codec.schema()]
@@ -83,7 +83,7 @@ def decode(text: string, location: string, files: list[source.SourceFile]) -> Se
     archived = codec.get_list_source_SourceFile(input)
     index := 0
     for file in archived:
-        if file.id.index != index:
+        if file.id != index:
             throw Error("noncanonical interface source table")
         path = location + "#semantic-source-" + string(index)
         found := -1
@@ -91,16 +91,16 @@ def decode(text: string, location: string, files: list[source.SourceFile]) -> Se
             if known.path == path:
                 if known.text != file.text:
                     throw Error("interface source snapshot changed during compilation")
-                found = int(known.id.index)
+                found = int(known.id)
         if found < 0:
             found = int(len(files))
-            files.append(source.SourceFile(source.SourceId(u32(found)), path, file.text))
+            files.append(source.SourceFile(u32(found), path, file.text))
         input.source_ids.append(found)
         index += 1
     module = codec.get_model_hir_module_module_Module(input)
     registry = codec.get_lexer_SyntaxRegistry(input)
     for file in archived:
-        registry.lexical_discovered.append(location + "#semantic-source-" + string(file.id.index))
+        registry.lexical_discovered.append(location + "#semantic-source-" + string(file.id))
     exports = codec.get_list_string(input)
     if input.cursor != int(len(input.lines)):
         throw Error("trailing generic/grammar interface data")
@@ -154,7 +154,7 @@ def register_grammar(payload: SemanticPayload, registry: lexer.SyntaxRegistry) -
     for rule in payload.registry.rules:
         present := false
         for previous in registry.rules:
-            if previous.name == rule.name and previous.span.source.index == rule.span.source.index:
+            if previous.name == rule.name and previous.span.source_id == rule.span.source_id:
                 present = true
         if not present:
             registry.rules.append(rule)

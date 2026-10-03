@@ -320,7 +320,7 @@ fn injected_prelude_declarations_are_local_and_not_reexported() {
         "bootstrap-prelude.sev",
         "def print(value: string) -> i32\n",
     );
-    source.id = severian_source::SourceId(u32::MAX);
+    source.id = u32::MAX;
     let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
     let module = severian_modules::ModuleId(1);
     let graph = severian_modules::ModuleGraph {

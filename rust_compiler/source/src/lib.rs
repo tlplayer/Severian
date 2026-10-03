@@ -2,25 +2,22 @@
 
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SourceId(pub u32);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
-    pub source: SourceId,
+    pub source: u32,
     pub start: u32,
     pub end: u32,
 }
 
 impl Span {
-    pub const fn new(source: SourceId, start: u32, end: u32) -> Self {
+    pub const fn new(source: u32, start: u32, end: u32) -> Self {
         Self { source, start, end }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFile {
-    pub id: SourceId,
+    pub id: u32,
     pub path: PathBuf,
     pub text: String,
 }
@@ -44,18 +41,18 @@ impl SourceMap {
         Self { files: Vec::new() }
     }
 
-    pub fn load(&mut self, path: impl AsRef<Path>) -> std::io::Result<SourceId> {
+    pub fn load(&mut self, path: impl AsRef<Path>) -> std::io::Result<u32> {
         let path = path.as_ref();
         let text = std::fs::read_to_string(path)?;
         Ok(self.insert(path.to_owned(), text))
     }
 
-    pub fn add_virtual(&mut self, name: impl Into<PathBuf>, text: impl Into<String>) -> SourceId {
+    pub fn add_virtual(&mut self, name: impl Into<PathBuf>, text: impl Into<String>) -> u32 {
         self.insert(name.into(), text.into())
     }
 
-    pub fn get(&self, id: SourceId) -> Option<&SourceFile> {
-        self.files.get(id.0 as usize)
+    pub fn get(&self, id: u32) -> Option<&SourceFile> {
+        self.files.get(id as usize)
     }
 
     pub fn len(&self) -> usize {
@@ -66,9 +63,9 @@ impl SourceMap {
         self.files.is_empty()
     }
 
-    fn insert(&mut self, path: PathBuf, text: String) -> SourceId {
+    fn insert(&mut self, path: PathBuf, text: String) -> u32 {
         let index = u32::try_from(self.files.len()).expect("source map exceeds u32 identities");
-        let id = SourceId(index);
+        let id = index;
         self.files.push(SourceFile { id, path, text });
         id
     }
@@ -78,7 +75,7 @@ impl SourceFile {
     pub fn load(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref();
         Ok(Self {
-            id: SourceId(0),
+            id: 0,
             path: path.to_owned(),
             text: std::fs::read_to_string(path)?,
         })
@@ -86,7 +83,7 @@ impl SourceFile {
 
     pub fn virtual_source(name: impl Into<PathBuf>, text: impl Into<String>) -> Self {
         Self {
-            id: SourceId(0),
+            id: 0,
             path: name.into(),
             text: text.into(),
         }

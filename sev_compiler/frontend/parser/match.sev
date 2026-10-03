@@ -27,7 +27,7 @@ def match_declared_token(input: list[TokenTerm], label: string, construct: (Lexe
         end = u32(len(spelling.text) - len(suffix))
         if start > end:
             return ParserDiagnostic("capture escaped its token", token.span, "parser.capture")
-        spelling = Lexeme(spelling.text[start:end], Span(token.span.source, token.span.start + start, token.span.start + end))
+        spelling = Lexeme(spelling.text[start:end], Span(token.span.source_id, token.span.start + start, token.span.start + end))
 
     return GrammarMatch(1, lambda: finish_declared_token(construct, spelling, token.span, label), identity=label + ":" + string(token.span.start) + ":" + string(token.span.end))
 

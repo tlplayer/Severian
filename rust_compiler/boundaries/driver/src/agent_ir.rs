@@ -306,7 +306,7 @@ pub(crate) fn write(
         .iter()
         .map(|module| {
             json!({
-                "id": format!("source:{}", module.source.id.0),
+                "id": format!("source:{}", module.source.id),
                 "module": module_ids[&module.id],
                 "file": display_path(&source_root, &module.path),
                 "bytes": module.source.text.len(),

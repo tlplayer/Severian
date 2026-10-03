@@ -1375,7 +1375,7 @@ mod tests {
     }
 
     fn borrowed_owner_body(invalidation: CfgStatement) -> CfgBody {
-        let span = severian_source::Span::new(severian_source::SourceId(7), 20, 30);
+        let span = severian_source::Span::new(7, 20, 30);
         CfgBody {
             entry: BlockId(0),
             locals: vec![local(0, true), local(1, false)],
@@ -1431,7 +1431,7 @@ mod tests {
         types.register_destruction(TypeId(1), field_drop);
         types.register_destruction_fields(TypeId(0), vec![TypeId(1), TypeId(1)], false);
         let first = Place { base: crate::PlaceBase::Local(LocalId(0)), projection: vec![crate::Projection::Field(0)] };
-        let span = severian_source::Span::new(severian_source::SourceId(3), 40, 50);
+        let span = severian_source::Span::new(3, 40, 50);
         let mut body = CfgBody {
             entry: BlockId(0), locals: vec![local(0, false)], return_type: TypeId(0),
             blocks: vec![BasicBlock {

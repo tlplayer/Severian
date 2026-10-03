@@ -1,4 +1,4 @@
-import B, Block, BlockKind, OperatorSyntax, SourceId, Y, load, span from "../block/block.sev"
+import B, Block, BlockKind, OperatorSyntax, Y, load, span from "../block/block.sev"
 import "../source.sev" as _dependency_source
 import source
 import AttrValue, BindingId, Symbol, TypeId from "../symbol/symbol.sev"
@@ -26,7 +26,7 @@ class Term:
     start: int
     end: int
     children: list[int] = []
-    source: SourceId | None = None
+    source: u32 | None = None
 
 enum SentenceField:
     Literal(spelling: string)
@@ -45,7 +45,7 @@ class SemanticObject:
     captures: list[Capture]
     start: int
     end: int
-    source: SourceId | None = None
+    source: u32 | None = None
 
 trait Sentence:
     def grammar() -> Grammar
@@ -62,7 +62,7 @@ class SentenceMatch:
     captures: list[Capture]
     start: int
     end: int
-    source: SourceId | None = None
+    source: u32 | None = None
 
 # Type/shape filtering precedes every value predicate, as required by SIP-0000.
 # A nested sentence is one classified term with children in the parser's arena.

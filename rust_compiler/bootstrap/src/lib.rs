@@ -3,7 +3,7 @@
 use severian_ast::{
     OperatorDeclaration, OperatorSyntax, TraitDeclaration, TypeAnnotation, TypeAnnotationKind,
 };
-use severian_source::{SourceFile, SourceId};
+use severian_source::{SourceFile};
 use severian_universal::{
     install_primitives, BinaryOperator, TypeContextBuilder, UnaryOperator, UniversalContext,
 };
@@ -24,7 +24,7 @@ fn build_from_packages<'a>(
     let mut declaration_packages = BTreeMap::<String, String>::new();
     for (index, (package, path, text)) in sources.into_iter().enumerate() {
         let source = SourceFile {
-            id: SourceId(index as u32),
+            id: index as u32,
             path: format!("{package}/{path}").into(),
             text: text.to_owned(),
         };

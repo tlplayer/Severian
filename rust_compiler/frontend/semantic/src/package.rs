@@ -1897,7 +1897,7 @@ fn resolution_definitions(resolution: &Resolution) -> Vec<DefId> {
 /// not declarations owned by the module and therefore must never be re-exported
 /// through an unqualified source import.
 fn is_injected_prelude_item(item: &Item) -> bool {
-    item_span(item).source.0 >= u32::MAX - 4
+    item_span(item).source >= u32::MAX - 4
 }
 
 fn item_span(item: &Item) -> severian_source::Span {
@@ -2250,7 +2250,7 @@ mod grammar_registration_tests {
     #[test]
     fn grammar_registry_filters_result_contracts_independently_of_query_span() {
         let index = collect_declarations(&graph()).unwrap();
-        let location = severian_source::Span::new(severian_source::SourceId(99), 20, 21);
+        let location = severian_source::Span::new(99, 20, 21);
         for result in ["F", "B"] {
             let expected = TypeAnnotation::named(result, Vec::new(), location);
             let entries = index.grammar_registry(Some(&expected)).collect::<Vec<_>>();

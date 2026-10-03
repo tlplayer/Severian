@@ -107,7 +107,7 @@ def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, co
 
 
 def sequence_candidate(grammar: syntax.RegisteredGrammar, state: SequenceState, context: GrammarContext, input: list[TokenTerm]) -> GrammarMatch:
-    span = Span(input[0].span.source, input[0].span.start, input[state.cursor - 1].span.end)
+    span = Span(input[0].span.source_id, input[0].span.start, input[state.cursor - 1].span.end)
     return GrammarMatch(state.cursor, lambda: construct_sequence(grammar, state.captures, context, span), check=lambda: check_sequence(grammar, state.captures, context), captures=state.captures, identity=grammar.syntax.path + ":" + grammar.syntax.name + ":" + string(span.start) + ":" + string(span.end))
 
 

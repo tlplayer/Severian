@@ -105,7 +105,7 @@ def branch_condition(conditions: list[Expression], span: source.Span) -> Express
 
 
 test "declared branch conditions preserve order and short circuit":
-    span = source.Span(source.SourceId(0), 0, 10)
+    span = source.Span(0, 0, 10)
     first = Expression(ExpressionKind.Name("first"), span)
     second = Expression(ExpressionKind.Name("second"), span)
     result = branch_condition([first, second], span)

@@ -43,7 +43,7 @@ fn list(values: impl IntoIterator<Item = Ex>, span: Span) -> Ex {
 }
 
 fn source_span(span: Span) -> Ex {
-    call("Span", vec![call("SourceId", vec![number(span.source.0, span)], span), number(span.start, span), number(span.end, span)], span)
+    call("Span", vec![number(span.source, span), number(span.start, span), number(span.end, span)], span)
 }
 
 fn declaration_source(module: &ResolvedModule, span: Span) -> Ex {

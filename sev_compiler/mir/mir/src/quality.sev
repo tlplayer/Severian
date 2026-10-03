@@ -8,7 +8,7 @@ import "cfg.sev" as cfg
 
 def debug_source(module: model_hir_module_module.Module, span: source.Span) -> bool:
     for file in module.debug_files:
-        if file.id.index == span.source.index:
+        if file.id == span.source_id:
             return true
     return false
 
@@ -16,10 +16,10 @@ def debug_source(module: model_hir_module_module.Module, span: source.Span) -> b
 # or compilation-unit order. Reject a collision instead of merging measurements.
 def quality_region(module: model_hir_module_module.Module, span: source.Span, kind: string) -> int:
     for excluded in module.quality_exclusions:
-        if excluded.source.index == span.source.index and span.start >= excluded.start and span.start < excluded.end:
+        if excluded.source_id == span.source_id and span.start >= excluded.start and span.start < excluded.end:
             return 0
     for file in module.quality_files:
-        if file.id.index != span.source.index:
+        if file.id != span.source_id:
             continue
         identity = file.path + ":" + string(span.start) + ":" + string(span.end) + ":" + kind
         id := 1

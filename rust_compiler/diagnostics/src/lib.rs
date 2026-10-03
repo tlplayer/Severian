@@ -111,13 +111,13 @@ impl Diagnostic {
         for span in self.span.iter().chain(self.labels.iter().map(|label| &label.span)) {
             let candidates: Vec<_> = self.sources.iter().filter(|source| source.id == span.source).collect();
             if candidates.len() > 1 {
-                missing.push(format!("source {} identifies conflicting snapshots: {}", span.source.0,
+                missing.push(format!("source {} identifies conflicting snapshots: {}", span.source,
                     candidates.iter().map(|source| source.path.display().to_string()).collect::<Vec<_>>().join(", ")));
             }
             match self.source_for(*span) {
                 Some(source) if span.start <= span.end && source.location(span.start).is_some()
                     && source.location(span.end).is_some() && !source.path.as_os_str().is_empty() => {}
-                _ => missing.push(format!("source {} bytes {}..{} has no valid file/span mapping", span.source.0, span.start, span.end)),
+                _ => missing.push(format!("source {} bytes {}..{} has no valid file/span mapping", span.source, span.start, span.end)),
             }
         }
         for label in self.labels.iter() {
@@ -240,11 +240,11 @@ impl fmt::Display for Diagnostic {
                     continue;
                 }
             }
-            write!(formatter, "\n related: source {} bytes {}..{}: {}", label.span.source.0, label.span.start, label.span.end, label.message)?;
+            write!(formatter, "\n related: source {} bytes {}..{}: {}", label.span.source, label.span.start, label.span.end, label.message)?;
         }
         if let Some(span) = self.span {
             if !self.source_for(span).is_some_and(|source| source.location(span.start).is_some() && source.location(span.end).is_some()) {
-                write!(formatter, "\n --> source {} bytes {}..{} (source unavailable)", span.source.0, span.start, span.end)?;
+                write!(formatter, "\n --> source {} bytes {}..{} (source unavailable)", span.source, span.start, span.end)?;
             }
         }
         for note in self.notes.iter() {
@@ -268,12 +268,12 @@ impl std::error::Error for Diagnostic {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use severian_source::{SourceFile, SourceId};
+    use severian_source::{SourceFile, u32};
 
     #[test]
     fn display_renders_source_labels_notes_and_help() {
         let source = SourceFile::virtual_source("example.sev", "value = .\n");
-        let span = Span::new(SourceId(0), 8, 9);
+        let span = Span::new(0, 8, 9);
         let rendered = Diagnostic::new("E000111", "expected an expression", Some(span))
             .with_label(span, "expression starts here")
             .with_note("a value is required")
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn missing_sources_and_invalid_spans_are_reported_without_losing_the_cause() {
-        let error = Diagnostic::new("E000203", "duplicate hashing", Some(Span::new(SourceId(42), 3, 8)));
+        let error = Diagnostic::new("E000203", "duplicate hashing", Some(Span::new(42, 3, 8)));
         assert!(error.validate().is_err());
         let rendered = error.to_string();
         assert!(rendered.contains("E000203: duplicate hashing"));

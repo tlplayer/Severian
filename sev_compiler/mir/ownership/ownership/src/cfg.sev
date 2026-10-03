@@ -127,7 +127,7 @@ def verify_availability(body: model_mir_cfg_cfg.CfgBody, parameters: list[model_
     for parameter in parameters:
         availability.add(definitions, int(parameter.index), body.entry, -1)
     for block in body.blocks:
-        span := source.Span(source.SourceId(0), 0, 0)
+        span := source.Span(0, 0, 0)
         terminal ?= block.terminator
         if terminal != None:
             span = terminal.span

@@ -50,7 +50,7 @@ impl Analyzer<'_> {
         else { self.types.register_destruction(ty, definition); }
         let unit = self.types.resolve_name("unit").unwrap();
         let binding = self.new_binding_id();
-        let span = severian_source::Span::new(severian_source::SourceId(0), 0, 0);
+        let span = severian_source::Span::new(0, 0, 0);
         let receiver = Expression { id: self.next_id(), type_id: ty,
             kind: ExpressionKind::Binding(binding), span };
         if self.types.resolve_name("string") == Some(ty) || self.any_type == Some(ty) {

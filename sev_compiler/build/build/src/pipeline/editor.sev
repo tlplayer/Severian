@@ -114,7 +114,7 @@ def editor_block(index: EditorIndex, body: model_syntax_block_block.Block, calle
 def editor_documentation(files: list[source.SourceFile], declared: source.Span) -> string:
     documentation := ""
     for file in files:
-        if file.id.index == declared.source.index:
+        if file.id == declared.source_id:
             line := 0
             for position in range(int(declared.start)):
                 if file.characters[position] == "\n":
@@ -177,14 +177,14 @@ def editor_documented_source(files: list[source.SourceFile], span: source.Span, 
     if len(resolution.packages) == 0:
         return true
     for file in files:
-        if file.id.index == span.source.index:
+        if file.id == span.source_id:
             return file.path.starts_with(resolution.packages[0].root + "/")
     return false
 
 def editor_package_docs(module: model_hir_module_module.Module, files: list[source.SourceFile], resolution: package.Resolution) -> string:
     sections: list[string] = ["# Package API"]
     for record in module.records:
-        if not record.name.starts_with("_") and int(record.span.source.index) not in module.prelude_sources and editor_documented_source(files, record.span, resolution):
+        if not record.name.starts_with("_") and int(record.span.source_id) not in module.prelude_sources and editor_documented_source(files, record.span, resolution):
             sections.append("## " + record.name + "\n\n" + editor_documentation(files, record.span))
     for function in module.functions:
         declared ?= function.span

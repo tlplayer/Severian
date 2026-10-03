@@ -416,7 +416,7 @@ pub struct Module {
 /// generated instructions, rather than rescanning every source prefix.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DebugSource {
-    pub id: severian_source::SourceId,
+    pub id: u32,
     pub path: std::path::PathBuf,
     text: String,
     line_starts: Vec<usize>,

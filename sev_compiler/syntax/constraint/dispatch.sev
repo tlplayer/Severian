@@ -2,7 +2,7 @@ import ConstraintGraph, ConstraintStage, DispatchFamily, ProofResult from "model
 import DefId, constraint_schedule from "graph.sev"
 import ConstraintId, ConstraintRequirement, DispatchCandidate from "model.sev"
 import Expression, ExpressionKind, LiteralValue from "../function/function.sev"
-import DeclarationId, SourceId, Span from "../source.sev"
+import DeclarationId, Span from "../source.sev"
 
 
 # Structural discovery can narrow a family before every capture is resolved.
@@ -112,7 +112,7 @@ def evaluate_dispatch_constraints(family: DispatchFamily, graph: ConstraintGraph
 
 
 test "progressive dispatch retains unknown candidates and excludes refuted ones":
-    location = Span(SourceId(0), 0, 1)
+    location = Span(0, 0, 1)
     condition = Expression(ExpressionKind.LiteralValue(LiteralValue.BooleanValue(true)), location)
     graph = ConstraintGraph([
         ConstraintRequirement(ConstraintId(0), condition, result=ProofResult.Unknown),

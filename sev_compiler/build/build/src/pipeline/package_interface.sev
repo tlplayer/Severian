@@ -27,10 +27,10 @@ def scalar_interface(module: borrow model_hir_module_module.Module, resolution: 
     for item in borrow module.items:
         match item:
             case BindingItem:
-                if int(binding.span.source.index) not in module.prelude_sources:
+                if int(binding.span.source_id) not in module.prelude_sources:
                     return ""
             case ExpressionItem:
-                if int(expression.span.source.index) not in module.prelude_sources:
+                if int(expression.span.source_id) not in module.prelude_sources:
                     return ""
             case _:
                 throw Error("unimplemented (sev_compiler/boundaries/driver/src/pipeline/package_interface.sev)")

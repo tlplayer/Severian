@@ -4,7 +4,7 @@ use severian_compile::{
 };
 use severian_diagnostics::Diagnostic;
 use severian_mir::{CfgStatement, Module as MirModule};
-use severian_source::{SourceFile, SourceId};
+use severian_source::{SourceFile};
 use severian_target::TargetSpec;
 use severian_universal::{CompilerId, UniversalContext};
 use std::collections::{BTreeMap, BTreeSet};
@@ -2732,7 +2732,7 @@ fn bootstrap_prelude_sources() -> [SourceFile; 3] {
         ("library/core/memory/src/box.sev", include_str!("../../../../../library/core/memory/src/box.sev")),
     ].map(|(path, text)| SourceFile::virtual_source(root.join(path), text));
     for (index, source) in sources.iter_mut().enumerate() {
-        source.id = SourceId(u32::MAX - index as u32);
+        source.id = u32::MAX - index as u32;
     }
     sources
 }

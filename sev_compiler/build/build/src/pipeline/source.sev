@@ -46,7 +46,7 @@ PreludeSnapshots: list[PreludeSnapshot] = []
 
 def prepare_prelude(sysroot: string) -> unit | Error:
     files: list[source.SourceFile] = []
-    subject = source.SourceFile(source.SourceId(0), "/__severian_prelude_snapshot__.sev", "")
+    subject = source.SourceFile(0, "/__severian_prelude_snapshot__.sev", "")
     result ?= compile_source(subject, false, sysroot, files, prepare_only=true)
     if result is Diagnostic:
         framed ?= diagnostics.with_frame(result, diagnostics.CallFrame("sev-compiler-build", "prepare_prelude", subject.path))
@@ -54,10 +54,10 @@ def prepare_prelude(sysroot: string) -> unit | Error:
         # Fetch only the source needed to render this diagnostic.
         location ?= framed.span
         if location != None:
-            if location.source.index < len(files):
-                original = files[location.source.index]
+            if location.source_id < len(files):
+                original = files[location.source_id]
                 if original.text == "" and os.is_file(original.path):
-                    files[location.source.index] = source.SourceFile(
+                    files[location.source_id] = source.SourceFile(
                         original.id,
                         original.path,
                         package.read_text(original.path),
@@ -206,7 +206,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
             provider_path = import_source(resolution if prelude_entry != "" else package.Resolution([], [], ""), prelude.path, provider_locator, root)
             selected_name ?= provider_import.source_name
             if selected_name != None:
-                namespace = "__prelude_" + string(registered_source(read_known_source(provider_path, files), files).id.index) + "."
+                namespace = "__prelude_" + string(registered_source(read_known_source(provider_path, files), files).id) + "."
             is_subject = provider_path == subject_path
             if is_subject:
                 initializer_namespace = namespace
@@ -238,7 +238,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
             if name not in reserved:
                 return error(diagnostics.diagnostic("E000120", "unknown prelude exclusion: " + name))
         for file in files:
-            parsed.prelude_sources.append(int(file.id.index))
+            parsed.prelude_sources.append(int(file.id))
     for file in files:
         if file.path.ends_with("/prelude.toml"):
             policy_entries = package.parse_document(file.text)
@@ -283,7 +283,7 @@ def compile_source(input: source.SourceFile, include_tests: bool, sysroot: strin
         for file in files:
             canonical = normalized_path(file.path if file.path.starts_with("/") else working_directory + "/" + file.path)
             if canonical != subject_path:
-                library_sources.append(int(file.id.index))
+                library_sources.append(int(file.id))
     timing.finish_stage(timings, "subject")
     captured: list[semantic.PreludeAnalysis] = []
     if len(prepared) > 0:

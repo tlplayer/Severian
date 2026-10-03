@@ -849,11 +849,11 @@ mod slice_tests {
         BoundaryType, Callee, ClassDeclaration, FunctionDeclaration, FunctionId, FunctionParameter,
         HirId,
     };
-    use severian_source::{SourceId, Span};
+    use severian_source::{u32, Span};
     use severian_universal::{CompileRoute, DeclarationId, DefId, Substitution, TypeId};
 
     fn pointer_write(binding: BindingId, ty: TypeId) -> Expression {
-        let span = Span::new(SourceId(0), 0, 1);
+        let span = Span::new(0, 0, 1);
         Expression {
             id: HirId(1),
             type_id: TypeId(0),
@@ -976,7 +976,7 @@ mod slice_tests {
                     id: HirId(3),
                     type_id: array,
                     kind: ExpressionKind::Binding(owner),
-                    span: Span::new(SourceId(0), 0, 1)
+                    span: Span::new(0, 0, 1)
                 },
                 &bindings,
                 &BTreeSet::new(),

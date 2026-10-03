@@ -31,7 +31,7 @@ def frame(module: model_hir_module_module.Module, origin: model_syntax_block_blo
         if input != None:
             files.append(input)
         for file in files:
-            if file.id.index == span.source.index and span.start <= len(file.characters):
+            if file.id == span.source_id and span.start <= len(file.characters):
                 path = file.path
                 line = 1
                 column = 1

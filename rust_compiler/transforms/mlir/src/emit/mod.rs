@@ -3594,12 +3594,12 @@ fn render_hook_sources(output: &mut String, module: &Module) {
         for source in &module.sources {
             let value = if text { source.text().to_owned() } else { source.path.to_string_lossy().into_owned() };
             output.push_str(&format!("  llvm.mlir.global private constant @__sev_hook_{kind}_{}(\"{}\\00\") : !llvm.array<{} x i8>\n",
-                source.id.0, mlir_string(&value), value.len() + 1));
+                source.id, mlir_string(&value), value.len() + 1));
         }
         output.push_str(&format!("  func.func @__sev_profile_source_{kind}(%source: i64) -> !llvm.ptr {{\n"));
         for (index, source) in module.sources.iter().enumerate() {
             if index != 0 { output.push_str(&format!("  ^source{index}:\n")); }
-            output.push_str(&format!("    %id{index} = arith.constant {} : i64\n    %match{index} = arith.cmpi eq, %source, %id{index} : i64\n    cf.cond_br %match{index}, ^found{index}, ^source{}\n  ^found{index}:\n    %value{index} = llvm.mlir.addressof @__sev_hook_{kind}_{} : !llvm.ptr\n    return %value{index} : !llvm.ptr\n", source.id.0, index + 1, source.id.0));
+            output.push_str(&format!("    %id{index} = arith.constant {} : i64\n    %match{index} = arith.cmpi eq, %source, %id{index} : i64\n    cf.cond_br %match{index}, ^found{index}, ^source{}\n  ^found{index}:\n    %value{index} = llvm.mlir.addressof @__sev_hook_{kind}_{} : !llvm.ptr\n    return %value{index} : !llvm.ptr\n", source.id, index + 1, source.id));
         }
         if !module.sources.is_empty() { output.push_str(&format!("  ^source{}:\n", module.sources.len())); }
         output.push_str("    %missing = llvm.mlir.zero : !llvm.ptr\n    return %missing : !llvm.ptr\n  }\n");

@@ -41,7 +41,7 @@ def recognize_window(input: Window, grammars: list[(Y, RegisteredGrammar)], incl
             if candidate == None:
                 continue
             span = candidate.lexeme.span
-            if probe.cursor != input.cursor or span.source != input.source.id or span.start != input.cursor or span.end < span.start or span.end > input.end or (span.end == span.start and not at_boundary):
+            if probe.cursor != input.cursor or span.source_id != input.source.id or span.start != input.cursor or span.end < span.start or span.end > input.end or (span.end == span.start and not at_boundary):
                 return LexicalDiagnostic("grammar returned an invalid consumed source range", input.span(), "lexer.recognize")
             if candidate.lexeme.text != input.source.text[span.start:span.end]:
                 return LexicalDiagnostic("grammar changed the original matched source spelling", span, "lexer.recognize")

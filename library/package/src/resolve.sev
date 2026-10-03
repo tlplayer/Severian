@@ -172,7 +172,7 @@ def visit(project: Project, source: string, development: bool, registry: string,
         next_chain.append(dependency.reference.name)
         try:
             declared = dependency.reference
-            ref := Reference(declared.name, declared.selector, declared.source, declared.location)
+            ref := Reference(declared.name, declared.selector, declared.source_id, declared.location)
             if int(len(locked)) > 0 and ref.source == "registry":
                 ref.selector = locked_version(locked, ref)
             location := ""

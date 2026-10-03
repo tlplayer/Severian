@@ -109,6 +109,6 @@ def require_resolved_block(block: B):
 
 
 test "incomplete block declarations are rejected":
-    declaration = RecordDeclaration("Incomplete", [], [], source.Span(source.SourceId(0), 0, 1))
+    declaration = RecordDeclaration("Incomplete", [], [], source.Span(0, 0, 1))
     result ?= block_contract(declaration)
     assert(result is Error)

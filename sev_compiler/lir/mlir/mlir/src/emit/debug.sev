@@ -15,7 +15,7 @@ def debug_file(file: string) -> string:
 
 def debug_location(files: borrow list[source.SourceFile], span: borrow source.Span, scope: string = "") -> MlirLocation | None:
     for file in borrow files:
-        if file.id.index != span.source.index:
+        if file.id != span.source_id:
             continue
         line := 1
         column := 1

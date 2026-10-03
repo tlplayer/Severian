@@ -5473,7 +5473,7 @@ impl Analyzer<'_> {
 
                 for (index, field) in instance.fields.iter().enumerate() {
                     let number = match field.name.as_str() {
-                        "source_id" => Some(function.span.source.0),
+                        "source_id" => Some(function.span.source),
                         "span_start" => Some(function.span.start),
                         "span_end" => Some(function.span.end),
                         _ => None,
@@ -19073,7 +19073,7 @@ fn synthetic_extension_definition(
         .join(".");
     let identity = format!(
         "severian.extension.{path}.{}.{}.{}",
-        span.source.0, span.start, concrete
+        span.source, span.start, concrete
     );
     DefId {
         package: 0,

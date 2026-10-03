@@ -17,7 +17,7 @@ class global: Y + B
 
 
 test "global block retains resolved source and provider identity":
-    root = global(span=source.Span(source.SourceId(4), 0, 20))
+    root = global(span=source.Span(4, 0, 20))
     unresolved ?= require_resolved_block(root)
     assert(unresolved is Error)
     root.context.identity = SourceBlockId(0)

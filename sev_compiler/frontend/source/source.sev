@@ -7,20 +7,17 @@ class EOF: Y
     token_forms: list[TokenForm] = [TokenForm("EOF", "", boundary=true)]
 
 
-class SourceId:
-    index: u32
-
 class Span:
     # Internal coordinates are half-open Unicode scalar indices. Serialized
     # tooling interfaces use UTF-8 bytes; convert explicitly at that boundary.
-    source: SourceId
+    source_id: u32 
     start: u32
     end: u32
 
 
 
 class SourceFile:
-    id: SourceId
+    source_id: u32 
     path: string
     text: string
     #Know what files and symbols are coming from outside the file
@@ -29,20 +26,17 @@ class SourceFile:
     # Derived lazily, shared by repeated tooling span queries, never archived.
     byte_offsets: list[int] = []
 
-    def SourceFile(id: SourceId, path: string, text: string):
+    def SourceFile(id: u32, path: string, text: string):
         self.id = id
         self.path = path
         self.text = text
         self.characters = text.characters()
 
-def source_id(index: u32) -> SourceId:
-    return SourceId(index)
-
-def span(source: SourceId, start: u32, end: u32) -> Span:
+def span(source: u32, start: u32, end: u32) -> Span:
     return Span(source, start, end)
 
 def virtual_source(path: string, text: string) -> SourceFile:
-    return SourceFile(SourceId(0), path, text)
+    return SourceFile(0, path, text)
 
 #UTF-8 offset
 def offset(file: SourceFile, offset: u32) -> u32 | Error:
@@ -63,13 +57,13 @@ def load(path: string) -> SourceFile | Error:
 class SourceMap:
     files: list[SourceFile] = []
 
-    def add_virtual(path: string, text: string) -> SourceId:
-        id = SourceId(u32(len(files)))
+    def add_virtual(path: string, text: string) -> u32:
+        id = u32(len(files))
         files.append(SourceFile(id, path, text))
         return id
 
-    def load(path: string) -> SourceId | Error:
+    def load(path: string) -> u32 | Error:
         return add_virtual(path, file.read_checked(path))
 
-    def get(id: SourceId) -> SourceFile:
-        return files[id.index]
+    def get(id: u32) -> SourceFile:
+        return files[id]

@@ -46,7 +46,7 @@ def source_location(origin: source.Span | None, files: list[source.SourceFile]) 
     span ?= origin
     if span != None:
         for file in files:
-            if file.id.index == span.source.index:
+            if file.id == span.source_id:
                 return "{\"path\":" + quoted(file.path) + ",\"start\":" + string(source.utf8_offset(file, span.start)) + ",\"end\":" + string(source.utf8_offset(file, span.end)) + "}"
     return "null"
 

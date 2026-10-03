@@ -587,7 +587,7 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
     context.body.origin = context.origin
     context.body.blocks[context.body.entry].origin = context.origin
     mir_block(module, context, module.initializer, scope)
-    cfg.finish(module, context, source.Span(source.SourceId(0), 0, 0))
+    cfg.finish(module, context, source.Span(0, 0, 0))
     ownership.analyze_ownership(module, context.body, [])
     cfg.promote_storage(module, context.body)
     ownership.authorize_lowering(module, context.body, [])
@@ -617,7 +617,7 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
             require_function(required, function.id)
         origin ?= function.span
         if origin != None:
-            if int(origin.source.index) not in library_sources:
+            if int(origin.source_id) not in library_sources:
                 require_function(required, function.id)
         else:
             require_function(required, function.id)
@@ -721,7 +721,7 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
             if declared_span != None:
                 quality.quality_hit(module, context, declared_span, "Function")
             mir_block(module, context, body, local)
-            span := source.Span(source.SourceId(0), 0, 0)
+            span := source.Span(0, 0, 0)
             declared ?= function.span
             if declared != None:
                 span = declared

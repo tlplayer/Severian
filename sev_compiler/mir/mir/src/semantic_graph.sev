@@ -50,7 +50,7 @@ def source_owner(owners: list[model_frontend_modules_graph_model.SourceUnit], sp
     origin ?= span
     if origin != None:
         for owner in owners:
-            if owner.source.index == origin.source.index:
+            if owner.source_id == origin.source_id:
                 return owner.submodule
         throw Error("definition source has no package-owned submodule membership")
     return fallback

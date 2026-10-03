@@ -76,7 +76,7 @@ def lexer(input: SourceFile) -> TokenStream | list[Diagnostic]:
                     matches.append(Token(name, matched.lexeme, matched.lexeme.span, [name]))
             for token in matches:
                 span = token.span
-                if span.source != input.id or span.start != cursor or (span.end < cursor or (span.end == cursor and cursor != end)) or span.end > end or token.lexeme.text != input.text[cursor:span.end]:
+                if span.source_id != input.id or span.start != cursor or (span.end < cursor or (span.end == cursor and cursor != end)) or span.end > end or token.lexeme.text != input.text[cursor:span.end]:
                     return [LexicalDiagnostic("token form returned an invalid source range", Span(input.id, cursor, cursor), "lexer.tokens")]
                 if span.end > longest:
                     candidates = [token]
@@ -110,7 +110,7 @@ test "lexer emits the equal symbol declared by syntax":
     token = result.tokens[0]
     assert(token.kind == "EQUAL")
     assert(token.lexeme.text == "=")
-    assert(token.span.source == source.id)
+    assert(token.span.source_id == source.id)
     assert(token.span.start == 0 and token.span.end == 1)
     assert(token.lexeme.span == token.span)
     assert(result.print() == "<line:1.=><EOF>")
@@ -178,7 +178,7 @@ test "lexer emits every fixed symbol with its longest spelling":
         token = result.tokens[0]
         assert(token.kind == kind)
         assert(token.lexeme.text == spelling)
-        assert(token.span.source == source.id)
+        assert(token.span.source_id == source.id)
         assert(token.span.start == 0 and token.span.end == len(spelling))
         assert(result.end.token.kind == "EOF")
         assert(result.end.token.span.start == len(spelling))
@@ -211,7 +211,7 @@ test "quoted and structural forms retain their complete source":
         assert(len(result.tokens) == 1)
         assert(result.tokens[0].kind == kind)
         assert(result.tokens[0].lexeme.text == spelling)
-        assert(result.tokens[0].span.source == source.id)
+        assert(result.tokens[0].span.source_id == source.id)
         assert(result.tokens[0].span.start == 0)
         assert(result.tokens[0].span.end == len(spelling))
         print(kind + " " + result.print())
@@ -252,7 +252,7 @@ test "empty input has one classified end boundary":
     assert(len(result.tokens) == 0)
     assert(result.end.token.kind == "EOF")
     assert(result.end.lexeme.text == "")
-    assert(result.end.token.span.source == source.id)
+    assert(result.end.token.span.source_id == source.id)
     assert(result.end.token.span.start == 0 and result.end.token.span.end == 0)
     assert(result.print() == "<EOF>")
     print(result.print())

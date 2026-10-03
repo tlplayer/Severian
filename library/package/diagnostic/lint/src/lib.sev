@@ -80,7 +80,7 @@ class LintSource:
 # Metrics consume classified lexer tokens: comments and string contents cannot
 # create declarations or uses. Offsets are Unicode character offsets, like Span.
 def lint_source(location: string, text: string) -> LintSource | Error:
-    input = source.SourceFile(source.SourceId(0), location, text)
+    input = source.SourceFile(0, location, text)
     tokens = lexer.scan_bootstrap(input)
     lines: list[int] = []
     columns: list[int] = []

@@ -41,7 +41,7 @@ def coverage_sources(files: list[source.SourceFile], roots: list[string], exclud
         for root in roots:
             if file.path.starts_with(root + "/") and len(root) > len(owner):
                 owner = root
-        if owner == "" or int(file.id.index) in prelude_sources:
+        if owner == "" or int(file.id) in prelude_sources:
             continue
         relative = file.path[int(len(owner)) + 1:]
         skip := false

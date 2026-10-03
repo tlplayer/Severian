@@ -20,7 +20,7 @@ def compile_prelude_package(arguments: list[string]) -> unit | Error:
     resolution = package.resolve(project, package.Resolve("build", true, ""))
     entry = package.inside(project.root, package.library_target(project.manifest).path)
     files: list[source.SourceFile] = []
-    subject = source.SourceFile(source.SourceId(0), project.root + "/__prelude_validation__.sev", "")
+    subject = source.SourceFile(0, project.root + "/__prelude_validation__.sev", "")
     output = arguments[3] + "/" + frontend_archive.schema() + "/frontend.txt"
     result ?= pipeline.compile_source(subject, false, arguments[4], files, resolution=resolution, prelude_entry=entry, archive_output=output)
     if result is Diagnostic:
