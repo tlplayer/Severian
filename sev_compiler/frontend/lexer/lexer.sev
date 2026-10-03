@@ -23,7 +23,8 @@ class RegistryLexer: Lexer
         return lexer(input)
 
 
-def recognize_window(input: Window, grammars: list[(Y, RegisteredGrammar)], include_boundary: bool = false) -> list[LexicalMatch] | Diagnostic:
+def recognize_window(input: Window, include_boundary: bool = false) -> list[LexicalMatch] | Diagnostic:
+    grammars = syntax.registry()
     matches: list[LexicalMatch] = []
     while not input.finished() or include_boundary:
         at_boundary = input.finished()
@@ -66,7 +67,7 @@ def recognize_window(input: Window, grammars: list[(Y, RegisteredGrammar)], incl
                 continue
             if child.start == span.start and child.end == span.end:
                 return LexicalDiagnostic("recursive capture must reduce the source window", span, "lexer.capture")
-            nested = recognize_window(SourceWindow(child.source, child.start, child.end, child.start), grammars)
+            nested = recognize_window(SourceWindow(child.source, child.start, child.end, child.start))
             if nested is Diagnostic:
                 return nested
             capture.matches = nested
@@ -82,36 +83,62 @@ def recognize_window(input: Window, grammars: list[(Y, RegisteredGrammar)], incl
 import virtual_source from "../source/source.sev"
 
 
-test "registered source boundary matches once and only in the root boundary pass":
-    class Boundary: Y
-        def recognize(input: Window) -> LexicalMatch | None:
-            if not input.finished() or input.end != len(input.source.characters):
-                return None
-            lexeme = Lexeme("", Span(input.source.id, input.cursor, input.cursor))
-            return LexicalMatch(self, lexeme, None, [])
+class TestBoundary: Y
+    def recognize(input: Window) -> LexicalMatch | None:
+        if not input.finished() or input.end != len(input.source.characters):
+            return None
+        lexeme = Lexeme("", Span(input.source.id, input.cursor, input.cursor))
+        return LexicalMatch(self, lexeme, None, [])
 
-    boundary = Boundary()
-    rules = [(boundary, RegisteredGrammar(boundary, Y, boundary.recognize))]
+
+class TestSpelling: Y
+    spelling: string
+
+    def recognize(input: Window) -> LexicalMatch | None:
+        if len(self.spelling) > input.end - input.cursor:
+            return None
+        end = input.cursor + u32(len(self.spelling))
+        if input.source.text[input.cursor:end] != self.spelling:
+            return None
+        lexeme = Lexeme(self.spelling, Span(input.source.id, input.cursor, end))
+        return LexicalMatch(self, lexeme, None, [])
+
+
+test "registered source boundary matches once and only in the root boundary pass":
+    boundary = TestBoundary()
+    rules: list[(Y, RegisteredGrammar)] = [(boundary, RegisteredGrammar(boundary, Y, boundary.recognize))]
+    mock(syntax.registry() -> rules)
     source = virtual_source("empty.sev", "")
-    matches = recognize_window(source_window(source), rules, include_boundary=true)
+    matches = recognize_window(source_window(source), include_boundary=true)
     assert(matches is list[LexicalMatch])
     assert(len(matches) == 1)
     assert(matches[0].lexeme.text == "")
     assert(matches[0].lexeme.span.start == 0 and matches[0].lexeme.span.end == 0)
-    assert(recognize_window(source_window(source), rules) == [])
-    assert(recognize_window(source_window(source), [rules[0], rules[0]], include_boundary=true) is Diagnostic)
-    assert(recognize_window(source_window(source), [], include_boundary=true) == [])
+    assert(recognize_window(source_window(source)) == [])
 
 
+test "duplicate source boundary declarations are ambiguous":
+    boundary = TestBoundary()
+    rule = (boundary, RegisteredGrammar(boundary, Y, boundary.recognize))
+    rules: list[(Y, RegisteredGrammar)] = [rule, rule]
+    mock(syntax.registry() -> rules)
+    assert(recognize_window(source_window(virtual_source("empty.sev", "")), include_boundary=true) is Diagnostic)
+
+
+test "empty syntax registry has no source boundary match":
+    rules: list[(Y, RegisteredGrammar)] = []
+    mock(syntax.registry() -> rules)
+    assert(recognize_window(source_window(virtual_source("empty.sev", "")), include_boundary=true) == [])
 
 
 test "basic lex preserves the explicit conditional example":
     source = virtual_source("basic.sev", "if true:\n    return 0\n")
-    grammars: list[(Y, RegisteredGrammar)] = []
+    rules: list[(Y, RegisteredGrammar)] = []
     for spelling in ["if", " ", "true", ":", "\n", "return", "0"]:
-        syntax = TestSpelling(spelling)
-        grammars.append((syntax, RegisteredGrammar(syntax, Y, syntax.recognize)))
-    matches = recognize_window(source_window(source), grammars)
+        declaration = TestSpelling(spelling)
+        rules.append((declaration, RegisteredGrammar(declaration, Y, declaration.recognize)))
+    mock(syntax.registry() -> rules)
+    matches = recognize_window(source_window(source))
     assert(matches is list[LexicalMatch])
     assert(matches[0].lexeme.text == "if")
     assert(matches[2].lexeme.text == "true")
@@ -120,38 +147,41 @@ test "basic lex preserves the explicit conditional example":
     assert(matches[9].lexeme.span.start == 13)
 
 
-test "Spelling with custom classes":
-    class TestSpelling: Y
-            spelling: string
-
-            def recognize(input: Window) -> LexicalMatch | None:
-                if len(self.spelling) > input.end - input.cursor:
-                    return None
-                end = input.cursor + u32(len(self.spelling))
-                if input.source.text[input.cursor:end] != self.spelling:
-                    return None
-                lexeme = Lexeme(self.spelling, Span(input.source.id, input.cursor, end))
-                return LexicalMatch(self, lexeme, None, [])
-    test "longest contiguous spelling wins independently of registration order":
-        # A test-owned syntax extension: the lexer knows nothing about its spelling.
-        
-
-        short = TestSpelling(">")
-        long = TestSpelling(">=")
-        rules = [(short, RegisteredGrammar(short, Y, short.recognize)), (long, RegisteredGrammar(long, Y, long.recognize))]
-        for ordered in [rules, [rules[1], rules[0]]]:
-            matches = recognize_window(source_window(virtual_source("operator.sev", ">=")), ordered)
-            assert(matches is list[LexicalMatch])
-            assert(len(matches) == 1 and matches[0].lexeme.text == ">=")
-        assert(recognize_window(source_window(virtual_source("separate.sev", "> =")), rules) is Diagnostic)
+test "longest contiguous spelling wins when the short form is registered first":
+    short = TestSpelling(">")
+    long = TestSpelling(">=")
+    rules: list[(Y, RegisteredGrammar)] = [(short, RegisteredGrammar(short, Y, short.recognize)), (long, RegisteredGrammar(long, Y, long.recognize))]
+    mock(syntax.registry() -> rules)
+    matches = recognize_window(source_window(virtual_source("operator.sev", ">=")))
+    assert(matches is list[LexicalMatch])
+    assert(len(matches) == 1 and matches[0].lexeme.text == ">=")
+    assert(recognize_window(source_window(virtual_source("separate.sev", "> ="))) is Diagnostic)
 
 
-    test "ambiguous and empty matches produce diagnostics without advancing":
-        syntax = TestSpelling("x")
-        rule = (syntax, RegisteredGrammar(syntax, Y, syntax.recognize))
-        window = source_window(virtual_source("ambiguous.sev", "x"))
-        assert(recognize_window(window, [rule, rule]) is Diagnostic)
-        assert(window.cursor == 0)
-        empty = TestSpelling("")
-        assert(recognize_window(window, [(empty, RegisteredGrammar(empty, Y, empty.recognize))]) is Diagnostic)
-        assert(window.cursor == 0)
+test "longest contiguous spelling wins when the long form is registered first":
+    short = TestSpelling(">")
+    long = TestSpelling(">=")
+    rules: list[(Y, RegisteredGrammar)] = [(long, RegisteredGrammar(long, Y, long.recognize)), (short, RegisteredGrammar(short, Y, short.recognize))]
+    mock(syntax.registry() -> rules)
+    matches = recognize_window(source_window(virtual_source("operator.sev", ">=")))
+    assert(matches is list[LexicalMatch])
+    assert(len(matches) == 1 and matches[0].lexeme.text == ">=")
+
+
+test "ambiguous matches produce diagnostics without advancing":
+    declaration = TestSpelling("x")
+    rule = (declaration, RegisteredGrammar(declaration, Y, declaration.recognize))
+    rules: list[(Y, RegisteredGrammar)] = [rule, rule]
+    mock(syntax.registry() -> rules)
+    window = source_window(virtual_source("ambiguous.sev", "x"))
+    assert(recognize_window(window) is Diagnostic)
+    assert(window.cursor == 0)
+
+
+test "empty matches produce diagnostics without advancing":
+    empty = TestSpelling("")
+    rules: list[(Y, RegisteredGrammar)] = [(empty, RegisteredGrammar(empty, Y, empty.recognize))]
+    mock(syntax.registry() -> rules)
+    window = source_window(virtual_source("empty-match.sev", "x"))
+    assert(recognize_window(window) is Diagnostic)
+    assert(window.cursor == 0)
