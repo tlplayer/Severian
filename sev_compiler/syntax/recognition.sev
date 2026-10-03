@@ -3,7 +3,7 @@ import ThrowKeyword from "keywords/throw.sev"
 import CaptureContract, DeclarationSource, DeclaredConstraint, DeclaredGrammarField, GrammarCallable, GrammarDeclarationContract from "grammar/declaration.sev"
 import TypeAnnotation, TypeAnnotationKind from "type/annotation.sev"
 import DefinitionID, DeclarationId from "source.sev"
-import CapturedGrammar, GrammarContext, capture_one, capture_many, captures_ready, context_field, context_value, match_declared_sentence from "../frontend/parser/sequence.sev"
+import CapturedGrammar, GrammarContext, capture_one, capture_many, captures_ready, context_field, context_value, context_receiver, context_receiver_state, match_declared_sentence from "../frontend/parser/sequence.sev"
 import GrammarValue, grammar_value from "grammar/resolution.sev"
 import ProofResult from "constraint/model.sev"
 import Y from "generic/symbol.sev"
@@ -16,7 +16,7 @@ import T from "generic/type.sev"
 import SentenceField, TermRole from "sentence/sentence.sev"
 import GrammarMatcher, GrammarMatch from "../frontend/parser/contract.sev"
 import TokenTerm from "generic/token.sev"
-import match_declared_token from "../frontend/parser/match.sev"
+import match_declared_token, match_contextual_token from "../frontend/parser/match.sev"
 
 
 import Equal from "symbol/equal.sev"
@@ -95,9 +95,10 @@ class RegisteredGrammar:
     accepts: ((list[CapturedGrammar], GrammarContext) -> ProofResult | Diagnostic) | None = None
     construct: ((list[CapturedGrammar], GrammarContext) -> GrammarValue | Diagnostic) | None = None
     declaration: GrammarDeclarationContract | None = None
+    match_context: ((list[TokenTerm], GrammarContext) -> GrammarMatch | None | Diagnostic) | None = None
 
     def has_parser_adapter() -> bool:
-        return self.match_tokens != None or self.construct != None
+        return self.match_tokens != None or self.construct != None or self.match_context != None
 
 
 # Grammar declarations register here when their owning declarations are loaded.

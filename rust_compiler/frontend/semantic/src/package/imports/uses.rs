@@ -192,6 +192,9 @@ impl Uses {
                         for f in c.methods.iter().chain(&c.constructors) {
                             s.function(f);
                         }
+                        for grammar in &c.sentences {
+                            s.scope(grammar.function.parameters.iter().map(|p| p.name.clone()).chain(["self".into()]), |s| s.function(&grammar.function));
+                        }
                         for op in &c.operators {
                             s.operator(op);
                         }
@@ -208,7 +211,7 @@ impl Uses {
                     t.type_parameters.iter().cloned().chain(["Self".to_owned()]),
                     |s| {
                         s.constraints(&t.constraints);
-                        for a in &t.bases {
+                        for a in t.type_parameter_defaults.iter().flatten().chain(&t.bases) {
                             s.annotation(a);
                         }
                         for p in &t.properties {
@@ -216,6 +219,9 @@ impl Uses {
                         }
                         for f in &t.methods {
                             s.function(f);
+                        }
+                        for grammar in &t.sentences {
+                            s.scope(grammar.function.parameters.iter().map(|p| p.name.clone()).chain(["self".into()]), |s| s.function(&grammar.function));
                         }
                         for op in &t.operators {
                             s.decorators(&op.decorators);
@@ -506,5 +512,23 @@ impl Uses {
                 Break { .. } | Continue { .. } => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod grammar_tests {
+    use super::*;
+
+    #[test]
+    fn grammar_imports_visit_defaults_constraints_and_bodies_in_capture_scope() {
+        let source = severian_source::SourceFile::virtual_source("grammar-imports.sev", "trait Provider[T = DefaultValue]:\n    grammar value[spelling: Lexeme]() -> Result with accepts(spelling.text, self.enabled):\n        return construct(spelling)\nclass Concrete:\n    sentence item[value: Result]() -> Output with eligible(value):\n        return finish(value)\n");
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let module = severian_parser::parse(&tokens).unwrap();
+        let mut uses = Uses::default();
+        for item in &module.items { uses.item(item); }
+        for name in ["DefaultValue", "Lexeme", "Result", "accepts", "construct", "Output", "eligible", "finish"] {
+            assert!(uses.names.contains(name), "missing grammar import requirement: {name}");
+        }
+        assert!(uses.names.iter().all(|name| !["self", "spelling", "value", "T"].contains(&name.split('.').next().unwrap())));
     }
 }

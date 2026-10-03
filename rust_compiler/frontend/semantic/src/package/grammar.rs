@@ -3,6 +3,44 @@ use severian_diagnostics::Diagnostic;
 use severian_modules::{ModuleGraph, ResolvedImport, ResolvedModule};
 use severian_source::Span;
 
+// Both declarations own grammars. A trait is never converted into a fabricated
+// class: its identity, property contracts, and receiver requirements survive.
+struct GrammarOwner<'a> {
+    name: &'a str,
+    kind: &'static str,
+    span: Span,
+    type_parameters: &'a [String],
+    type_parameter_defaults: &'a [Option<ast::TypeAnnotation>],
+    constraints: &'a [ast::GenericConstraint],
+    fields: &'a [ast::PropertyDeclaration],
+    traits: &'a [ast::TypeAnnotation],
+    sentences: &'a [ast::SentenceDeclaration],
+}
+
+impl<'a> GrammarOwner<'a> {
+    fn from_item(item: &'a Item) -> Option<Self> {
+        match item {
+            Item::Class(owner) => Some(Self {
+                name: &owner.name, kind: "class", span: owner.span,
+                type_parameters: &owner.type_parameters,
+                type_parameter_defaults: &owner.type_parameter_defaults,
+                constraints: &owner.constraints, fields: &owner.fields,
+                traits: &owner.traits, sentences: &owner.sentences,
+            }),
+            Item::Trait(owner) => Some(Self {
+                name: &owner.name, kind: "trait", span: owner.span,
+                type_parameters: &owner.type_parameters,
+                type_parameter_defaults: &owner.type_parameter_defaults,
+                constraints: &owner.constraints, fields: &owner.properties,
+                traits: &owner.bases, sentences: &owner.sentences,
+            }),
+            _ => None,
+        }
+    }
+
+    fn is_trait(&self) -> bool { self.kind == "trait" }
+}
+
 fn expression(kind: K, span: Span) -> Ex { Ex { kind, span } }
 fn name(value: &str, span: Span) -> Ex { expression(K::Name(value.into()), span) }
 fn text(value: &str, span: Span) -> Ex { expression(K::Literal(Literal::String(value.into())), span) }
@@ -85,7 +123,7 @@ fn constraint_contract(module: &ResolvedModule, constraint: &ast::GenericConstra
     }
 }
 
-fn grammar_contract(module: &ResolvedModule, owner: &ast::ClassDeclaration, grammar: &ast::SentenceDeclaration, ordinal: usize) -> Result<Ex, Diagnostic> {
+fn grammar_contract(module: &ResolvedModule, owner: &GrammarOwner<'_>, grammar: &ast::SentenceDeclaration, ordinal: usize) -> Result<Ex, Diagnostic> {
     let span = grammar.function.span;
     let mut seen = vec![false; grammar.function.parameters.len()];
     for field in &grammar.fields {
@@ -101,7 +139,7 @@ fn grammar_contract(module: &ResolvedModule, owner: &ast::ClassDeclaration, gram
         return Err(Diagnostic::new("E000212", "grammar callable parameter has no capture", Some(span)));
     }
     let identity = |declaration: u128| call("DefId", vec![number(module.package.0, span), number(module.id.0, span), call("DeclarationId", vec![number(declaration, span)], span)], span);
-    let owner_id = identity(super::stable_hash(&format!("class:{}", owner.name)));
+    let owner_id = identity(super::stable_hash(&format!("{}:{}", owner.kind, owner.name)));
     let callable_id = identity(super::stable_hash(&format!("grammar:{}:{}:{ordinal}", owner.name, grammar.function.name)));
     let optional_source = |value: &Option<Ex>| value.as_ref().map(|value| declaration_source(module, value.span)).unwrap_or_else(|| expression(K::Literal(Literal::None), span));
     let captures = grammar.function.parameters.iter().map(|parameter| call("CaptureContract", vec![
@@ -122,7 +160,7 @@ fn grammar_contract(module: &ResolvedModule, owner: &ast::ClassDeclaration, gram
 
 // Executable adapters are a separate capability of the old parser. Failure to
 // provide one must never remove a declaration from the registry.
-fn supports_legacy_adapter(owner: &ast::ClassDeclaration, grammar: &ast::SentenceDeclaration) -> bool {
+fn supports_legacy_adapter(owner: &GrammarOwner<'_>, grammar: &ast::SentenceDeclaration) -> bool {
     if !owner.type_parameters.is_empty() || !grammar.function.type_parameters.is_empty()
         || !owner.constraints.is_empty()
         || grammar.function.constraints.iter().any(|item| !matches!(item, ast::GenericConstraint::Predicate(_))) {
@@ -131,7 +169,7 @@ fn supports_legacy_adapter(owner: &ast::ClassDeclaration, grammar: &ast::Sentenc
     if grammar.lexical {
         return grammar.function.parameters.len() <= 1 && grammar.function.parameters.iter().all(|parameter| !parameter.variadic && parameter.annotation.simple_name() == Some("Lexeme"));
     }
-    grammar.function.body.is_some()
+    grammar.function.body.is_some() && grammar.function.parameters.iter().all(|parameter| parameter.annotation.simple_name().is_some())
 }
 
 fn attach_contract(entry: &mut Ex, contract: Ex) {
@@ -154,6 +192,119 @@ fn typed_call(callee: &str, contract: ast::TypeAnnotation, values: Vec<Ex>, span
     value
 }
 
+fn receiver_check(owner: &GrammarOwner<'_>, registry_alias: &str, span: Span) -> Vec<Statement> {
+    vec![
+        bind("_receiver_proof", typed_call(&format!("{registry_alias}context_receiver_state"),
+            annotation(owner.name, span), vec![name("context", span)], span), span),
+        Statement::If {
+            condition: expression(K::Binary { operator: ast::BinaryOperator::NotEqual,
+                left: Box::new(name("_receiver_proof", span)),
+                right: Box::new(name(&format!("{registry_alias}ProofResult.Proven"), span)) }, span),
+            then_block: vec![Statement::Return { value: Some(name("_receiver_proof", span)), span }],
+            else_block: Vec::new(), span,
+        },
+    ]
+}
+
+// Trait lexical grammars operate on atomic source tokens. Their receiver can
+// be unknown during lexing, so receiver predicates are checked at selection.
+// A free Lexeme capture must not greedily consume the entire remaining file.
+fn lower_trait_lexical(owner: &GrammarOwner<'_>, grammar: &ast::SentenceDeclaration,
+    suffix: &str, registry_alias: &str, owner_alias: &str, module: &ResolvedModule,
+) -> Result<(Vec<Item>, Ex), Diagnostic> {
+    let span = grammar.function.span;
+    let label_name = format!("{}.{}", owner.name, grammar.function.name);
+    let label = call("SyntaxDeclaration", vec![text(&module.path.to_string_lossy(), span), text(&label_name, span)], span);
+    let capture_name = grammar.function.parameters.first().map_or("_spelling", |parameter| parameter.name.as_str());
+    let mut prefix = String::new();
+    let mut suffix_text = String::new();
+    let mut captured = false;
+    for field in &grammar.fields {
+        match field {
+            ast::SentenceElement::Literal(value) => if captured { suffix_text.push_str(value); } else { prefix.push_str(value); },
+            ast::SentenceElement::Capture(_) => captured = true,
+        }
+    }
+    let mut raw = grammar.function.clone();
+    raw.name = format!("_grammar_body_{suffix}");
+    raw.decorators.clear();
+    raw.constraints.clear();
+    raw.contracts.clear();
+    raw.parameters = vec![
+        ast::FunctionParameter { name: capture_name.into(), annotation: annotation(&format!("{registry_alias}Lexeme"), span),
+            immutable_reference: false, variadic: false, default: None, span },
+        ast::FunctionParameter { name: "context".into(), annotation: annotation(&format!("{registry_alias}GrammarContext"), span),
+            immutable_reference: false, variadic: false, default: None, span },
+    ];
+    let receiver = bind("self", typed_call(&format!("{registry_alias}context_receiver"),
+        annotation(owner.name, span), vec![name("context", span)], span), span);
+    let mut body = vec![receiver.clone()];
+    body.extend(grammar.function.body.clone().ok_or_else(|| Diagnostic::new("E000212", "grammar requires a construction body", Some(span)))?);
+    raw.body = Some(body);
+    let construct = boxed_adapter(&raw, &format!("_grammar_construct_{suffix}"), registry_alias);
+    let mut accept = raw.clone();
+    accept.name = format!("_grammar_accept_{suffix}");
+    accept.result = annotation(&format!("{registry_alias}ProofResult"), span);
+    let mut conditions = receiver_check(owner, registry_alias, span);
+    conditions.push(receiver);
+    for constraint in &grammar.function.constraints {
+        if let ast::GenericConstraint::Predicate(predicate) = constraint {
+            conditions.push(Statement::If { condition: predicate.clone(), then_block: Vec::new(),
+                else_block: vec![Statement::Return { value: Some(name(&format!("{registry_alias}ProofResult.Refuted"), span)), span }], span });
+        }
+    }
+    conditions.push(Statement::Return { value: Some(name(&format!("{registry_alias}ProofResult.Proven"), span)), span });
+    accept.body = Some(conditions);
+    let mut matcher = raw.clone();
+    matcher.name = format!("_grammar_match_{suffix}");
+    matcher.parameters[0].name = "input".into();
+    matcher.parameters[0].annotation = ast::TypeAnnotation::named("list", vec![annotation(&format!("{registry_alias}TokenTerm"), span)], span);
+    matcher.result = ast::TypeAnnotation { kind: ast::TypeAnnotationKind::Union(vec![
+        annotation(&format!("{registry_alias}GrammarMatch"), span), annotation("None", span), annotation(&format!("{registry_alias}Diagnostic"), span),
+    ]), span };
+    matcher.body = Some(vec![Statement::Return { value: Some(call(&format!("{registry_alias}match_contextual_token"), vec![
+        name("input", span), text(&label_name, span), name("context", span), name(&accept.name, span), name(&construct.name, span),
+        text(&prefix, span), text(&suffix_text, span), boolean(captured, span),
+    ], span)), span }]);
+    let matcher_name = matcher.name.clone();
+    let mut functions = vec![Item::Function(raw), Item::Function(construct), Item::Function(accept), Item::Function(matcher)];
+    let mut recognizer = expression(K::Literal(Literal::None), span);
+    if !captured {
+        // Fixed spellings can be recognized without the receiver. Acceptance
+        // still waits for the concrete trait implementation in parser context.
+        let mut accepts_spelling = grammar.function.clone();
+        accepts_spelling.name = format!("_grammar_spelling_{suffix}");
+        accepts_spelling.decorators.clear();
+        accepts_spelling.constraints.clear();
+        accepts_spelling.contracts.clear();
+        accepts_spelling.parameters = vec![ast::FunctionParameter { name: "spelling".into(),
+            annotation: annotation(&format!("{registry_alias}Lexeme"), span), immutable_reference: false, variadic: false, default: None, span }];
+        accepts_spelling.result = annotation("bool", span);
+        accepts_spelling.body = Some(vec![Statement::Return { value: Some(boolean(true, span)), span }]);
+        let mut recognize = accepts_spelling.clone();
+        recognize.name = format!("_grammar_recognize_{suffix}");
+        recognize.parameters[0].name = "input".into();
+        recognize.parameters[0].annotation = annotation(&format!("{registry_alias}Window"), span);
+        recognize.result = ast::TypeAnnotation { kind: ast::TypeAnnotationKind::Union(vec![
+            annotation(&format!("{registry_alias}LexicalMatch"), span), annotation("None", span), annotation(&format!("{registry_alias}Diagnostic"), span),
+        ]), span };
+        recognize.body = Some(vec![Statement::Return { value: Some(call(&format!("{registry_alias}recognize_declared"), vec![
+            name("input", span), call(&format!("{registry_alias}SyntaxDeclaration"), vec![text(&module.path.to_string_lossy(), span), text(&label_name, span)], span),
+            text(&prefix, span), text("", span), text("", span), name(&accepts_spelling.name, span),
+        ], span)), span }]);
+        recognizer = name(&format!("{owner_alias}{}", recognize.name), span);
+        functions.extend([Item::Function(accepts_spelling), Item::Function(recognize)]);
+    }
+    let result = grammar.function.result.simple_name();
+    let result_value = result.map(|result| name(&format!("{}{result}", if matches!(result, "bool" | "int" | "float" | "char" | "string" | "None" | "unit" | "absent") { "" } else { owner_alias }), span)).unwrap_or_else(|| expression(K::Literal(Literal::None), span));
+    let mut descriptor = call("RegisteredGrammar", vec![label.clone(), result_value, recognizer], span);
+    if let K::Call { arguments, .. } = &mut descriptor.kind {
+        arguments.push(ast::CallArgument { name: Some("token_form".into()), spread: false, value: boolean(true, span), expected_error: None, span });
+        arguments.push(ast::CallArgument { name: Some("match_context".into()), spread: false, value: name(&format!("{owner_alias}{matcher_name}"), span), expected_error: None, span });
+    }
+    Ok((functions, expression(K::Tuple(vec![label, descriptor]), span)))
+}
+
 fn boxed_adapter(raw: &ast::FunctionDeclaration, adapter_name: &str, registry_alias: &str) -> ast::FunctionDeclaration {
     let span = raw.span;
     let mut adapter = raw.clone();
@@ -165,7 +316,7 @@ fn boxed_adapter(raw: &ast::FunctionDeclaration, adapter_name: &str, registry_al
 
 // Predicate receiver reads bind to declared fields, never a fabricated `self`
 // object or an invocation of the owner's construction behavior.
-fn predicate_context(value: &mut Ex, owner: &ast::ClassDeclaration, registry_alias: &str) {
+fn predicate_context(value: &mut Ex, owner: &GrammarOwner<'_>, registry_alias: &str) {
     if let K::Member { object, name: field_name } = &value.kind {
         if matches!(&object.kind, K::Name(value) if value == "self") {
             if let Some(field) = owner.fields.iter().find(|field| field.name == *field_name) {
@@ -190,7 +341,7 @@ fn predicate_context(value: &mut Ex, owner: &ast::ClassDeclaration, registry_ali
     }
 }
 
-fn lower_sentence(owner: &ast::ClassDeclaration, grammar: &ast::SentenceDeclaration,
+fn lower_sentence(owner: &GrammarOwner<'_>, grammar: &ast::SentenceDeclaration,
     suffix: &str, registry_alias: &str, owner_alias: &str, module: &ResolvedModule,
 ) -> Result<(Vec<Item>, Ex), Diagnostic> {
     let span = grammar.function.span;
@@ -215,8 +366,10 @@ fn lower_sentence(owner: &ast::ClassDeclaration, grammar: &ast::SentenceDeclarat
         bindings.push(bind(&parameter.name, typed_call(&format!("{registry_alias}{helper}"), parameter.annotation.clone(), vec![name("captures", span), number(index, span)], span), span));
         if parameter.variadic { repetitions.push(number(index, span)); }
     }
-    let mut receiver = call(&owner.name, Vec::new(), span);
-    if let K::Call { arguments, .. } = &mut receiver.kind {
+    let mut receiver = if owner.is_trait() {
+        typed_call(&format!("{registry_alias}context_receiver"), annotation(owner.name, span), vec![name("context", span)], span)
+    } else { call(owner.name, Vec::new(), span) };
+    if !owner.is_trait() { if let K::Call { arguments, .. } = &mut receiver.kind {
         for field in owner.fields.iter().filter(|field| field.default.is_none()) {
             let value = if let Some((index, capture)) = grammar.function.parameters.iter().enumerate().find(|(_, parameter)| parameter.name == field.name) {
                 typed_call(&format!("{registry_alias}{}", if capture.variadic { "capture_many" } else { "capture_one" }), capture.annotation.clone(), vec![name("captures", span), number(index, span)], span)
@@ -225,7 +378,7 @@ fn lower_sentence(owner: &ast::ClassDeclaration, grammar: &ast::SentenceDeclarat
             };
             arguments.push(ast::CallArgument { name: Some(field.name.clone()), spread: false, value, expected_error: None, span });
         }
-    }
+    } }
     let mut body = bindings.clone();
     body.push(bind("self", receiver, span));
     body.extend(grammar.function.body.clone().ok_or_else(|| fail("sentence requires a construction body"))?);
@@ -237,15 +390,19 @@ fn lower_sentence(owner: &ast::ClassDeclaration, grammar: &ast::SentenceDeclarat
     accepts.hook = None;
     accepts.result = ast::TypeAnnotation { kind: ast::TypeAnnotationKind::Union(vec![annotation(&format!("{registry_alias}ProofResult"), span), annotation(&format!("{registry_alias}Diagnostic"), span)]), span };
     let proof = |value: &str| name(&format!("{registry_alias}ProofResult.{value}"), span);
-    let mut predicate = vec![Statement::If {
+    let mut predicate = if owner.is_trait() { receiver_check(owner, registry_alias, span) } else { Vec::new() };
+    predicate.push(Statement::If {
         condition: call(&format!("{registry_alias}captures_ready"), vec![name("captures", span)], span), then_block: Vec::new(),
         else_block: vec![Statement::Return { value: Some(proof("Unknown")), span }], span,
-    }];
+    });
     predicate.extend(bindings);
+    if owner.is_trait() {
+        predicate.push(bind("self", typed_call(&format!("{registry_alias}context_receiver"), annotation(owner.name, span), vec![name("context", span)], span), span));
+    }
     for constraint in &grammar.function.constraints {
         let ast::GenericConstraint::Predicate(condition) = constraint else { continue; };
         let mut condition = condition.clone();
-        predicate_context(&mut condition, owner, registry_alias);
+        if !owner.is_trait() { predicate_context(&mut condition, owner, registry_alias); }
         predicate.push(Statement::If { condition, then_block: Vec::new(), else_block: vec![Statement::Return { value: Some(proof("Refuted")), span }], span });
     }
     predicate.push(Statement::Return { value: Some(proof("Proven")), span });
@@ -263,9 +420,16 @@ fn lower_sentence(owner: &ast::ClassDeclaration, grammar: &ast::SentenceDeclarat
     });
     let result = grammar.function.result.simple_name();
     let result_value = result.map(|result| name(&format!("{}{result}", if matches!(result, "bool" | "int" | "float" | "char" | "string" | "None") { "" } else { owner_alias }), span)).unwrap_or_else(|| expression(K::Literal(Literal::None), span));
+    let capture_types = grammar.function.parameters.iter().map(|parameter| {
+        let contract = &parameter.annotation;
+        let Some(value) = contract.simple_name() else {
+            return Err(Diagnostic::new("E000212", "sentence capture requires specialization before an executable adapter can be generated", Some(contract.span)));
+        };
+        Ok(name(&format!("{}{value}", if matches!(value, "bool" | "int" | "float" | "char" | "string" | "None" | "unit" | "absent") { "" } else { owner_alias }), contract.span))
+    }).collect::<Result<Vec<_>, Diagnostic>>()?;
     let descriptor = call("RegisteredGrammar", vec![label.clone(), result_value,
         expression(K::Literal(Literal::None), span), list(fields, span), name(&format!("{owner_alias}{match_name}"), span),
-        boolean(false, span), list([], span), list(repetitions, span), name(&format!("{owner_alias}{accept_name}"), span), name(&format!("{owner_alias}{construct_name}"), span)], span);
+        boolean(false, span), list(capture_types, span), list(repetitions, span), name(&format!("{owner_alias}{accept_name}"), span), name(&format!("{owner_alias}{construct_name}"), span)], span);
     Ok((vec![Item::Function(raw), Item::Function(construct), Item::Function(accepts), Item::Function(matcher)], expression(K::Tuple(vec![label, descriptor]), span)))
 }
 
@@ -290,13 +454,13 @@ pub(super) fn lower_registrations(graph: &ModuleGraph) -> Result<ModuleGraph, Di
         let mut generated = Vec::new();
         let mut first_span = None;
         for item in &module.ast.items {
-            let Item::Class(owner) = item else { continue; };
+            let Some(owner) = GrammarOwner::from_item(item) else { continue; };
             for (ordinal, grammar) in owner.sentences.iter().enumerate() {
                 let span = grammar.function.span;
                 first_span.get_or_insert(span);
                 let fail = |message: &str| Diagnostic::new("E000212", message, Some(span));
-                let contract = grammar_contract(module, owner, grammar, ordinal)?;
-                if !supports_legacy_adapter(owner, grammar) {
+                let contract = grammar_contract(module, &owner, grammar, ordinal)?;
+                if !supports_legacy_adapter(&owner, grammar) {
                     let label = call("SyntaxDeclaration", vec![text(&module.path.to_string_lossy(), span), text(&format!("{}.{}", owner.name, grammar.function.name), span)], span);
                     let mut descriptor = call("RegisteredGrammar", vec![label.clone(), expression(K::Literal(Literal::None), span), expression(K::Literal(Literal::None), span)], span);
                     if let K::Call { arguments, .. } = &mut descriptor.kind {
@@ -309,7 +473,15 @@ pub(super) fn lower_registrations(graph: &ModuleGraph) -> Result<ModuleGraph, Di
                 }
                 if !grammar.lexical {
                     let suffix = format!("{:032x}_{:032x}_{ordinal}", module.id.0, super::stable_hash(&owner.name));
-                    let (functions, mut entry) = lower_sentence(owner, grammar, &suffix, &registry_alias, &owner_alias, module)?;
+                    let (functions, mut entry) = lower_sentence(&owner, grammar, &suffix, &registry_alias, &owner_alias, module)?;
+                    attach_contract(&mut entry, contract);
+                    generated.extend(functions);
+                    entries.push(entry);
+                    continue;
+                }
+                if owner.is_trait() {
+                    let suffix = format!("{:032x}_{:032x}_{ordinal}", module.id.0, super::stable_hash(owner.name));
+                    let (functions, mut entry) = lower_trait_lexical(&owner, grammar, &suffix, &registry_alias, &owner_alias, module)?;
                     attach_contract(&mut entry, contract);
                     generated.extend(functions);
                     entries.push(entry);
@@ -452,6 +624,90 @@ mod tests {
         ] }
     }
 
+    fn descriptors(graph: &ModuleGraph) -> Vec<&[ast::CallArgument]> {
+        let table = graph.modules[0].ast.items.iter().find_map(|item| match item {
+            Item::Binding(binding) if binding.name == "registered_grammars" => Some(&binding.value), _ => None,
+        }).unwrap();
+        let K::List(entries) = &table.kind else { panic!("registry") };
+        entries.iter().map(|entry| {
+            let K::Tuple(pair) = &entry.kind else { panic!("entry") };
+            let K::Call { arguments, .. } = &pair[1].kind else { panic!("descriptor") };
+            arguments.as_slice()
+        }).collect()
+    }
+
+    #[test]
+    fn trait_grammar_keeps_identity_and_defers_receiver_dependent_recognition() {
+        let original = graph("trait B:\n    indentation_unit: string = \"    \"\n    grammar indentation[spelling: Lexeme]() -> string with spelling.text == self.indentation_unit:\n        return construction_must_not_run(spelling.text)\ntrait Derived: B\nclass Block: Derived\n    indentation_unit: string = \"\\t\"\n");
+        let lowered = lower_registrations(&original).unwrap();
+        let descriptors = descriptors(&lowered);
+        // Inheriting a grammar doesn't duplicate its declaration.
+        assert_eq!(descriptors.len(), 1);
+        let descriptor = descriptors[0];
+        assert!(matches!(descriptor[2].value.kind, K::Literal(Literal::None)), "an unbounded capture cannot become a greedy lexer recognizer");
+        assert!(descriptor.iter().any(|argument| argument.name.as_deref() == Some("match_context")));
+        let contract = &descriptor.iter().find(|argument| argument.name.as_deref() == Some("declaration")).unwrap().value;
+        let K::Call { arguments, .. } = &contract.kind else { panic!("contract") };
+        let K::Call { arguments: callable, .. } = &arguments[0].value.kind else { panic!("callable") };
+        let K::Call { arguments: owner, .. } = &callable[1].value.kind else { panic!("owner") };
+        let K::Call { arguments: identity, .. } = &owner[2].value.kind else { panic!("identity") };
+        assert!(matches!(&identity[0].value.kind, K::Literal(Literal::Integer(value)) if value == &super::super::stable_hash("trait:B").to_string()));
+        let functions: Vec<_> = lowered.modules[1].ast.items.iter().filter_map(|item| match item { Item::Function(f) => Some(f), _ => None }).collect();
+        let accept = functions.iter().find(|function| function.name.starts_with("_grammar_accept_")).unwrap();
+        let body = accept.body.as_ref().unwrap();
+        assert!(matches!(&body[0], Statement::Binding(binding) if binding.name == "_receiver_proof"));
+        assert!(matches!(&body[1], Statement::If { then_block, .. } if matches!(&then_block[0], Statement::Return { value: Some(Ex { kind: K::Name(value), .. }), .. } if value == "_receiver_proof")));
+        assert!(matches!(&body[2], Statement::Binding(binding) if binding.name == "self"));
+        assert!(functions.iter().filter(|function| !function.name.starts_with("_grammar_body_")).all(|function| !format!("{:?}", function.body).contains("construction_must_not_run")));
+        let indexed = super::super::collect_declarations(&original).unwrap();
+        assert!(matches!(&indexed.grammars[0].owner_declaration, super::super::GrammarOwnerDeclaration::Trait(owner) if owner.name == "B"));
+    }
+
+    #[test]
+    fn trait_grammar_fixed_spelling_has_a_pure_recognizer_and_contextual_matcher() {
+        let original = graph("trait Mark:\n    enabled: bool\n    grammar marker[\"@@\"]() -> int with self.enabled:\n        return construct_marker()\n");
+        let lowered = lower_registrations(&original).unwrap();
+        let descriptor = descriptors(&lowered)[0];
+        assert!(matches!(descriptor[2].value.kind, K::Name(_)));
+        assert!(descriptor.iter().any(|argument| argument.name.as_deref() == Some("match_context")));
+        let functions: Vec<_> = lowered.modules[1].ast.items.iter().filter_map(|item| match item { Item::Function(f) => Some(f), _ => None }).collect();
+        let spelling = functions.iter().find(|function| function.name.starts_with("_grammar_spelling_")).unwrap();
+        assert!(matches!(spelling.body.as_deref().unwrap(), [Statement::Return { value: Some(Ex { kind: K::Literal(Literal::Boolean(true)), .. }), .. }]));
+        let accept = functions.iter().find(|function| function.name.starts_with("_grammar_accept_")).unwrap();
+        assert!(format!("{:?}", accept.body).contains("enabled"));
+        assert!(!format!("{:?}", accept.body).contains("construct_marker"));
+    }
+
+    #[test]
+    fn trait_sentence_uses_context_receiver_instead_of_constructing_the_trait() {
+        let original = graph("trait Branch:\n    enabled: bool\n    sentence branch[\"branch\", value: int]() -> Branch with self.enabled:\n        return self\n");
+        let lowered = lower_registrations(&original).unwrap();
+        let raw = lowered.modules[1].ast.items.iter().find_map(|item| match item {
+            Item::Function(f) if f.name.starts_with("_grammar_body_") => Some(f), _ => None,
+        }).unwrap();
+        let receiver = raw.body.as_ref().unwrap().iter().find_map(|statement| match statement {
+            Statement::Binding(binding) if binding.name == "self" => Some(&binding.value), _ => None,
+        }).unwrap();
+        let K::Call { callee, .. } = &receiver.kind else { panic!("receiver access") };
+        let K::TypeApplication { callee, arguments } = &callee.kind else { panic!("typed receiver") };
+        assert!(matches!(&callee.kind, K::Name(value) if value.ends_with("context_receiver")));
+        assert_eq!(arguments[0].simple_name(), Some("Branch"));
+    }
+
+    #[test]
+    fn generic_trait_grammar_remains_discoverable_without_an_unsafe_adapter() {
+        let original = graph("trait Provider[T = int]:\n    grammar value[spelling: Lexeme]() -> T:\n        return self.convert(spelling)\n");
+        let lowered = lower_registrations(&original).unwrap();
+        let descriptor = descriptors(&lowered)[0];
+        assert!(matches!(descriptor[2].value.kind, K::Literal(Literal::None)));
+        let contract = descriptor.iter().find(|argument| argument.name.as_deref() == Some("declaration")).unwrap();
+        let K::Call { arguments, .. } = &contract.value.kind else { panic!("contract") };
+        let K::List(defaults) = &arguments[8].value.kind else { panic!("owner defaults") };
+        assert_eq!(defaults.len(), 1);
+        assert!(!matches!(defaults[0].kind, K::Literal(Literal::None)));
+        assert!(lowered.modules[1].ast.items.iter().all(|item| !matches!(item, Item::Function(_))));
+    }
+
     #[test]
     fn compilation_populates_registry_and_generates_recognition_without_construction() {
         let original = graph("class Example:\n    grammar fixed[\"example\"]() -> bool:\n        return construction_must_not_run()\n    grammar captured[value: Lexeme]() -> int with valid(value.text):\n        return construction_must_not_run(value)\n    sentence semantic[\"later\"]() -> B:\n        return self\n");
@@ -465,13 +721,13 @@ mod tests {
         let functions: Vec<_> = lowered.modules[1].ast.items.iter().filter_map(|item| match item {
             Item::Function(function) => Some(function), _ => None,
         }).collect();
-        assert_eq!(functions.len(), 11);
-        assert!(functions.iter().filter(|function| !function.name.starts_with("_grammar_construct_")).all(|function| !format!("{:?}", function.body).contains("construction_must_not_run")));
+        assert!(functions.iter().filter(|function| !function.name.starts_with("_grammar_body_")).all(|function| !format!("{:?}", function.body).contains("construction_must_not_run")));
         let predicate = functions.iter().find(|function| function.name.starts_with("_grammar_accept_") && function.parameters[0].name == "value").unwrap();
         assert!(matches!(predicate.body.as_ref().unwrap()[0], Statement::If { .. }));
         let constructors: Vec<_> = functions.iter().filter(|function| function.name.starts_with("_grammar_construct_")).collect();
         assert_eq!(constructors.len(), 3);
-        assert_eq!(constructors.iter().filter(|function| format!("{:?}", function.body).contains("construction_must_not_run")).count(), 2);
+        assert_eq!(functions.iter().filter(|function| format!("{:?}", function.body).contains("construction_must_not_run")).count(), 2);
+        assert!(constructors.iter().all(|function| format!("{:?}", function.body).contains("_grammar_body_")));
         assert_eq!(lowered.modules[0].imports.len(), 1);
         assert_eq!(lowered.modules[1].imports.len(), 1);
         for entry in entries {
@@ -505,7 +761,7 @@ mod tests {
         let functions: Vec<_> = lowered.modules[1].ast.items.iter().filter_map(|item| match item { Item::Function(function) => Some(function), _ => None }).collect();
         let accept = functions.iter().find(|function| function.name.starts_with("_grammar_accept_")).unwrap();
         assert!(accept.body.as_ref().unwrap().iter().any(|statement| matches!(statement, Statement::If { .. })));
-        let construct = functions.iter().find(|function| function.name.starts_with("_grammar_construct_")).unwrap();
+        let construct = functions.iter().find(|function| function.name.starts_with("_grammar_body_")).unwrap();
         assert_eq!(construct.result.simple_name(), Some("B"));
         assert!(format!("{:?}", construct.body).contains("capture_many"));
     }
@@ -520,10 +776,13 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_capture_is_diagnosed_instead_of_registered_without_its_contract() {
+    fn capture_without_legacy_adapter_retains_its_declaration_contract() {
         let source = graph("class Example:\n    grammar typed[value: int]() -> int:\n        return value\n");
-        let error = lower_registrations(&source).unwrap_err();
-        assert!(error.message.contains("Lexeme capture"));
-        assert!(error.span.is_some());
+        let lowered = lower_registrations(&source).unwrap();
+        let descriptors = descriptors(&lowered);
+        assert_eq!(descriptors.len(), 1);
+        assert!(matches!(descriptors[0][2].value.kind, K::Literal(Literal::None)));
+        assert!(descriptors[0].iter().any(|argument| argument.name.as_deref() == Some("declaration")));
+        assert!(lowered.modules[1].ast.items.iter().all(|item| !matches!(item, Item::Function(_))));
     }
 }

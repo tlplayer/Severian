@@ -5,7 +5,8 @@ import TokenTerm from "../../syntax/generic/token.sev"
 import Lexeme from "../../syntax/generic/lexeme.sev"
 import B from "../../syntax/generic/block.sev"
 import GrammarMatch from "contract.sev"
-import GrammarContext, match_contract from "sequence.sev"
+import GrammarContext, match_contract, select_grammar from "sequence.sev"
+import ProofResult from "../../syntax/constraint/model.sev"
 import ResolvedGrammarNode from "../../syntax/grammar/resolution.sev"
 import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import ParserDiagnostic from "diagnostic.sev"
@@ -61,7 +62,10 @@ def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
     root_context = GrammarContext(body=root)
     for label, grammar in syntax.registry(B):
         if len(grammar.sequence) == 0 and grammar.construct != None:
-            if grammar.accepts == None or grammar.accepts([], root_context):
+            proof = ProofResult.Proven if grammar.accepts == None else grammar.accepts([], root_context)
+            if proof is Diagnostic:
+                return [proof]
+            if proof == ProofResult.Proven:
                 root_providers.append(grammar)
     if len(root_providers) > 1:
         return [ParserDiagnostic("multiple grammars provide the global block", root.span, "parser.block")]
@@ -70,9 +74,10 @@ def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
         constructed = root_providers[0].construct([], root_context)
         if constructed is Diagnostic:
             return [constructed]
-        if not (constructed is B):
+        block = constructed.block()
+        if block == None:
             return [ParserDiagnostic("global grammar did not construct a block", root.span, "parser.block")]
-        provider = constructed
+        provider = block
         provider.context = root.context
         provider.span = root.span
         provider.subblocks = root.subblocks
@@ -117,14 +122,15 @@ def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
                 complete.append(candidate)
         if len(complete) == 0:
             return [ParserDiagnostic("no registered grammar resolves this token sequence", line.tokens[0].span, "parser.grammar")]
-        if len(complete) != 1:
-            return [ParserDiagnostic("multiple grammar implementations accept this token sequence", line.tokens[0].span, "parser.grammar")]
-        resolved = complete[0].resolve()
+        selected = select_grammar(complete, line.tokens[0].span)
+        if selected is Diagnostic:
+            return [selected]
+        resolved = selected.resolve()
         if resolved is Diagnostic:
             return [resolved]
         for node in resolved.nodes:
-            value = node.value
-            if value is B:
+            value = node.value.block()
+            if value != None:
                 body.id = SourceBlockId(u32(len(file.blocks)))
                 body.parent = file.blocks[parent_index].id
                 body.context = value.context
@@ -181,9 +187,9 @@ test "declared nested if blocks preserve concrete conditions and ownership":
     assert(blocks[2].parent == blocks[1].id)
     assert(blocks[0].subblocks == [blocks[1].id])
     assert(blocks[1].subblocks == [blocks[2].id])
-    assert(graph.nodes[0].children[0].value == true)
-    assert(graph.nodes[1].children[0].value == false)
-    assert(graph.nodes[2].value == true)
+    assert(graph.nodes[0].children[0].value.read[bool](graph.nodes[0].children[0].span) == true)
+    assert(graph.nodes[1].children[0].value.read[bool](graph.nodes[1].children[0].span) == false)
+    assert(graph.nodes[2].value.read[bool](graph.nodes[2].span) == true)
     assert(graph.nodes[2].owner == blocks[2].id)
     assert(graph.nodes[2].span.start == 31)
 

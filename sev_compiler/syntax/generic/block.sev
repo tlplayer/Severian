@@ -120,17 +120,16 @@ trait B:
 trait ExecutableBlock: B
     def lower(cfg: BlockLowering)
 
-
-test "blocks own four space indentation and relative body depth":
-    class IndentedBlock: B
-        context: BlockContext = BlockContext()
-        span: source.Span | None = None
-        sentences: list[BlockSentence] = []
-        subblocks: list[SourceBlockId] = []
+class IndentedBlock: B
+    context: BlockContext = BlockContext()
+    span: source.Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
 
     def prefix(text: string) -> Lexeme:
         return Lexeme(text, source.Span(0, 0, u32(len(text))))
 
+test "blocks own four space indentation and relative body depth":
     block = IndentedBlock()
     assert(block.indentation_level(prefix("")) == 0)
     assert(block.indentation_level(prefix("    ")) == 1)

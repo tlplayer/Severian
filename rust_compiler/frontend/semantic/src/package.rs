@@ -107,10 +107,12 @@ pub(crate) fn generic_parameters(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraitDecl {
     pub type_parameters: Vec<String>,
+    pub type_parameter_defaults: Vec<Option<TypeAnnotation>>,
     pub constraints: Vec<GenericConstraint>,
     pub bases: Vec<TypeAnnotation>,
     pub properties: Vec<severian_ast::PropertyDeclaration>,
     pub methods: Vec<severian_ast::FunctionDeclaration>,
+    pub sentences: Vec<severian_ast::SentenceDeclaration>,
     pub operators: Vec<severian_ast::OperatorDeclaration>,
 }
 
@@ -132,7 +134,13 @@ pub struct GrammarRegistration {
     pub declaration: severian_ast::SentenceDeclaration,
     /// Complete lexical owner contract, including generic defaults, receiver
     /// fields, inherited contracts, and owner constraints.
-    pub owner_declaration: severian_ast::ClassDeclaration,
+    pub owner_declaration: GrammarOwnerDeclaration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GrammarOwnerDeclaration {
+    Class(severian_ast::ClassDeclaration),
+    Trait(severian_ast::TraitDeclaration),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2092,10 +2100,12 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                     &declaration.name,
                     DefKind::Trait(TraitDecl {
                         type_parameters: declaration.type_parameters.clone(),
+                        type_parameter_defaults: declaration.type_parameter_defaults.clone(),
                         constraints: declaration.constraints.clone(),
                         bases: declaration.bases.clone(),
                         properties: declaration.properties.clone(),
                         methods: declaration.methods.clone(),
+                        sentences: declaration.sentences.clone(),
                         operators: declaration.operators.clone(),
                     }),
                 ),
@@ -2160,20 +2170,25 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                 visibility,
                 kind,
             };
-            if let Item::Class(class) = item {
-                for (ordinal, declaration) in class.sentences.iter().enumerate() {
+            let grammar_owner = match item {
+                Item::Class(class) => Some((&class.sentences, GrammarOwnerDeclaration::Class(class.clone()))),
+                Item::Trait(trait_) => Some((&trait_.sentences, GrammarOwnerDeclaration::Trait(trait_.clone()))),
+                _ => None,
+            };
+            if let Some((sentences, owner_declaration)) = grammar_owner {
+                for (ordinal, declaration) in sentences.iter().enumerate() {
                     let label = DefId {
                         package: id.package,
                         module: id.module,
                         declaration: DeclarationId(stable_hash(&format!(
-                            "grammar:{}:{}:{ordinal}", class.name, declaration.function.name,
+                            "grammar:{}:{}:{ordinal}", name, declaration.function.name,
                         ))),
                     };
                     index.grammars.push(GrammarRegistration {
                         label,
                         owner: id,
                         declaration: declaration.clone(),
-                        owner_declaration: class.clone(),
+                        owner_declaration: owner_declaration.clone(),
                     });
                 }
             }
@@ -2264,6 +2279,8 @@ mod grammar_registration_tests {
 
 fn compatible_trait_redeclaration(left: &TraitDecl, right: &TraitDecl) -> bool {
     left.type_parameters == right.type_parameters
+        && left.type_parameter_defaults == right.type_parameter_defaults
+        && left.sentences == right.sentences
         && left.constraints.len() == right.constraints.len()
         && annotations_match(&left.bases, &right.bases)
         && left.properties.len() == right.properties.len()

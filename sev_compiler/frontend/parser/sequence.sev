@@ -16,6 +16,9 @@ class GrammarContext:
     previous: B | None = None
     fields: dict[string, GrammarValue] = {}
     span: Span | None = None
+    # Explicit receivers allow grammars owned by traits other than B. Block
+    # grammars may use the enclosing block when no explicit receiver is set.
+    receiver: GrammarValue | None = None
 
 
 class CapturedGrammar:
@@ -138,7 +141,13 @@ import ResolvedGrammarNode from "../../syntax/grammar/resolution.sev"
 def match_contract(input: list[TokenTerm], required: T | None, context: GrammarContext, active: list[string] = []) -> list[GrammarMatch] | Diagnostic:
     matches: list[GrammarMatch] = []
     for label, grammar in syntax.registry(required):
-        if grammar.construct != None:
+        if grammar.match_context != None:
+            selected = grammar.match_context(input, context)
+            if selected is Diagnostic:
+                return selected
+            if selected != None:
+                matches.append(selected)
+        elif grammar.construct != None:
             candidates = match_sequence(input, grammar, context, active)
             if candidates is Diagnostic:
                 return candidates
@@ -168,6 +177,41 @@ def context_value[T](value: B | None) -> T:
     if value is T:
         return value
     throw Error("grammar context does not implement the receiver field contract")
+
+
+def context_receiver_state[T](context: GrammarContext) -> ProofResult:
+    if context.receiver != None:
+        location = context.span if context.span != None else Span(0, 0, 0)
+        value = context.receiver.read[T](location)
+        return ProofResult.Refuted if value is Diagnostic else ProofResult.Proven
+    if context.parent == None:
+        return ProofResult.Unknown
+    return ProofResult.Proven if context.parent is T else ProofResult.Refuted
+
+
+def context_receiver[T](context: GrammarContext) -> T:
+    if context.receiver != None:
+        location = context.span if context.span != None else Span(0, 0, 0)
+        value = context.receiver.read[T](location)
+        if value is Diagnostic:
+            throw value
+        return value
+    return context_value[T](context.parent)
+
+
+import GrammarValueOf from "../../syntax/grammar/resolution.sev"
+
+
+test "grammar receiver checks retain missing and incompatible context":
+    assert(context_receiver_state[B](GrammarContext()) == ProofResult.Unknown)
+    block = Block()
+    context = GrammarContext(parent=block)
+    assert(context_receiver_state[B](context) == ProofResult.Proven)
+    assert(context_receiver[B](context).indentation_unit == "    ")
+    context.receiver = GrammarValueOf[string]("explicit")
+    assert(context_receiver_state[B](context) == ProofResult.Refuted)
+    assert(context_receiver_state[string](context) == ProofResult.Proven)
+    assert(context_receiver[string](context) == "explicit")
 
 
 def captures_ready(captures: list[CapturedGrammar]) -> bool:

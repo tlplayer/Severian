@@ -430,10 +430,12 @@ pub struct TraitDeclaration {
     pub namespaces: Vec<Decorator>,
     pub name: String,
     pub type_parameters: Vec<String>,
+    pub type_parameter_defaults: Vec<Option<TypeAnnotation>>,
     pub constraints: Vec<GenericConstraint>,
     pub bases: Vec<TypeAnnotation>,
     pub properties: Vec<PropertyDeclaration>,
     pub methods: Vec<FunctionDeclaration>,
+    pub sentences: Vec<SentenceDeclaration>,
     pub operators: Vec<OperatorDeclaration>,
     pub span: Span,
 }

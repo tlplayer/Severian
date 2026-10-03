@@ -1969,7 +1969,7 @@ impl Parser<'_> {
     ) -> Result<TraitDeclaration, Diagnostic> {
         let start = self.next().span;
         let (name, _) = self.identifier("expected a trait name")?;
-        let (type_parameters, mut constraints, _) = self.type_parameters()?;
+        let (type_parameters, mut constraints, type_parameter_defaults) = self.type_parameters()?;
         constraints.extend(self.declaration_constraints()?);
         self.expect(&TokenKind::Colon, "expected `:` after trait name")?;
         let mut bases = Vec::new();
@@ -1992,10 +1992,12 @@ impl Parser<'_> {
                 namespaces: Vec::new(),
                 name,
                 type_parameters,
+                type_parameter_defaults,
                 constraints,
                 bases,
                 properties: Vec::new(),
                 methods: Vec::new(),
+                sentences: Vec::new(),
                 operators: Vec::new(),
                 span: Span::new(start.source, start.start, self.peek().span.start),
             });
@@ -2003,6 +2005,7 @@ impl Parser<'_> {
         self.expect(&TokenKind::Indent, "expected an indented trait body")?;
         let mut properties = Vec::new();
         let mut methods = Vec::new();
+        let mut sentences = Vec::new();
         let mut operators = Vec::new();
         let mut namespaces = Vec::new();
         self.separators();
@@ -2017,6 +2020,11 @@ impl Parser<'_> {
                 let method = self.function_declaration(member_decorators)?;
                 member_has_body = method.body.is_some();
                 methods.push(method);
+            } else if self.at_identifier("sentence") || self.at_identifier("grammar") {
+                let mut declaration = self.sentence_declaration()?;
+                declaration.function.decorators = member_decorators;
+                sentences.push(declaration);
+                member_has_body = true;
             } else if self.at_identifier("operator") {
                 operators.push(self.operator_declaration(member_decorators)?);
             } else if !member_decorators.is_empty() {
@@ -2029,7 +2037,7 @@ impl Parser<'_> {
                 bases.push(self.type_annotation()?);
             } else {
                 return Err(self.error(
-                    "expected a property, `def`, `operator`, or composed trait in trait body",
+                    "expected a property, `def`, `grammar`, `sentence`, `operator`, or composed trait in trait body",
                 ));
             }
             if !member_has_body && !self.at(&TokenKind::Newline) && !self.at(&TokenKind::Dedent) {
@@ -2045,10 +2053,12 @@ impl Parser<'_> {
             namespaces,
             name,
             type_parameters,
+            type_parameter_defaults,
             constraints,
             bases,
             properties,
             methods,
+            sentences,
             operators,
             span: Span::new(start.source, start.start, end.end),
         })
@@ -5305,6 +5315,40 @@ mod named_operator_tests {
 #[cfg(test)]
 mod block_sentence_tests {
     use super::*;
+
+    #[test]
+    fn trait_grammar_and_sentence_preserve_receiver_constraints_and_following_members() {
+        let source = SourceFile::virtual_source("trait-grammar.sev",
+            "trait B:\n    indentation_unit: string = \"    \"\n    grammar indentation[spelling: Lexeme]() -> string with spelling.text == self.indentation_unit:\n        return spelling.text\n    sentence block[\"block\", value: int]() -> B:\n        return self\n    def next() -> int:\n        return 1\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let Item::Trait(owner) = &module.items[0] else { panic!("expected trait") };
+        assert_eq!(owner.sentences.len(), 2);
+        let grammar = &owner.sentences[0];
+        assert!(grammar.lexical);
+        assert!(!owner.sentences[1].lexical);
+        assert_eq!(grammar.fields, vec![severian_ast::SentenceElement::Capture(0)]);
+        assert_eq!(grammar.function.parameters[0].annotation.simple_name(), Some("Lexeme"));
+        assert_eq!(grammar.function.result.simple_name(), Some("string"));
+        let GenericConstraint::Predicate(condition) = &grammar.function.constraints[0] else { panic!("predicate") };
+        let ExpressionKind::Binary { right, .. } = &condition.kind else { panic!("comparison") };
+        assert!(matches!(&right.kind, ExpressionKind::Member { object, name }
+            if name == "indentation_unit" && matches!(&object.kind, ExpressionKind::Name(value) if value == "self")));
+        assert_eq!(owner.methods[0].name, "next");
+        assert_eq!(owner.properties[0].name, "indentation_unit");
+    }
+
+    #[test]
+    fn trait_grammar_keeps_generic_defaults_and_rejects_duplicate_captures() {
+        let source = SourceFile::virtual_source("generic-trait.sev",
+            "trait Provider[T = int]:\n    grammar value[spelling: Lexeme]() -> T:\n        return convert(spelling)\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let Item::Trait(owner) = &module.items[0] else { panic!("trait") };
+        assert_eq!(owner.type_parameter_defaults[0].as_ref().unwrap().simple_name(), Some("int"));
+        assert_eq!(owner.sentences[0].function.result.simple_name(), Some("T"));
+        let invalid = SourceFile::virtual_source("duplicate.sev",
+            "trait Provider:\n    grammar value[x: Lexeme, x: Lexeme]() -> int:\n        return 0\n");
+        assert!(parse(&scan(&invalid).unwrap()).unwrap_err().message.contains("duplicate sentence capture"));
+    }
 
     #[test]
     fn class_grammar_preserves_literal_and_constrained_capture() {
