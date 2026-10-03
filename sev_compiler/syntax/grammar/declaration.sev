@@ -1,4 +1,4 @@
-import DefId, Span from "../source.sev"
+import DefinitionID, Span from "../source.sev"
 import TypeAnnotation from "../type/annotation.sev"
 
 
@@ -10,8 +10,8 @@ class DeclarationSource:
 
 
 class GrammarCallable:
-    definition: DefId
-    owner: DefId
+    definition: DefinitionID
+    owner: DefinitionID
     source: DeclarationSource
 
 

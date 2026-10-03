@@ -1,4 +1,4 @@
-import B, Block, BlockKind, OperatorSyntax, Y, load, span from "../block/block.sev"
+import B, Block, OperatorSyntax, Y, load, span from "../block/block.sev"
 import "../source.sev" as _dependency_source
 import source
 import AttrValue, BindingId, Symbol, TypeId from "../symbol/symbol.sev"

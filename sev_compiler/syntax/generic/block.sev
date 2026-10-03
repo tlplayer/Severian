@@ -1,5 +1,5 @@
 import source
-import DefId, ScopeId, ValueId from "../symbol/symbol.sev"
+import DefinitionID, ScopeId, ValueId from "../symbol/symbol.sev"
 import Capture from "../sentence/sentence.sev"
 import Expression, FunctionParameter, FunctionDeclaration, RecordDeclaration from "../function/function.sev"
 import TypeAnnotation from "../type/annotation.sev"
@@ -34,8 +34,8 @@ class BlockSentence:
 # Populated by resolution, not guessed from a block's spelling or CFG index.
 class BlockContext:
     identity: SourceBlockId | None = None
-    provider: DefId | None = None
-    constructor: DefId | None = None
+    provider: DefinitionID | None = None
+    constructor: DefinitionID | None = None
     scope: ScopeId | None = None
     parent: SourceBlockId | None = None
     captures: list[Capture] = []

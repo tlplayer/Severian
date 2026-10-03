@@ -11,14 +11,14 @@ import source
 import "../../../hir/modules/graph/verify.sev" as graph_verify
 
 
-def callable_definition(module: model_hir_module_module.Module, function: model_syntax_symbol_symbol.FunctionId) -> model_syntax_symbol_symbol.DefId | Error:
+def callable_definition(module: model_hir_module_module.Module, function: model_syntax_symbol_symbol.FunctionId) -> model_syntax_symbol_symbol.DefinitionID | Error:
     for declaration in borrow module.functions:
         if declaration.id.value == function.value:
             return declaration.definition
     throw Error("call graph refers to an unknown function: " + string(function.value))
 
 
-def grammar_parent(module: model_hir_module_module.Module, declaration: model_syntax_function_syntax.TraitDeclaration, name: string) -> model_syntax_symbol_symbol.DefId | Error:
+def grammar_parent(module: model_hir_module_module.Module, declaration: model_syntax_function_syntax.TraitDeclaration, name: string) -> model_syntax_symbol_symbol.DefinitionID | Error:
     for parent in borrow module.traits:
         if parent.name == declaration.lookup + name:
             return parent.definition
@@ -28,7 +28,7 @@ def grammar_parent(module: model_hir_module_module.Module, declaration: model_sy
     throw Error("semantic graph refers to an unknown base: " + name)
 
 
-def body_dependencies(graph: model_frontend_modules_graph_model.DefinitionGraph, module: model_hir_module_module.Module, definition: model_syntax_symbol_symbol.DefId, body: model_mir_cfg_cfg.CfgBody) -> unit | Error:
+def body_dependencies(graph: model_frontend_modules_graph_model.DefinitionGraph, module: model_hir_module_module.Module, definition: model_syntax_symbol_symbol.DefinitionID, body: model_mir_cfg_cfg.CfgBody) -> unit | Error:
     owner = model_frontend_modules_graph_model.definition_index(graph, definition)
     for block in body.blocks:
         position := 0
@@ -89,7 +89,7 @@ def build(module: model_hir_module_module.Module, owners: list[model_frontend_mo
             region = model_syntax_symbol_symbol.RegionId(layout.id.index)
             for attachment in declaration.attachments:
                 module.obligations.append(model_syntax_constraint_model.ConstraintObligation(declaration.definition, attachment.role, attachment.condition, region=region))
-    initializer = model_syntax_symbol_symbol.DefId(0, 0, model_syntax_symbol_symbol.DeclarationId(0))
+    initializer = model_syntax_symbol_symbol.DefinitionID(0, 0, model_syntax_symbol_symbol.DeclarationId(0))
     if len(module.cfg_bodies) > 0:
         model_frontend_modules_graph_model.add_definition(graph, initializer, model_frontend_modules_graph_model.DefinitionKind.Callable, "$initializer", None, submodule=root)
     for declaration in module.traits:

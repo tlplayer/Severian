@@ -1,4 +1,4 @@
-import B, Block, BlockKind, OperationOrigin, SourceBlockId from "../../syntax/block/block.sev"
+import B, Block, OperationOrigin, SourceBlockId from "../../syntax/block/block.sev"
 import "block.sev" as cfg_blocks
 import "branch.sev" as _dependency_branch
 import Constant, Constructor, Conversion, ConversionKind, LazyOperand, Lexeme, LexemeTerm, Size, SourceFile, SourceMap, Span, TokenTerm, TypeRef, array_mlir, byte_view_mlir, index_mlir, load, memref_mlir, ranked_memref_storage, scalar_mlir, span, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source from "lazy.sev"
@@ -6,7 +6,7 @@ import Conversions, Effects, Evaluation from "effects.sev"
 import "control_flow.sev" as control_flow
 import source
 import hashing from "../../syntax/function/lowering.sev"
-import AttrValue, AttributeId, DefId, LocalId, OpId, Substitution, SymbolKind, TypeId, VariantId from "../../syntax/symbol/symbol.sev"
+import AttrValue, AttributeId, DefinitionID, LocalId, OpId, Substitution, SymbolKind, TypeId, VariantId from "../../syntax/symbol/symbol.sev"
 import LiteralValue from "../../syntax/literal/value.sev"
 import Associativity, BinaryOperator, DecoratorValue, Move, UnaryOperator from "../../syntax/function/syntax.sev"
 import ExpressionConversion, ExpressionKind, Operation, ResolvedCallee from "../../syntax/function/function.sev"
@@ -40,14 +40,14 @@ enum Operand:
     Copy(place: Place)
     Move(place: Place)
     Constant(value: LiteralValue, type_id: TypeId)
-    Function(definition: DefId)
+    Function(definition: DefinitionID)
 
 
 enum Callee:
-    Direct(function: DefId, substitution: Substitution)
+    Direct(function: DefinitionID, substitution: Substitution)
     FunctionValue(operand: Operand)
-    Method(implementation: DefId, receiver: Operand, substitution: Substitution)
-    Constructor(type_definition: DefId, variant: VariantId | None)
+    Method(implementation: DefinitionID, receiver: Operand, substitution: Substitution)
+    Constructor(type_definition: DefinitionID, variant: VariantId | None)
     Intrinsic(operation: OpId)
 
 
@@ -90,11 +90,11 @@ def empty_cfg(return_type: TypeId, source_block: Block | None = None) -> CfgBody
 
 
 test "CFG entry uses the shared block defaults":
-    body = empty_cfg(TypeId(2), Block(id=SourceBlockId(12), kind=BlockKind.Callable))
+    body = empty_cfg(TypeId(2), Block(id=SourceBlockId(12), syntax_name="custom.scope"))
     assert(body.entry == 0)
     assert(len(body.blocks) == 1)
     assert(body.blocks[0].cfg_index == 0)
     assert(body.blocks[0].id.index == 12)
-    assert(body.blocks[0].kind == BlockKind.Callable)
+    assert(body.blocks[0].syntax_name == "custom.scope")
     assert(len(body.blocks[0].operations) == 0)
     assert(body.blocks[0].terminator == None)

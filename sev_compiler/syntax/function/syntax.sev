@@ -1,6 +1,6 @@
 import Item from "../../hir/modules/module.sev"
 import source
-import AttrValue, DeclarationId, DefId, FunctionId, InterfaceId, ModuleId, Symbol, TypeId from "../symbol/symbol.sev"
+import AttrValue, DeclarationId, DefinitionID, FunctionId, InterfaceId, ModuleId, Symbol, TypeId from "../symbol/symbol.sev"
 import TypeAnnotation from "../type/annotation.sev"
 import LiteralSyntax from "../primitive/contract.sev"
 import Block from "../block/block.sev"
@@ -67,7 +67,7 @@ class PropertyDeclaration:
     annotation: TypeAnnotation
     default: Expression | None
     span: source.Span
-    definition: DefId = DefId(0, 0, DeclarationId(0))
+    definition: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
 
 
 class OperatorParameter:
@@ -86,7 +86,7 @@ class OperatorDeclaration:
     constraints: list[GenericConstraint] = []
     body: Block | None = None
     receiver: bool = true
-    definition: DefId = DefId(0, 0, DeclarationId(0))
+    definition: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
     grammar_parameter: string | absent = absent
     result_mode: string = ""
 
@@ -101,7 +101,7 @@ class TraitDeclaration:
     operators: list[OperatorDeclaration]
     span: source.Span
     methods: list[FunctionDeclaration] = []
-    definition: DefId = DefId(0, 0, DeclarationId(0))
+    definition: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
     lookup: string = ""
     compiler_descriptor: bool = false
     grammar: bool = false
@@ -243,7 +243,7 @@ class OperatorSyntax:
     precedence: u8
     associativity: Associativity
     domain: OperatorDomain = ValueOperator
-    definition: DefId = DefId(0, 0, DeclarationId(0))
+    definition: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
     grammar_name: string = ""
     grammar_form: string = ""
     scalar_operation: ScalarOperation | None = None

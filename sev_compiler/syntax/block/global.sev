@@ -1,7 +1,7 @@
 import Y from "../generic/symbol.sev"
 import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
 import source
-import DefId, DeclarationId, ScopeId, ModuleId from "../symbol/symbol.sev"
+import DefinitionID, DeclarationId, ScopeId, ModuleId from "../symbol/symbol.sev"
 import require_resolved_block from "contract.sev"
 
 # The source window itself introduces global scope; there is no global keyword.
@@ -21,8 +21,8 @@ test "global block retains resolved source and provider identity":
     unresolved ?= require_resolved_block(root)
     assert(unresolved is Error)
     root.context.identity = SourceBlockId(0)
-    root.context.provider = DefId(1, 2, DeclarationId(3))
-    root.context.constructor = DefId(1, 2, DeclarationId(4))
+    root.context.provider = DefinitionID(1, 2, DeclarationId(3))
+    root.context.constructor = DefinitionID(1, 2, DeclarationId(4))
     root.context.scope = ScopeId(ModuleId(5))
     require_resolved_block(root)
     assert(root.context.parent == None)

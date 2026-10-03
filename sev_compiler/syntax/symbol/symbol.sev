@@ -65,7 +65,7 @@ class CompilerId: StableId
     value: u128
 
 
-class DefId:
+class DefinitionId:
     package: u128
     module: u128
     declaration: DeclarationId
@@ -78,7 +78,7 @@ class TypeBinding:
 
 class TypeConstructorBinding:
     parameter: GenericParamId
-    definition: DefId
+    definition: DefinitionID
 
 
 class Substitution:
@@ -191,15 +191,15 @@ def semantic_digest(key: string) -> u128:
     return first * 2305843009213693952 + second
 
 
-def definition_from_key(key: string) -> DefId:
-    return DefId(2, semantic_digest("definition-owner-2:" + key), DeclarationId(semantic_digest(key)))
+def definition_from_key(key: string) -> DefinitionID:
+    return DefinitionID(2, semantic_digest("definition-owner-2:" + key), DeclarationId(semantic_digest(key)))
 
 
-def same_definition(left: DefId, right: DefId) -> bool:
+def same_definition(left: DefinitionID, right: DefinitionID) -> bool:
     return left.package == right.package and left.module == right.module and left.declaration.value == right.declaration.value
 
 
-def named_definition(owner: string, kind: string, name: string) -> DefId:
+def named_definition(owner: string, kind: string, name: string) -> DefinitionID:
     return definition_from_key(semantic_key([owner, kind, name]))
 
 

@@ -1,6 +1,6 @@
 import Y from "symbol.sev"
 import source
-import Block, DeclarationId, DefId, FunctionParameter, TypeAnnotation, span from "../function/function.sev"
+import Block, DeclarationId, DefinitionID, FunctionParameter, TypeAnnotation, span from "../function/function.sev"
 import ScalarOperation,Associativity, OperatorSyntax from "../function/syntax.sev"
 
 enum GrammarPrimitive:
@@ -46,7 +46,7 @@ class GrammarDeclaration:
     body: Block
     span: source.Span
     syntax: OperatorSyntax | None = None
-    definition: DefId = DefId(0, 0, DeclarationId(0))
+    definition: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
     program: list[GrammarInstruction] = []
     slots: list[GrammarSlotKind] = []
     protocols: list[string] = []

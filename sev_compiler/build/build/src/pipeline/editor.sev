@@ -34,10 +34,10 @@ def editor_definition(index: EditorIndex, id: string, name: string, kind: string
 def editor_reference(index: EditorIndex, id: string, caller: string, span: source.Span):
     index.references.append("{\"symbol\":" + package.document_quote(id) + ",\"caller\":" + package.document_quote(caller) + ",\"source\":" + agent_ir.span_json(span, index.files) + "}")
 
-def editor_symbol(definition: model_syntax_symbol_symbol.DefId) -> string:
+def editor_symbol(definition: model_syntax_symbol_symbol.DefinitionID) -> string:
     return string(definition.package) + ":" + string(definition.module) + ":" + string(definition.declaration.value)
 
-def editor_relationship(index: EditorIndex, implementation: model_syntax_symbol_symbol.DefId, contract: model_syntax_symbol_symbol.DefId):
+def editor_relationship(index: EditorIndex, implementation: model_syntax_symbol_symbol.DefinitionID, contract: model_syntax_symbol_symbol.DefinitionID):
     index.relationships.append("{\"from\":" + package.document_quote(editor_symbol(implementation)) + ",\"to\":" + package.document_quote(editor_symbol(contract)) + ",\"kind\":\"implements\"}")
 
 def editor_expression(state: EditorIndex, expression: model_syntax_function_function.Expression, caller: string):

@@ -1,5 +1,5 @@
 import ConstraintGraph, ConstraintStage, DispatchFamily, ProofResult from "model.sev"
-import DefId, constraint_schedule from "graph.sev"
+import DefinitionID, constraint_schedule from "graph.sev"
 import ConstraintId, ConstraintRequirement, DispatchCandidate from "model.sev"
 import Expression, ExpressionKind, LiteralValue from "../function/function.sev"
 import DeclarationId, Span from "../source.sev"
@@ -25,7 +25,7 @@ def admissible_dispatch_candidates(family: DispatchFamily, graph: ConstraintGrap
 
 
 # Unknown candidates remain live; they never become false because a budget ran out.
-def select_dispatch(family: DispatchFamily, graph: ConstraintGraph, evaluate: ((Expression) -> ProofResult) | None = None) -> DefId | Error:
+def select_dispatch(family: DispatchFamily, graph: ConstraintGraph, evaluate: ((Expression) -> ProofResult) | None = None) -> DefinitionID | Error:
     evaluator ?= evaluate
     if evaluator != None:
         return select_dispatch(family, evaluate_dispatch_constraints(family, graph, evaluator))
@@ -119,8 +119,8 @@ test "progressive dispatch retains unknown candidates and excludes refuted ones"
         ConstraintRequirement(ConstraintId(1), condition, result=ProofResult.Refuted),
         ConstraintRequirement(ConstraintId(2), condition, result=ProofResult.Proven),
     ])
-    first = DefId(0, 0, DeclarationId(1))
-    second = DefId(0, 0, DeclarationId(2))
+    first = DefinitionID(0, 0, DeclarationId(1))
+    second = DefinitionID(0, 0, DeclarationId(2))
     family = DispatchFamily("parse", [
         DispatchCandidate(first, [ConstraintId(0)]),
         DispatchCandidate(second, [ConstraintId(1), ConstraintId(0)]),

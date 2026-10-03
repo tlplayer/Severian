@@ -1,6 +1,6 @@
 import Lexeme, LexemeTerm from "lexeme.sev"
 import TokenForm, TokenTerm from "token.sev"
-import DefId, ScopeId, TypeId from "../symbol/symbol.sev"
+import DefinitionID, ScopeId, TypeId from "../symbol/symbol.sev"
 
 # A symbol owns the matched spelling, classified token, and semantic context.
 # Source-free declarations and symbols awaiting resolution leave those parts
@@ -9,6 +9,6 @@ trait Y:
     token_forms: list[TokenForm] = []
     lexeme: Lexeme | None = None
     token: TokenTerm | None = None
-    definition: DefId | None = None
+    definition: DefinitionID | None = None
     scope: ScopeId | None = None
     type_id: TypeId | None = None

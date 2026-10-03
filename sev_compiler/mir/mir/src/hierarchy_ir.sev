@@ -1,45 +1,10 @@
 import "../../../hir/modules/graph/model.sev" as model_frontend_modules_graph_model
 import "../../../hir/modules/module.sev" as model_hir_module_module
-import "../../../syntax/block/block.sev" as model_syntax_block_block
 import source
 
 
 def quoted(value: string) -> string:
     return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
-
-
-def block_kind(kind: model_syntax_block_block.BlockKind) -> string:
-    match kind:
-        case Global:
-            return "global"
-        case Callable:
-            return "callable"
-        case Class:
-            return "class"
-        case Trait:
-            return "trait"
-        case Test:
-            return "test"
-        case Main:
-            return "main"
-        case Lexical:
-            return "lexical"
-        case If:
-            return "if"
-        case Else:
-            return "else"
-        case Match:
-            return "match"
-        case Case:
-            return "case"
-        case Switch:
-            return "switch"
-        case For:
-            return "for"
-        case While:
-            return "while"
-        case With:
-            return "with"
 
 
 def source_location(origin: source.Span | None, files: list[source.SourceFile]) -> string:
@@ -85,7 +50,7 @@ def emit(module: model_hir_module_module.Module, graph: model_frontend_modules_g
         children: list[string] = []
         for child in block.children:
             children.append(string(child.index))
-        blocks.append("{\"id\":" + string(block.id.index) + ",\"kind\":" + quoted(block_kind(block.kind)) + ",\"definition\":" + quoted(model_frontend_modules_graph_model.definition_identity(block.owner)) + ",\"parent\":" + parent + ",\"introduced_by\":" + introduced + ",\"children\":[" + children.join(",") + "],\"source\":" + source_location(block.span, files) + "}")
+        blocks.append("{\"id\":" + string(block.id.index) + ",\"definition\":" + quoted(model_frontend_modules_graph_model.definition_identity(block.owner)) + ",\"parent\":" + parent + ",\"introduced_by\":" + introduced + ",\"children\":[" + children.join(",") + "],\"source\":" + source_location(block.span, files) + "}")
     obligations: list[string] = []
     for obligation in module.obligations:
         role := "context"

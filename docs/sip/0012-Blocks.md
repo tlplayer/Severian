@@ -1,8 +1,8 @@
-SIP-0000: Title
+SIP-0012: Blocks
 
 Status: Draft | Accepted | Implementing | Implemented | Rejected | Superseded
 Type: Language | Compiler | Runtime | Tooling | Package | Interop | Process
-Authors:
+Authors: Timothy Player
 Created: YYYY-MM-DD
 Target:
 Supersedes:

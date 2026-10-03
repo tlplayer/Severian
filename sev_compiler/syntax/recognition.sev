@@ -2,7 +2,7 @@ import ForKeyword from "block/for.sev"
 import ThrowKeyword from "keywords/throw.sev"
 import CaptureContract, DeclarationSource, DeclaredConstraint, DeclaredGrammarField, GrammarCallable, GrammarDeclarationContract from "grammar/declaration.sev"
 import TypeAnnotation, TypeAnnotationKind from "type/annotation.sev"
-import DefId, DeclarationId from "source.sev"
+import DefinitionID, DeclarationId from "source.sev"
 import CapturedGrammar, GrammarContext, capture_one, capture_many, captures_ready, context_field, context_value, match_declared_sentence from "../frontend/parser/sequence.sev"
 import GrammarValue, grammar_value from "grammar/resolution.sev"
 import ProofResult from "constraint/model.sev"
@@ -191,7 +191,7 @@ def registry(result: T | None = None) -> list[(Y, RegisteredGrammar)]:
     return entries
 
 
-def grammar_declaration(definition: DefId) -> GrammarDeclarationContract | None:
+def grammar_declaration(definition: DefinitionID) -> GrammarDeclarationContract | None:
     for label, grammar in registry():
         declaration = grammar.declaration
         if declaration != None and declaration.callable.definition == definition:

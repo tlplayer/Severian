@@ -1,5 +1,5 @@
 import source
-import BlockId, DefId, RegionId, ValueId from "../symbol/symbol.sev"
+import BlockId, DefinitionID, RegionId, ValueId from "../symbol/symbol.sev"
 import Expression from "../function/function.sev"
 
 
@@ -32,7 +32,7 @@ class WithAttachment:
     role: AttachmentRole
     condition: Expression
     stage: ConstraintStage = ConstraintStage.Runtime
-    interface: DefId | None = None
+    interface: DefinitionID | None = None
 
 
 class ConstraintRequirement:
@@ -51,7 +51,7 @@ class ConstraintGraph:
 
 
 class DispatchCandidate:
-    definition: DefId
+    definition: DefinitionID
     requirements: list[ConstraintId]
 
 
@@ -61,7 +61,7 @@ class DispatchFamily:
 
 
 class ConstraintObligation:
-    owner: DefId
+    owner: DefinitionID
     role: AttachmentRole
     condition: Expression
     result: ProofResult = ProofResult.Unknown

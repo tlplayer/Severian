@@ -1,4 +1,4 @@
-import DeclarationId, DefId, GenericParamId, InferVarId, PrimitiveId, RegionId, Substitution, SymbolKind, TypeId from "../symbol/symbol.sev"
+import DeclarationId, DefinitionID, GenericParamId, InferVarId, PrimitiveId, RegionId, Substitution, SymbolKind, TypeId from "../symbol/symbol.sev"
 
 
 # Structural types and inference ported from rust_compiler/universal/src/type_system.rs.
@@ -10,14 +10,14 @@ class Signature:
 
 enum TypeKind:
     Primitive(primitive: PrimitiveId)
-    Nominal(definition: DefId, substitution: Substitution)
+    Nominal(definition: DefinitionID, substitution: Substitution)
     Parameter(parameter: GenericParamId)
     Infer(variable: InferVarId)
     Function(signature: Signature)
     Tuple(elements: list[TypeId])
     Union(members: list[TypeId])
     Reference(target: TypeId, mutable: bool, lifetime: RegionId)
-    Resource(definition: DefId, substitution: Substitution)
+    Resource(definition: DefinitionID, substitution: Substitution)
 
 
 class TyInterner:
@@ -107,7 +107,7 @@ def insert_type(types: list[TypeId], type: TypeId):
 
 
 class TraitRef:
-    trait_id: DefId
+    trait_id: DefinitionID
     self_type: TypeId
     substitution: Substitution
 

@@ -16,7 +16,7 @@ def quoted(value: string) -> string:
     return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
 
 
-def identity(id: model_syntax_symbol_symbol.DefId) -> string:
+def identity(id: model_syntax_symbol_symbol.DefinitionID) -> string:
     return quoted(model_frontend_modules_graph_model.definition_identity(id))
 
 
@@ -121,7 +121,7 @@ def origin_json(origin: model_syntax_block_block.OperationOrigin, files: list[so
     return "{\"block\":" + block + ",\"source\":" + location + ",\"callable_path\":[" + frames.join(",") + "]}"
 
 
-def body_json(definition: model_syntax_symbol_symbol.DefId, body: model_mir_cfg_cfg.CfgBody, files: list[source.SourceFile], module: model_hir_module_module.Module) -> string | Error:
+def body_json(definition: model_syntax_symbol_symbol.DefinitionID, body: model_mir_cfg_cfg.CfgBody, files: list[source.SourceFile], module: model_hir_module_module.Module) -> string | Error:
     blocks: list[string] = []
     for block in body.blocks:
         operations: list[string] = []
@@ -159,7 +159,7 @@ def body_json(definition: model_syntax_symbol_symbol.DefId, body: model_mir_cfg_
             for edge in cfg.successors(terminal.exit):
                 edges.append("{\"target\":" + quoted(string(edge.target)) + ",\"arguments\":" + values_json(edge.arguments) + "}")
             terminator = "{\"kind\":" + quoted(kind) + payload + ",\"grammar\":" + identity(terminal.grammar) + ",\"source\":" + span_json(terminal.span, files) + ",\"successors\":[" + edges.join(",") + "]}"
-            blocks.append("{\"id\":" + quoted(string(block.cfg_index)) + ",\"kind\":" + quoted(hierarchy_ir.block_kind(block.kind)) + ",\"origin\":" + origin_json(block.origin, files) + ",\"parameters\":" + values_json(block.parameters) + ",\"operations\":[" + operations.join(",") + "],\"origins\":[" + origins.join(",") + "],\"terminator\":" + terminator + "}")
+            blocks.append("{\"id\":" + quoted(string(block.cfg_index)) + ",\"origin\":" + origin_json(block.origin, files) + ",\"parameters\":" + values_json(block.parameters) + ",\"operations\":[" + operations.join(",") + "],\"origins\":[" + origins.join(",") + "],\"terminator\":" + terminator + "}")
     return "{\"definition\":" + identity(definition) + ",\"entry\":" + quoted(string(body.entry)) + ",\"blocks\":[" + blocks.join(",") + "]}"
 
 
@@ -207,7 +207,7 @@ def emit(module: model_hir_module_module.Module, files: list[source.SourceFile],
         if declaration.cfg_index >= 0:
             functions.append(body_json(declaration.definition, module.cfg_bodies[declaration.cfg_index], files, module))
     if len(module.cfg_bodies) != 0:
-        definition = model_syntax_symbol_symbol.DefId(0, 0, model_syntax_symbol_symbol.DeclarationId(0))
+        definition = model_syntax_symbol_symbol.DefinitionID(0, 0, model_syntax_symbol_symbol.DeclarationId(0))
         node = graph.nodes[model_frontend_modules_graph_model.definition_index(graph, definition).index]
         definitions.append("{\"id\":" + identity(definition) + ",\"submodule\":" + string(node.submodule) + ",\"name\":\"$initializer\",\"kind\":\"function\",\"bases\":[],\"source\":null}")
         functions.append(body_json(definition, module.cfg_bodies[0], files, module))

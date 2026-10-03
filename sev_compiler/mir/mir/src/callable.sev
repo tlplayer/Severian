@@ -570,17 +570,14 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
     module.hierarchy.sentences = []
     module.hierarchy.blocks = []
     module.cfg_bodies = []
-    initializer = model_syntax_symbol_symbol.DefId(0, 0, model_syntax_symbol_symbol.DeclarationId(0))
+    initializer = model_syntax_symbol_symbol.DefinitionID(0, 0, model_syntax_symbol_symbol.DeclarationId(0))
     model_hir_module_hierarchy.hierarchy_region(module.hierarchy, initializer, module.initializer, origin=module.initializer.span)
-    module.hierarchy.blocks[0].kind = model_syntax_block_block.BlockKind.Global
     type_blocks: list[tuple[model_syntax_symbol_symbol.TypeId, model_syntax_symbol_symbol.RegionId]] = []
     for record in module.records:
         region = model_hir_module_hierarchy.hierarchy_region(module.hierarchy, record.definition, model_syntax_block_block.Block([], span=record.span), origin=record.span)
-        module.hierarchy.blocks[region.index].kind = model_syntax_block_block.BlockKind.Class
         type_blocks.append((record.type_id, region))
     for trait in module.traits:
         region = model_hir_module_hierarchy.hierarchy_region(module.hierarchy, trait.definition, model_syntax_block_block.Block([], span=trait.span), origin=trait.span)
-        module.hierarchy.blocks[region.index].kind = model_syntax_block_block.BlockKind.Trait
     scope = CallableMirScope()
     context := cfg.ExecutionContext(model_mir_cfg_cfg.empty_cfg(unit_type_id(), module.initializer), source_block=module.initializer)
     context.origin = model_syntax_block_block.OperationOrigin(module.initializer.span, model_syntax_block_block.SourceBlockId(0), initializer, [model_syntax_block_block.CallableOrigin(initializer, "$initializer", module.initializer.span)])
@@ -658,12 +655,7 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
                     module.hierarchy.sentences.append(model_hir_module_hierarchy.SemanticSentence(sentence, owner[1], function.span, int(len(module.hierarchy.blocks[owner[1].index].children))))
                     break
             region = model_hir_module_hierarchy.hierarchy_region(module.hierarchy, function.definition, source_body, parent, introduced_by, function.span)
-            module.hierarchy.blocks[region.index].kind = model_syntax_block_block.BlockKind.Callable
-            if function.name == "main":
-                module.hierarchy.blocks[region.index].kind = model_syntax_block_block.BlockKind.Main
             source_block = model_syntax_block_block.SourceBlockId(region.index)
-            if function.name.starts_with("__test_") or function.name.starts_with("$case$"):
-                module.hierarchy.blocks[region.index].kind = model_syntax_block_block.BlockKind.Test
         context = cfg.ExecutionContext(model_mir_cfg_cfg.empty_cfg(function.result_type, source_body), source_block=source_body)
         path = [model_syntax_block_block.CallableOrigin(function.definition, function.name, function.span)]
         for dependency in paths:

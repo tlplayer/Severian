@@ -1,4 +1,4 @@
-import Block, BlockKind, Constant, OperationOrigin, SourceBlockId, span from "package:syntax/block/block.sev"
+import Block, Constant, OperationOrigin, SourceBlockId, span from "package:syntax/block/block.sev"
 import TypeId, ValueId from "../../syntax/symbol/symbol.sev"
 import "../../syntax/function/lowering.sev" as _dependency_lowering
 import CfgEdge, CfgExit, CfgTerminator from "branch.sev"
@@ -7,7 +7,6 @@ import CfgEdge, CfgExit, CfgTerminator from "branch.sev"
 def inherit_source(block: Block, source_block: Block):
     block.id = source_block.id
     block.parent = source_block.parent
-    block.kind = source_block.kind
     block.span = source_block.span
     block.layout = source_block.layout
     block.sentences = source_block.sentences
@@ -22,7 +21,6 @@ def inherit_source(block: Block, source_block: Block):
     if layout != None:
         block.id = layout.id
         block.parent = layout.parent
-        block.kind = layout.kind
         block.origin.block = layout.id
 
 
@@ -39,11 +37,11 @@ def execution_block(index: int, origin: OperationOrigin = OperationOrigin(), sou
 
 
 test "execution blocks retain source identity without sharing instruction storage":
-    source_block = Block(id=SourceBlockId(42), parent=SourceBlockId(7), kind=BlockKind.If)
+    source_block = Block(id=SourceBlockId(42), parent=SourceBlockId(7), syntax_name="custom.scope")
     lowered = execution_block(3, source_block=source_block)
     assert(lowered.id.index == 42)
     assert(lowered.parent == source_block.parent)
-    assert(lowered.kind == BlockKind.If)
+    assert(lowered.syntax_name == "custom.scope")
     assert(lowered.cfg_index == 3)
     lowered.parameters.append(ValueId(9))
     assert(len(source_block.parameters) == 0)
@@ -54,7 +52,7 @@ test "execution blocks retain source identity without sharing instruction storag
 test "execution block origin is independent of its caller context":
     original_id = SourceBlockId(8)
     origin = OperationOrigin(block=original_id)
-    source_block = Block(id=SourceBlockId(12), kind=BlockKind.Case)
+    source_block = Block(id=SourceBlockId(12), syntax_name="custom.scope")
     lowered = execution_block(2, origin, source_block)
     assert(origin.block == original_id)
     assert(lowered.origin.block == source_block.id)

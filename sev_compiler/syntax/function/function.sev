@@ -1,7 +1,7 @@
 import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider from "../type/mlir.sev"
 import AssertionOrigin, CoveragePoint from "../source.sev"
 import source
-import AbiId, ArtifactId, BindingId, CompilerId, DeclarationId, DefId, FfiId, FunctionId, GenericParamId, HirId, InterfaceId, OpId, ProviderId, Substitution, SymbolId, TypeBinding, TypeId, ValueId, VariantId, semantic_key from "../symbol/symbol.sev"
+import AbiId, ArtifactId, BindingId, CompilerId, DeclarationId, DefinitionID, FfiId, FunctionId, GenericParamId, HirId, InterfaceId, OpId, ProviderId, Substitution, SymbolId, TypeBinding, TypeId, ValueId, VariantId, semantic_key from "../symbol/symbol.sev"
 import TypeAnnotation, TypeAnnotationKind, named_type, simple_type_name from "../type/annotation.sev"
 import LoweredFloatFormat, LoweredType from "../lowered.sev"
 import Associativity, BinaryOperator, Decorator, DecoratorValue, GenericConstraint, OperatorDeclaration, OperatorSyntax, TestMode, operator_syntax from "syntax.sev"
@@ -78,7 +78,7 @@ class FunctionDeclaration:
     body: Block | None = None
     span: source.Span | None = None
     id: FunctionId = FunctionId(0)
-    definition: DefId = DefId(0, 0, DeclarationId(0))
+    definition: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
     generic_parameters: list[GenericParamId] = []
     parameter_types: list[TypeId] = []
     result_type: TypeId = TypeId(0)
@@ -95,7 +95,7 @@ class FunctionDeclaration:
     operator_syntax: OperatorSyntax | None = None
     owner_type: TypeId = TypeId(0)
     extension: bool = false
-    template: DefId | None = None
+    template: DefinitionID | None = None
     type_arguments: list[TypeBinding] = []
     pack_specialization: bool = false
     constructor: bool = false
@@ -152,7 +152,7 @@ class RecordDeclaration:
     type_id: TypeId = TypeId(0)
     lookup: string = ""
     traits: list[TypeAnnotation] = []
-    definition: DefId = DefId(0, 0, DeclarationId(0))
+    definition: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
     operators: list[OperatorDeclaration] = []
     type_parameters: list[string] = []
     constraints: list[GenericConstraint] = []
@@ -161,7 +161,7 @@ class RecordDeclaration:
     type_defaults: list[TypeAnnotation] = []
     alternatives: list[CallableAlternative] = []
     representation: string = ""
-    declaration_grammar: DefId = DefId(0, 0, DeclarationId(0))
+    declaration_grammar: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
     storage_element: TypeId = TypeId(0)
     source_name: string = ""
     extension_target: TypeAnnotation | None = None
@@ -195,7 +195,7 @@ class Expression:
     span: source.Span
     id: HirId = HirId(0)
     type_id: TypeId = TypeId(0)
-    grammar: DefId | None = None
+    grammar: DefinitionID | None = None
     loan_root: int = -1
     loan_mode: string = ""
     literal: LiteralConstruction | None = None
@@ -209,10 +209,10 @@ class CallArgument:
 
 
 enum ResolvedCallee:
-    Direct(function: DefId, substitution: Substitution)
+    Direct(function: DefinitionID, substitution: Substitution)
     FunctionValue(expression: Expression)
-    Method(implementation: DefId, receiver: Expression, substitution: Substitution)
-    Constructor(type_definition: DefId, variant: VariantId | None)
+    Method(implementation: DefinitionID, receiver: Expression, substitution: Substitution)
+    Constructor(type_definition: DefinitionID, variant: VariantId | None)
     Intrinsic(operation: OpId)
 
 
@@ -222,7 +222,7 @@ enum ExpressionKind:
     Ownership(mode: string, value: Expression)
     AddressOf(value: Expression)
     TypeLayout(subject: TypeId, alignment: bool)
-    SourceSymbol(spelling: string, definition: DefId)
+    SourceSymbol(spelling: string, definition: DefinitionID)
     CompilerTerm(name: string, arguments: list[TypeAnnotation])
     TypeApplication(target: Expression, arguments: list[TypeAnnotation])
     LiteralValue(value: LiteralValue)
@@ -246,7 +246,7 @@ enum ExpressionKind:
     OutcomeUnwrap(value: Expression)
     UpdateOperand(index: int)
     BindingReference(binding: BindingId)
-    FunctionReference(definition: DefId)
+    FunctionReference(definition: DefinitionID)
     ResolvedCall(callee: ResolvedCallee, arguments: list[CallArgument])
     Convert(operand: Expression, conversion: ExpressionConversion)
     Unary(operator: OperatorSyntax, operand: Expression)
@@ -257,7 +257,7 @@ enum ExpressionKind:
     TypeName(value: Expression, name: string)
     RecordValue(fields: list[CallArgument])
     FieldReference(object: Expression, index: int)
-    RequiredMember(object: Expression, requirement: DefId, name: string)
+    RequiredMember(object: Expression, requirement: DefinitionID, name: string)
 
 
 def resolve_expression(expression: Expression, id: HirId, type_id: TypeId, kind: ExpressionKind) -> Expression:
@@ -277,7 +277,7 @@ enum ExpressionConversionKind:
     NumericWidening
     UnionInjection
     Borrow
-    User(function: DefId)
+    User(function: DefinitionID)
 
 enum Operation:
     DebugOwnership(name: string, mode: string, span: source.Span)

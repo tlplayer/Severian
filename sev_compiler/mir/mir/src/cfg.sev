@@ -51,8 +51,8 @@ def verify(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBo
             return error(diagnostics.Diagnostic("E000230", "CFG block identity mismatch", None))
         layout ?= selected.layout
         if layout != None:
-            if selected.id.index != layout.id.index or selected.kind != layout.kind:
-                return error(diagnostics.Diagnostic("E000230", "CFG block lost its source block identity or kind", selected.span))
+            if selected.id.index != layout.id.index:
+                return error(diagnostics.Diagnostic("E000230", "CFG block lost its source block identity", selected.span))
         block_index += 1
         terminator ?= selected.terminator
         if terminator == None:
