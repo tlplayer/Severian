@@ -105,6 +105,27 @@ def space_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
     return whitespace_end(source, start, false)
 
 
+def identifier_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
+    end = u32(len(source.characters))
+    if start >= end:
+        return None
+    first = source.characters[start]
+    # Use the same ASCII character contract as keyword boundaries.
+    if not (first.is_alphabetic() or first == "_"):
+        return None
+    cursor = start + 1
+    while cursor < end:
+        value = source.characters[cursor]
+        if not (value.is_alphanumeric() or value == "_"):
+            break
+        cursor += 1
+    return cursor
+
+
+class Identifier: Y
+    token_forms: list[TokenForm] = [TokenForm("IDENTIFIER", recognize=identifier_end)]
+
+
 class StringSymbol: Y
     token_forms: list[TokenForm] = [TokenForm("STRING", recognize=string_end)]
 
@@ -143,3 +164,16 @@ class Newline: Y
 
 class EndOfFile: Y
     token_forms: list[TokenForm] = [TokenForm("EOF", "", boundary=true)]
+
+
+test "identifier forms consume names without consuming delimiters":
+    import virtual_source from "../../frontend/source/source.sev"
+    for spelling in ["name", "_", "_value2", "if_value", "while2"]:
+        source = virtual_source("identifier.sev", spelling + ":")
+        assert(identifier_end(source, 0) == len(spelling))
+    for spelling in ["", "2name", "+", " "]:
+        assert(identifier_end(virtual_source("identifier.sev", spelling), 0) == None)
+    source = virtual_source("offset.sev", "=name")
+    assert(identifier_end(source, 1) == 5)
+    assert(identifier_end(source, 5) == None)
+    assert(identifier_end(source, 6) == None)

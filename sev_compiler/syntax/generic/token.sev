@@ -23,3 +23,5 @@ class Token: TokenTerm
     span: Span
     # Applicable declarations remain candidates until grammar resolution.
     declarations: list[string] = []
+    # All classifications of the longest match; kind remains the first form.
+    kinds: list[string] = []

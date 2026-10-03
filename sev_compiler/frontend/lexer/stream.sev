@@ -1,5 +1,6 @@
-import EOF, SourceFile from "../source/source.sev"
+import EOF, SourceFile, Span, virtual_source from "../source/source.sev"
 import Token from "../../syntax/generic/token.sev"
+import Lexeme from "../../syntax/generic/lexeme.sev"
 
 
 class TokenStream:
@@ -10,35 +11,87 @@ class TokenStream:
     def print() -> string:
         result := ""
         line := 1
+        column := 1
         cursor := 0
-        for token in self.tokens:
+        entries = self.tokens[:]
+        if self.end.token is Token:
+            entries.append(self.end.token)
+        else:
+            end = len(self.source.characters)
+            location = Span(self.source.id, end, end)
+            entries.append(Token("EOF", Lexeme("", location), location))
+        for token in entries:
             while cursor < token.span.start:
-                if self.source.characters[cursor] == "\n":
+                character = self.source.characters[cursor]
+                if character == "\r":
                     line += 1
-                cursor += 1
-            spelling := ""
-            for character in token.lexeme.text:
-                if character == '\n':
-                    spelling += "\\n"
-                elif character == '\r':
-                    spelling += "\\r"
-                elif character == '\t':
-                    spelling += "\\t"
-                elif character == '<':
-                    spelling += "\\<"
-                elif character == '>':
-                    spelling += "\\>"
+                    column = 1
+                elif character == "\n":
+                    if cursor == 0 or self.source.characters[cursor - 1] != "\r":
+                        line += 1
+                    column = 1
                 else:
-                    spelling += string(character)
-            result += "<line:" + string(line) + "." + spelling + ">"
-        return result + "<EOF>"
+                    column += 1
+                cursor += 1
+            kinds = token.kind if len(token.kinds) == 0 else "|".join(token.kinds)
+            position := "[" + string(token.span.start) + "]"
+            # EOF has a display-only marker range; its source span stays empty.
+            if token.kind == "EOF":
+                position = "[" + string(token.span.start) + "," + string(token.span.start + 1) + ")"
+            elif token.span.end - token.span.start > 1:
+                position = "[" + string(token.span.start) + ":" + string(token.span.end - 1) + "]"
+            result += self.source.path + ":" + string(line) + ":" + string(column) + "  " + position + " " + kinds + " \"" + escape_token_spelling(token.lexeme.text) + "\"\n"
+        return result
+
+
+def escape_token_spelling(text: string) -> string:
+    result := ""
+    for character in text:
+        if character == '\\':
+            result += "\\\\"
+        elif character == '"':
+            result += "\\\""
+        elif character == '\n':
+            result += "\\n"
+        elif character == '\r':
+            result += "\\r"
+        elif character == '\t':
+            result += "\\t"
+        else:
+            result += string(character)
+    return result
 
 
 test "token printing retains lines without inventing symbol resolution":
-    import virtual_source, Span from "../source/source.sev"
-    import Lexeme from "../../syntax/generic/lexeme.sev"
     source = virtual_source("tokens.sev", "x\nλ")
     first = Span(source.id, 0, 1)
     second = Span(source.id, 2, 3)
     stream = TokenStream(source, [Token("Identifier", Lexeme("x", first), first), Token("Identifier", Lexeme("λ", second), second)])
-    assert(stream.print() == "<line:1.x><line:2.λ><EOF>")
+    assert(stream.print() == "tokens.sev:1:1  [0] Identifier \"x\"\ntokens.sev:2:1  [2] Identifier \"λ\"\ntokens.sev:2:2  [3,4) EOF \"\"\n")
+
+
+test "token printing counts CRLF and CR lines in Unicode scalar coordinates":
+    source = virtual_source("lines.sev", "x\r\nλ\rz\n")
+    tokens: list[Token] = []
+    for start in [0, 3, 5]:
+        location = Span(source.id, u32(start), u32(start + 1))
+        tokens.append(Token("IDENTIFIER", Lexeme(source.text[start:start + 1], location), location))
+    stream = TokenStream(source, tokens)
+    assert(stream.print() == "lines.sev:1:1  [0] IDENTIFIER \"x\"\nlines.sev:2:1  [3] IDENTIFIER \"λ\"\nlines.sev:3:1  [5] IDENTIFIER \"z\"\nlines.sev:4:1  [7,8) EOF \"\"\n")
+    assert(len(stream.tokens) == 3)
+
+
+test "token printing distinguishes escaped source and competing classifications":
+    assert(escape_token_spelling("\\n\n\t\r\"") == "\\\\n\\n\\t\\r\\\"")
+    source = virtual_source("keyword.sev", "if")
+    location = Span(source.id, 0, 2)
+    token = Token("IF", Lexeme("if", location), location, kinds=["IF", "IDENTIFIER"])
+    stream = TokenStream(source, [token])
+    expected = "keyword.sev:1:1  [0:1] IF|IDENTIFIER \"if\"\nkeyword.sev:1:3  [2,3) EOF \"\"\n"
+    assert(stream.print() == expected)
+    assert(stream.print() == expected)
+
+
+test "empty token stream prints its source boundary":
+    stream = TokenStream(virtual_source("empty.sev", ""), [])
+    assert(stream.print() == "empty.sev:1:1  [0,1) EOF \"\"\n")

@@ -67,7 +67,7 @@ import Dot from "symbol/dot.sev"
 import Range from "symbol/range.sev"
 import Ellipsis from "symbol/ellipsis.sev"
 import At from "symbol/at.sev"
-import StringSymbol, Character, BlockString, FormattedString, FormattedBlockString, Comment, Indent, Space, Newline, EndOfFile from "symbol/forms.sev"
+import Identifier, StringSymbol, Character, BlockString, FormattedString, FormattedBlockString, Comment, Indent, Space, Newline, EndOfFile from "symbol/forms.sev"
 
 
 import NotKeyword from "keywords/not.sev"
@@ -173,6 +173,7 @@ registered_grammars: list[(Y, RegisteredGrammar)] = [
     (Space(), RegisteredGrammar(Space(), None, None, token_form=true)),
     (Newline(), RegisteredGrammar(Newline(), None, None, token_form=true)),
     (EndOfFile(), RegisteredGrammar(EndOfFile(), None, None, token_form=true)),
+    (Identifier(), RegisteredGrammar(Identifier(), None, None, token_form=true)),
 ]
 
 

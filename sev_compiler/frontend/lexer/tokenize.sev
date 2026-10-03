@@ -113,7 +113,7 @@ test "lexer emits the equal symbol declared by syntax":
     assert(token.span.source_id == source.id)
     assert(token.span.start == 0 and token.span.end == 1)
     assert(token.lexeme.span == token.span)
-    assert(result.print() == "<line:1.=><EOF>")
+    assert(result.print() == "equal.sev:1:1  [0] EQUAL \"=\"\nequal.sev:1:2  [1,2) EOF \"\"\n")
     print(token.kind + " " + token.lexeme.text)
     print(result.print())
 
@@ -254,5 +254,5 @@ test "empty input has one classified end boundary":
     assert(result.end.lexeme.text == "")
     assert(result.end.token.span.source_id == source.id)
     assert(result.end.token.span.start == 0 and result.end.token.span.end == 0)
-    assert(result.print() == "<EOF>")
+    assert(result.print() == "empty.sev:1:1  [0,1) EOF \"\"\n")
     print(result.print())
