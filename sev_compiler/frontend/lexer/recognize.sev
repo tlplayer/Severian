@@ -2,8 +2,9 @@ import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import Lexeme from "../../syntax/generic/lexeme.sev"
 import Y from "../../syntax/generic/symbol.sev"
 import TokenTerm from "../../syntax/generic/token.sev"
-import SourceWindow, Window from "window.sev"
-import Span from "../source/source.sev"
+import SourceWindow, Window, source_window from "window.sev"
+import Span, virtual_source from "../source/source.sev"
+import SyntaxDeclaration from "../../syntax/recognition.sev"
 
 
 class LexicalCapture:
@@ -66,19 +67,16 @@ def lexical_boundary(input: Window, end: u32) -> bool:
     return not ((previous.is_alphanumeric() or previous == "_") and (following.is_alphanumeric() or following == "_"))
 
 
+# TODO: Move these test imports and the helper back into the test block once
+# the compiler supports imports and function declarations inside blocks.
+def recognition_test_accept(value: Lexeme) -> bool:
+    return value.text == "λ" or value.text == "true"
 
 
 test "generated recognition preserves raw captures and whole word boundaries":
-    import virtual_source from "../source/source.sev"
-    import source_window from "window.sev"
-    import SyntaxDeclaration from "../../syntax/recognition.sev"
-
-    def accept(value: Lexeme) -> bool:
-        return value.text == "λ" or value.text == "true"
-
     label = SyntaxDeclaration("fixture.sev", "Fixture.literal")
     input = source_window(virtual_source("capture.sev", "{λ}"))
-    matched = recognize_declared(input, label, "{", "}", "value", accept)
+    matched = recognize_declared(input, label, "{", "}", "value", recognition_test_accept)
     assert(matched is LexicalMatch)
     assert(matched.lexeme.text == "{λ}")
     assert(matched.captures[0].window.text() == "λ")
@@ -87,6 +85,6 @@ test "generated recognition preserves raw captures and whole word boundaries":
     assert(matched.captures[0].terminal)
     assert(input.cursor == 0)
     word = source_window(virtual_source("word.sev", "true"))
-    assert(recognize_declared(word, label, "true", "", "", accept) is LexicalMatch)
+    assert(recognize_declared(word, label, "true", "", "", recognition_test_accept) is LexicalMatch)
     longer = source_window(virtual_source("identifier.sev", "true_value"))
-    assert(recognize_declared(longer, label, "true", "", "", accept) == None)
+    assert(recognize_declared(longer, label, "true", "", "", recognition_test_accept) == None)

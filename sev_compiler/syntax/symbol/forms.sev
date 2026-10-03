@@ -3,6 +3,8 @@ import TokenForm from "../generic/token.sev"
 import SourceFile, Span from "../source.sev"
 import Diagnostic from "../primitive/error/diagnostic.sev"
 import LexicalDiagnostic from "../../frontend/lexer/diagnostic.sev"
+# TODO: Move this import back into its test when block-local imports are supported.
+import virtual_source from "../../frontend/source/source.sev"
 
 
 # Recognition returns an absolute Unicode scalar offset. Construction and
@@ -167,7 +169,6 @@ class EndOfFile: Y
 
 
 test "identifier forms consume names without consuming delimiters":
-    import virtual_source from "../../frontend/source/source.sev"
     for spelling in ["name", "_", "_value2", "if_value", "while2"]:
         source = virtual_source("identifier.sev", spelling + ":")
         assert(identifier_end(source, 0) == len(spelling))

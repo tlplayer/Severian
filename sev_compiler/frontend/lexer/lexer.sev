@@ -83,6 +83,7 @@ def recognize_window(input: Window, include_boundary: bool = false) -> list[Lexi
 import virtual_source from "../source/source.sev"
 
 
+# TODO: Scope these fixtures to their tests when block-local declarations are supported.
 class TestBoundary: Y
     def recognize(input: Window) -> LexicalMatch | None:
         if not input.finished() or input.end != len(input.source.characters):
