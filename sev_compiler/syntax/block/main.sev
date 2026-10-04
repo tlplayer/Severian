@@ -6,6 +6,7 @@ import FunctionParameter from "../function/function.sev"
 import TypeAnnotation from "../type/annotation.sev"
 
 class main: Y + B
+    declaration_name: string = "main"
     context: BlockContext = BlockContext()
     span: source.Span | None = None
     sentences: list[BlockSentence] = []

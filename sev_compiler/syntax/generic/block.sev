@@ -85,6 +85,8 @@ trait BlockLowering:
 # B is the source structure shared by discovery and resolved block bodies.
 # Sentence spans remain available before any expression or literal is resolved.
 trait B:
+    partition_with_parent: bool = false
+    declaration_name: string = ""
     context: BlockContext
     span: source.Span | None
     sentences: list[BlockSentence]
@@ -118,6 +120,7 @@ trait B:
 
 
 trait ExecutableBlock: B
+    partition_with_parent: bool = true
     def lower(cfg: BlockLowering)
 
 class IndentedBlock: B

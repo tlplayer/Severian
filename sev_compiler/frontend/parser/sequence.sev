@@ -111,6 +111,9 @@ def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, co
 
 def sequence_candidate(grammar: syntax.RegisteredGrammar, state: SequenceState, context: GrammarContext, input: list[TokenTerm]) -> GrammarMatch:
     span = Span(input[0].span.source_id, input[0].span.start, input[state.cursor - 1].span.end)
+    # Each candidate owns its source window; probing another interpretation
+    # must not replace the span retained by this candidate's constructor.
+    context = GrammarContext(context.parent, context.body, context.previous, context.fields, span, context.receiver)
     return GrammarMatch(state.cursor, lambda: construct_sequence(grammar, state.captures, context, span), check=lambda: check_sequence(grammar, state.captures, context), captures=state.captures, identity=grammar.syntax.path + ":" + grammar.syntax.name + ":" + string(span.start) + ":" + string(span.end))
 
 
@@ -305,6 +308,11 @@ def select_grammar(candidates: list[GrammarMatch], span: Span) -> GrammarMatch |
 
 
 def context_field[T](context: GrammarContext, name: string) -> T:
+    if name == "span" and context.span != None:
+        value = LiteralValueOf[Span](context.span).read[T](context.span)
+        if value is Diagnostic:
+            throw value
+        return value
     if name == "parent":
         return context_value[T](context.parent)
     if name == "body":

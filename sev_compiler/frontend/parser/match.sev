@@ -92,9 +92,9 @@ def contextual_matcher_construct(value: Lexeme, context: GrammarContext) -> Lite
 
 test "contextual token grammar preserves boundaries and constructs only after selection":
     source = virtual_source("receiver.sev", "[λ]next")
-    span = Span(source.id, 0, 3)
+    span = Span(source.source_id, 0, 3)
     token = Token("fixture", Lexeme("[λ]", span), span)
-    next_span = Span(source.id, 3, 7)
+    next_span = Span(source.source_id, 3, 7)
     following = Token("identifier", Lexeme("next", next_span), next_span)
     receiver = ContextualMatcherFixture("λ")
     context = GrammarContext(receiver=LiteralValueOf[ContextualMatcherFixture](receiver))
@@ -117,7 +117,7 @@ test "contextual token grammar preserves boundaries and constructs only after se
 
 test "contextual token grammar does not select missing or incompatible receivers":
     source = virtual_source("receiver.sev", "x")
-    span = Span(source.id, 0, 1)
+    span = Span(source.source_id, 0, 1)
     token = Token("identifier", Lexeme("x", span), span)
     context = GrammarContext()
     matched = match_contextual_token([token], "Fixture.value", context, contextual_matcher_accept, contextual_matcher_construct, captured=true)
@@ -129,7 +129,7 @@ test "contextual token grammar does not select missing or incompatible receivers
     assert(select_grammar([matched], span) is Diagnostic)
     assert(match_contextual_token([token], "Fixture.fixed", context, contextual_matcher_accept, contextual_matcher_construct, "@@") == None)
     assert(match_contextual_token([], "Fixture.value", context, contextual_matcher_accept, contextual_matcher_construct, captured=true) == None)
-    end = Span(source.id, 1, 1)
+    end = Span(source.source_id, 1, 1)
     assert(match_contextual_token([Token("EOF", Lexeme("", end), end)], "Fixture.value", context, contextual_matcher_accept, contextual_matcher_construct, captured=true) == None)
 
 
@@ -139,7 +139,7 @@ def matcher_test_construct(value: Lexeme) -> LiteralValue:
 
 test "competing literal grammars report ambiguity without constructing either result":
     source = virtual_source("conflict.sev", "0")
-    span = Span(source.id, 0, 1)
+    span = Span(source.source_id, 0, 1)
     token = Token("literal", Lexeme("0", span), span)
     receiver = ContextualMatcherFixture("0")
     context = GrammarContext(receiver=LiteralValueOf[ContextualMatcherFixture](receiver))
@@ -154,7 +154,7 @@ test "competing literal grammars report ambiguity without constructing either re
 
 test "token matching preserves concrete values":
     source = virtual_source("literal.sev", "true")
-    span = Span(source.id, 0, 4)
+    span = Span(source.source_id, 0, 4)
     label = SyntaxDeclaration("fixture.sev", "Bool.true")
     token = Token("Bool.true", Lexeme("true", span), span, ["Bool.true"])
     matched = match_declared_token([token], label.name, matcher_test_construct)

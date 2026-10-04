@@ -421,12 +421,8 @@ compiler intrinsics. They remain ordinary Severian/library operations unless
 they have a real MLIR operation to bind to.
 '''
 class int: Integer:
-    identity: PrimitiveId = I64Primitive().identity
-    mlir: MlirTypeBinding = I64Primitive().mlir
-    id: TypeId = I64Primitive().id
-    token_kind: string = I64Primitive().token_kind
-    literal_family: string = I64Primitive().literal_family
-    literal_syntaxes: list[LiteralSyntax] = I64Primitive().literal_syntaxes
+    # The family supplies behavior; each concrete integer owns its storage
+    # metadata. A family grammar must not introduce an i64 instance layout.
 
     # Capture the complete numeric spelling, including its original span.
     # A float or unit spelling must not be accepted as an integer prefix.

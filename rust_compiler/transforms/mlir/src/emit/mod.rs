@@ -387,21 +387,46 @@ fn render_unit(module: &Module, library: Option<&str>) -> Result<String, MlirErr
         None,
         &mut coverage_ordinal,
     )?;
+    let mut entry_type = &LoweredType::Unit;
     if let Some(entry) = module.entry {
         let function = function(module, entry)?;
+        let (assignment, result) = entry_result(function)?;
+        entry_type = &function.result;
         if !function.parameters.is_empty() {
             return Err(MlirError::UnsupportedOperation(
                 "MLIR entry lowering does not yet provide process arguments".into(),
             ));
         }
         output.push_str(&format!(
-            "    func.call @{}() : () -> ()\n",
+            "    {assignment}func.call @{}() : () -> {result}\n",
             function_symbol(function)
         ));
     }
-    output.push_str("    %sev_exit = arith.constant 0 : i32\n");
-    output.push_str("    return %sev_exit : i32\n  }\n}\n");
+    render_entry_exit(&mut output, entry_type)?;
+    output.push_str("  }\n}\n");
     Ok(output)
+}
+
+// The native wrapper returns the entry's status; unit entries succeed with zero.
+fn entry_result(function: &Function) -> Result<(&'static str, String), MlirError> {
+    match function.result {
+        LoweredType::Unit => Ok(("", "()".into())),
+        LoweredType::Integer { .. } => Ok(("%sev_entry_status = ", mlir_type(&function.result)?)),
+        _ => Err(MlirError::UnsupportedOperation("entry result must be unit or integer".into())),
+    }
+}
+
+fn render_entry_exit(output: &mut String, result: &LoweredType) -> Result<(), MlirError> {
+    match result {
+        LoweredType::Unit => output.push_str("    %sev_exit = arith.constant 0 : i32\n    return %sev_exit : i32\n"),
+        LoweredType::Integer { bits: 32, .. } => output.push_str("    return %sev_entry_status : i32\n"),
+        LoweredType::Integer { bits, signed } => {
+            let conversion = if *bits > 32 { "trunci" } else if *signed { "extsi" } else { "extui" };
+            output.push_str(&format!("    %sev_exit = arith.{conversion} %sev_entry_status : i{bits} to i32\n    return %sev_exit : i32\n"));
+        }
+        _ => return Err(MlirError::UnsupportedOperation("entry result must be unit or integer".into())),
+    }
+    Ok(())
 }
 
 fn render_cfg_module(module: &Module, library: Option<&str>) -> Result<String, MlirError> {
@@ -669,11 +694,14 @@ fn render_cfg_module(module: &Module, library: Option<&str>) -> Result<String, M
         "    func.call @__sev_process_set_arguments(%argc, %argv) : (i32, !llvm.ptr) -> ()\n",
     );
     output.push_str("    func.call @__sev_init() : () -> ()\n");
+    let mut entry_type = &LoweredType::Unit;
     if let Some(entry) = module.entry {
         let function = function(module, entry)?;
+        let (assignment, result) = entry_result(function)?;
+        entry_type = &function.result;
         match function.parameter_types.as_slice() {
             [] => output.push_str(&format!(
-                "    func.call @{}() : () -> ()\n",
+                "    {assignment}func.call @{}() : () -> {result}\n",
                 function_symbol(function)
             )),
             [LoweredType::Arguments] => {
@@ -687,7 +715,7 @@ fn render_cfg_module(module: &Module, library: Option<&str>) -> Result<String, M
                     "    %sev_args = llvm.insertvalue %argv, %sev_args_argc[1] : !llvm.struct<(i32, !llvm.ptr)>\n",
                 );
                 output.push_str(&format!(
-                    "    func.call @{}(%sev_args) : (!llvm.struct<(i32, !llvm.ptr)>) -> ()\n",
+                    "    {assignment}func.call @{}(%sev_args) : (!llvm.struct<(i32, !llvm.ptr)>) -> {result}\n",
                     function_symbol(function)
                 ));
             }
@@ -698,8 +726,8 @@ fn render_cfg_module(module: &Module, library: Option<&str>) -> Result<String, M
             }
         }
     }
-    output.push_str("    %sev_exit = arith.constant 0 : i32\n");
-    output.push_str("    return %sev_exit : i32\n  }\n}\n");
+    render_entry_exit(&mut output, entry_type)?;
+    output.push_str("  }\n}\n");
     Ok(output)
 }
 

@@ -1,0 +1,5 @@
+# HIR hands MIR modules indexing the same submodules and shared block graph.
+# CFG, ownership and lowered operations remain on the existing block model.
+import Program, Module, Submodule from "../../../hir/hir/src/program.sev"
+import BlockGraph, BlockAddress from "../../../hir/hir/src/dependencies.sev"
+import Block from "../../../syntax/block/block.sev"

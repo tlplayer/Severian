@@ -594,12 +594,18 @@ pub(super) fn lower_registrations(graph: &ModuleGraph) -> Result<ModuleGraph, Di
             output.modules[module_index].ast.items.extend(generated);
         }
     }
-    let binding = output.modules[registry_index].ast.items.iter_mut().find_map(|item| match item {
-        Item::Binding(binding) if binding.name == "registered_grammars" => Some(binding),
+    let initializer = output.modules[registry_index].ast.items.iter_mut().find_map(|item| match item {
+        Item::Binding(binding) if binding.name == "registered_grammars" => Some(&mut binding.value),
+        Item::Function(function) if function.name == "registered_grammars" => {
+            match function.body.as_mut()?.as_mut_slice() {
+                [Statement::Return { value: Some(value), .. }] => Some(value),
+                _ => None,
+            }
+        }
         _ => None,
     }).ok_or_else(|| Diagnostic::new("E000212", "grammar registry has no declaration table initializer", None))?;
-    let K::List(existing) = &mut binding.value.kind else {
-        return Err(Diagnostic::new("E000212", "grammar registry initializer must be a list", Some(binding.span)));
+    let K::List(existing) = &mut initializer.kind else {
+        return Err(Diagnostic::new("E000212", "grammar registry initializer must be a list", Some(initializer.span)));
     };
     existing.extend(entries);
     Ok(output)
@@ -622,6 +628,24 @@ mod tests {
             module(1, "registered_grammars = []\n@compiler_grammar_registry\ndef registry():\n    return registered_grammars\n"),
             module(2, owner),
         ] }
+    }
+
+    #[test]
+    fn declaration_table_can_be_constructed_after_import_resolution() {
+        let original = ModuleGraph { policies: Default::default(), modules: vec![
+            module(1, "def registered_grammars():\n    return []\n@compiler_grammar_registry\ndef registry():\n    return registered_grammars()\n"),
+            module(2, "class Flag:\n    grammar literal[\"flag\"]() -> bool:\n        return true\n"),
+        ] };
+        let lowered = lower_registrations(&original).unwrap();
+        assert!(!lowered.modules[0].ast.items.iter().any(|item| matches!(item, Item::Binding(_))));
+        let function = lowered.modules[0].ast.items.iter().find_map(|item| match item {
+            Item::Function(function) if function.name == "registered_grammars" => Some(function),
+            _ => None,
+        }).unwrap();
+        let [Statement::Return { value: Some(Ex { kind: K::List(entries), .. }), .. }] = function.body.as_deref().unwrap() else {
+            panic!("declaration table must remain a function returning its entries");
+        };
+        assert_eq!(entries.len(), 1);
     }
 
     fn descriptors(graph: &ModuleGraph) -> Vec<&[ast::CallArgument]> {
@@ -773,6 +797,8 @@ mod tests {
         module(5, include_str!("../../../../../sev_compiler/frontend/parser/sequence.sev"));
         module(6, include_str!("../../../../../sev_compiler/syntax/grammar/resolution.sev"));
         module(4, include_str!("../../../../../sev_compiler/frontend/parser/contract.sev"));
+        module(8, include_str!("../../../../../sev_compiler/hir/hir/src/program.sev"));
+        module(9, include_str!("../../../../../sev_compiler/mir/mir/src/model.sev"));
     }
 
     #[test]

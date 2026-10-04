@@ -97,6 +97,8 @@ pub struct FunctionDeclaration {
     pub hook: Option<HookSpecification>,
     pub parameters: Vec<FunctionParameter>,
     pub result: TypeAnnotation,
+    /// Distinguishes an omitted result from an explicitly declared `unit`.
+    pub result_declared: bool,
     /// `None` denotes an interface declaration. Source functions have an
     /// ordered body, including an explicitly empty body.
     pub body: Option<Vec<Statement>>,

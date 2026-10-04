@@ -72,7 +72,7 @@ trait G:
     short_circuit: bool | absent
     const: bool
     foldable: bool
-    operations: {T: ScalarOperation}
+    operations: dict[T, ScalarOperation]
 
     def valid(left: Ex, right: Ex) -> bool
     def semantic(left: Ex, right: Ex) -> X

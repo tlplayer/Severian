@@ -61,6 +61,11 @@ class Block: B
     origins: list[OperationOrigin] = []
     origin: OperationOrigin = OperationOrigin()
     context: BlockContext = BlockContext()
+    # Ordered indices into BlockGraph.nodes; the same block survives HIR/MIR.
+    contents: list[int] = []
+    implementation: B | None = None
+    # Internal execution regions travel with their owning compilation block.
+    partition_owner: SourceBlockId | None = None
 
 
 class BlockFile:
@@ -71,7 +76,7 @@ class BlockFile:
 
 
 def global_source_block(file: source.SourceFile) -> Block:
-    return Block(span=source.Span(file.id, 0, u32(len(file.characters))), syntax_name="global", name=file.path)
+    return Block(span=source.Span(file.source_id, 0, u32(len(file.characters))), syntax_name="global", name=file.path)
 
 
 # Discovery consumes these contracts; spelling and containment rules live here.

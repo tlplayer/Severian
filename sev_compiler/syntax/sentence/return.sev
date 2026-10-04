@@ -1,0 +1,30 @@
+import Statement from "sentence.sev"
+import Expression, ExpressionKind from "../function/function.sev"
+import LiteralValueOf from "../grammar/resolution.sev"
+import Span from "../../frontend/source/source.sev"
+import "../primitive/int/int.sev" as _integer_grammar
+
+
+# Construct a return operation; parsing this sentence never returns from or
+# executes the source function. Integer spelling is handled by int.literal.
+class ReturnSyntax:
+    span: Span
+
+    sentence integer_return["return", value: int]() -> Statement:
+        expression = Expression(ExpressionKind.LiteralValue(LiteralValueOf[int](value)), self.span)
+        return Statement.Return(expression, self.span)
+
+
+test "return grammar constructs an operation without executing the source return":
+    operation = ReturnSyntax(Span(1, 0, 8)).integer_return(0)
+    match operation:
+        case Return:
+            assert(span == Span(1, 0, 8))
+            assert(value is Expression)
+            match value.kind:
+                case LiteralValue:
+                    assert(value.read[int](span) == 0)
+                case _:
+                    assert(false, "return must preserve the type-owned literal value")
+        case _:
+            assert(false, "return grammar must construct a return operation")

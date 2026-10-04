@@ -1,0 +1,182 @@
+import BlockAddress, BlockGraph, checked_block, contains_block from "dependencies.sev"
+
+
+# Parser supplies the graph; HIR groups dependency cycles into submodules and
+# then modules. MIR fills CFG/ownership on these same blocks through the graph.
+class Submodule:
+    blocks: list[BlockAddress]
+    dependencies: list[int] = []  # Indices into Program.submodules.
+
+
+class Module:
+    package: string
+    name: string
+    submodules: list[int] = []
+    dependencies: list[int] = []  # Indices into Program.modules.
+
+
+class Program:
+    graph: BlockGraph
+    submodules: list[Submodule] = []
+    modules: list[Module] = []
+
+    def submodule_of(address: BlockAddress) -> int:
+        for index in range(len(self.submodules)):
+            if contains_block(self.submodules[index].blocks, address):
+                return index
+        throw Error("block is not in this HIR partition")
+
+
+def address_key(address: BlockAddress) -> string:
+    return string(address.unit) + ":" + string(address.block.index)
+
+
+def partition(graph: BlockGraph) -> Program:
+    program = Program(graph)
+    blocks: list[BlockAddress] = []
+    indices: dict[string, int] = {}
+    for unit in range(len(graph.units)):
+        for block in graph.units[unit].file.blocks:
+            address = BlockAddress(unit, block.id)
+            checked_block(graph, address)
+            indices[address_key(address)] = len(blocks)
+            blocks.append(address)
+    forward: list[list[int]] = []
+    reverse: list[list[int]] = []
+    for address in blocks:
+        forward.append([])
+        reverse.append([])
+    for edge in graph.dependencies:
+        checked_block(graph, edge.consumer)
+        checked_block(graph, edge.provider)
+        consumer = indices[address_key(edge.consumer)]
+        provider = indices[address_key(edge.provider)]
+        forward[consumer].append(provider)
+        reverse[provider].append(consumer)
+    # Ownership joins internal execution blocks without turning lexical
+    # containment or shared scope into compilation dependencies.
+    for index in range(len(blocks)):
+        address = blocks[index]
+        owner = checked_block(graph, address).partition_owner
+        if owner != None:
+            target = BlockAddress(address.unit, owner)
+            checked_block(graph, target)
+            parent = indices[address_key(target)]
+            forward[index].append(parent)
+            forward[parent].append(index)
+            reverse[index].append(parent)
+            reverse[parent].append(index)
+    visited: list[bool] = [false for address in blocks]
+    order: list[int] = []
+    for root in range(len(blocks)):
+        pending: list[(int, bool)] = [(root, false)]
+        while len(pending) > 0:
+            vertex, exiting = pending.pop()
+            if exiting:
+                order.append(vertex)
+            elif not visited[vertex]:
+                visited[vertex] = true
+                pending.append((vertex, true))
+                for following in forward[vertex]:
+                    if not visited[following]:
+                        pending.append((following, false))
+    component: list[int] = [-1 for address in blocks]
+    while len(order) > 0:
+        root = order.pop()
+        if component[root] >= 0:
+            continue
+        index = len(program.submodules)
+        group = Submodule([])
+        pending: list[int] = [root]
+        component[root] = index
+        while len(pending) > 0:
+            vertex = pending.pop()
+            group.blocks.append(blocks[vertex])
+            for following in reverse[vertex]:
+                if component[following] < 0:
+                    component[following] = index
+                    pending.append(following)
+        program.submodules.append(group)
+    for consumer in range(len(blocks)):
+        group = program.submodules[component[consumer]]
+        for provider in forward[consumer]:
+            dependency = component[provider]
+            if dependency != component[consumer] and dependency not in group.dependencies:
+                group.dependencies.append(dependency)
+    owners: list[int] = []
+    for index in range(len(program.submodules)):
+        group = program.submodules[index]
+        source = graph.units[group.blocks[0].unit]
+        for address in group.blocks:
+            other = graph.units[address.unit]
+            if other.package != source.package or other.module != source.module:
+                throw Error("a recursive submodule crosses logical module boundaries")
+        selected := -1
+        for candidate in range(len(program.modules)):
+            module = program.modules[candidate]
+            if module.package == source.package and module.name == source.module:
+                selected = candidate
+        if selected < 0:
+            selected = len(program.modules)
+            program.modules.append(Module(source.package, source.module))
+        program.modules[selected].submodules.append(index)
+        owners.append(selected)
+    for index in range(len(program.submodules)):
+        module = program.modules[owners[index]]
+        for target in program.submodules[index].dependencies:
+            dependency = owners[target]
+            if dependency != owners[index] and dependency not in module.dependencies:
+                module.dependencies.append(dependency)
+    return program
+
+
+import Block, BlockFile, SourceBlockId from "../../../syntax/block/block.sev"
+import BlockUnit, index_block_file, require_block from "dependencies.sev"
+
+
+test "HIR groups recursive blocks and their bodies without consuming siblings":
+    graph = BlockGraph()
+    file = BlockFile("cycle.sev", 0, [Block(id=SourceBlockId(0)), Block(id=SourceBlockId(1)), Block(id=SourceBlockId(2)), Block(id=SourceBlockId(3), partition_owner=SourceBlockId(0))])
+    index_block_file(graph, BlockUnit("cycle.sev", "example", "main", "", file))
+    require_block(graph, BlockAddress(0, SourceBlockId(0)), BlockAddress(0, SourceBlockId(1)))
+    require_block(graph, BlockAddress(0, SourceBlockId(1)), BlockAddress(0, SourceBlockId(0)))
+    require_block(graph, BlockAddress(0, SourceBlockId(0)), BlockAddress(0, SourceBlockId(2)))
+    program = partition(graph)
+    assert(len(program.submodules) == 2)
+    assert(len(program.modules) == 1)
+    recursive = program.submodule_of(BlockAddress(0, SourceBlockId(0)))
+    sibling = program.submodule_of(BlockAddress(0, SourceBlockId(2)))
+    assert(program.submodule_of(BlockAddress(0, SourceBlockId(1))) == recursive)
+    assert(program.submodule_of(BlockAddress(0, SourceBlockId(3))) == recursive)
+    assert(recursive != sibling)
+    assert(program.submodules[recursive].dependencies == [sibling])
+    assert(program.submodules[sibling].dependencies == [])
+    assert(program.graph == graph)
+
+
+test "HIR empty graph has no invented modules":
+    program = partition(BlockGraph())
+    assert(len(program.submodules) == 0)
+    assert(len(program.modules) == 0)
+
+
+test "HIR preserves file qualified identities and groups logical modules":
+    graph = BlockGraph()
+    for path, module in [("a.sev", "main"), ("b.sev", "main"), ("c.sev", "library")]:
+        file = BlockFile(path, u32(len(graph.units)), [Block(id=SourceBlockId(0))])
+        index_block_file(graph, BlockUnit(path, "example", module, "", file))
+    require_block(graph, BlockAddress(0, SourceBlockId(0)), BlockAddress(1, SourceBlockId(0)))
+    require_block(graph, BlockAddress(1, SourceBlockId(0)), BlockAddress(0, SourceBlockId(0)))
+    require_block(graph, BlockAddress(0, SourceBlockId(0)), BlockAddress(2, SourceBlockId(0)))
+    program = partition(graph)
+    assert(len(program.submodules) == 2)
+    assert(len(program.modules) == 2)
+    shared = program.submodule_of(BlockAddress(0, SourceBlockId(0)))
+    assert(program.submodule_of(BlockAddress(1, SourceBlockId(0))) == shared)
+    assert(len(program.submodules[shared].blocks) == 2)
+    for module in program.modules:
+        if module.name == "main":
+            assert(len(module.dependencies) == 1)
+            assert(program.modules[module.dependencies[0]].name == "library")
+        else:
+            assert(module.dependencies == [])

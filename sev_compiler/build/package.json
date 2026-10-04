@@ -83,6 +83,10 @@
       "path": "../frontend/parser",
       "package": "sev-compiler-parser"
     },
+    "hir": {
+      "path": "../hir",
+      "package": "sev-compiler-hir"
+    },
     "semantic": {
       "path": "../hir/semantic",
       "package": "sev-compiler-semantic"

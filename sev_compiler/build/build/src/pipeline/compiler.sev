@@ -1,9 +1,14 @@
 import backend
 import source
 import "source.sev" as pipeline
+import "frontend.sev" as frontend
+import Diagnostic from "../../../../syntax/primitive/error/diagnostic.sev"
 
 class Compiler:
     sysroot: string = "."
+
+    def analyze_source(input: source.SourceFile, package: string = "", module: string = "") -> frontend.FrontendResult | list[Diagnostic]:
+        return frontend.analyze_source(input, package, module)
 
     def compile_source(input: source.SourceFile, output: string) -> backend.Artifact | Error:
         mlir = pipeline.compile_to_mlir(input, sysroot=sysroot)

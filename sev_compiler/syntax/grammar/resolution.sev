@@ -51,6 +51,7 @@ class ResolvedGrammarNode:
     declaration: string
     children: list[ResolvedGrammarNode] = []
     owner: SourceBlockId | None = None
+    owner_unit: int | None = None
 
 
 test "grammar results retain scalar and container types without literal variants":

@@ -1,4 +1,4 @@
-import Error from "../primitive/error/contract.sev"
+import Error from "../primitive/error/error.sev"
 import For from "../block/for.sev"
 import Throw from "../keywords/throw.sev"
 import Diagnostic, DiagnosticType, ErrorType from "../primitive/error/diagnostic.sev"
@@ -45,7 +45,7 @@ trait Positive: G
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Associativity.Right
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("addi"),
         f32 | f64: ScalarOperation("addf"),
     }
@@ -56,7 +56,7 @@ trait Negative: G
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Associativity.Right
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("subi"),
         f32 | f64: ScalarOperation("negf", direct=true),
     }
@@ -67,7 +67,7 @@ trait Not: G
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Associativity.Right
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         bool: ScalarOperation("xori", identity=1),
     }
 
@@ -77,7 +77,7 @@ trait Bang: G
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Associativity.Right
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         bool: ScalarOperation("xori", identity=1),
     }
 
@@ -87,7 +87,7 @@ trait Copy: G
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Associativity.Right
-    operations: {T: ScalarOperation} = {}
+    operations: dict[T, ScalarOperation] = {}
 
 
 trait Move: G
@@ -137,7 +137,7 @@ trait Add: G
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
     associativity: Associativity = Associativity.Left
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("addi"),
         f32 | f64: ScalarOperation("addf"),
     }
@@ -148,7 +148,7 @@ trait Subtract: G
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
     associativity: Associativity = Associativity.Left
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("subi"),
         f32 | f64: ScalarOperation("subf"),
     }
@@ -159,7 +159,7 @@ trait Multiply: G
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
     associativity: Associativity = Associativity.Left
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("muli"),
         f32 | f64: ScalarOperation("mulf"),
     }
@@ -170,7 +170,7 @@ trait Divide: G
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
     associativity: Associativity = Associativity.Left
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         f32 | f64: ScalarOperation("divf"),
     }
 
@@ -201,7 +201,7 @@ trait Equal: G
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index | bool: ScalarOperation("cmpi", predicate=0),
         f32 | f64: ScalarOperation("cmpf", predicate=1),
     }
@@ -212,7 +212,7 @@ trait NotEqual: G
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index | bool: ScalarOperation("cmpi", predicate=1),
         f32 | f64: ScalarOperation("cmpf", predicate=13),
     }
@@ -223,7 +223,7 @@ trait Less: G
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=2),
         u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=6),
         f32 | f64: ScalarOperation("cmpf", predicate=4),
@@ -235,7 +235,7 @@ trait LessEqual: G
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=3),
         u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=7),
         f32 | f64: ScalarOperation("cmpf", predicate=5),
@@ -247,7 +247,7 @@ trait Greater: G
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=4),
         u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=8),
         f32 | f64: ScalarOperation("cmpf", predicate=2),
@@ -259,7 +259,7 @@ trait GreaterEqual: G
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: {T: ScalarOperation} = {
+    operations: dict[T, ScalarOperation] = {
         i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=5),
         u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=9),
         f32 | f64: ScalarOperation("cmpf", predicate=3),

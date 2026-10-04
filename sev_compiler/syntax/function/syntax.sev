@@ -1,4 +1,4 @@
-import Item from "../../hir/modules/module.sev"
+import ResolvedGrammarNode from "../grammar/resolution.sev"
 import source
 import AttrValue, DeclarationId, DefinitionID, FunctionId, InterfaceId, ModuleId, Symbol, TypeId from "../symbol/symbol.sev"
 import TypeAnnotation from "../type/annotation.sev"
@@ -122,7 +122,7 @@ class CompilerTestCase:
     diagnostic_name: string | None
     body: Block
     span: source.Span
-    declarations: list[Item] = []
+    declarations: list[ResolvedGrammarNode] = []
     parse_error: string = ""
 
 

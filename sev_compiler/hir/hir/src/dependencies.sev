@@ -1,5 +1,4 @@
 import ResolvedGrammarNode from "../../../syntax/grammar/resolution.sev"
-import primitives
 import AbiId, Add, ArtifactId, AssertionLocation, AssertionOrigin, Associativity, AttachmentRole, AttrValue, AttributeId, B, BackendId, BinaryOperation, BinaryOperator, Binding, BindingId, BitwiseAnd, BitwiseOr, BitwiseXor, Block, BlockFile, BlockId, BlockLayout, BlockSentence, BlockSyntax, BlockTerm, BlockTermRole, BoundaryModifier, CallArgument, CallType, CallableAlternative, CallableOrigin, Callee, CanonicalRewrite, Capture, CfgBody, CfgEdge, CfgExit, CfgStatement, CfgTerminator, CompileRoute, CompiledRegionId, CompilerCapability, CompilerExpectation, CompilerId, CompilerTestCase, Constant, Constraint, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, Constructor, Contains, Conversion, ConversionKind, Conversions, CoverageKind, CoveragePoint, DeclarationId, Decorator, DecoratorArgument, DecoratorValue, DefinitionID, DialectId, DispatchCandidate, DispatchFamily, Divide, EffectSet, Effects, Equal, Evaluation, Expression, ExpressionConversion, ExpressionConversionKind, ExpressionKind, ExternalCall, FfiId, FieldConstraint, Fixity, FloorDivide, FunctionDeclaration, FunctionId, FunctionLinkage, FunctionParameter, GenericConstraint, GenericParamId, Grammar, Greater, GreaterEqual, HirId, ImportDeclaration, ImportSubject, IndexedId, InferVarId, InferenceContext, InterfaceId, IrContext, LazyOperand, LeftShift, Less, LessEqual, Lexeme, LexemeTerm, LiteralSyntax, LiteralConstruction, LiteralValue, LocalDecl, LocalId, LogicalAnd, LogicalOr, LoweredFloatFormat, LoweredOperation, LoweredType, LoweringCapability, LoweringRequirements, MatchArm, MlirObject, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, MockFunction, ModuleId, Move, Multiply, NamedId, Negative, Not, NotEqual, OpId, Operand, Operation, OperationDiagnostic, OperationId, OperationInterface, OperationOrigin, OperationRegistry, Operator, OperatorDeclaration, OperatorDomain, OperatorParameter, OperatorSignature, OperatorSyntax, PackageId, Place, Positive, Power, Primitive, PrimitiveAlias, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Projection, ProofResult, PropertyDeclaration, ProviderId, QualityRegion, RecordDeclaration, RegionId, RegisteredOperation, Remainder, ResolvedCallee, RightShift, RuntimeId, Rvalue, ScalarOperation, ScopeId, SemanticObject, Sentence, SentenceDefinition, SentenceField, SentenceId, SentenceMatch, Signature, Size, SourceBlockId, SourceFile, SourceMap, Span, StableId, Statement, Substitution, Subtract, SwitchCase, Symbol, SymbolId, SymbolKind, SymbolName, Term, TermRole, TestCaseRow, TestDeclaration, TestExpectation, TestMode, TestModeArguments, TestStream, TokenTerm, TraitDeclaration, TraitRef, TyInterner, Type, TypeAnnotation, TypeAnnotationKind, TypeBinding, TypeConstraint, TypeConstructorBinding, TypeDeclaration, TypeId, TypeKind, TypePattern, TypeRef, UnaryOperation, UnaryOperator, UnifyError, ValueId, VariantId, WithAttachment, Y, accepts_shape, allocate_effect, annotation_key, array_mlir, attribute_id, backend_id, byte_view_mlir, callable_key, cfg_blocks, control_flow, declared_mlir_binding, definition_from_key, dialect_id, empty_cfg, free_effect, hashing, index_mlir, insert_type, io_effect, iteration_sentences, load, local_place, match_sentence, memref_mlir, named_definition, named_operation, named_type, no_effects, operation_id, operator_syntax, outcome_variants, provider_id, ranked_memref_storage, read_effect, record_mlir_binding, resolve_expression, resolve_sentence, resolved_function, runtime_id, same_constructor, same_definition, same_parameters, scalar_boundary, scalar_mlir, scalar_operand_segments, scalar_requirement_names, scalar_requirements, semantic_digest, semantic_key, simple_type_name, span, standard_block_syntax, struct_mlir, tensor_mlir, test_mode_name, throw_effect, type_children, union_variants, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source, write_effect from "../../../syntax/block/block.sev"
 import source
 
@@ -13,8 +12,8 @@ class BlockAddress:
 class BlockUnit:
     key: string
     package: string
-    module: string
-    submodule: string
+    module: string  # Logical module supplied by the package, not the file path.
+    submodule: string  # Legacy display hint; HIR computes membership from edges.
     file: BlockFile
 
 
@@ -50,11 +49,11 @@ class BlockDependency:
     provider: BlockAddress
 
 
-class PrimitiveBlock:
+# Selected grammar/type providers retain their declaration identity. Literal
+# recognition and construction remain on the owning type, before HIR.
+class BlockProvider:
+    definition: DefinitionID
     provider: BlockAddress
-    descriptor: primitives.PrimitiveDescriptor
-    # None means an explicitly installed prelude binding.
-    scope: BlockAddress | None = None
 
 
 class BlockGraph:
@@ -64,7 +63,7 @@ class BlockGraph:
     dependencies: list[BlockDependency] = []
     # Prelude is an explicit set of visible declarations, never a compiler model.
     prelude: list[PreludeBlock] = []
-    primitives: list[PrimitiveBlock] = []
+    providers: list[BlockProvider] = []
     types: list[TypeDeclaration] = []
     expressions: list[Expression] = []
     nodes: list[ResolvedGrammarNode] = []
@@ -73,7 +72,10 @@ class BlockGraph:
         result := ""
         visited: list[BlockAddress] = []
         for unit in range(len(self.units)):
-            result += self.units[unit].module + "/" + self.units[unit].submodule + ":\n"
+            label = self.units[unit].module if self.units[unit].module != "" else self.units[unit].key
+            if self.units[unit].submodule != "":
+                label += "/" + self.units[unit].submodule
+            result += label + ":\n"
             for block in self.units[unit].file.blocks:
                 if block.parent == None:
                     result += print_block_graph(self, BlockAddress(unit, block.id), "  ", [], visited)
@@ -284,38 +286,23 @@ def selected_block_units(graph: BlockGraph, selection: BlockSelection) -> list[B
 
 
 
-def bind_block_primitive(graph: BlockGraph, binding: PrimitiveBlock):
+def bind_block_provider(graph: BlockGraph, binding: BlockProvider):
     checked_block(graph, binding.provider)
-    scope ?= binding.scope
-    if scope != None:
-        checked_block(graph, scope)
-    graph.primitives.append(binding)
+    for existing in graph.providers:
+        if same_definition(existing.definition, binding.definition):
+            if not same_block(existing.provider, binding.provider):
+                throw Error("declaration has more than one provider block")
+            return
+    graph.providers.append(binding)
 
 
-def resolve_block_literal(graph: BlockGraph, consumer: BlockAddress, kind: string, spelling: string, span: source.Span) -> primitives.LiteralConstruction | None:
-    scope: BlockAddress | None := consumer
-    while true:
-        providers: list[primitives.PrimitiveDescriptor] = []
-        bindings: list[PrimitiveBlock] = []
-        current ?= scope
-        for binding in graph.primitives:
-            owner ?= binding.scope
-            visible := current == None and owner == None
-            if current != None and owner != None:
-                visible = same_block(current, owner)
-            if visible:
-                providers.append(binding.descriptor)
-                bindings.append(binding)
-        literal ?= primitives.literal_from_providers(kind, spelling, span, providers)
-        if literal != None:
-            for binding in bindings:
-                if binding.descriptor.identity.declaration.value == literal.primitive.declaration.value:
-                    require_block(graph, consumer, binding.provider)
-            return literal
-        if current == None:
-            return None
-        parent ?= checked_block(graph, current).parent
-        scope = BlockAddress(current.unit, parent) if parent != None else None
+def require_block_provider(graph: BlockGraph, consumer: BlockAddress, definition: DefinitionID):
+    checked_block(graph, consumer)
+    for binding in graph.providers:
+        if same_definition(binding.definition, definition):
+            require_block(graph, consumer, binding.provider)
+            return
+    throw Error("resolved declaration has no provider block")
 
 
 test "block graph printing marks cycles and shared submodules":
@@ -372,12 +359,14 @@ test "local block declarations shadow the prelude":
     assert(not contains_block(selected.bodies, implicit))
 
 
-test "a literal consumes the block declaring its primitive":
+test "a selected declaration consumes its provider without reparsing a literal":
     graph = BlockGraph()
-    unit = index_block_file(graph, BlockUnit("literal.sev", "app", "app", "literal", BlockFile("literal.sev", 0, [Block([], id=SourceBlockId(0)), Block([], id=SourceBlockId(1), parent=SourceBlockId(0), name="entry"), Block([], id=SourceBlockId(2), parent=SourceBlockId(0), name="string")])))
+    unit = index_block_file(graph, BlockUnit("literal.sev", "app", "app", "literal", BlockFile("literal.sev", 0, [Block(id=SourceBlockId(0)), Block(id=SourceBlockId(1), parent=SourceBlockId(0), name="entry"), Block(id=SourceBlockId(2), parent=SourceBlockId(0), name="int")])))
     entry = BlockAddress(unit, SourceBlockId(1))
     provider = BlockAddress(unit, SourceBlockId(2))
-    bind_block_primitive(graph, PrimitiveBlock(provider, primitives.describe_primitive(primitives.StringPrimitive())))
-    literal ?= resolve_block_literal(graph, entry, "String", "a", source.Span(0, 0, 3))
-    assert(literal != None)
+    definition = DefinitionID(1, 2, DeclarationId(3))
+    bind_block_provider(graph, BlockProvider(definition, provider))
+    require_block_provider(graph, entry, definition)
+    require_block_provider(graph, entry, definition)
+    assert(len(graph.dependencies) == 1)
     assert(contains_block(consume_blocks(graph, [entry]).bodies, provider))

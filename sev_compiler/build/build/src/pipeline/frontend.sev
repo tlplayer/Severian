@@ -1,0 +1,23 @@
+import SourceFile from "../../../../frontend/source/source.sev"
+import lexer from "../../../../frontend/lexer/tokenize.sev"
+import TokenStream from "../../../../frontend/lexer/stream.sev"
+import parser from "../../../../frontend/parser/parser.sev"
+import Program, partition from "../../../../hir/hir/src/program.sev"
+import Diagnostic from "../../../../syntax/primitive/error/diagnostic.sev"
+
+
+class FrontendResult:
+    tokens: TokenStream
+    program: Program  # Retains the parser's shared block graph.
+
+
+# Each stage consumes the preceding result. Failed stages return their original
+# diagnostics without producing a successful HIR result.
+def analyze_source(input: SourceFile, package: string = "", module: string = "") -> FrontendResult | list[Diagnostic]:
+    tokens = lexer(input)
+    if tokens is list[Diagnostic]:
+        return tokens
+    graph = parser(tokens, package, module)
+    if graph is list[Diagnostic]:
+        return graph
+    return FrontendResult(tokens, partition(graph))

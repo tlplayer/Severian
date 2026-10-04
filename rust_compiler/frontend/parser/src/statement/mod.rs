@@ -437,7 +437,8 @@ impl Parser<'_> {
         let close = self
             .expect(&TokenKind::RightParen, "expected `)` after parameters")?
             .span;
-        let result = if self.take(&TokenKind::Arrow).is_some() {
+        let result_declared = self.take(&TokenKind::Arrow).is_some();
+        let result = if result_declared {
             self.type_annotation()?
         } else {
             TypeAnnotation::named("unit", vec![], close)
@@ -493,6 +494,7 @@ impl Parser<'_> {
             parameters,
             span: Span::new(start.source, start.start, end),
             result,
+            result_declared,
             body,
         })
     }
@@ -2113,7 +2115,7 @@ impl Parser<'_> {
             function: FunctionDeclaration {
                 decorators: Vec::new(), compile_time: false, name,
                 type_parameters: Vec::new(), constraints, contracts, hook: None,
-                parameters, result, body: Some(body),
+                parameters, result, result_declared: true, body: Some(body),
                 span: Span::new(start.source, start.start, end),
             },
         })

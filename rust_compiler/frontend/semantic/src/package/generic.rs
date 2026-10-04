@@ -487,8 +487,25 @@ fn validate_generic_expression(
             validate_generic_expression(body, &lambda_names, function, index, types)?;
             Ok(None)
         }
-        Expression::Member { object, .. } => {
-            validate_generic_expression(object, names, function, index, types)
+        Expression::Member { object, name } => {
+            let parameter = validate_generic_expression(object, names, function, index, types)?;
+            if let Some(parameter) = &parameter {
+                for bound in parameter_bounds(parameter, function) {
+                    let Some((bound_name, _)) = bound.named_parts() else { continue; };
+                    for definition in index.definitions.values().filter(|definition| definition.name == bound_name) {
+                        let DefKind::Trait(declaration) = &definition.kind else { continue; };
+                        let Some(property) = declaration.properties.iter().find(|property| property.name == *name) else { continue; };
+                        let parameters = declaration.type_parameters.iter().chain(&function.type_parameters)
+                            .map(String::as_str).chain(std::iter::once("Self")).collect::<BTreeSet<_>>();
+                        if !annotation_depends_on(&property.annotation, &parameters) {
+                            // Window.cursor: u32 is arithmetic on u32,
+                            // not an operation on the generic Window.
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+            Ok(parameter)
         }
         Expression::Index {
             object,
@@ -581,6 +598,11 @@ fn validate_generic_expression(
             if *operator == severian_ast::BinaryOperator::Pipe {
                 return Ok(left.or(right));
             }
+            // Identity/type tests are compiler operations, not overloadable
+            // equality. Testing a generic value never requires Equatable.
+            if *operator == severian_ast::BinaryOperator::Identity {
+                return Ok(None);
+            }
             let universal = ast_binary(*operator);
             for parameter in [&left, &right].into_iter().flatten() {
                 if !parameter_allows_binary(parameter, universal, function, index, types) {
@@ -594,6 +616,18 @@ fn validate_generic_expression(
             }
             Ok(left.or(right))
         }
+    }
+}
+
+fn annotation_depends_on(annotation: &TypeAnnotation, parameters: &BTreeSet<&str>) -> bool {
+    match &annotation.kind {
+        TypeAnnotationKind::Named { name, arguments } => parameters.contains(name.as_str())
+            || arguments.iter().any(|argument| annotation_depends_on(argument, parameters)),
+        TypeAnnotationKind::Function { parameters: arguments, result } => arguments.iter().any(|argument| annotation_depends_on(argument, parameters))
+            || annotation_depends_on(result, parameters),
+        TypeAnnotationKind::Union(members) => members.iter().any(|member| annotation_depends_on(member, parameters)),
+        TypeAnnotationKind::ShapeSpread(name) => parameters.contains(name.as_str()),
+        TypeAnnotationKind::DimensionConstant(_) | TypeAnnotationKind::DimensionRuntime(_) => false,
     }
 }
 
@@ -3429,6 +3463,28 @@ fn dim_expr_annotation(dimension: &severian_universal::DimExpr) -> TypeAnnotatio
 #[cfg(test)]
 mod environment_tests {
     use super::*;
+
+    #[test]
+    fn generic_type_tests_and_concrete_trait_fields_do_not_require_equality_on_the_receiver() {
+        let context = severian_bootstrap::load().unwrap();
+        for (body, valid) in [
+            ("return value is int", true),
+            ("return value == value", false),
+            ("return value.cursor + 1", true),
+            ("return value.optional == None", true),
+        ] {
+            let source = severian_source::SourceFile::virtual_source("generic-fields.sev", format!(
+                "trait Window:\n    cursor: u32\n    optional: u32 | None\ndef inspect[T: Window](value: T):\n    {body}\n"
+            ));
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            let graph = ModuleGraph { policies: Default::default(), modules: vec![severian_modules::ResolvedModule {
+                id: ModuleId(0), package: PackageId(0), path: "generic-fields.sev".into(), source, ast, imports: Vec::new(),
+            }] };
+            let index = collect_declarations(&graph).unwrap();
+            let result = validate_generic_bodies(&graph, &index, &context.types);
+            assert_eq!(result.is_ok(), valid, "{body}: {result:?}");
+        }
+    }
 
     fn constructor(source: &str) -> severian_ast::FunctionDeclaration {
         let source = severian_source::SourceFile::virtual_source("constructor.sev", source);

@@ -571,6 +571,14 @@ pub(crate) fn analyze_with_package_functions(
             });
         }
         let mut result = analyzer.resolve_source_type(&ast_function.result)?;
+        // An unannotated process entry may return an exit status. Ordinary
+        // functions and explicitly annotated unit entries keep their contract.
+        if ast_function.name == "main"
+            && !ast_function.result_declared
+            && ast_function.body.as_deref().is_some_and(returns_value)
+        {
+            result = analyzer.types.resolve_name("i32").expect("bootstrap defines i32");
+        }
         if expected_throw_functions.contains(&ast_function.name)
             && !analyzer.fallible_types.contains_key(&result)
             && !analyzer.is_error_type(result)
@@ -782,6 +790,17 @@ pub(crate) fn analyze_with_package_functions(
             None,
         )?;
         if function.name == "main" {
+            let unit = analyzer.types.resolve_name("unit").expect("bootstrap defines unit");
+            let integer = analyzer.types.primitive(function.result.ty).is_some_and(|primitive| matches!(
+                primitive.representation,
+                severian_universal::PrimitiveRepresentation::Integer { .. }
+                    | severian_universal::PrimitiveRepresentation::PointerInteger { .. }
+            ));
+            if function.result.ty != unit && !integer {
+                return Err(Diagnostic::new(
+                    "E000209", "entry result must be unit or an integer exit status", Some(ast_function.result.span),
+                ).with_help("Use `-> i32` for a process exit status, or omit value returns for a unit entry."));
+            }
             let arguments_type = analyzer
                 .types
                 .resolve_name("args")
@@ -1218,7 +1237,74 @@ pub(crate) fn normalize_extensions(
         !matches!(item, severian_ast::Item::Extension(extension) if extension.decorators.is_empty())
     });
     collapse_zipped_type_families(&mut normalized, &union_members)?;
+    inherit_trait_defaults(&mut normalized)?;
     Ok(normalized)
+}
+
+fn inherit_trait_defaults(ast: &mut severian_ast::Module) -> Result<(), Diagnostic> {
+    let traits = ast.items.iter().filter_map(|item| match item {
+        severian_ast::Item::Trait(declaration) => Some((declaration.name.clone(), declaration.clone())),
+        _ => None,
+    }).collect::<BTreeMap<_, _>>();
+    for item in &mut ast.items {
+        let severian_ast::Item::Class(class) = item else { continue; };
+        let explicit_methods = class.methods.iter().map(|method| method.name.clone()).collect::<BTreeSet<_>>();
+        let explicit_fields = class.fields.iter().map(|field| field.name.clone()).collect::<BTreeSet<_>>();
+        let mut methods = BTreeMap::new();
+        let mut fields = BTreeMap::new();
+        let mut visited = BTreeSet::new();
+        let mut pending = class.traits.iter().cloned().map(|bound| (bound, Vec::<String>::new())).collect::<Vec<_>>();
+        while let Some((bound, path)) = pending.pop() {
+            let Some((name, arguments)) = bound.named_parts() else { continue; };
+            let Some(declaration) = traits.get(name) else { continue; };
+            if path.iter().any(|ancestor| ancestor == name) {
+                return Err(Diagnostic::new("E000218", "trait inheritance cycle", Some(bound.span)));
+            }
+            if !visited.insert(render_type_annotation(&bound)) { continue; }
+            let substitutions = declaration.type_parameters.iter().cloned().zip(arguments.iter().cloned()).collect::<BTreeMap<_, _>>();
+            let generic = package::generic::Substitution::from_iter(substitutions.iter().map(|(name, value)| (name.clone(), render_type_annotation(value))));
+            for method in declaration.methods.iter().filter(|method| method.body.is_some()) {
+                if explicit_methods.contains(&method.name) { continue; }
+                if let Some((owner, span)) = methods.get(&method.name) {
+                    if *span == method.span || path.contains(owner) { continue; }
+                    return Err(Diagnostic::new("E000218", format!("ambiguous default method `{}.{}`", class.name, method.name), Some(method.span)));
+                }
+                methods.insert(method.name.clone(), (name.to_owned(), method.span));
+                class.methods.push(package::generic::specialize_member(method, &generic));
+            }
+            for field in declaration.properties.iter().filter(|field| field.default.is_some()) {
+                if explicit_fields.contains(&field.name) { continue; }
+                if let Some((owner, span)) = fields.get(&field.name) {
+                    if *span == field.span || path.contains(owner) { continue; }
+                    return Err(Diagnostic::new("E000218", format!("ambiguous default field `{}.{}`", class.name, field.name), Some(field.span)));
+                }
+                fields.insert(field.name.clone(), (name.to_owned(), field.span));
+                class.fields.push(package::generic::specialize_property(field, &generic));
+            }
+            let mut path = path;
+            path.push(name.to_owned());
+            for base in &declaration.bases {
+                pending.push((substitute_type_annotation(base, &substitutions), path.clone()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn returns_value(body: &[AstStatement]) -> bool {
+    body.iter().any(|statement| match statement {
+        AstStatement::Return { value, .. } => value.is_some(),
+        AstStatement::Unsafe { body, .. }
+        | AstStatement::Placement { body, .. }
+        | AstStatement::FallibleElse { body, .. }
+        | AstStatement::While { body, .. }
+        | AstStatement::For { body, .. } => returns_value(body),
+        AstStatement::If { then_block, else_block, .. } => returns_value(then_block) || returns_value(else_block),
+        AstStatement::Try { body, catch_body, .. } => returns_value(body) || returns_value(catch_body),
+        AstStatement::Match { cases, .. } => cases.iter().any(|case| returns_value(&case.body)),
+        AstStatement::Select { cases, error_body, .. } => cases.iter().any(|case| returns_value(&case.body)) || returns_value(error_body),
+        _ => false,
+    })
 }
 
 fn collapse_zipped_type_families(
@@ -8886,6 +8972,7 @@ impl Analyzer<'_> {
                                 hook: None,
                                 parameters: Vec::new(),
                                 result: operator.result.clone(),
+                                result_declared: true,
                                 body: Some(operator.body.clone()),
                                 span: operator.span,
                             };
@@ -10028,6 +10115,7 @@ impl Analyzer<'_> {
                 })
                 .collect(),
             result: implementation.result.clone(),
+            result_declared: true,
             body: Some(implementation.body.clone()),
             span: implementation.span,
         };
@@ -12945,6 +13033,7 @@ impl Analyzer<'_> {
                     hook: None,
                     parameters: Vec::new(),
                     result: operator.result.clone(),
+                                result_declared: true,
                     body: Some(operator.body.clone()),
                     span: operator.span,
                 };
@@ -19390,6 +19479,11 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                     .iter()
                     .filter(|method| method.name == required.name)
                     .collect::<Vec<_>>();
+                if named.is_empty() && required.body.is_some() {
+                    // The contract supplies an implementation; classes only
+                    // have to provide methods whose contract is abstract.
+                    continue;
+                }
                 if named.is_empty() {
                     return Err(Diagnostic::new(
                         "E000218",
@@ -19400,16 +19494,20 @@ fn validate_trait_implementations(ast: &severian_ast::Module) -> Result<(), Diag
                         Some(class.span),
                     ));
                 }
-                let required_parameters = required
-                    .parameters
-                    .iter()
-                    .map(|parameter| {
-                        substitute_type_annotation(&parameter.annotation, &trait_substitution)
-                    })
-                    .collect::<Vec<_>>();
-                let required_result =
-                    substitute_type_annotation(&required.result, &trait_substitution);
                 let provided = named.iter().copied().find(|provided| {
+                    if required.type_parameters.len() != provided.type_parameters.len() {
+                        return false;
+                    }
+                    // Method-local type parameters are binders. Their names
+                    // may differ, and they shadow enclosing trait parameters.
+                    let mut substitution = trait_substitution.clone();
+                    for (required, provided) in required.type_parameters.iter().zip(&provided.type_parameters) {
+                        substitution.insert(required.clone(), TypeAnnotation::named(provided, Vec::new(), class.span));
+                    }
+                    let required_parameters = required.parameters.iter().map(|parameter|
+                        substitute_type_annotation(&parameter.annotation, &substitution)
+                    ).collect::<Vec<_>>();
+                    let required_result = substitute_type_annotation(&required.result, &substitution);
                     required_parameters.len() == provided.parameters.len()
                         && required_parameters.iter().zip(&provided.parameters).all(
                             |(required, provided)| {
@@ -21356,6 +21454,67 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn unannotated_entry_value_returns_use_the_process_status_contract() {
+        for source in [
+            "def main():\n    return 0\n",
+            "def main():\n    if true:\n        return 7\n    return 3\n",
+            "def main(args: args):\n    return 7\n",
+        ] {
+            let (program, context) = analyze_source(source);
+            let module = &program.modules[0];
+            let entry = module.functions.iter().find(|function| Some(function.id) == module.entry).unwrap();
+            assert_eq!(entry.result.ty, context.types.resolve_name("i32").unwrap());
+            severian_mir::build(&program).unwrap();
+        }
+        let (program, context) = analyze_source("def main():\n    return\n");
+        assert_eq!(program.modules[0].functions[0].result.ty, context.types.resolve_name("unit").unwrap());
+    }
+
+    #[test]
+    fn entry_status_inference_does_not_override_an_explicit_result() {
+        let context = severian_bootstrap::load().unwrap();
+        for source in ["def main() -> unit:\n    return 0\n", "def ordinary():\n    return 0\n"] {
+            let source = SourceFile::virtual_source("entry.sev", source);
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            assert_eq!(analyze(&ast, &context.types).unwrap_err().code, "E000210");
+        }
+        let (program, context) = analyze_source("def main() -> int:\n    return 7\n");
+        assert_eq!(program.modules[0].functions[0].result.ty, context.types.resolve_name("int").unwrap());
+    }
+
+    #[test]
+    fn trait_method_type_parameters_match_by_binding_not_spelling() {
+        for (implementation, valid) in [
+            ("def read[R](value: R) -> R:\n        return value", true),
+            ("def read[R](value: R) -> int:\n        return 0", false),
+            ("def read(value: int) -> int:\n        return value", false),
+        ] {
+            let source = SourceFile::virtual_source("generic-trait.sev", format!(
+                "trait Reader:\n    def read[T](value: T) -> T\nclass Box: Reader\n    {implementation}\n"
+            ));
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            assert_eq!(validate_trait_implementations(&ast).is_ok(), valid, "{implementation}");
+        }
+    }
+
+    #[test]
+    fn trait_defaults_supply_fields_and_methods_to_the_concrete_class() {
+        let (program, _) = analyze_source(
+            "trait Base:\n    value: int = 7\n    def read() -> int:\n        return self.value\ntrait Derived: Base\nclass Box: Derived\n    marker: bool = false\ndef main() -> int:\n    return Box().read()\n"
+        );
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn unrelated_trait_defaults_require_an_explicit_override() {
+        let source = SourceFile::virtual_source("defaults.sev",
+            "trait Left:\n    def read() -> int:\n        return 1\ntrait Right:\n    def read() -> int:\n        return 2\nclass Box: Left + Right\n    marker: bool = false\n"
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        assert_eq!(normalize_extensions(&ast).unwrap_err().code, "E000218");
     }
 
     #[test]

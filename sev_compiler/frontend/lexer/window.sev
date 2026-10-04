@@ -49,7 +49,7 @@ class SourceWindow: Window
         return SourceWindow(self.source, start, end, start)
 
     def span() -> Span:
-        return Span(self.source.id, self.start, self.end)
+        return Span(self.source.source_id, self.start, self.end)
 
     def text() -> string:
         return self.source.text[self.start:self.end]

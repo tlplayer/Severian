@@ -27,7 +27,7 @@ class SourceFile:
     byte_offsets: list[int] = []
 
     def SourceFile(id: u32, path: string, text: string):
-        self.id = id
+        self.source_id = id
         self.path = path
         self.text = text
         self.characters = text.characters()
@@ -37,6 +37,13 @@ def span(source: u32, start: u32, end: u32) -> Span:
 
 def virtual_source(path: string, text: string) -> SourceFile:
     return SourceFile(0, path, text)
+
+
+test "source identity and Unicode scalar positions survive construction":
+    file = SourceFile(17, "unicode.sev", "x\nλ")
+    assert(file.source_id == 17)
+    assert(file.path == "unicode.sev")
+    assert(file.characters == ["x", "\n", "λ"])
 
 #UTF-8 offset
 def offset(file: SourceFile, offset: u32) -> u32 | Error:

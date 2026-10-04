@@ -71,6 +71,10 @@ class DefinitionId:
     declaration: DeclarationId
 
 
+# Existing consumers share this identity while migrating its spelling.
+DefinitionId as DefinitionID
+
+
 class TypeBinding:
     parameter: GenericParamId
     type_id: TypeId

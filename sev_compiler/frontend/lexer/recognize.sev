@@ -40,7 +40,7 @@ def recognize_declared(input: Window, label: Y, prefix: string, suffix: string, 
     if capture == "":
         if not lexical_boundary(input, capture_start):
             return None
-        lexeme = Lexeme(prefix, Span(input.source.id, start, capture_start))
+        lexeme = Lexeme(prefix, Span(input.source.source_id, start, capture_start))
         if not accepts(lexeme):
             return None
         return LexicalMatch(label, lexeme, None, [])
@@ -48,10 +48,10 @@ def recognize_declared(input: Window, label: Y, prefix: string, suffix: string, 
     while end >= capture_start + len(suffix):
         capture_end = end - u32(len(suffix))
         if input.source.text[capture_end:end] == suffix and lexical_boundary(input, end):
-            lexeme = Lexeme(input.source.text[capture_start:capture_end], Span(input.source.id, capture_start, capture_end))
+            lexeme = Lexeme(input.source.text[capture_start:capture_end], Span(input.source.source_id, capture_start, capture_end))
             if accepts(lexeme):
                 window = SourceWindow(input.source, capture_start, capture_end, capture_start)
-                matched = Lexeme(input.source.text[start:end], Span(input.source.id, start, end))
+                matched = Lexeme(input.source.text[start:end], Span(input.source.source_id, start, end))
                 return LexicalMatch(label, matched, None, [LexicalCapture(capture, window, terminal=true)])
         if end == capture_start + len(suffix):
             break

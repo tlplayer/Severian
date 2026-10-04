@@ -18,7 +18,7 @@ class TokenStream:
             entries.append(self.end.token)
         else:
             end = len(self.source.characters)
-            location = Span(self.source.id, end, end)
+            location = Span(self.source.source_id, end, end)
             entries.append(Token("EOF", Lexeme("", location), location))
         for token in entries:
             while cursor < token.span.start:
@@ -64,8 +64,8 @@ def escape_token_spelling(text: string) -> string:
 
 test "token printing retains lines without inventing symbol resolution":
     source = virtual_source("tokens.sev", "x\nλ")
-    first = Span(source.id, 0, 1)
-    second = Span(source.id, 2, 3)
+    first = Span(source.source_id, 0, 1)
+    second = Span(source.source_id, 2, 3)
     stream = TokenStream(source, [Token("Identifier", Lexeme("x", first), first), Token("Identifier", Lexeme("λ", second), second)])
     assert(stream.print() == "tokens.sev:1:1  [0] Identifier \"x\"\ntokens.sev:2:1  [2] Identifier \"λ\"\ntokens.sev:2:2  [3,4) EOF \"\"\n")
 
@@ -74,7 +74,7 @@ test "token printing counts CRLF and CR lines in Unicode scalar coordinates":
     source = virtual_source("lines.sev", "x\r\nλ\rz\n")
     tokens: list[Token] = []
     for start in [0, 3, 5]:
-        location = Span(source.id, u32(start), u32(start + 1))
+        location = Span(source.source_id, u32(start), u32(start + 1))
         tokens.append(Token("IDENTIFIER", Lexeme(source.text[start:start + 1], location), location))
     stream = TokenStream(source, tokens)
     assert(stream.print() == "lines.sev:1:1  [0] IDENTIFIER \"x\"\nlines.sev:2:1  [3] IDENTIFIER \"λ\"\nlines.sev:3:1  [5] IDENTIFIER \"z\"\nlines.sev:4:1  [7,8) EOF \"\"\n")
@@ -84,7 +84,7 @@ test "token printing counts CRLF and CR lines in Unicode scalar coordinates":
 test "token printing distinguishes escaped source and competing classifications":
     assert(escape_token_spelling("\\n\n\t\r\"") == "\\\\n\\n\\t\\r\\\"")
     source = virtual_source("keyword.sev", "if")
-    location = Span(source.id, 0, 2)
+    location = Span(source.source_id, 0, 2)
     token = Token("IF", Lexeme("if", location), location, kinds=["IF", "IDENTIFIER"])
     stream = TokenStream(source, [token])
     expected = "keyword.sev:1:1  [0:1] IF|IDENTIFIER \"if\"\nkeyword.sev:1:3  [2,3) EOF \"\"\n"

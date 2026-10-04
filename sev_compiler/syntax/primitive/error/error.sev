@@ -23,7 +23,12 @@ trait Error:
     prefix: string | absent
 
 
-def Error(message: string) -> MessageError:
-    return MessageError(message)
-
+class MessageError: Error
+    note: string
+    type: ErrorType = ErrorType.E
+    persistence: ErrorPersistence = ErrorPersistence.Permanent
+    category: int = 0
+    code: int = 0
+    help: string = "Inspect the operation that reported this error."
+    prefix: string | absent = absent
 

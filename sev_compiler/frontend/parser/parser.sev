@@ -12,7 +12,8 @@ import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import ParserDiagnostic from "diagnostic.sev"
 import Block, BlockFile, SourceBlockId, global_source_block from "../../syntax/block/block.sev"
 import BlockGraph, BlockUnit, index_block_file from "../../hir/hir/src/dependencies.sev"
-import Span, virtual_source from "../source/source.sev"
+import SourceFile, Span, virtual_source from "../source/source.sev"
+import Program, partition from "../../hir/hir/src/program.sev"
 
 
 class TokenLine:
@@ -31,7 +32,7 @@ def token_lines(input: TokenStream) -> list[TokenLine]:
         spelling = token.lexeme.text
         if token.kind == "NEWLINE" or spelling == "\n" or spelling == "\r\n":
             if len(terms) > 0:
-                lines.append(TokenLine(terms, Lexeme(prefix, Span(input.source.id, start, start + u32(len(prefix))))))
+                lines.append(TokenLine(terms, Lexeme(prefix, Span(input.source.source_id, start, start + u32(len(prefix))))))
             terms = []
             prefix = ""
             start = token.span.end
@@ -43,20 +44,21 @@ def token_lines(input: TokenStream) -> list[TokenLine]:
         else:
             terms.append(token)
     if len(terms) > 0:
-        lines.append(TokenLine(terms, Lexeme(prefix, Span(input.source.id, start, start + u32(len(prefix))))))
+        lines.append(TokenLine(terms, Lexeme(prefix, Span(input.source.source_id, start, start + u32(len(prefix))))))
     return lines
 
 
-def attach_node(node: ResolvedGrammarNode, owner: SourceBlockId):
+def attach_node(node: ResolvedGrammarNode, owner: SourceBlockId, unit: int = 0):
     node.owner = owner
+    node.owner_unit = unit
     for child in node.children:
-        attach_node(child, owner)
+        attach_node(child, owner, unit)
 
 
-def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
+def parser(input: TokenStream, package: string = "", module: string = "") -> BlockGraph | list[Diagnostic]:
     root = global_source_block(input.source)
     root.context.identity = root.id
-    file = BlockFile(input.source.path, input.source.id, [root])
+    file = BlockFile(input.source.path, input.source.source_id, [root])
     graph = BlockGraph()
     root_providers: list[syntax.RegisteredGrammar] = []
     root_context = GrammarContext(body=root)
@@ -82,6 +84,7 @@ def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
         provider.span = root.span
         provider.subblocks = root.subblocks
     providers: list[B] = [provider]
+    root.implementation = provider
     ancestry: list[int] = [0]
     previous: dict[int, B] = {}
     pending: int | None = None
@@ -136,6 +139,11 @@ def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
                 body.context = value.context
                 body.context.identity = body.id
                 body.context.parent = body.parent
+                body.implementation = value
+                body.name = value.declaration_name
+                if value.partition_with_parent:
+                    enclosing = file.blocks[parent_index]
+                    body.partition_owner = enclosing.partition_owner if enclosing.partition_owner != None else enclosing.id
                 body.span = node.span
                 body.syntax_name = node.declaration
                 value.span = node.span
@@ -149,16 +157,30 @@ def parser(input: TokenStream) -> BlockGraph | list[Diagnostic]:
                 attach_node(node, body.id)
             else:
                 attach_node(node, file.blocks[parent_index].id)
+            # Header results stay ordered in the enclosing block; captures keep
+            # their selected owner and original source spans.
+            file.blocks[parent_index].contents.append(len(graph.nodes))
             graph.nodes.append(node)
         graph.types.extend(resolved.types)
         graph.expressions.extend(resolved.expressions)
     if pending != None:
         return [ParserDiagnostic("block header requires an indented body", file.blocks[pending].span, "parser.block")]
-    index_block_file(graph, BlockUnit(input.source.path, "", input.source.path, "global", file))
+    index_block_file(graph, BlockUnit(input.source.path, package, module, "", file))
     return graph
 
 
-def print(input: BlockGraph) -> string:
+# The public source entry retains stage diagnostics and hands MIR HIR's modules.
+def parse_source(input: SourceFile, package: string = "", module: string = "") -> Program | list[Diagnostic]:
+    tokens = lexer(input)
+    if tokens is list[Diagnostic]:
+        return tokens
+    graph = parser(tokens, package, module)
+    if graph is list[Diagnostic]:
+        return graph
+    return partition(graph)
+
+
+def format_blocks(input: BlockGraph) -> string:
     return input.print()
 
 
@@ -174,6 +196,24 @@ import lexer from "../lexer/tokenize.sev"
 import "../../syntax/block/if.sev" as _if_grammar
 import "../../syntax/primitive/bool/bool.sev" as _bool_grammar
 import "../../syntax/primitive/char/char.sev" as _character_grammar
+import "../../syntax/block/main.sev" as _main_grammar
+import "../../syntax/sentence/return.sev" as _return_grammar
+import Statement from "../../syntax/sentence/sentence.sev"
+
+
+test "main with an integer return retains its body and type-owned capture":
+    program = parse_source(virtual_source("main.sev", "def main():\n    return 0\n"), "example", "main")
+    assert(program is Program)
+    blocks = program.graph.units[0].file.blocks
+    assert(len(blocks) == 2)
+    assert(blocks[1].name == "main")
+    assert(blocks[1].parent == blocks[0].id)
+    assert(blocks[1].contents == [1])
+    returned = program.graph.nodes[1]
+    assert(returned.owner == blocks[1].id and returned.owner_unit == 0)
+    assert(returned.value.read[Statement](returned.span) is Statement)
+    assert(returned.children[0].span == Span(0, 23, 24))
+    assert(returned.children[0].value.read[int](returned.children[0].span) == 0)
 
 
 test "declared nested if blocks preserve concrete conditions and ownership":
@@ -211,9 +251,44 @@ test "block lines preserve indentation windows and quoted block markers":
     assert(len(lines) == 2)
     assert(lines[0].prefix.text == "")
     assert(lines[1].prefix.text == "    ")
-    assert(lines[1].prefix.span == Span(source.id, 9, 13))
+    assert(lines[1].prefix.span == Span(source.source_id, 9, 13))
     assert(len(lines[1].tokens) == 1)
     quoted = lines[1].tokens[0]
     assert(quoted.lexeme.text == "\"if false: # text\"")
-    assert(quoted.span.source_id == source.id)
+    assert(quoted.span.source_id == source.source_id)
     assert(source.text[quoted.span.start:quoted.span.end] == quoted.lexeme.text)
+
+
+test "tokenizer parser and HIR share blocks through module partitioning":
+    program = parse_source(virtual_source("nested.sev", "if true:\n    if false:\n        true\n"), "example", "main")
+    assert(program is Program)
+    assert(len(program.modules) == 1)
+    assert(program.modules[0].name == "main")
+    assert(len(program.submodules) == 1)
+    assert(len(program.submodules[0].blocks) == 3)
+    blocks = program.graph.units[0].file.blocks
+    assert(blocks[0].contents == [0])
+    assert(blocks[1].contents == [1])
+    assert(blocks[2].contents == [2])
+    assert(blocks[1].implementation != None)
+    for node in program.graph.nodes:
+        assert(node.owner_unit == 0)
+
+
+test "source to HIR keeps tokenizer and parser failures at their stage":
+    lexical = parse_source(virtual_source("unterminated.sev", "\"unfinished"))
+    assert(lexical is list[Diagnostic])
+    assert(len(lexical) > 0)
+    structural = parse_source(virtual_source("missing-body.sev", "if true:\n"))
+    assert(structural is list[Diagnostic])
+    assert(len(structural) > 0)
+
+
+test "empty source to HIR retains its global block and requested module":
+    program = parse_source(virtual_source("empty.sev", ""), "example", "main")
+    assert(program is Program)
+    assert(len(program.graph.units[0].file.blocks) == 1)
+    assert(len(program.submodules) == 1)
+    assert(len(program.modules) == 1)
+    assert(program.modules[0].package == "example")
+    assert(program.modules[0].name == "main")

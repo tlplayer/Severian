@@ -42,7 +42,7 @@ def recognize_window(input: Window, include_boundary: bool = false) -> list[Lexi
             if candidate == None:
                 continue
             span = candidate.lexeme.span
-            if probe.cursor != input.cursor or span.source_id != input.source.id or span.start != input.cursor or span.end < span.start or span.end > input.end or (span.end == span.start and not at_boundary):
+            if probe.cursor != input.cursor or span.source_id != input.source.source_id or span.start != input.cursor or span.end < span.start or span.end > input.end or (span.end == span.start and not at_boundary):
                 return LexicalDiagnostic("grammar returned an invalid consumed source range", input.span(), "lexer.recognize")
             if candidate.lexeme.text != input.source.text[span.start:span.end]:
                 return LexicalDiagnostic("grammar changed the original matched source spelling", span, "lexer.recognize")
@@ -54,14 +54,14 @@ def recognize_window(input: Window, include_boundary: bool = false) -> list[Lexi
         if len(candidates) == 0:
             if at_boundary:
                 return matches
-            return LexicalDiagnostic("no registered grammar recognizes this source", Span(input.source.id, input.cursor, input.cursor + 1), "lexer.recognize")
+            return LexicalDiagnostic("no registered grammar recognizes this source", Span(input.source.source_id, input.cursor, input.cursor + 1), "lexer.recognize")
         if len(candidates) != 1:
             return LexicalDiagnostic("ambiguous grammar declarations match this source", candidates[0].lexeme.span, "lexer.select")
         selected = candidates[0]
         for capture in selected.captures:
             child = capture.window
             span = selected.lexeme.span
-            if child.source.id != input.source.id or child.start < span.start or child.end > span.end or child.start > child.end or child.cursor != child.start:
+            if child.source.source_id != input.source.source_id or child.start < span.start or child.end > span.end or child.start > child.end or child.cursor != child.start:
                 return LexicalDiagnostic("grammar capture escaped its matched source range", span, "lexer.capture")
             if capture.terminal:
                 continue
@@ -88,7 +88,7 @@ class TestBoundary: Y
     def recognize(input: Window) -> LexicalMatch | None:
         if not input.finished() or input.end != len(input.source.characters):
             return None
-        lexeme = Lexeme("", Span(input.source.id, input.cursor, input.cursor))
+        lexeme = Lexeme("", Span(input.source.source_id, input.cursor, input.cursor))
         return LexicalMatch(self, lexeme, None, [])
 
 
@@ -101,7 +101,7 @@ class TestSpelling: Y
         end = input.cursor + u32(len(self.spelling))
         if input.source.text[input.cursor:end] != self.spelling:
             return None
-        lexeme = Lexeme(self.spelling, Span(input.source.id, input.cursor, end))
+        lexeme = Lexeme(self.spelling, Span(input.source.source_id, input.cursor, end))
         return LexicalMatch(self, lexeme, None, [])
 
 

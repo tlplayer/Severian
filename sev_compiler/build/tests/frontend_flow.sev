@@ -1,0 +1,169 @@
+import FrontendResult, analyze_source from "../build/src/pipeline/frontend.sev"
+import SourceFile, Span from "../../frontend/source/source.sev"
+import lexer from "../../frontend/lexer/tokenize.sev"
+import TokenStream from "../../frontend/lexer/stream.sev"
+import ParserDiagnostic from "../../frontend/parser/diagnostic.sev"
+import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
+import BlockAddress, same_block from "../../hir/hir/src/dependencies.sev"
+import Program from "../../hir/hir/src/program.sev"
+import B from "../../syntax/generic/block.sev"
+import "../../syntax/recognition.sev" as syntax
+import "../../syntax/block/function.sev" as _function_grammar
+import "../../syntax/block/if.sev" as _if_grammar
+import "../../syntax/primitive/bool/bool.sev" as _bool_grammar
+
+
+def named_block(program: Program, name: string) -> BlockAddress:
+    found: BlockAddress | None = None
+    for unit in range(len(program.graph.units)):
+        for block in program.graph.units[unit].file.blocks:
+            if block.name == name:
+                assert(found == None, "fixture declaration must have one block")
+                found = BlockAddress(unit, block.id)
+    if found == None:
+        throw Error("parser must retain the declaration's name")
+    return found
+
+
+def has_dependency(program: Program, consumer: BlockAddress, provider: BlockAddress) -> bool:
+    for edge in program.graph.dependencies:
+        if same_block(edge.consumer, consumer) and same_block(edge.provider, provider):
+            return true
+    return false
+
+
+test "pipeline source and syntax produce nested blocks and HIR modules":
+    source = SourceFile(41, "nested.sev", "if true:\n    if false:\n        true\n")
+    result = analyze_source(source, "integration", "main")
+    assert(result is FrontendResult)
+    tokens = result.tokens
+    expected = ["if", " ", "true", ":", "\n", "    ", "if", " ", "false", ":", "\n", "        ", "true", "\n"]
+    assert(len(tokens.tokens) == len(expected))
+    cursor: u32 = 0
+    for index in range(len(expected)):
+        token = tokens.tokens[index]
+        end = cursor + u32(len(expected[index]))
+        assert(token.lexeme.text == expected[index])
+        assert(token.span == Span(41, cursor, end))
+        assert(token.lexeme.span == token.span)
+        cursor = end
+    assert(cursor == len(source.characters))
+    assert(tokens.end.token.kind == "EOF")
+    assert(tokens.end.token.span == Span(41, cursor, cursor))
+
+    program = result.program
+    graph = program.graph
+    assert(len(graph.units) == 1)
+    blocks = graph.units[0].file.blocks
+    assert(len(blocks) == 3)
+    assert(blocks[0].parent == None)
+    assert(blocks[1].parent == blocks[0].id)
+    assert(blocks[2].parent == blocks[1].id)
+    assert(blocks[0].subblocks == [blocks[1].id])
+    assert(blocks[1].subblocks == [blocks[2].id])
+    assert(blocks[0].contents == [0])
+    assert(blocks[1].contents == [1])
+    assert(blocks[2].contents == [2])
+    assert(len(graph.nodes) == 3)
+    first = graph.nodes[0].children[0]
+    second = graph.nodes[1].children[0]
+    assert(first.value.read[bool](first.span) == true)
+    assert(second.value.read[bool](second.span) == false)
+    assert(first.span == Span(41, 3, 7))
+    assert(second.span == Span(41, 16, 21))
+    assert(first.owner == blocks[1].id and first.owner_unit == 0)
+    assert(second.owner == blocks[2].id and second.owner_unit == 0)
+    assert(graph.nodes[2].span == Span(41, 31, 35))
+    assert(graph.nodes[2].value.read[bool](graph.nodes[2].span) == true)
+    for index in range(len(graph.nodes)):
+        assert(graph.nodes[index].owner_unit == 0)
+    assert(graph.nodes[0].owner == blocks[1].id)
+    assert(graph.nodes[1].owner == blocks[2].id)
+    assert(graph.nodes[2].owner == blocks[2].id)
+    assert(len(program.submodules) == 1)
+    assert(len(program.submodules[0].blocks) == 3)
+    assert(len(program.modules) == 1)
+    assert(program.modules[0].package == "integration")
+    assert(program.modules[0].name == "main")
+    assert(program.modules[0].submodules == [0])
+
+
+test "pipeline derives recursive dependencies from source before HIR partitioning":
+    source = SourceFile(42, "recursion.sev", "def first():\n    second()\n\ndef second():\n    first()\n\ndef independent():\n    return\n")
+    result = analyze_source(source, "integration", "main")
+    assert(result is FrontendResult)
+    program = result.program
+    first = named_block(program, "first")
+    second = named_block(program, "second")
+    independent = named_block(program, "independent")
+    assert(has_dependency(program, first, second))
+    assert(has_dependency(program, second, first))
+    assert(not has_dependency(program, first, independent))
+    assert(not has_dependency(program, second, independent))
+    assert(not has_dependency(program, independent, first))
+    assert(not has_dependency(program, independent, second))
+    recursive = program.submodule_of(first)
+    separate = program.submodule_of(independent)
+    assert(program.submodule_of(second) == recursive)
+    assert(recursive != separate)
+    assert(program.submodules[recursive].dependencies == [])
+    assert(program.submodules[separate].dependencies == [])
+    assert(len(program.modules) == 1)
+    assert(recursive in program.modules[0].submodules)
+    assert(separate in program.modules[0].submodules)
+    assert(program.modules[0].package == "integration")
+    assert(program.modules[0].name == "main")
+
+
+# Real type-owned grammars join the compiler-generated registry. The source
+# marker is unique to this integration fixture; trying it must not run a body.
+ambiguity_constructions: list[string] = []
+
+
+class FirstAmbiguousLiteral:
+    grammar literal["__hir_ambiguity_fixture__"]() -> bool:
+        ambiguity_constructions.append("first")
+        return true
+
+
+class SecondAmbiguousLiteral:
+    grammar literal["__hir_ambiguity_fixture__"]() -> bool:
+        ambiguity_constructions.append("second")
+        return false
+
+
+def assert_ambiguous_pipeline(source: SourceFile):
+    tokens = lexer(source)
+    assert(tokens is TokenStream)
+    assert(len(tokens.tokens) == 1)
+    assert("FirstAmbiguousLiteral.literal" in tokens.tokens[0].declarations)
+    assert("SecondAmbiguousLiteral.literal" in tokens.tokens[0].declarations)
+    assert(tokens.tokens[0].span == Span(43, 0, u32(len(source.characters))))
+    assert(ambiguity_constructions == [])
+    result = analyze_source(source, "integration", "main")
+    assert(result is list[Diagnostic])
+    assert(len(result) == 1)
+    diagnostic = result[0]
+    assert(diagnostic is ParserDiagnostic)
+    assert(diagnostic.step == "parser.select")
+    assert(diagnostic.note == "multiple grammar interpretations remain admissible")
+    assert(diagnostic.span == tokens.tokens[0].span)
+    assert(ambiguity_constructions == [])
+
+
+test "pipeline rejects ambiguous type grammars before construction in either order":
+    source = SourceFile(43, "ambiguity.sev", "__hir_ambiguity_fixture__")
+    ambiguity_constructions.clear()
+    original = syntax.registry()
+    block_grammars = syntax.registry(B)
+    assert_ambiguous_pipeline(source)
+    reversed = original[::-1]
+    # Only visitation order changes; recognition and all pipeline stages are real.
+    mock(
+        syntax.registry(None) -> reversed,
+        syntax.registry(B) -> block_grammars[::-1],
+        else throw Error("unexpected grammar contract in ambiguity fixture")
+    )
+    assert(syntax.registry() == reversed)
+    assert(syntax.registry(None) == reversed)
+    assert_ambiguous_pipeline(source)

@@ -1,78 +1,61 @@
-# SIP-0017: Parser/Lexer Span Dispatch
+# SIP-0017: Parser
 
-Status: Draft
+Status: Draft | Accepted | Implementing | Implemented | Rejected | Superseded
+Type: Language | Compiler | Runtime | Tooling | Package | Interop | Process
+Authors:
+Created: YYYY-MM-DD
+Target:
+Supersedes:
+Superseded by:
 
-## Contract
+## Appendix
 
-Parsing dispatches on the value of a source span. Language declarations implement
-the existing generic and trait contracts and declare acceptance conditions through
-`with`. The lexer/parser applies those contracts instead of acquiring a special
-case whenever the language gains syntax.
+-- all terms, file formats, variables, classes, functions, traits in a table
 
-The intended interface is schematically:
 
-```sev
-trait Lexeme:
-    def parse(span: view string) -> T with {
-        ...
-    }
+| Record | Contents |
+|---|---|
+| `BlockGraph` | Source units, blocks, sentences, semantic terms, bindings, uses, constraints, and dependency edges. |
+| `Block` | Identity, source span, implementing `B`, enclosing scope, and ordered references to its contents. |
+| `Sentence` | Owning block, source span, grammar declaration identity, captures, and references to its semantic results. |
+| Semantic term | A declaration, expression, operation, type, literal value, or other syntax-defined result retaining its concrete contract. |
+| Binding/use | A declaration’s identity and scope, or a reference awaiting resolution. |
+| Dependency | Consumer → provider, with the originating use/span explaining why it exists. |
+| `Submodule` | A resolved group of blocks, its interface, and dependencies on other submodules. |
+| HIR result | The graph plus its submodule partition and exported interfaces. |
+
+## Context
+
+Once the lexer has tokenized the source file according to syntax. The parser then attempts to group by the grammar defined. 
+First grouping blocks, then sentences, then atomic operations like a = b, a = 1+1, etc. So we don't miss parse items. 
+
+## Structure
+
+Blocks and terms live in indexed collections and reference one another by ID. This preserves sharing, cycles, and cross-file references. Ordered block contents preserve sentence order. The grammar’s implementing declaration supplies behavior; adding a new block form should not require another compiler-owned IfBlock-style variant.
+There are three relationships we must keep distinct:
+- Containment: where a sentence or nested block belongs.
+- Scope: where a name is visible.
+- Dependency: which declaration or implementation a consumer requires.
+[SIP-0013](/home/tplayer/Documents/Severian/docs/sip/0013-Submodule.md) specifies strongly connected components for submodules. We should apply that to semantic dependencies. Mutually recursive declarations belong together; merely sharing a file or enclosing class does not force them together. A callable’s internal execution blocks remain attached to that callable during partitioning.
+
+## Structure
+
+### Data Models
+
 ```
 
-Implementers supply concrete result contracts and acceptance predicates. `Y`
-connects lexemes and tokens to symbols; `S` describes sentences; `B` describes
-blocks; `G` describes their grammar; `W` supplies constraints. These retain their
-existing meanings and the traits required of their implementers.
-
-## Source windows
-
-The frontend starts with the source window, establishes its blocks, and recursively
-establishes windows for their nested blocks and sentence regions. Enclosing
-structure is recognized before its captured regions are resolved. Delimiters,
-indentation, and the selected grammar establish the boundaries; quoted contents
-and nested regions retain their own boundaries. Every window retains its original
-source location for diagnostics.
-
-Within a window, candidates come from implementers of the required contract.
-Their `with` conditions progressively exclude incompatible implementations.
-Resolving a captured window can establish facts required by an enclosing candidate.
-A class declaration therefore fails the assignment contract through its declared
-conditions, rather than through a parser exception for `class`.
-
-For dictionary construction, the class declares a sentence recognizing braces
-around repeated key/value captures separated by commas. That sentence invokes
-the dictionary's construction behavior. Braces alone do not establish a block.
-
-## Resolution
-
-Resolution follows the existing interface dispatch scheme:
-
-1. Restrict candidates by the required trait and concrete type contracts.
-2. Evaluate ready `with` constraints and exclude refuted candidates.
-3. Resolve captured regions needed by remaining constraints; unknown candidates
-   remain eligible.
-4. Invoke the parse body only when exactly one implementation is admissible.
-
-Zero matches is a syntax failure for the required contract. Multiple surviving
-matches is ambiguity. Declaration order, priority, or cost does not choose a
-winner. Failure in the selected body is a diagnostic, not a dispatch retry.
-Constraint evaluation follows SIP-0007's existing safety and dependency rules.
-
-## Example
-
-```sev
-if 1 == 0.0:
-    return false
 ```
 
-`if` is a `B` and controls CFG manipulation. Its declaration captures a condition
-window and a body window. The condition resolves its operands through their literal
-contracts and `==` through the applicable operation contract. The body resolves
-`return` and the boolean literal `false` through their declarations.
+## Problem(s)
 
-The integer spelling contract accepts `0`; floating spelling accepts `0.0` and
-`.0`. Literal recognition and construction belong to the implementing types.
-The frontend applies their declared conditions rather than hiding those decisions
-inside parser branches.
+For the parser → HIR boundary, successful output should guarantee:
+- Valid, source-qualified identities and exact source spans.
+- Explicit ownership and ordering for every sentence and block.
+- Captures and syntax-defined results retained.
+- Unresolved names, types, or constraints represented explicitly.
 
-Adding or refining syntax therefore changes the implementing declarations and
-their `with` conditions, using the same frontend dispatch machinery.
+## Examples
+
+## Testing
+
+
