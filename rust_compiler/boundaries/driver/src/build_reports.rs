@@ -1,26 +1,44 @@
 //! Disposable reports shared by an update and its child compiler invocations.
-use severian_driver::config::Manifest;
+use crate::config::Manifest;
 use severian_diagnostics::{Diagnostic, DiagnosticContext};
 use severian_source::SourceFile;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::hash::{Hash, Hasher};
 
-pub(crate) const ENV: &str = "SEVERIAN_BUILD_REPORT_DIR";
+thread_local! {
+    static ACTIVE_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
 
-pub(crate) struct Reports {
-    pub(crate) root: PathBuf,
+pub fn warning(source: &Path, message: &str) -> Result<(), String> {
+    let root = ACTIVE_ROOT.with(|root| root.borrow().clone())
+        .or_else(|| std::env::var_os(ENV).filter(|value| !value.is_empty()).map(PathBuf::from));
+    if let Some(root) = root {
+        Reports { root }.record("dependencies", "warning", source, message)
+    } else {
+        eprintln!("warning: {message}");
+        Ok(())
+    }
+}
+
+pub const ENV: &str = "SEVERIAN_BUILD_REPORT_DIR";
+
+pub struct Reports {
+    pub root: PathBuf,
 }
 
 impl Reports {
-    pub(crate) fn begin() -> Result<Self, String> {
+    pub fn begin() -> Result<Self, String> {
         let inherited = std::env::var_os(ENV).filter(|value| !value.is_empty());
         let root = match &inherited {
             Some(root) => PathBuf::from(root),
             None => std::env::current_dir().map_err(|error| error.to_string())?.join("package.pkg/debug/build"),
         };
-        Self::open(root, inherited.is_none())
+        let reports = Self::open(root, inherited.is_none())?;
+        ACTIVE_ROOT.with(|root| *root.borrow_mut() = Some(reports.root.clone()));
+        Ok(reports)
     }
 
     fn open(root: PathBuf, reset: bool) -> Result<Self, String> {
@@ -28,17 +46,20 @@ impl Reports {
             fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
         }
         fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        if reset || !root.join("log.txt").exists() {
+            fs::write(root.join("log.txt"), "Build trace (grouped by source file)\n").map_err(|error| error.to_string())?;
+        }
         Ok(Self { root })
     }
 
-    pub(crate) fn record(&self, step: &str, category: &str, source: &Path, message: &str) -> Result<(), String> {
-        if !matches!(category, "error" | "lint" | "warning") {
+    pub fn record(&self, step: &str, category: &str, source: &Path, message: &str) -> Result<(), String> {
+        if !matches!(category, "error" | "lint" | "warning" | "trace") {
             return Err(format!("invalid build report category: {category}"));
         }
         let step = if step.trim().is_empty() { "build" } else { step };
         let step: String = step.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
         let directory = self.root.join(step);
-        for category in ["error", "lint", "warning"] {
+        for category in ["error", "lint", "warning", "trace"] {
             fs::create_dir_all(directory.join(category)).map_err(|error| error.to_string())?;
         }
         let record = serde_json::json!({"source": source, "message": message,
@@ -99,7 +120,7 @@ impl Reports {
         let record = serde_json::json!({"code": diagnostic.code, "source": location,
             "span": span, "message": diagnostic.to_string(), "status": "reported", "callers": [caller]});
         let step: String = step.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
-        for category in ["error", "lint", "warning"] {
+        for category in ["error", "lint", "warning", "trace"] {
             fs::create_dir_all(self.root.join(&step).join(category)).map_err(|error| error.to_string())?;
         }
         self.store(&self.root.join(step).join("error"), key, record)?;
@@ -107,8 +128,8 @@ impl Reports {
         Ok(())
     }
 
-    pub(crate) fn scan(&self, manifest: Option<&Manifest>, input: &Path) -> Result<(Vec<PathBuf>, bool), String> {
-        eprintln!("[build] Discovering source files: {}", input.display());
+    pub fn scan(&self, manifest: Option<&Manifest>, input: &Path) -> Result<(Vec<PathBuf>, bool), String> {
+        self.record("build", "trace", input, "Discovering source files")?;
         let mut files = BTreeSet::new();
         if let Some(manifest) = manifest {
             for package in manifest.package_graph.packages.values() {
@@ -120,12 +141,7 @@ impl Reports {
         let mut valid = Vec::new();
         let mut failed = false;
         let total = files.len();
-        let mut last_progress = std::time::Instant::now();
-        for (index, path) in files.into_iter().enumerate() {
-            if index == 0 || index + 1 == total || last_progress.elapsed().as_secs() >= 1 {
-                eprintln!("[build] Lexer/parser {}/{}: {}", index + 1, total, path.display());
-                last_progress = std::time::Instant::now();
-            }
+        for path in files {
             let source = match SourceFile::load(&path) {
                 Ok(source) => source,
                 Err(error) => {
@@ -143,23 +159,62 @@ impl Reports {
                 }
             };
             match severian_parser::parse_with_max_errors(&tokens, usize::MAX) {
-                Ok(_) => valid.push(path),
+                Ok(_) => {
+                    self.record("parser", "trace", &path, "Source parsed successfully")?;
+                    valid.push(path);
+                }
                 Err(error) => {
                     self.diagnostic(error, &source, "parser")?;
                     failed = true;
                 }
             }
         }
-        eprintln!("[build] Lexer/parser finished: {} of {} files parsed successfully", valid.len(), total);
+        self.record("build", "trace", input, &format!("Lexer/parser: {} of {total} files parsed successfully", valid.len()))?;
         Ok((valid, failed))
     }
 
-    pub(crate) fn failure(&self) -> String {
-        format!("build failed; collected reports: {}", self.root.display())
+    pub fn finish(&self) -> Result<(), String> {
+        fn read(directory: &Path, groups: &mut BTreeMap<String, Vec<(String, serde_json::Value)>>) -> Result<(), String> {
+            for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
+                let path = entry.map_err(|error| error.to_string())?.path();
+                if path.is_dir() { read(&path, groups)?; }
+                else if path.extension().is_some_and(|extension| extension == "json") {
+                    let record: serde_json::Value = serde_json::from_slice(&fs::read(&path).map_err(|error| error.to_string())?)
+                        .map_err(|error| error.to_string())?;
+                    let source = record["source"].as_str().unwrap_or("build/update").to_owned();
+                    let category = path.parent().and_then(Path::file_name).unwrap().to_string_lossy();
+                    let stage = path.parent().and_then(Path::parent).and_then(Path::file_name).unwrap().to_string_lossy();
+                    groups.entry(source).or_default().push((format!("{stage}/{category}"), record));
+                }
+            }
+            Ok(())
+        }
+        let mut groups = BTreeMap::new();
+        read(&self.root, &mut groups)?;
+        let mut output = String::from("Build trace (grouped by source file)\n");
+        for (source, mut records) in groups {
+            output.push_str(&format!("\n===== {source} =====\n"));
+            records.sort_by_key(|(stage, record)| (stage.clone(), record["span"][0].as_u64().unwrap_or(0), record["message"].as_str().unwrap_or("").to_owned()));
+            for (stage, record) in records {
+                output.push_str(&format!("\n[{stage}]\n{}\n", record["message"].as_str().unwrap_or("")));
+                if let Some(callers) = record["callers"].as_array() {
+                    for caller in callers {
+                        if let Some(caller) = caller.as_str().filter(|caller| *caller != source) {
+                            output.push_str(&format!("  required by: {caller}\n"));
+                        }
+                    }
+                }
+            }
+        }
+        fs::write(self.root.join("log.txt"), output).map_err(|error| error.to_string())
     }
 
-    pub(crate) fn compile_error(&self, source: &Path, error: &severian_driver::CompileError) -> Result<(), String> {
-        use severian_driver::CompileError;
+    pub fn failure(&self) -> String {
+        format!("build failed; see {}", self.root.join("log.txt").display())
+    }
+
+    pub fn compile_error(&self, source: &Path, error: &crate::CompileError) -> Result<(), String> {
+        use crate::CompileError;
         if let CompileError::Diagnostic(diagnostic) = error {
             let fallback = match diagnostic.code {
                 "E000101" | "E000102" | "E000103" => "lexer",
@@ -185,8 +240,8 @@ impl Reports {
     }
 }
 
-pub(crate) fn owner_manifest(source: &Path) -> Option<PathBuf> {
-    source.ancestors().skip(1).map(severian_driver::config::document::path)
+pub fn owner_manifest(source: &Path) -> Option<PathBuf> {
+    source.ancestors().skip(1).map(crate::config::document::path)
         .find(|path| path.is_file())
 }
 
@@ -224,13 +279,22 @@ mod tests {
         let source = SourceFile::virtual_source("shared.sev", "invalid\n");
         let diagnostic = Diagnostic::new("E000112", "invalid declaration", Some(severian_source::Span::new(source.id, 0, 7)))
             .with_source(source);
-        reports.compile_error(Path::new("first.sev"), &severian_driver::CompileError::Diagnostic(diagnostic.clone())).unwrap();
-        reports.compile_error(Path::new("second.sev"), &severian_driver::CompileError::Diagnostic(diagnostic)).unwrap();
+        reports.compile_error(Path::new("first.sev"), &crate::CompileError::Diagnostic(diagnostic.clone())).unwrap();
+        reports.compile_error(Path::new("second.sev"), &crate::CompileError::Diagnostic(diagnostic)).unwrap();
         let files = fs::read_dir(root.join("parser/error")).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(files.len(), 1);
         let report: serde_json::Value = serde_json::from_slice(&fs::read(files[0].path()).unwrap()).unwrap();
         assert_eq!(report["source"], "shared.sev");
         assert_eq!(report["callers"], serde_json::json!(["first.sev", "second.sev"]));
+        reports.record("dependencies", "warning", Path::new("package.json"), "missing optional package").unwrap();
+        reports.finish().unwrap();
+        let log = fs::read_to_string(root.join("log.txt")).unwrap();
+        assert_eq!(log.matches("===== shared.sev =====").count(), 1);
+        assert_eq!(log.matches("E000112: invalid declaration").count(), 1);
+        assert!(log.contains("required by: first.sev") && log.contains("required by: second.sev"));
+        assert!(log.contains("[dependencies/warning]\nmissing optional package"));
+        Reports::open(root.clone(), true).unwrap();
+        assert!(!fs::read_to_string(root.join("log.txt")).unwrap().contains("invalid declaration"));
         fs::remove_dir_all(root).unwrap();
     }
 

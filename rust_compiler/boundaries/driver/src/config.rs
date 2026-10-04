@@ -710,7 +710,7 @@ impl<'a> PackageGraphBuilder<'a> {
             })
             .unwrap_or_else(|| root.join("src/lib.sev"));
         if require_library && !library.is_file() {
-            eprintln!("warning: dependency `{name}` has no library source at {}; an import requiring it will fail", library.display());
+            crate::build_reports::warning(&manifest_path, &format!("dependency `{name}` has no library source at {}; an import requiring it will fail", library.display()))?;
         }
         let id = severian_modules::PackageId(self.next_id);
         self.next_id += 1;
@@ -752,7 +752,7 @@ impl<'a> PackageGraphBuilder<'a> {
             match fs::metadata(&manifest) {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     let reason = format!("package `{owner}` dependency `{alias}` is missing at {}", manifest.display());
-                    eprintln!("warning: {reason}; an import requiring it will fail");
+                    crate::build_reports::warning(&document::path(root), &format!("{reason}; an import requiring it will fail"))?;
                     unavailable.insert(alias.clone(), reason);
                     continue;
                 }

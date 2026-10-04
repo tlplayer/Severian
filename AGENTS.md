@@ -7,6 +7,9 @@ NO TASK SHOULD TAKE LONGER THAN 6 MINUTES if builds hold it back that's a proble
 Dont touch MD files, they just glob/pollute the namespace and you make bad decisions vs me. 
 
 IIF you are building rust can you run the rust compiler to validate the change. Dont run the severian build to validate that change. 
+
+Only after after rust/sev implementation is COMPLETE 100%! not partial, can you run tests and builds in severian
+
 ```
 sev_rust # Rust compiler
 sev # sev_compiler 

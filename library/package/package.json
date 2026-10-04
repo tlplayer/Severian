@@ -9,6 +9,10 @@
     "path": "src/lib.sev"
   },
   "dependencies": {
+    "compile": {
+      "package": "package.compile",
+      "path": "compile"
+    },
     "time": {
       "path": "../core/time"
     },

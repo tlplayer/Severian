@@ -185,7 +185,7 @@ match shape:
         print(width)
 
     case Point:
-        pass
+        print(Point)
 ```
 
 A bare variant may also ignore its complete payload:
@@ -199,7 +199,7 @@ match shape:
         print("some rectangle")
 
     case Point:
-        pass
+        throw Error("Unsupported shape")
 ```
 
 Thus:
@@ -1417,6 +1417,8 @@ match shape:
 
     case Point:
         ...
+
+    #case _: THIS IS a BARRED OPERATION ON ENUMS! Enums are exhaustive, and if another case is added it should throw. Not be silent that defeats exhaustiveness!
 ```
 
 covers:

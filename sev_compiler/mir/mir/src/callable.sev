@@ -1,5 +1,4 @@
-import "../../../hir/modules/hierarchy.sev" as model_hir_module_hierarchy
-import "../../../hir/modules/module.sev" as model_hir_module_module
+import MirAnalysis, MirContext, callable_context, callable_declarations, checked_block from "model.sev"
 import "../../cfg/branch.sev" as model_mir_cfg_branch
 import "../../cfg/cfg.sev" as model_mir_cfg_cfg
 import "../../cfg/lazy.sev" as model_mir_cfg_lazy
@@ -39,12 +38,12 @@ class CallableMirScope:
     error_expectations: list[model_syntax_function_function.Expression] = []
 
 
-def mir_check_expected_error(module: model_hir_module_module.Module, context: cfg.ExecutionContext, scope: CallableMirScope, raised: model_syntax_symbol_symbol.ValueId, expected: model_syntax_function_function.Expression) -> unit | diagnostics.Diagnostic:
+def mir_check_expected_error(module: MirContext, context: cfg.ExecutionContext, scope: CallableMirScope, raised: model_syntax_symbol_symbol.ValueId, expected: model_syntax_function_function.Expression) -> unit | diagnostics.Diagnostic:
     if expected.type_id.index == 0:
         return
     variant_index := -1
-    for record in module.records:
-        if record.type_id.index == module.values[raised.index].type_id.index:
+    for record in module.analysis.records:
+        if record.type_id.index == module.callable.values[raised.index].type_id.index:
             index := 0
             for variant in model_syntax_function_function.outcome_variants(record):
                 if variant.index == expected.type_id.index:
@@ -63,7 +62,7 @@ def mir_check_expected_error(module: model_hir_module_module.Module, context: cf
                 predicate ?= comparison
                 if expected_value != None:
                     if predicate != None:
-                        subject = model_syntax_function_function.Expression(model_syntax_function_function.UpdateOperand(0), expected.span, type_id=module.values[raised.index].type_id)
+                        subject = model_syntax_function_function.Expression(model_syntax_function_function.UpdateOperand(0), expected.span, type_id=module.callable.values[raised.index].type_id)
                         payload = model_syntax_function_function.Expression(model_syntax_function_function.FieldReference(subject, variant_index + 1), expected.span, type_id=expected.type_id)
                         local = CallableMirScope(scope.bindings, scope.loops, [raised], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names, scope.error_targets, scope.error_expectations)
                         actual = mir_expression(module, context, local, payload)
@@ -75,13 +74,11 @@ def mir_check_expected_error(module: model_hir_module_module.Module, context: cf
                 return error(diagnostics.Diagnostic("E000231", "invalid error expectation", expected.span))
 
 
-def mir_value(module: model_hir_module_module.Module, type_id: model_syntax_symbol_symbol.TypeId) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
-    id = model_syntax_symbol_symbol.ValueId(u32(len(module.values)))
-    module.values.append(model_mir_value.Value(id, type_id))
-    return id
+def mir_value(module: MirContext, type_id: model_syntax_symbol_symbol.TypeId) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
+    return cfg.value(module, type_id)
 
 
-def mir_expression(module: model_hir_module_module.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: model_syntax_function_function.Expression) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
+def mir_expression(module: MirContext, context: cfg.ExecutionContext, scope: CallableMirScope, expression: model_syntax_function_function.Expression) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
     previous = context.origin
     context.origin = cfg.source_origin(context, expression.span)
     lowered = mir_expression_value(module, context, scope, expression)
@@ -98,7 +95,7 @@ def mir_expression(module: model_hir_module_module.Module, context: cfg.Executio
     context.origin = previous
     return lowered
 
-def mir_expression_value(module: model_hir_module_module.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: model_syntax_function_function.Expression) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
+def mir_expression_value(module: MirContext, context: cfg.ExecutionContext, scope: CallableMirScope, expression: model_syntax_function_function.Expression) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
     match expression.kind:
         case Ownership:
             result = mir_expression(module, context, scope, value)
@@ -141,7 +138,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
             if len(elements_values) != 0:
                 exemplar = elements_values[0]
             else:
-                exemplar = mir_value(module, storage_types.buffer_element(expression.type_id, module.records))
+                exemplar = mir_value(module, storage_types.buffer_element(expression.type_id, module.analysis.records))
                 cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.LiteralValueOf[None](None), exemplar))
             local := CallableMirScope(scope.bindings, scope.loops, [count, exemplar], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names, scope.error_targets, scope.error_expectations)
             result = mir_expression(module, context, local, construction)
@@ -159,7 +156,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
             return mir_expression(module, context, CallableMirScope(scope.bindings, scope.loops, [receiver, offset], scope.return_target, scope.inline_functions, scope.aggregates, scope.borrowed_records, scope.debug_names, scope.error_targets, scope.error_expectations), access)
         case OutcomeValue:
             payload = mir_expression(module, context, scope, value)
-            if storage_types.owned_record(expression.type_id, module.records):
+            if storage_types.owned_record(expression.type_id, module.analysis.records):
                 handle = aggregate.allocate(module, context, scope.aggregates, expression.type_id)
                 members = aggregate.fields(scope.aggregates, handle)
                 tag = mir_value(module, i64_type_id())
@@ -198,7 +195,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
             # Keep expression composition typed after this terminating edge.
             # CFG reachability removes this continuation before emission.
             cfg.at(context, cfg.block(context))
-            if storage_types.owned_record(expression.type_id, module.records):
+            if storage_types.owned_record(expression.type_id, module.analysis.records):
                 result = aggregate.allocate(module, context, scope.aggregates, expression.type_id)
                 aggregate.initialize(module, context, scope.aggregates, result, expression.type_id)
                 return result
@@ -206,7 +203,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
             cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.LiteralValueOf[None](None), result))
             return result
         case LiteralValue:
-            if storage_types.string_element(expression.type_id, module.records).index != 0:
+            if storage_types.string_element(expression.type_id, module.analysis.records).index != 0:
                 text = value.read[string](expression.span)
                 if text is diagnostics.Diagnostic:
                     return text
@@ -221,10 +218,10 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
             address = callable_mir_place(module, context, scope, expression)
             return aggregate.load(module, context, address, expression.type_id)
         case RecordValue:
-            if storage_types.owned_record(expression.type_id, module.records):
+            if storage_types.owned_record(expression.type_id, module.analysis.records):
                 handle = aggregate.allocate(module, context, scope.aggregates, expression.type_id)
                 members = aggregate.fields(scope.aggregates, handle)
-                for record in module.records:
+                for record in module.analysis.records:
                     if record.type_id.index == expression.type_id.index:
                         field_index := 0
                         for field in record.fields:
@@ -237,7 +234,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
                             field_index += 1
                 for argument in fields:
                     value = mir_expression(module, context, scope, argument.value)
-                    for record in module.records:
+                    for record in module.analysis.records:
                         if record.type_id.index == expression.type_id.index:
                             index := 0
                             for field in record.fields:
@@ -249,7 +246,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
             cfg.append(context, model_syntax_function_function.Operation.Allocate(expression.type_id, address))
             for argument in fields:
                 value = mir_expression(module, context, scope, argument.value)
-                for record in module.records:
+                for record in module.analysis.records:
                     if record.type_id.index == expression.type_id.index:
                         index := 0
                         for field in record.fields:
@@ -264,7 +261,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
         case TypeName:
             mir_expression(module, context, scope, value)
             result = mir_value(module, expression.type_id)
-            if storage_types.string_element(expression.type_id, module.records).index != 0:
+            if storage_types.string_element(expression.type_id, module.analysis.records).index != 0:
                 return callable_string_literal(module, context, scope, name, expression.type_id)
             cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.LiteralValueOf[string](name), result))
             return result
@@ -286,7 +283,7 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
             syntax = model_syntax_function_syntax.OperatorSyntax("", model_syntax_function_syntax.Fixity.Prefix, 0, model_syntax_function_syntax.Associativity.None, definition=origin.grammar)
             evaluated = execute_grammar(module, context, scope, syntax, [condition, then_value, else_value], [], expression.span)
             result = semantic_runtime(evaluated, expression.span)
-            if module.values[result.index].type_id.index != expression.type_id.index:
+            if module.callable.values[result.index].type_id.index != expression.type_id.index:
                 return error(diagnostics.Diagnostic("E000231", "grammar result type mismatch", expression.span))
             return result
         case ResolvedCall:
@@ -294,22 +291,22 @@ def mir_expression_value(module: model_hir_module_module.Module, context: cfg.Ex
                 case Direct:
                     native := false
                     target: model_syntax_symbol_symbol.FunctionId | None := None
-                    for declaration in module.functions:
+                    for declaration in callable_declarations(module.analysis):
                         if model_syntax_symbol_symbol.same_definition(declaration.definition, function):
                             target = declaration.id
                             native = boundary.scalar_boundary(declaration, "mlir") != ""
-                            if not native and (declaration.result_origin >= 0 or callable_exclusive_signature(declaration) or (declaration.extension and storage_types.buffer_element(declaration.parameter_types[0], module.records).index != 0)):
+                            if not native and (declaration.result_origin >= 0 or callable_exclusive_signature(declaration) or (declaration.extension and storage_types.buffer_element(declaration.parameter_types[0], module.analysis.records).index != 0)):
                                 return callable_inline_receiver(module, context, scope, declaration, arguments, expression.span)
-                            if aggregate.signature(declaration, module.records):
+                            if aggregate.signature(declaration, module.analysis.records):
                                 return callable_aggregate_call(module, context, scope, declaration, arguments, expression.span)
                     evaluated: list[model_syntax_symbol_symbol.ValueId] = []
                     for argument in arguments:
-                        if storage_types.indirect_value(argument.value.type_id, module.records) and not native:
+                        if storage_types.indirect_value(argument.value.type_id, module.analysis.records) and not native:
                             evaluated.append(callable_mir_place(module, context, scope, argument.value))
                         else:
                             evaluated.append(mir_expression(module, context, scope, argument.value))
                     inputs: list[model_syntax_symbol_symbol.ValueId] = []
-                    for declaration in module.functions:
+                    for declaration in callable_declarations(module.analysis):
                         if model_syntax_symbol_symbol.same_definition(declaration.definition, function):
                             parameter_index := 0
                             for parameter in declaration.parameters:
@@ -350,7 +347,7 @@ def callable_exclusive_signature(function: model_syntax_function_function.Functi
     return false
 
 
-def callable_inline_receiver(module: model_hir_module_module.Module, context: cfg.ExecutionContext, scope: CallableMirScope, function: model_syntax_function_function.FunctionDeclaration, arguments: list[model_syntax_function_function.CallArgument], span: source.Span) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
+def callable_inline_receiver(module: MirContext, context: cfg.ExecutionContext, scope: CallableMirScope, function: model_syntax_function_function.FunctionDeclaration, arguments: list[model_syntax_function_function.CallArgument], span: source.Span) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
     previous = context.origin
     path = previous.path[:]
     path.append(model_syntax_block_block.CallableOrigin(function.definition, function.name, span))
@@ -360,10 +357,10 @@ def callable_inline_receiver(module: model_hir_module_module.Module, context: cf
     return result
 
 
-def callable_inline_receiver_value(module: model_hir_module_module.Module, context: cfg.ExecutionContext, scope: CallableMirScope, function: model_syntax_function_function.FunctionDeclaration, arguments: list[model_syntax_function_function.CallArgument], span: source.Span) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
+def callable_inline_receiver_value(module: MirContext, context: cfg.ExecutionContext, scope: CallableMirScope, function: model_syntax_function_function.FunctionDeclaration, arguments: list[model_syntax_function_function.CallArgument], span: source.Span) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
     identity = int(function.id.value)
     if identity in scope.inline_functions:
-        if aggregate.signature(function, module.records):
+        if aggregate.signature(function, module.analysis.records):
             return error(diagnostics.Diagnostic("E000230", "recursive owned aggregate calls require a reference ABI", span))
         return error(diagnostics.Diagnostic("E000230", "recursive buffer receiver methods require a reference ABI", span))
     if boundary.scalar_boundary(function, "mlir") != "" or function.body == None:
@@ -378,11 +375,11 @@ def callable_inline_receiver_value(module: model_hir_module_module.Module, conte
     # each once before entering the callee, including aliased value arguments.
     evaluated: list[model_syntax_symbol_symbol.ValueId] = []
     for argument in arguments:
-        receiver := function.extension and storage_types.buffer_element(function.parameter_types[0], module.records).index != 0 and argument.name == function.parameters[0].name
+        receiver := function.extension and storage_types.buffer_element(function.parameter_types[0], module.analysis.records).index != 0 and argument.name == function.parameters[0].name
         for parameter in function.parameters:
             if argument.name == parameter.name and callable_exclusive_parameter(parameter):
                 receiver = true
-        if receiver or storage_types.indirect_value(argument.value.type_id, module.records):
+        if receiver or storage_types.indirect_value(argument.value.type_id, module.analysis.records):
             evaluated.append(callable_mir_place(module, context, scope, argument.value))
         else:
             evaluated.append(mir_expression(module, context, scope, argument.value))
@@ -391,13 +388,13 @@ def callable_inline_receiver_value(module: model_hir_module_module.Module, conte
         argument_index := 0
         for argument in arguments:
             if argument.name == parameter.name:
-                receiver = (function.extension and index == 0 and storage_types.buffer_element(parameter.type_id, module.records).index != 0) or (callable_exclusive_parameter(parameter) and not storage_types.indirect_value(parameter.type_id, module.records))
-                if receiver or storage_types.owned_record(parameter.type_id, module.records):
+                receiver = (function.extension and index == 0 and storage_types.buffer_element(parameter.type_id, module.analysis.records).index != 0) or (callable_exclusive_parameter(parameter) and not storage_types.indirect_value(parameter.type_id, module.analysis.records))
+                if receiver or storage_types.owned_record(parameter.type_id, module.analysis.records):
                     local.bindings.append(evaluated[argument_index])
-                    if storage_types.owned_record(parameter.type_id, module.records):
+                    if storage_types.owned_record(parameter.type_id, module.analysis.records):
                         local.borrowed_records.append(index)
                 else:
-                    type_id = pointer_type_id() if storage_types.indirect_value(parameter.type_id, module.records) else parameter.type_id
+                    type_id = pointer_type_id() if storage_types.indirect_value(parameter.type_id, module.analysis.records) else parameter.type_id
                     cell = mir_value(module, pointer_type_id())
                     cfg.append(context, model_syntax_function_function.Operation.Allocate(type_id, cell))
                     cfg.append(context, model_syntax_function_function.Operation.Store(cell, evaluated[argument_index]))
@@ -408,11 +405,14 @@ def callable_inline_receiver_value(module: model_hir_module_module.Module, conte
     if body == None:
         return error(diagnostics.Diagnostic("E000230", "receiver borrowing requires a source body", span))
     if body != None:
-        # Inline-only callables never pass through standalone body lowering.
-        # Give each expansion its own source layout before emitting operations;
-        # emitted origins retain that identity even if the source is reused.
-        model_hir_module_hierarchy.hierarchy_region(module.hierarchy, function.definition, body, origin=function.span)
-        mir_block(module, context, body, local)
+        # Inlining retains the callee's canonical source identity. Its emitted
+        # values belong to the caller realization; no new source block is made.
+        callee = callable_context(module.analysis, function.id)
+        address ?= callee.callable.source
+        if address == None:
+            return error(diagnostics.Diagnostic("E000230", "inline callable has no qualified source block", span))
+        if address != None:
+            mir_block(module, context, checked_block(module.analysis.program.graph, address), local)
     origin = cfg.origin(module, "Return", span)
     if cfg.open(context):
         if function.result_type.index == unit_type_id().index:
@@ -430,7 +430,7 @@ def callable_inline_receiver_value(module: model_hir_module_module.Module, conte
     return result
 
 
-def mir_block(module: model_hir_module_module.Module, context: cfg.ExecutionContext, block: model_syntax_block_block.Block, scope: CallableMirScope) -> bool | diagnostics.Diagnostic:
+def mir_block(module: MirContext, context: cfg.ExecutionContext, block: model_syntax_block_block.Block, scope: CallableMirScope) -> bool | diagnostics.Diagnostic:
     previous = context.origin
     previous_block = context.source_block
     layout ?= block.layout
@@ -443,7 +443,7 @@ def mir_block(module: model_hir_module_module.Module, context: cfg.ExecutionCont
     return result
 
 
-def mir_block_contents(module: model_hir_module_module.Module, context: cfg.ExecutionContext, block: model_syntax_block_block.Block, scope: CallableMirScope) -> bool | diagnostics.Diagnostic:
+def mir_block_contents(module: MirContext, context: cfg.ExecutionContext, block: model_syntax_block_block.Block, scope: CallableMirScope) -> bool | diagnostics.Diagnostic:
     for statement in block.statements:
         if not cfg.open(context):
             return true
@@ -476,7 +476,7 @@ def mir_block_contents(module: model_hir_module_module.Module, context: cfg.Exec
                 value := mir_expression(module, context, scope, binding.value)
                 if quality.debug_source(module, binding.span):
                     cfg.append(context, model_syntax_function_function.Operation.DebugValue(binding.name, value, binding.span, 0, binding.value.loan_mode, false, binding.type_id))
-                if storage_types.owned_record(binding.type_id, module.records):
+                if storage_types.owned_record(binding.type_id, module.analysis.records):
                     if binding.update:
                         if int(binding.id.index) in scope.borrowed_records:
                             return error(diagnostics.Diagnostic("E000230", "owned aggregate parameter rebinding requires a reference ABI", binding.span))
@@ -486,7 +486,7 @@ def mir_block_contents(module: model_hir_module_module.Module, context: cfg.Exec
                         aggregate.store(module, context, scope.aggregates, destination, value)
                         scope.bindings.append(destination)
                     continue
-                if storage_types.indirect_value(binding.type_id, module.records):
+                if storage_types.indirect_value(binding.type_id, module.analysis.records):
                     address = mir_value(module, pointer_type_id())
                     cfg.append(context, model_syntax_function_function.Operation.Allocate(binding.type_id, address))
                     cfg.append(context, model_syntax_function_function.Operation.Store(address, value))
@@ -495,7 +495,7 @@ def mir_block_contents(module: model_hir_module_module.Module, context: cfg.Exec
                     cfg.append(context, model_syntax_function_function.Operation.Store(scope.bindings[binding.id.index], value))
                 else:
                     cell = mir_value(module, pointer_type_id())
-                    stored_type = pointer_type_id() if storage_types.indirect_value(binding.type_id, module.records) else binding.type_id
+                    stored_type = pointer_type_id() if storage_types.indirect_value(binding.type_id, module.analysis.records) else binding.type_id
                     cfg.append(context, model_syntax_function_function.Operation.Allocate(stored_type, cell))
                     cfg.append(context, model_syntax_function_function.Operation.Store(cell, value))
                     scope.bindings.append(cell)
@@ -536,12 +536,12 @@ class CallableDependencyPath:
     path: list[model_syntax_block_block.CallableOrigin]
 
 
-def require_call(module: model_hir_module_module.Module, required: list[model_syntax_symbol_symbol.FunctionId], paths: list[CallableDependencyPath], function: model_syntax_symbol_symbol.FunctionId, origin: model_syntax_block_block.OperationOrigin):
+def require_call(module: MirContext, required: list[model_syntax_symbol_symbol.FunctionId], paths: list[CallableDependencyPath], function: model_syntax_symbol_symbol.FunctionId, origin: model_syntax_block_block.OperationOrigin):
     require_function(required, function)
     for known in paths:
         if known.function.value == function.value:
             return
-    for declaration in module.functions:
+    for declaration in callable_declarations(module.analysis):
         if declaration.id.value == function.value:
             path = origin.path[:]
             path.append(model_syntax_block_block.CallableOrigin(declaration.definition, declaration.name, origin.span))
@@ -549,7 +549,7 @@ def require_call(module: model_hir_module_module.Module, required: list[model_sy
             return
 
 
-def required_calls(module: model_hir_module_module.Module, body: borrow model_mir_cfg_cfg.CfgBody, required: list[model_syntax_symbol_symbol.FunctionId], paths: list[CallableDependencyPath]):
+def required_calls(module: MirContext, body: borrow model_mir_cfg_cfg.CfgBody, required: list[model_syntax_symbol_symbol.FunctionId], paths: list[CallableDependencyPath]):
     for block in borrow body.blocks:
         position := 0
         for operation in borrow block.operations:
@@ -564,97 +564,49 @@ def required_calls(module: model_hir_module_module.Module, body: borrow model_mi
                     continue
 
 
-def build_callables(module: model_hir_module_module.Module, library_sources: list[int] = [], export_names: list[string] = []) -> model_hir_module_module.Module | diagnostics.Diagnostic:
-    module.hierarchy.regions = []
-    module.hierarchy.sentences = []
-    module.hierarchy.blocks = []
-    module.cfg_bodies = []
-    initializer = model_syntax_symbol_symbol.DefinitionID(0, 0, model_syntax_symbol_symbol.DeclarationId(0))
-    model_hir_module_hierarchy.hierarchy_region(module.hierarchy, initializer, module.initializer, origin=module.initializer.span)
-    type_blocks: list[tuple[model_syntax_symbol_symbol.TypeId, model_syntax_symbol_symbol.RegionId]] = []
-    for record in module.records:
-        region = model_hir_module_hierarchy.hierarchy_region(module.hierarchy, record.definition, model_syntax_block_block.Block([], span=record.span), origin=record.span)
-        type_blocks.append((record.type_id, region))
-    for trait in module.traits:
-        region = model_hir_module_hierarchy.hierarchy_region(module.hierarchy, trait.definition, model_syntax_block_block.Block([], span=trait.span), origin=trait.span)
-    scope = CallableMirScope()
-    context := cfg.ExecutionContext(model_mir_cfg_cfg.empty_cfg(unit_type_id(), module.initializer), source_block=module.initializer)
-    context.origin = model_syntax_block_block.OperationOrigin(module.initializer.span, model_syntax_block_block.SourceBlockId(0), initializer, [model_syntax_block_block.CallableOrigin(initializer, "$initializer", module.initializer.span)])
-    context.body.origin = context.origin
-    context.body.blocks[context.body.entry].origin = context.origin
-    mir_block(module, context, module.initializer, scope)
-    cfg.finish(module, context, source.Span(0, 0, 0))
-    ownership.analyze_ownership(module, context.body, [])
-    cfg.promote_storage(module, context.body)
-    ownership.authorize_lowering(module, context.body, [])
-    module.cfg_bodies.append(context.body)
-    module.globals = scope.bindings
-    functions: list[model_syntax_function_function.FunctionDeclaration] = []
+def build_callables(analysis: MirAnalysis, export_names: list[string] = []) -> MirAnalysis | diagnostics.Diagnostic:
+    analysis.selected = []
     required: list[model_syntax_symbol_symbol.FunctionId] = []
     paths: list[CallableDependencyPath] = []
-    required_calls(module, context.body, required, paths)
-    # Runtime entry points are roots even when a generated test has no user
-    # source span (for example the summary of a file with no test declarations).
-    entry ?= module.entry
+    for root in analysis.roots:
+        require_function(required, root)
+    for initializer in analysis.initializers:
+        require_function(required, initializer)
+    entry ?= analysis.entry
     if entry != None:
         require_function(required, entry)
-    for test in module.tests:
+    for test in analysis.tests:
         function ?= test.function
         if function != None:
             require_function(required, function)
-    # All application declarations remain roots, including library exports and
-    # unused functions that still need lowering diagnostics. Imported bodies
-    # are demand driven. Scan lowered calls so inlined ownership operations,
-    # recursive calls and source grammar-generated calls use the same graph.
-    for function in borrow module.functions:
-        # An external declaration is a dependency of a live call, not a root.
-        # Its signature was already checked during semantic analysis.
+    for function in callable_declarations(analysis):
         if function.name in export_names:
-            require_function(required, function.id)
-        origin ?= function.span
-        if origin != None:
-            if int(origin.source_id) not in library_sources:
-                require_function(required, function.id)
-        else:
             require_function(required, function.id)
     cursor := 0
     while cursor < len(required):
         identity = required[cursor]
         cursor += 1
-        selected := -1
-        index := 0
-        for candidate in borrow module.functions:
-            if candidate.id.value == identity.value:
-                selected = index
-                break
-            index += 1
-        if selected == -1:
-            return error(diagnostics.Diagnostic("E000230", "call graph refers to an unknown function", None))
-        function = module.functions[selected]
+        module = callable_context(analysis, identity)
+        function = module.callable.declaration
         if callable_exclusive_signature(function) and boundary.scalar_boundary(function, "mlir") == "":
             if function.body == None:
                 return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", function.span))
             continue
-        # Specializations and test mocks copy declarations. Allocate each
-        # lowered signature independently instead of appending to a shared list.
+        module.callable.changed()
+        module.callable.values = []
+        module.callable.body = None
         function.values = []
         local = CallableMirScope()
         for parameter in function.parameters:
             local.debug_names.append(parameter.name)
         source_body ?= function.body
         source_block: model_syntax_block_block.SourceBlockId | None := None
-        if source_body != None:
-            parent: model_syntax_symbol_symbol.RegionId | None := None
-            introduced_by: model_syntax_block_block.SentenceId | None := None
-            for owner in type_blocks:
-                if function.owner_type.index != 0 and owner[0].index == function.owner_type.index:
-                    parent = owner[1]
-                    sentence = model_syntax_block_block.SentenceId(u32(len(module.hierarchy.sentences)))
-                    introduced_by = sentence
-                    module.hierarchy.sentences.append(model_hir_module_hierarchy.SemanticSentence(sentence, owner[1], function.span, int(len(module.hierarchy.blocks[owner[1].index].children))))
-                    break
-            region = model_hir_module_hierarchy.hierarchy_region(module.hierarchy, function.definition, source_body, parent, introduced_by, function.span)
-            source_block = model_syntax_block_block.SourceBlockId(region.index)
+        address ?= module.callable.source
+        if address != None:
+            source_body = checked_block(analysis.program.graph, address)
+            source_block = address.block
+        elif source_body != None:
+            return error(diagnostics.Diagnostic("E000230", "callable body has no qualified source block", function.span))
         context = cfg.ExecutionContext(model_mir_cfg_cfg.empty_cfg(function.result_type, source_body), source_block=source_body)
         path = [model_syntax_block_block.CallableOrigin(function.definition, function.name, function.span)]
         for dependency in paths:
@@ -665,14 +617,14 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
         context.body.origin = context.origin
         context.body.blocks[context.body.entry].origin = context.origin
         for type_id in function.parameter_types:
-            if storage_types.owned_record(type_id, module.records):
+            if storage_types.owned_record(type_id, module.analysis.records):
                 cell = aggregate.parameter(module, context, local.aggregates, type_id, context.body.entry)
                 local.bindings.append(cell)
                 continue
-            stored_type = pointer_type_id() if storage_types.indirect_value(type_id, module.records) and boundary.scalar_boundary(function, "mlir") == "" else type_id
+            stored_type = pointer_type_id() if storage_types.indirect_value(type_id, module.analysis.records) and boundary.scalar_boundary(function, "mlir") == "" else type_id
             parameter_value = mir_value(module, stored_type)
             function.values.append(parameter_value)
-            if len(module.debug_files) > 0 and len(function.parameters) >= len(function.values):
+            if len(module.analysis.debug_files) > 0 and len(function.parameters) >= len(function.values):
                 parameter = function.parameters[len(function.values) - 1]
                 if quality.debug_source(module, parameter.span):
                     mode := ""
@@ -684,17 +636,17 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
             cfg.append(context, model_syntax_function_function.Operation.Allocate(stored_type, cell))
             cfg.append(context, model_syntax_function_function.Operation.Store(cell, parameter_value))
             local.bindings.append(cell)
-            if len(module.debug_files) > 0 and len(function.parameters) >= len(function.values):
+            if len(module.analysis.debug_files) > 0 and len(function.parameters) >= len(function.values):
                 parameter = function.parameters[len(function.values) - 1]
                 if quality.debug_source(module, parameter.span):
                     cfg.append(context, model_syntax_function_function.Operation.DebugValue(parameter.name, cell, parameter.span, int(len(function.values)), "", true, stored_type))
         # Aggregate parameters were added as entry block values; interleave
         # leaves with scalar parameters in source parameter order.
-        if aggregate.signature(function, module.records):
+        if aggregate.signature(function, module.analysis.records):
             function.values = []
             parameter_cursor := 0
             for type_id in function.parameter_types:
-                if storage_types.owned_record(type_id, module.records):
+                if storage_types.owned_record(type_id, module.analysis.records):
                     for value in callable_parameter_fields(context.body, local.aggregates, local.bindings[parameter_cursor]):
                         function.values.append(value)
                 else:
@@ -706,12 +658,11 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
                             case _:
                                 throw diagnostics.diagnostic("E000231", "unimplemented (sev_compiler/transforms/mir/src/callable.sev)")
                 parameter_cursor += 1
-        body ?= function.body
-        if body != None:
+        if source_body != None:
             declared_span ?= function.span
             if declared_span != None:
                 quality.quality_hit(module, context, declared_span, "Function")
-            mir_block(module, context, body, local)
+            mir_block(module, context, source_body, local)
             span := source.Span(0, 0, 0)
             declared ?= function.span
             if declared != None:
@@ -719,37 +670,37 @@ def build_callables(module: model_hir_module_module.Module, library_sources: lis
             cfg.finish(module, context, span, function.values)
             ownership.analyze_ownership(module, context.body, function.values)
             cfg.promote_storage(module, context.body)
+            cfg.verify(module, context.body)
+            cfg.verify_availability(context.body, function.values)
+            module.callable.cfg_revision = module.callable.revision
             ownership.authorize_lowering(module, context.body, function.values)
             required_calls(module, context.body, required, paths)
-            function.cfg_index = int(len(module.cfg_bodies))
-            module.cfg_bodies.append(context.body)
-        functions.append(function)
-    module.functions = functions
-    return module
+        analysis.selected.append(module.callable.key)
+    return analysis
 
 
-def callable_mir_place(module: model_hir_module_module.Module, context: cfg.ExecutionContext, scope: CallableMirScope, expression: model_syntax_function_function.Expression) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
+def callable_mir_place(module: MirContext, context: cfg.ExecutionContext, scope: CallableMirScope, expression: model_syntax_function_function.Expression) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
     match expression.kind:
         case Ownership:
             return callable_mir_place(module, context, scope, value)
         case BindingReference:
-            if storage_types.owned_record(expression.type_id, module.records):
+            if storage_types.owned_record(expression.type_id, module.analysis.records):
                 return scope.bindings[binding.index]
-            if storage_types.indirect_value(expression.type_id, module.records):
+            if storage_types.indirect_value(expression.type_id, module.analysis.records):
                 address = mir_value(module, pointer_type_id())
                 cfg.append(context, model_syntax_function_function.Operation.Load(scope.bindings[binding.index], address))
                 return address
             return scope.bindings[binding.index]
         case FieldReference:
             base = callable_mir_place(module, context, scope, object)
-            if storage_types.owned_record(object.type_id, module.records):
+            if storage_types.owned_record(object.type_id, module.analysis.records):
                 return aggregate.fields(scope.aggregates, base)[index]
             result = mir_value(module, pointer_type_id())
             cfg.append(context, model_syntax_function_function.Operation.FieldAddress(base, object.type_id, index, result))
             return result
         case _:
             value = mir_expression(module, context, scope, expression)
-            if storage_types.owned_record(expression.type_id, module.records):
+            if storage_types.owned_record(expression.type_id, module.analysis.records):
                 return value
             address = mir_value(module, pointer_type_id())
             cfg.append(context, model_syntax_function_function.Operation.Allocate(expression.type_id, address))
@@ -810,7 +761,7 @@ def semantic_path(expression: model_syntax_function_function.Expression) -> stri
             return ""
 
 
-def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScope, frame: SemanticFrame, expression: model_syntax_function_function.Expression) -> SemanticValue | diagnostics.Diagnostic:
+def semantic_eval(module: MirContext, scope: CallableMirScope, frame: SemanticFrame, expression: model_syntax_function_function.Expression) -> SemanticValue | diagnostics.Diagnostic:
     match expression.kind:
         case Name:
             return semantic_value(frame, name, expression.span)
@@ -826,7 +777,7 @@ def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScop
                             case ExpressionBody:
                                 match expression.kind:
                                     case BindingReference:
-                                        if storage_types.owned_record(expression.type_id, module.records) and int(binding.index) in scope.borrowed_records:
+                                        if storage_types.owned_record(expression.type_id, module.analysis.records) and int(binding.index) in scope.borrowed_records:
                                             return error(diagnostics.Diagnostic("E000230", "owned aggregate parameter rebinding requires a reference ABI", expression.span))
                                     case IndexReference:
                                         receiver = mir_expression(module, frame.context, scope, object)
@@ -861,7 +812,7 @@ def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScop
                             return Nothing
                         return error(diagnostics.Diagnostic("E000231", "indexed storage is not writable", expression.span))
                     case PlaceHandle:
-                        if module.values[value.index].type_id.index != type_id.index:
+                        if module.callable.values[value.index].type_id.index != type_id.index:
                             return error(diagnostics.Diagnostic("E000231", "place store type mismatch", expression.span))
                         aggregate.store(module, frame.context, scope.aggregates, address, value)
                         return Nothing
@@ -904,7 +855,7 @@ def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScop
             if name == "cfg.parameter" and len(inputs) == 2:
                 target = semantic_block(inputs[0], expression.span)
                 exemplar = semantic_runtime(inputs[1], expression.span)
-                parameter = aggregate.parameter(module, frame.context, scope.aggregates, module.values[exemplar.index].type_id, target)
+                parameter = aggregate.parameter(module, frame.context, scope.aggregates, module.callable.values[exemplar.index].type_id, target)
                 return RuntimeValue(parameter)
             if name == "cfg.goto" and len(inputs) >= 1:
                 edge_arguments: list[model_syntax_symbol_symbol.ValueId] = []
@@ -915,7 +866,7 @@ def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScop
                 return Nothing
             if name == "cfg.branch" and len(inputs) == 3:
                 condition = semantic_runtime(inputs[0], expression.span)
-                if module.values[condition.index].type_id.index != bool_type_id().index:
+                if module.callable.values[condition.index].type_id.index != bool_type_id().index:
                     return error(diagnostics.Diagnostic("E000231", "CFG branch condition requires bool", expression.span))
                 taken = model_mir_cfg_branch.CfgEdge(semantic_block(inputs[1], expression.span))
                 otherwise = model_mir_cfg_branch.CfgEdge(semantic_block(inputs[2], expression.span))
@@ -946,9 +897,9 @@ def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScop
                     cfg.terminate(frame.context, model_mir_cfg_branch.CfgExit.Jump(model_mir_cfg_branch.CfgEdge(scope.error_targets[-1])), frame.origin)
                 elif scope.return_target >= 0 and len(frame.context.body.blocks[scope.return_target].parameters) != 0:
                     cfg.terminate(frame.context, model_mir_cfg_branch.CfgExit.Jump(model_mir_cfg_branch.CfgEdge(scope.return_target, aggregate.values(module, frame.context, scope.aggregates, raised))), frame.origin)
-                elif frame.context.body.return_type.index == module.values[raised.index].type_id.index and storage_types.owned_record(frame.context.body.return_type, module.records):
+                elif frame.context.body.return_type.index == module.callable.values[raised.index].type_id.index and storage_types.owned_record(frame.context.body.return_type, module.analysis.records):
                     cfg.terminate(frame.context, model_mir_cfg_branch.CfgExit.FinishFields(aggregate.values(module, frame.context, scope.aggregates, raised)), frame.origin)
-                elif storage_types.owned_record(module.values[raised.index].type_id, module.records):
+                elif storage_types.owned_record(module.callable.values[raised.index].type_id, module.analysis.records):
                     # An unhandled outcome has no return boundary. Terminate
                     # here without letting its lowering-only handle escape.
                     failed = mir_value(module, bool_type_id())
@@ -967,15 +918,15 @@ def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScop
                 return Nothing
             if name in ["outcome.success", "outcome.payload"] and len(inputs) == 1:
                 input = semantic_runtime(inputs[0], expression.span)
-                type_id = module.values[input.index].type_id
-                for record in module.records:
+                type_id = module.callable.values[input.index].type_id
+                for record in module.analysis.records:
                     if record.type_id.index == type_id.index:
                         index := 0
                         for variant in model_syntax_function_function.outcome_variants(record):
                             if variant.index == frame.result_type.index:
                                 if name == "outcome.success":
                                     return RuntimeValue(aggregate.test_variant(module, frame.context, scope.aggregates, input, index))
-                                if storage_types.owned_record(type_id, module.records):
+                                if storage_types.owned_record(type_id, module.analysis.records):
                                     field = aggregate.fields(scope.aggregates, input)[index + 1]
                                     return RuntimeValue(aggregate.load(module, frame.context, field, variant))
                                 address = mir_value(module, pointer_type_id())
@@ -1003,7 +954,7 @@ def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScop
                             return error(diagnostics.Diagnostic("E000231", "CFG return requires a lowered value", expression.span))
                 if scope.return_target >= 0:
                     cfg.terminate(frame.context, model_mir_cfg_branch.CfgExit.Jump(model_mir_cfg_branch.CfgEdge(scope.return_target, inline_arguments)), frame.origin)
-                elif storage_types.owned_record(frame.context.body.return_type, module.records):
+                elif storage_types.owned_record(frame.context.body.return_type, module.analysis.records):
                     cfg.terminate(frame.context, model_mir_cfg_branch.CfgExit.FinishFields(inline_arguments), frame.origin)
                 else:
                     cfg.terminate(frame.context, model_mir_cfg_branch.CfgExit.Finish(returned), frame.origin)
@@ -1028,8 +979,8 @@ def semantic_eval(module: model_hir_module_module.Module, scope: CallableMirScop
             return error(diagnostics.Diagnostic("E000231", "invalid compiler context expression", expression.span))
 
 
-def execute_grammar(module: model_hir_module_module.Module, context: cfg.ExecutionContext, scope: CallableMirScope, syntax: model_syntax_function_syntax.OperatorSyntax, operands: list[model_syntax_function_function.Expression], bodies: list[model_syntax_block_block.Block], span: source.Span, result_type: model_syntax_symbol_symbol.TypeId = model_syntax_symbol_symbol.TypeId(0)) -> SemanticValue | diagnostics.Diagnostic:
-    for definition in module.traits:
+def execute_grammar(module: MirContext, context: cfg.ExecutionContext, scope: CallableMirScope, syntax: model_syntax_function_syntax.OperatorSyntax, operands: list[model_syntax_function_function.Expression], bodies: list[model_syntax_block_block.Block], span: source.Span, result_type: model_syntax_symbol_symbol.TypeId = model_syntax_symbol_symbol.TypeId(0)) -> SemanticValue | diagnostics.Diagnostic:
+    for definition in module.analysis.traits:
         if definition.grammar and definition.definition.module == syntax.definition.module and definition.definition.declaration.value == syntax.definition.declaration.value:
             capable := false
             for property in definition.properties:
@@ -1122,13 +1073,13 @@ def callable_parameter_fields(body: model_mir_cfg_cfg.CfgBody, state: aggregate.
     return values
 
 
-def callable_aggregate_call(module: model_hir_module_module.Module, context: cfg.ExecutionContext, scope: CallableMirScope, function: model_syntax_function_function.FunctionDeclaration, arguments: list[model_syntax_function_function.CallArgument], span: source.Span) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
+def callable_aggregate_call(module: MirContext, context: cfg.ExecutionContext, scope: CallableMirScope, function: model_syntax_function_function.FunctionDeclaration, arguments: list[model_syntax_function_function.CallArgument], span: source.Span) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
     if boundary.scalar_boundary(function, "mlir") != "" or boundary.scalar_boundary(function, "c") != "":
         return error(diagnostics.Diagnostic("E000230", "owned aggregate boundaries require an ownership ABI", span))
     inputs: list[model_syntax_symbol_symbol.ValueId] = []
     evaluated: list[model_syntax_symbol_symbol.ValueId] = []
     for argument in arguments:
-        if storage_types.indirect_value(argument.value.type_id, module.records):
+        if storage_types.indirect_value(argument.value.type_id, module.analysis.records):
             evaluated.append(callable_mir_place(module, context, scope, argument.value))
         else:
             evaluated.append(mir_expression(module, context, scope, argument.value))
@@ -1140,10 +1091,10 @@ def callable_aggregate_call(module: model_hir_module_module.Module, context: cfg
                     inputs.append(value)
             index += 1
     outputs: list[model_syntax_symbol_symbol.ValueId] = []
-    for type_id in storage_types.value_fields(function.result_type, module.records):
+    for type_id in storage_types.value_fields(function.result_type, module.analysis.records):
         outputs.append(mir_value(module, type_id))
     cfg.append(context, model_syntax_function_function.Operation.CallFields(function.id, inputs, outputs))
-    if storage_types.owned_record(function.result_type, module.records):
+    if storage_types.owned_record(function.result_type, module.analysis.records):
         result = aggregate.allocate(module, context, scope.aggregates, function.result_type)
         aggregate.write_values(module, context, scope.aggregates, result, outputs, [0])
         return result
@@ -1154,12 +1105,12 @@ def callable_aggregate_call(module: model_hir_module_module.Module, context: cfg
 
 # A literal exposes constant array storage with capacity equal to its length.
 # Appending grows through vector -> array -> storage -> memory before writing.
-def callable_string_literal(module: model_hir_module_module.Module, context: cfg.ExecutionContext, scope: CallableMirScope, text: string, type_id: model_syntax_symbol_symbol.TypeId) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
-    leaves = storage_types.value_fields(type_id, module.records)
+def callable_string_literal(module: MirContext, context: cfg.ExecutionContext, scope: CallableMirScope, text: string, type_id: model_syntax_symbol_symbol.TypeId) -> model_syntax_symbol_symbol.ValueId | diagnostics.Diagnostic:
+    leaves = storage_types.value_fields(type_id, module.analysis.records)
     buffer = mir_value(module, leaves[0])
     cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.LiteralValueOf[string](text), buffer))
     count = mir_value(module, i64_type_id())
-    size = len(text.characters()) if storage_types.string_element(type_id, module.records).index == char_type_id().index else len(text.bytes())
+    size = len(text.characters()) if storage_types.string_element(type_id, module.analysis.records).index == char_type_id().index else len(text.bytes())
     cfg.append(context, model_syntax_function_function.Operation.Constant(model_syntax_literal_value.LiteralValueOf[int](size), count))
     result = aggregate.allocate(module, context, scope.aggregates, type_id)
     aggregate.write_values(module, context, scope.aggregates, result, [buffer, count], [0])

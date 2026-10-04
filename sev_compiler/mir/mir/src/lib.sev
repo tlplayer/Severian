@@ -1,13 +1,9 @@
-import Program, Module, Submodule, BlockGraph, BlockAddress, Block from "model.sev"
-import "../../../hir/modules/module.sev" as model_hir_module_module
+import Program, Module, Submodule, BlockGraph, BlockAddress, Block, MirAnalysis, MirContext, CallableRealization, QualityAnalysis, add_callable, callable_context, realization_key from "model.sev"
 import "cfg.sev" as _dependency_cfg
 import "../../ownership/ownership/src/plan.sev" as _dependency_plan
 import "passes.sev" as _dependency_passes
 import "verify.sev" as _dependency_verify
-import "build/mod.sev" as _dependency_mod
-
-def empty_module() -> model_hir_module_module.Module:
-    return model_hir_module_module.empty_module()
+import build from "build/mod.sev"
 
 import "agent_ir.sev" as _dependency_agent_ir
 import "callable.sev" as _dependency_callable

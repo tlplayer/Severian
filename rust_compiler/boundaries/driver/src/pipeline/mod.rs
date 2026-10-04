@@ -1075,19 +1075,18 @@ impl Compiler {
         render_python_bridge(python, &external.plans).map_err(CompileError::NativeLink)
     }
 
-    fn resolve_modules(
+    fn resolve_modules(&self, source: &Path) -> Result<severian_modules::ModuleGraph, CompileError> {
+        self.discover_modules(source)?.into_result().map_err(CompileError::Diagnostic)
+    }
+
+    pub fn discover_modules(
         &self,
         source: &Path,
-    ) -> Result<severian_modules::ModuleGraph, CompileError> {
+    ) -> Result<severian_modules::ModuleDiscovery, CompileError> {
         let _timing = crate::timing::Stage::begin("module-resolution");
         let packages = self.standard_package_graph(source)?;
-        let initial = severian_modules::resolve_with_packages_and_max_errors(
-            source,
-            &packages,
-            self.max_errors,
-        )
-        .map_err(CompileError::Diagnostic)?;
-        let imports_file = initial.modules.iter().any(|module| {
+        let initial = severian_modules::discover_with_packages(source, &packages, &[], self.max_errors);
+        let imports_file = initial.graph.modules.iter().any(|module| {
             module.ast.items.iter().any(|item| {
                 let severian_ast::Item::Import(import) = item else {
                     return false;
@@ -1119,13 +1118,12 @@ impl Compiler {
         } else {
             Vec::new()
         };
-        severian_modules::resolve_with_packages_and_additional_roots(
+        Ok(severian_modules::discover_with_packages(
             source,
             &packages,
             &registry_roots,
             self.max_errors,
-        )
-        .map_err(CompileError::Diagnostic)
+        ))
     }
 
     fn standard_package_graph(

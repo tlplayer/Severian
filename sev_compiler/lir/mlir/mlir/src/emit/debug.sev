@@ -1,4 +1,4 @@
-import "../../../../../hir/modules/module.sev" as model_hir_module_module
+import MirAnalysis from "../../../../../mir/mir/src/model.sev"
 import "../../../../../syntax/function/function.sev" as model_syntax_function_function
 import i64_type_id from "../../../../../syntax/primitive/int/declarations.sev"
 import "../../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
@@ -15,7 +15,7 @@ def debug_file(file: string) -> string:
 
 def debug_location(files: borrow list[source.SourceFile], span: borrow source.Span, scope: string = "") -> MlirLocation | None:
     for file in borrow files:
-        if file.id != span.source_id:
+        if file.source_id != span.source_id:
             continue
         line := 1
         column := 1
@@ -28,7 +28,7 @@ def debug_location(files: borrow list[source.SourceFile], span: borrow source.Sp
         return MlirLocation(file.path, u32(line), u32(column), scope)
     return None
 
-def debug_function(module: borrow model_hir_module_module.Module, function: borrow model_syntax_function_function.FunctionDeclaration) -> MlirLocation | None:
+def debug_function(module: borrow MirAnalysis, function: borrow model_syntax_function_function.FunctionDeclaration) -> MlirLocation | None:
     if len(module.debug_files) == 0:
         return None
     span ?= function.span
@@ -51,7 +51,7 @@ def debug_type(type_id: model_syntax_symbol_symbol.TypeId) -> string:
             return "#llvm.di_basic_type<tag = DW_TAG_base_type, name = " + debug_quote(known.name) + ", sizeInBits = " + string(known.bits) + ", encoding = " + encoding + ">"
     return ""
 
-def debug_value(builder: MlirOpBuilder, module: borrow model_hir_module_module.Module, name: string, value: MlirValue, type_id: model_syntax_symbol_symbol.TypeId, span: source.Span, argument: int, scope: string, address: bool = false):
+def debug_value(builder: MlirOpBuilder, module: borrow MirAnalysis, name: string, value: MlirValue, type_id: model_syntax_symbol_symbol.TypeId, span: source.Span, argument: int, scope: string, address: bool = false):
     type_text = debug_type(type_id)
     location ?= debug_location(module.debug_files, span, scope)
     if type_text == "" or scope == "" or location == None:
@@ -96,7 +96,7 @@ def debug_annotate(builder: MlirOpBuilder, location: MlirLocation | None):
 
 # The debugger exposes the current compiler ownership state beside each binding.
 # 0 owned, 1 shared borrow, 2 view, 3 mirror, 4 moved, 5 exclusive borrow.
-def debug_ownership(builder: MlirOpBuilder, module: model_hir_module_module.Module, name: string, mode: string, span: source.Span, scope: string):
+def debug_ownership(builder: MlirOpBuilder, module: MirAnalysis, name: string, mode: string, span: source.Span, scope: string):
     state := 0
     if mode in ["borrow", "inferred read"]:
         state = 1

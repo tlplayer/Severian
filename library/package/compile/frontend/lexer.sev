@@ -1,0 +1,2 @@
+# Forward the compiler's public lexer contract without copying token models.
+from compiler_lexer import Lexer, RegistryLexer, lexer, recognize_window, TokenStream, SourceWindow, Window, source_window

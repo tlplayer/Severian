@@ -15,6 +15,7 @@ import os
 import environment
 import process
 import file
+import unit_arguments from "package:compile/src/driver.sev"
 
 
 # Package sessions own the lifetime of shared provider state. A worker may
@@ -190,7 +191,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
             # Never let a failed compilation validate a previous artifact.
             if os.is_file(cache + "/output"):
                 os.remove(cache + "/output")
-            arguments := [compiler.executable, "__compile-unit", input, stage + "/artifact", emit, compiler.sysroot, stage + "/resolution.json", "test" if unit.include_tests else "build", unit.platform, unit.profile]
+            arguments := unit_arguments(compiler.executable, input, stage + "/artifact", emit, compiler.sysroot, stage + "/resolution.json", unit.include_tests, unit.platform, unit.profile)
             memory := 0
             seconds := 0
             if (unit.include_tests or guard_tests) and len(resolution.packages) > 0:

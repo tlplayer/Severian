@@ -4815,6 +4815,19 @@ impl Analyzer<'_> {
             .find(|instance| instance.ty == subject.type_id)
             .cloned()
             .expect("caller selected an enum subject");
+        // Check the complete arm list before lowering bodies, including a
+        // redundant default after all variants. A new variant must require
+        // updating the match instead of silently selecting a fallback.
+        if let Some(case) = cases.iter().find(|case| {
+            case.annotation.is_none()
+                && case.binding.as_deref().is_none_or(|name| name == "_")
+        }) {
+            return Err(Diagnostic::new(
+                "E000216",
+                format!("default `case _:` is not allowed when matching enum `{}`", instance.name),
+                Some(case.span),
+            ).with_help("use an `if` statement for a partial check, or add an explicit case for every enum variant so adding a variant produces a compile-time error"));
+        }
         let integer = self.tag_type();
         let boolean = self
             .types
@@ -4896,14 +4909,16 @@ impl Analyzer<'_> {
         self.names = outer_names;
         self.declarations = outer_declarations;
         self.value_substitutions = outer_substitutions;
-        if handled.len() != instance.variants.len()
-            && !lowered.iter().any(|(condition, _)| condition.is_none())
-        {
+        if handled.len() != instance.variants.len() {
+            let missing = instance.variants.iter().enumerate()
+                .filter(|(ordinal, _)| !handled.contains(ordinal))
+                .map(|(_, variant)| variant.name.as_str())
+                .collect::<Vec<_>>().join(", ");
             return Err(Diagnostic::new(
                 "E000216",
-                format!("match does not cover every `{}` variant", instance.name),
+                format!("match does not cover every `{}` variant; missing: {missing}", instance.name),
                 Some(span),
-            ));
+            ).with_help("add an explicit case for every missing enum variant, or use an `if` statement for a partial check"));
         }
         let mut lowered = lowered.into_iter().rev();
         let Some((_last_condition, last_body)) = lowered.next() else {
@@ -22211,6 +22226,57 @@ def interpolate(text: string) -> string:
         assert!(error
             .message
             .contains("Status.Received -> Status.Connecting"));
+    }
+
+    #[test]
+    fn enum_match_rejects_defaults_even_after_complete_coverage() {
+        let context = severian_bootstrap::load().unwrap();
+        for arms in [
+            "        case _:\n            return 0\n",
+            "        case Left:\n            return 1\n        case _:\n            return 0\n",
+            "        case Left:\n            return 1\n        case Right:\n            return 2\n        case _:\n            return 0\n",
+            "        case _:\n            return 0\n        case Left:\n            return 1\n        case Right:\n            return 2\n",
+        ] {
+            let text = format!("enum Direction:\n    Left\n    Right\ndef read(value: Direction) -> int:\n    match value:\n{arms}");
+            let source = SourceFile::virtual_source("enum-default.sev", &text);
+            let tokens = severian_lexer::scan(&source).unwrap();
+            let ast = severian_parser::parse(&tokens).unwrap();
+            let error = analyze(&ast, &context.types).unwrap_err();
+            assert_eq!(error.code, "E000216");
+            assert!(error.message.contains("default `case _:` is not allowed"));
+            let help = error.help.as_deref().unwrap();
+            assert!(help.contains("`if` statement"));
+            assert!(help.contains("every enum variant"));
+            assert!(help.contains("compile-time error"));
+            let span = error.span.unwrap();
+            assert!(text[span.start as usize..span.end as usize].starts_with("case _:"));
+        }
+    }
+
+    #[test]
+    fn enum_match_requires_a_case_for_each_new_variant() {
+        let body = "def read(value: Direction) -> int:\n    match value:\n        case Left:\n            return 1\n        case Right:\n            return 2\n";
+        let (program, _) = analyze_source(&format!("enum Direction:\n    Left\n    Right\n{body}"));
+        severian_mir::build(&program).unwrap();
+
+        let context = severian_bootstrap::load().unwrap();
+        let source = SourceFile::virtual_source("new-variant.sev", &format!(
+            "enum Direction:\n    Left\n    Right\n    Up\n{body}"
+        ));
+        let tokens = severian_lexer::scan(&source).unwrap();
+        let ast = severian_parser::parse(&tokens).unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000216");
+        assert!(error.message.contains("missing: Up"));
+        assert!(error.help.as_deref().unwrap().contains("`if` statement"));
+    }
+
+    #[test]
+    fn enum_match_restriction_preserves_non_enum_defaults() {
+        let (program, _) = analyze_source(
+            "def read(value: int) -> int:\n    match value:\n        case _:\n            return 7\n"
+        );
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]

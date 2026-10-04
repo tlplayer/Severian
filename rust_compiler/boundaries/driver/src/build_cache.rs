@@ -105,23 +105,15 @@ fn compile_unit(compiler: &Compiler, source: &Path, output: &Path, root: &Path, 
     let lock = File::create(directory.join(format!("{key:016x}.lock"))).map_err(|e| e.to_string())?;
     lock.lock().map_err(|e| e.to_string())?;
     let record_path = directory.join(format!("{key:016x}.json"));
-    let previous = fs::read(&record_path).ok().and_then(|bytes| serde_json::from_slice::<Record>(&bytes).ok()).filter(|r| r.schema_version == 2);
+    let previous = fs::read(&record_path).ok().and_then(|bytes| serde_json::from_slice::<Record>(&bytes).ok()).filter(|r| r.schema_version == 3);
     let mut roots = declared.into_iter().map(|p| fs::canonicalize(p).map_err(|e| e.to_string())).collect::<Result<BTreeSet<_>, _>>()?;
-    if let Some(record) = &previous { roots.extend(record.roots.iter().filter(|p| p.exists()).cloned()); }
+    // The caller's discovered graph is authoritative; retired imports must not
+    // survive through a previous build's inventory.
+    roots.insert(fs::canonicalize(source).map_err(|error| error.to_string())?);
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(3).expect("driver repository");
-    for directory in ["rust_compiler/runtime/native", "library/core/memory", "library/system/extern", "sev_compiler/syntax", "library/prelude"] { roots.insert(repository.join(directory)); }
-    let before = snapshot(&configuration, &roots, &output)?;
-    let force = std::env::var("SEVERIAN_FORCE_REBUILD").as_deref() == Ok("1");
-    if !force && output.is_file() {
-        if let Some(record) = previous {
-            if record.snapshot == before && hashes(std::slice::from_ref(&output))?[0] == record.output && record.sidecars.iter().all(|item| item.path.is_file()) && hashes(&record.sidecars.iter().map(|item| item.path.clone()).collect::<Vec<_>>())? == record.sidecars {
-                println!("fresh {}", output.display());
-                return Ok(false);
-            }
-        }
-    }
-    // Discover new import/provider roots only on a miss. Warm checks do no
-    // parsing, semantic analysis, lowering or native code generation.
+    for directory in ["rust_compiler/runtime/native", "library/system/extern"] { roots.insert(repository.join(directory)); }
+    // Every inventory follows the current graph, including newly generated
+    // imports and manifests. A warm build still skips semantic/codegen work.
     let mut reported_packages = BTreeSet::new();
     for module in compiler.resolved_module_paths(source).map_err(|e| e.to_string())? {
         let package = package_root(&module);
@@ -134,11 +126,18 @@ fn compile_unit(compiler: &Compiler, source: &Path, output: &Path, root: &Path, 
                 .unwrap_or("unspecified");
             eprintln!("Compiling {name} v{version} ({})", package.display());
         }
-        roots.insert(package);
-        // Directory inventories exclude build output, but generated source
-        // actually read by the compiler is an input and needs its own digest.
-        if module.components().any(|part| part.as_os_str() == "package.pkg") {
-            roots.insert(module);
+        let manifest = severian_driver::config::document::path(&package);
+        if manifest.is_file() { roots.insert(manifest); }
+        roots.insert(module);
+    }
+    let before = snapshot(&configuration, &roots, &output)?;
+    let force = std::env::var("SEVERIAN_FORCE_REBUILD").as_deref() == Ok("1");
+    if !force && output.is_file() {
+        if let Some(record) = previous {
+            if record.snapshot == before && hashes(std::slice::from_ref(&output))?[0] == record.output && record.sidecars.iter().all(|item| item.path.is_file()) && hashes(&record.sidecars.iter().map(|item| item.path.clone()).collect::<Vec<_>>())? == record.sidecars {
+                println!("fresh {}", output.display());
+                return Ok(false);
+            }
         }
     }
     let before = snapshot(&configuration, &roots, &output)?;
@@ -161,7 +160,7 @@ fn compile_unit(compiler: &Compiler, source: &Path, output: &Path, root: &Path, 
         }
     }
     fs::rename(&staging, &output).map_err(|e| e.to_string())?;
-    let record = Record { schema_version: 2, roots, snapshot: before, output: hashes(std::slice::from_ref(&output))?.remove(0), sidecars: hashes(&sidecars)? };
+    let record = Record { schema_version: 3, roots, snapshot: before, output: hashes(std::slice::from_ref(&output))?.remove(0), sidecars: hashes(&sidecars)? };
     let staging = directory.join(format!(".sev-record-{}-{key:016x}.json", std::process::id()));
     fs::write(&staging, serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     fs::rename(staging, record_path).map_err(|e| e.to_string())?;

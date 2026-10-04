@@ -233,6 +233,13 @@ When a package is removed due to dead code or the references are stale we should
 Refactor caused package A to be deprecated, B relies on A but never used A. B's build should not fail until a code dep is referenced on A. 
 Until then build proceeds. We then capture that A was never used and suggest deprecation as lint 
 
+2. Unused Packages increase complexity while providing no benefit
+If a package is unused this should flag a lint and in the default sev build --lint we remove unused packages
+
+3. Single managable number of failures ~5 are useful when writing small programs,
+whereas for large projects there might be 100 errors which need to be analyzed and root cause before proceeding. 
+- Adding a debug/build/log.txt for the full trace so the terminal is not unreadable 
+- Adding per file json files that allow easier editor error triaging
 
 ## References
 

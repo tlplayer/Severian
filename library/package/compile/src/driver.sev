@@ -1,0 +1,4 @@
+# Keep the compiler worker protocol behind the package compilation boundary.
+# Package orchestration owns caching, worker lifetime and resource limits.
+def unit_arguments(executable: string, input: string, output: string, emit: string, sysroot: string, resolution: string, include_tests: bool, platform: string, profile: string) -> list[string]:
+    return [executable, "__compile-unit", input, output, emit, sysroot, resolution, "test" if include_tests else "build", platform, profile]

@@ -1,0 +1,24 @@
+{
+  "package": {
+    "name": "package.compile",
+    "version": "0.1.0",
+    "edition": "2026",
+    "description": "Package compilation adapters for the current Severian compiler"
+  },
+  "lib": { "path": "src/lib.sev" },
+  "language": { "explicit-imports": true },
+  "dependencies": {
+    "compiler_lexer": {
+      "path": "../../../sev_compiler/frontend/lexer",
+      "package": "sev-compiler-lexer"
+    },
+    "compiler_parser": {
+      "path": "../../../sev_compiler/frontend/parser",
+      "package": "sev-compiler-parser"
+    },
+    "compiler_source": {
+      "path": "../../../sev_compiler/frontend/source",
+      "package": "sev-compiler-source"
+    }
+  }
+}

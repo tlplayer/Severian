@@ -1,6 +1,6 @@
 mod api;
 mod build_cache;
-mod build_reports;
+use severian_driver::build_reports;
 mod generators;
 mod example_validation;
 mod mutation;
@@ -321,13 +321,13 @@ fn emit_ir(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
             .output
             .clone()
             .unwrap_or_else(|| env::current_dir().expect("invocation directory").join("package.pkg/cache/agent-ir"));
-        compiler(&config, manifest, false)?
+        compiler(&config, manifest, false, &[targets[0].path().to_owned()])?
             .emit_agent_ir(targets[0].path(), input_root(&input), &output, package)
             .map_err(|error| error.to_string())?;
         println!("wrote Agent IR to {}", output.display());
         return Ok(());
     }
-    let text = compiler(&config, manifest, false)?
+    let text = compiler(&config, manifest, false, &[targets[0].path().to_owned()])?
         .emit_file(targets[0].path(), stage)
         .map_err(|error| error.to_string())?;
     if let Some(output) = &options.output {
@@ -493,8 +493,8 @@ fn check(options: CommonOptions, catalog: &Catalog) -> Result<(), String> {
     let input = discover(options.path.as_deref(), catalog)?;
     let manifest = input.manifest();
     let config = resolve_config(catalog, manifest, &options)?;
-    let compiler = compiler(&config, manifest, false)?;
     let targets = selected_targets(&input, options.bin.as_deref())?;
+    let compiler = compiler(&config, manifest, false, &targets.iter().map(|target| target.path().to_owned()).collect::<Vec<_>>())?;
     lint_sources(&compiler, targets.iter().map(|target| target.path().to_owned()).collect(), input_root(&input))?;
     for target in targets {
         compiler
@@ -541,91 +541,65 @@ fn build(options: CommonOptions, catalog: &Catalog) -> Result<Vec<PathBuf>, Stri
     let result = build_reported(options, catalog, &reports);
     if let Err(error) = &result {
         reports.record("build", "error", Path::new("."), error)?;
-        eprintln!("Build reports: {}", reports.root.display());
     }
-    result
+    reports.finish()?;
+    eprintln!("Build log: {}", reports.root.join("log.txt").display());
+    result.map_err(|_| reports.failure())
 }
 
 fn build_reported(options: CommonOptions, catalog: &Catalog, reports: &build_reports::Reports) -> Result<Vec<PathBuf>, String> {
     if !options.application_args.is_empty() {
         return Err("`sev build` does not accept application arguments".into());
     }
-    eprintln!("[build] Resolving package configuration and dependencies");
+    reports.record("build", "trace", Path::new("."), "Resolving package configuration and dependencies")?;
     let input = discover(options.path.as_deref(), catalog)?;
     let manifest = input.manifest();
     let config = resolve_config(catalog, manifest, &options)?;
-    let (sources, mut failed) = reports.scan(manifest, options.path.as_deref().unwrap_or(input_root(&input)))?;
-    eprintln!("[build] Preparing source generators");
-    let generators_failed = if let Some(manifest) = manifest {
-        match generators::prepare_reported(manifest, Some(reports)) {
-            Ok(()) => false,
-            Err(error) => {
-                reports.record("generator", "error", input_root(&input), &error)?;
-                failed = true;
-                true
-            }
-        }
-    } else { false };
-    eprintln!("[build] Initializing compiler");
-    let compiler = match compiler_without_generators(&config, manifest, false) {
-        Ok(compiler) => compiler.with_max_errors(usize::MAX),
-        Err(error) => {
-            reports.record("bootstrap", "error", input_root(&input), &error)?;
-            reports.record("build", "error", input_root(&input), "blocked: semantic analysis and code generation require successful compiler initialization; independent source scanning completed")?;
-            return Err(reports.failure());
-        }
-    };
-    let known_roots: BTreeSet<_> = manifest.into_iter().flat_map(|manifest|
-        manifest.package_graph.packages.values().map(|package| package.root.clone())).collect();
-    let mut nested = BTreeMap::new();
-    let source_count = sources.len();
-    let mut last_progress = std::time::Instant::now();
-    eprintln!("[build] Checking imports and semantics for {source_count} source files");
-    for (index, source) in sources.into_iter().enumerate() {
-        if index == 0 || index + 1 == source_count || last_progress.elapsed().as_secs() >= 1 {
-            eprintln!("[build] Import/semantic check {}/{}: {}", index + 1, source_count, source.display());
-            last_progress = std::time::Instant::now();
-        }
-        let owner = build_reports::owner_manifest(&source);
-        let selected: &Compiler = if let Some(owner) = owner.filter(|owner| !known_roots.contains(owner.parent().unwrap_or(Path::new(".")))) {
-            let result = nested.entry(owner.clone()).or_insert_with(|| {
-                let manifest = Manifest::load(&owner, catalog)?;
-                let config = resolve_config(catalog, Some(&manifest), &options)?;
-                compiler_without_generators(&config, Some(&manifest), false)
-                    .map(|compiler| compiler.with_max_errors(usize::MAX))
-            });
-            match result {
-                Ok(compiler) => compiler,
-                Err(error) => {
-                    reports.record("package-import-resolution", "error", &owner, error)?;
-                    failed = true;
-                    continue;
-                }
-            }
-        } else { &compiler };
-        if let Err(error) = selected.check_file(&source) {
-            reports.compile_error(&source, &error)?;
-            failed = true;
-        }
-    }
     let targets = selected_targets(&input, options.bin.as_deref())?;
     if options.output.is_some() && targets.len() != 1 {
         return Err("`--output` requires exactly one selected artifact".into());
     }
+    let mut failed = false;
+    reports.record("build", "trace", Path::new("."), "Initializing compiler")?;
+    let compiler = compiler_without_generators(&config, manifest, false)
+        .map_err(|error| { let _ = reports.record("bootstrap", "error", input_root(&input), &error); error })?
+        .with_max_errors(usize::MAX);
+    let sources = targets.iter().map(|target| target.path().to_owned()).collect::<Vec<_>>();
+    let prepared = generators::prepare_reachable(&compiler, manifest, &sources, Some(reports))?;
+    let roots = prepared.roots;
+    let required_packages = prepared.packages;
+    let generator_failed = prepared.failed;
+    let mut reachable_sources = BTreeSet::new();
+    for source in &roots {
+        let discovery = compiler.discover_modules(source).map_err(|error| error.to_string())?;
+        for module in &discovery.graph.modules {
+            reachable_sources.insert(module.path.clone());
+            reports.record("discovery", "trace", &module.path, &format!("required by target or generator {}", source.display()))?;
+        }
+        if !discovery.diagnostics.is_empty() {
+            failed = true;
+            for error in discovery.diagnostics {
+                reports.compile_error(source, &severian_driver::CompileError::Diagnostic(error))?;
+            }
+        } else if let Err(error) = compiler.check_file(source) {
+            reports.compile_error(source, &error)?;
+            failed = true;
+        }
+    }
     let root = input_root(&input);
     let mut artifacts = Vec::new();
     let import_sources: Vec<_> = targets.iter().map(|target| target.path().to_path_buf()).collect();
-    eprintln!("[build] Checking import lint");
+    reports.record("build", "trace", Path::new("."), "Checking import lint")?;
     if let Err(error) = lint_sources_reported(&compiler, import_sources, root, Some(reports)) {
         reports.record("imports", "lint", root, &error)?;
         failed = true;
     }
-    if generators_failed {
-        reports.record("build", "error", root, "blocked: artifact generation requires successful generators; independent source checks completed")?;
+    if generator_failed || failed {
+        reports.record("build", "error", root, "blocked: artifact generation requires successful reachable source checks and generators")?;
         return Err(reports.failure());
     }
     for target in targets {
-        eprintln!("[build] Compiling artifact: {}", target.path().display());
+        reports.record("build", "trace", target.path(), "Compiling artifact")?;
         let result = (|| -> Result<PathBuf, String> {
             let output = options
                 .output
@@ -637,14 +611,14 @@ fn build_reported(options: CommonOptions, catalog: &Catalog, reports: &build_rep
             }
             match &target {
                 DeclaredTarget::Binary(binary) => {
-                    let roots = manifest.map(|m| m.package_graph.packages.values().map(|p| p.root.clone()).collect()).unwrap_or_else(|| vec![root.to_path_buf()]);
+                    let roots = reachable_sources.iter().cloned().collect();
                     let configuration = format!("{config:?}\n{target:?}\n{:?}", manifest.map(|m| &m.package_graph));
                     if !build_cache::compile(&compiler, &binary.path, &output, &env::current_dir().map_err(|error| error.to_string())?, configuration, roots)? {
                         return Ok(output);
                     }
                 }
                 DeclaredTarget::Library(library) => {
-                    let roots = manifest.map(|m| m.package_graph.packages.values().map(|p| p.root.clone()).collect()).unwrap_or_else(|| vec![root.to_path_buf()]);
+                    let roots = reachable_sources.iter().cloned().collect();
                     let configuration = format!("library-object-v2\n{config:?}\n{target:?}\n{:?}", manifest.map(|m| &m.package_graph));
                     let rebuilt = build_cache::compile_library(&compiler, &library.path, &output.with_extension("o"), root, configuration, roots)?;
                     if rebuilt || !output.is_file() {
@@ -659,9 +633,25 @@ fn build_reported(options: CommonOptions, catalog: &Catalog, reports: &build_rep
         match result {
             Ok(output) => artifacts.push(output),
             Err(error) => {
-                eprintln!("[build] Artifact failed: {error}");
+                reports.record("build", "trace", Path::new("."), &format!("Artifact failed: {error}"))?;
                 reports.record("code-generation", "error", target.path(), &error)?;
                 failed = true;
+            }
+        }
+    }
+    if !failed {
+        if let Some(manifest) = manifest {
+            for package in manifest.package_graph.packages.values().filter(|package| required_packages.contains(&package.root)) {
+                for (alias, dependency) in &package.dependencies {
+                    if !required_packages.contains(&manifest.package_graph.packages[dependency].root) {
+                        reports.record("dependencies", "lint", &severian_driver::config::document::path(&package.root),
+                            &format!("dependency `{alias}` was unused by this build's selected targets; consider removing it if no other target requires it"))?;
+                    }
+                }
+                for alias in package.unavailable_dependencies.keys() {
+                    reports.record("dependencies", "lint", &severian_driver::config::document::path(&package.root),
+                        &format!("missing dependency `{alias}` was unused by this successful build; consider removing the stale declaration"))?;
+                }
             }
         }
     }
@@ -709,13 +699,13 @@ fn lint_sources_reported(compiler: &Compiler, import_sources: Vec<PathBuf>, root
     }
     let imports = severian_driver::package_lint::correct_imports(&import_graph, root)?;
     for file in &imports.files {
-        println!("resolved {} imports in {}", file.imports, file.path.display());
+        if reports.is_none() { println!("resolved {} imports in {}", file.imports, file.path.display()); }
         if let Some(reports) = reports {
             reports.record("imports", "lint", &file.path, &format!("resolved {} imports", file.imports))?;
         }
     }
     for note in &imports.notes {
-        eprintln!("note: {note}");
+        if reports.is_none() { eprintln!("note: {note}"); }
         if let Some(reports) = reports { reports.record("imports", "lint", root, note)?; }
     }
     Ok(())
@@ -746,7 +736,7 @@ fn publish_package(options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
         ));
     }
     let config = resolve_config(catalog, Some(&manifest), &options)?;
-    let compiler = compiler(&config, Some(&manifest), false)?;
+    let compiler = compiler(&config, Some(&manifest), false, &manifest.library.iter().map(|library| library.path.clone()).chain(manifest.bins.iter().map(|binary| binary.path.clone())).collect::<Vec<_>>())?;
     for source in manifest
         .library
         .iter()
@@ -934,7 +924,7 @@ fn run_program(mut options: CommonOptions, catalog: &Catalog) -> Result<(), Stri
         fs::create_dir_all(parent)
             .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
     }
-    let compiler = compiler(&config, manifest, false)?;
+    let compiler = compiler(&config, manifest, false, std::slice::from_ref(&binary.path))?;
     lint_sources(&compiler, vec![binary.path.clone()], input_root(&input))?;
     compiler.compile_file(&binary.path, &output).map_err(|error| error.to_string())?;
     let executable = if output.is_absolute() {
@@ -1114,7 +1104,7 @@ fn materialize_registry_binary(
         fs::create_dir_all(parent)
             .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
     }
-    compiler(&config, Some(&manifest), false)?
+    compiler(&config, Some(&manifest), false, std::slice::from_ref(&binary.path))?
         .compile_file(&binary.path, &cache)
         .map_err(|error| error.to_string())?;
     Ok((cache, binary_name))
@@ -1267,7 +1257,7 @@ fn test(options: CommonOptions, catalog: &Catalog, mutate: bool) -> Result<(), S
         ));
     }
     let config = resolve_config(catalog, manifest.as_ref(), &options)?;
-    let compiler = compiler(&config, manifest.as_ref(), true)?;
+    let compiler = compiler(&config, manifest.as_ref(), true, &sources)?;
     let compiler = if validation.is_some() {
         compiler.with_coverage()
     } else {
@@ -1318,11 +1308,11 @@ fn compiler(
     config: &ResolvedConfig,
     manifest: Option<&Manifest>,
     include_root_dev: bool,
+    sources: &[PathBuf],
 ) -> Result<Compiler, String> {
-    if let Some(manifest) = manifest {
-        generators::prepare(manifest)?;
-    }
-    compiler_without_generators(config, manifest, include_root_dev)
+    let compiler = compiler_without_generators(config, manifest, include_root_dev)?;
+    generators::prepare_reachable(&compiler, manifest, sources, None)?;
+    Ok(compiler)
 }
 
 fn compiler_without_generators(
@@ -2116,7 +2106,7 @@ fn project_manifest_path(start: &Path) -> Result<PathBuf, String> {
 
 fn validate_package_targets(manifest: &Manifest, catalog: &Catalog) -> Result<(), String> {
     let config = resolve_config(catalog, Some(manifest), &CommonOptions::default())?;
-    let compiler = compiler(&config, Some(manifest), false)?;
+    let compiler = compiler(&config, Some(manifest), false, &manifest.library.iter().map(|library| library.path.clone()).chain(manifest.bins.iter().map(|binary| binary.path.clone())).collect::<Vec<_>>())?;
     if let Some(library) = &manifest.library {
         compiler
             .check_file(&library.path)

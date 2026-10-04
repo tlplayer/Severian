@@ -1,4 +1,4 @@
-import "../../../../hir/modules/module.sev" as model_hir_module_module
+import MirContext from "../../../mir/src/model.sev"
 import "../../../cfg/cfg.sev" as model_mir_cfg_cfg
 import "../../../../syntax/function/function.sev" as model_syntax_function_function
 import "../../../../syntax/primitive/catalog.sev" as model_syntax_primitive_catalog
@@ -130,7 +130,7 @@ def same_state(left: list[StoragePlace], right: list[StoragePlace]) -> bool:
     return true
 
 
-def verify(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBody) -> unit | diagnostics.Diagnostic:
+def verify(module: MirContext, body: model_mir_cfg_cfg.CfgBody) -> unit | diagnostics.Diagnostic:
     reachable = cfg.reachable_blocks(body)
     universe: list[StoragePlace] = []
     for block in body.blocks:
@@ -174,7 +174,7 @@ def verify(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBo
                     # Aggregate completeness still needs declared active-variant
                     # information. Check scalar leaves without rejecting legal
                     # partially initialized outcome payloads.
-                    descriptor ?= model_syntax_primitive_catalog.primitive_descriptor(module.values[result.index].type_id)
+                    descriptor ?= model_syntax_primitive_catalog.primitive_descriptor(module.callable.values[result.index].type_id)
                     if descriptor != None:
                         for place in address_places(body, address):
                             if place.root >= 0 and not place_present(initialized, place):

@@ -248,36 +248,66 @@ pub fn resolve_with_packages_and_max_errors(
 /// Resolves the root program plus compiler-provided registry packages whose
 /// trait implementations must participate even when applications do not
 /// import their ordinary symbols.
+/// Discovery retains independent failures for tooling and generator scheduling.
+/// Only `into_result` authorizes the graph for semantic analysis.
+#[derive(Debug)]
+pub struct ModuleDiscovery {
+    pub graph: ModuleGraph,
+    pub diagnostics: Vec<Diagnostic>,
+    pub attempted: BTreeSet<PathBuf>,
+    pub packages: BTreeSet<PackageId>,
+}
+
+impl ModuleDiscovery {
+    pub fn into_result(mut self) -> Result<ModuleGraph, Diagnostic> {
+        if self.diagnostics.is_empty() { return Ok(self.graph); }
+        let mut first = self.diagnostics.remove(0);
+        first.additional.extend(self.diagnostics);
+        Err(first)
+    }
+}
+
 pub fn resolve_with_packages_and_additional_roots(
     root: &Path,
     packages: &PackageGraph,
     additional_roots: &[(PathBuf, PackageId)],
     max_errors: usize,
 ) -> Result<ModuleGraph, Diagnostic> {
+    discover_with_packages(root, packages, additional_roots, max_errors).into_result()
+}
+
+pub fn discover_with_packages(
+    root: &Path,
+    packages: &PackageGraph,
+    additional_roots: &[(PathBuf, PackageId)],
+    max_errors: usize,
+) -> ModuleDiscovery {
     let mut resolver = Resolver::new(packages, max_errors);
-    for (path, package) in additional_roots {
-        resolver.visit(path, *package)?;
+    for (path, package) in additional_roots.iter().chain(std::iter::once(&(root.to_owned(), packages.root))) {
+        if let Err(error) = resolver.visit(path, *package) { resolver.diagnostics.push(error); }
     }
-    resolver.visit(root, packages.root)?;
-    let canonical_root = std::fs::canonicalize(root).map_err(|error| {
-        Diagnostic::new(
-            "E000001",
-            format!("could not read {}: {error}", root.display()),
-            None,
-        )
-    })?;
-    if let Some(position) = resolver
-        .order
-        .iter()
-        .position(|module| module.path == canonical_root)
-    {
-        let root = resolver.order.remove(position);
-        resolver.order.push(root);
+    if let Ok(canonical_root) = std::fs::canonicalize(root) {
+        if let Some(position) = resolver.order.iter().position(|module| module.path == canonical_root) {
+            let root = resolver.order.remove(position);
+            resolver.order.push(root);
+        }
     }
-    Ok(ModuleGraph {
-        modules: resolver.order,
-        policies: package_policies(packages)?,
-    })
+    // Unused package policy must not cause an otherwise unrelated build to fail.
+    let used = PackageGraph {
+        root: packages.root,
+        packages: packages.packages.iter().filter(|(id, _)| resolver.used_packages.contains(id))
+            .map(|(id, package)| (*id, package.clone())).collect(),
+    };
+    let policies = match package_policies(&used) {
+        Ok(policies) => policies,
+        Err(error) => { resolver.diagnostics.push(error); BTreeMap::new() }
+    };
+    ModuleDiscovery {
+        graph: ModuleGraph { modules: resolver.order, policies },
+        diagnostics: resolver.diagnostics,
+        attempted: resolver.attempted,
+        packages: resolver.used_packages,
+    }
 }
 
 struct Resolver<'a> {
@@ -290,6 +320,10 @@ struct Resolver<'a> {
     import_edges: BTreeMap<PathBuf, Vec<ResolvedImport>>,
     sources: SourceMap,
     max_errors: usize,
+    diagnostics: Vec<Diagnostic>,
+    attempted: BTreeSet<PathBuf>,
+    used_packages: BTreeSet<PackageId>,
+    failed: BTreeSet<PathBuf>,
 }
 
 impl<'a> Resolver<'a> {
@@ -304,10 +338,16 @@ impl<'a> Resolver<'a> {
             import_edges: BTreeMap::new(),
             sources: SourceMap::new(),
             max_errors: max_errors.max(1),
+            diagnostics: Vec::new(),
+            attempted: BTreeSet::new(),
+            used_packages: BTreeSet::new(),
+            failed: BTreeSet::new(),
         }
     }
 
     fn visit(&mut self, path: &Path, package: PackageId) -> Result<(), Diagnostic> {
+        self.attempted.insert(path.to_owned());
+        self.used_packages.insert(package);
         let canonical = std::fs::canonicalize(path).map_err(|error| {
             Diagnostic::new(
                 "E000001",
@@ -324,7 +364,8 @@ impl<'a> Resolver<'a> {
             .filter(|candidate| canonical.starts_with(&candidate.root))
             .max_by_key(|candidate| candidate.root.components().count())
             .map_or(package, |candidate| candidate.id);
-        if self.visited.contains(&canonical) {
+        self.used_packages.insert(package);
+        if self.visited.contains(&canonical) || self.failed.contains(&canonical) {
             return Ok(());
         }
         if let Some(cycle_start) = self.visiting.iter().position(|path| path == &canonical) {
@@ -364,10 +405,14 @@ impl<'a> Resolver<'a> {
         let owner = self.packages.packages.get(&package)
             .map(|package| package.root.display().to_string())
             .unwrap_or_else(|| format!("package#{}", package.0));
-        let tokens = severian_lexer::scan(&source)
-            .map_err(|diagnostic| source_diagnostic(diagnostic, &source, &owner, "lexer"))?;
-        let ast = severian_parser::parse_with_max_errors(&tokens, self.max_errors)
-            .map_err(|diagnostic| source_diagnostic(diagnostic, &source, &owner, "parser"))?;
+        let parsed = severian_lexer::scan(&source)
+            .map_err(|diagnostic| source_diagnostic(diagnostic, &source, &owner, "lexer"))
+            .and_then(|tokens| severian_parser::parse_with_max_errors(&tokens, self.max_errors)
+                .map_err(|diagnostic| source_diagnostic(diagnostic, &source, &owner, "parser")));
+        let ast = match parsed {
+            Ok(ast) => ast,
+            Err(error) => { self.failed.insert(canonical); return Err(error); }
+        };
         self.parsed.insert(canonical.clone(), ast.clone());
         let module_id = module_id(&canonical, package, self.packages)?;
         self.module_ids.insert(canonical.clone(), module_id);
@@ -376,32 +421,31 @@ impl<'a> Resolver<'a> {
             Item::Import(import) => Some(import),
             _ => None,
         }) {
-            if let Some((dependency, dependency_package)) =
-                source_import(&canonical, package, import, self.packages)
-                    .map_err(|diagnostic| source_diagnostic(diagnostic, &source, &owner, "package import resolution"))?
-            {
-                self.visit(&dependency, dependency_package)?;
-                let dependency = std::fs::canonicalize(&dependency).map_err(|error| {
-                    Diagnostic::new(
-                        "E000001",
-                        format!("could not read {}: {error}", dependency.display()),
-                        Some(import.span),
-                    )
-                    .with_source(source.clone())
-                })?;
-                let dependency_id = *self
-                    .module_ids
-                    .get(&dependency)
-                    .expect("visited source imports have module identities");
-                self.import_edges
-                    .entry(canonical.clone())
-                    .or_default()
-                    .push(ResolvedImport {
-                        span: import.span,
-                        module: dependency_id,
-                    });
+            let resolved = source_import(&canonical, package, import, self.packages)
+                .map_err(|diagnostic| source_diagnostic(diagnostic, &source, &owner, "package import resolution"));
+            let (dependency, dependency_package) = match resolved {
+                Ok(Some(dependency)) => dependency,
+                Ok(None) => continue,
+                Err(error) => { self.diagnostics.push(error); continue; }
+            };
+            if let Err(mut error) = self.visit(&dependency, dependency_package) {
+                // Loading failures need the importing location; parser/semantic
+                // diagnostics already carry the dependency's own source span.
+                if error.span.is_none() {
+                    error.span = Some(import.span);
+                    error = source_diagnostic(error, &source, &owner, "package import resolution");
+                }
+                self.diagnostics.push(error);
+                continue;
+            }
+            let Ok(dependency) = std::fs::canonicalize(&dependency) else { continue; };
+            if self.failed.contains(&dependency) { continue; }
+            if let Some(dependency_id) = self.module_ids.get(&dependency) {
+                self.import_edges.entry(canonical.clone()).or_default()
+                    .push(ResolvedImport { span: import.span, module: *dependency_id });
             }
         }
+
         self.visiting.pop();
         self.visited.insert(canonical.clone());
         let imports = self.import_edges.remove(&canonical).unwrap_or_default();
@@ -588,6 +632,42 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn reachable_graph_uses_explicit_entries_and_ignores_unlinked_module_files() {
+        let root = temporary();
+        for name in ["main.sev", "lib.sev", "mod.sev", "submod.sev"] {
+            std::fs::write(root.join(name), "this is deliberately invalid : [\n").unwrap();
+        }
+        std::fs::create_dir(root.join("used")).unwrap();
+        std::fs::write(root.join("used/submod.sev"), "def value() -> int:\n    return 1\n").unwrap();
+        std::fs::write(root.join("target_file.sev"), "import \"used/submod.sev\" as used\n").unwrap();
+        let graph = resolve(&root.join("target_file.sev")).unwrap();
+        assert_eq!(graph.modules.len(), 2);
+        assert!(graph.modules.last().unwrap().path.ends_with("target_file.sev"));
+        assert!(graph.modules[0].path.ends_with("used/submod.sev"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reachable_graph_reports_independent_missing_imports_without_checking_siblings() {
+        let root = temporary();
+        std::fs::write(root.join("main.sev"), "import \"first.sev\" as first\nimport \"second.sev\" as second\nimport \"good.sev\" as good\n").unwrap();
+        std::fs::write(root.join("good.sev"), "value = 1\n").unwrap();
+        std::fs::write(root.join("unused.sev"), "invalid : [\n").unwrap();
+        let package = PackageId(0);
+        let packages = PackageGraph { root: package, packages: BTreeMap::from([
+            (package, ResolvedPackage { id: package, root: root.clone(), library: root.join("main.sev"),
+                dependencies: BTreeMap::new(), unavailable_dependencies: BTreeMap::new() })
+        ]) };
+        let discovery = discover_with_packages(&root.join("main.sev"), &packages, &[], 20);
+        assert_eq!(discovery.diagnostics.len(), 2);
+        assert!(discovery.diagnostics.iter().all(|diagnostic| diagnostic.code == "E000123"));
+        assert_eq!(discovery.graph.modules.len(), 2);
+        assert!(discovery.graph.modules.iter().any(|module| module.path.ends_with("good.sev")));
+        assert!(discovery.into_result().is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

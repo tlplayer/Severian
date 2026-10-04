@@ -6,35 +6,35 @@
   },
   "lib": {
     "name": "backend",
-    "path": "backend/src/lib.sev"
+    "path": "src/lib.sev"
   },
   "dependencies": {
     "syntax": {
-      "path": "../../../../sev_compiler/syntax",
+      "path": "../../syntax",
       "package": "sev-compiler-syntax"
     },
     "environment": {
-      "path": "../../../system/environment",
+      "path": "../../../library/system/environment",
       "package": "environment"
     },
     "file": {
-      "path": "../../../system/file",
+      "path": "../../../library/system/file",
       "package": "file"
     },
     "path": {
-      "path": "../../../system/path",
+      "path": "../../../library/system/path",
       "package": "path"
     },
     "process": {
-      "path": "../../../system/process",
+      "path": "../../../library/system/process",
       "package": "process"
     },
     "package": {
-      "path": "../..",
+      "path": "../../../library/package",
       "package": "package"
     },
     "os": {
-      "path": "../../../system/os"
+      "path": "../../../library/system/os"
     }
   }
 }

@@ -205,7 +205,6 @@ fn run_package_fixtures(
         let result = (|| {
             let manifest = Manifest::load(&severian_driver::config::document::path(&package), catalog)?;
             let config = super::resolve_config(catalog, Some(&manifest), options)?;
-            let compiler = super::compiler(&config, Some(&manifest), true)?.with_coverage();
             let mut sources = manifest
                 .bins
                 .iter()
@@ -216,6 +215,7 @@ fn run_package_fixtures(
             if tests.is_dir() {
                 test_runner::collect_sources(&tests, &mut sources)?;
             }
+            let compiler = super::compiler(&config, Some(&manifest), true, &sources)?.with_coverage();
             let sources = test_runner::deduplicate_roots(&compiler, sources)?;
             coverage_points.extend(declared_coverage(&compiler, &sources)?);
             let package_output = output_root.join(format!("package-{index}"));

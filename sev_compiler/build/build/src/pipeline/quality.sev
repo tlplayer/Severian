@@ -1,9 +1,8 @@
-import "../../../../hir/modules/module.sev" as model_hir_module_module
+import MirAnalysis, callable_declarations from "../../../../mir/mir/src/model.sev"
 import package
 import source
-import "package:mir/mir/src/quality.sev" as quality
 
-def prepare_quality(module: model_hir_module_module.Module, files: list[source.SourceFile], resolution: package.Resolution):
+def prepare_quality(module: MirAnalysis, files: list[source.SourceFile], resolution: package.Resolution):
     if len(resolution.packages) == 0:
         return
     project = resolution.packages[0]
@@ -13,20 +12,25 @@ def prepare_quality(module: model_hir_module_module.Module, files: list[source.S
     roots: list[string] = []
     for dependency in resolution.packages:
         roots.append(dependency.root)
-    module.quality_files = package.coverage_sources(files, roots, excluded, module.prelude_sources)
+    prelude_sources: list[int] = []
+    for binding in module.program.graph.prelude:
+        source_id = int(module.program.graph.units[binding.provider.unit].file.source)
+        if source_id not in prelude_sources:
+            prelude_sources.append(source_id)
+    module.quality.files = package.coverage_sources(files, roots, excluded, prelude_sources)
+    module.quality.exclusions = []
     for test in module.tests:
-        module.quality_exclusions.append(test.span)
+        module.quality.exclusions.append(test.span)
     # main is the execution harness; unit coverage measures its callable APIs.
-    for function in module.functions:
+    for function in callable_declarations(module):
         if function.name == "main" or function.name.ends_with(".main"):
             declared ?= function.span
             if declared != None:
-                module.quality_exclusions.append(declared)
+                module.quality.exclusions.append(declared)
 
-def quality_map(module: model_hir_module_module.Module) -> string:
-    quality.quality_branches(module)
+def quality_map(module: MirAnalysis) -> string:
     regions: list[package.CoverageRegion] = []
-    for region in module.quality_regions:
+    for region in module.quality.regions:
         kind = "Branch" if region.kind.starts_with("Branch") else "Condition" if region.kind.starts_with("Condition") else region.kind
         regions.append(package.CoverageRegion(string(region.id), kind, region.file, region.line, region.column, region.kind))
     tests: list[package.CoverageTest] = []

@@ -1,4 +1,4 @@
-import "../../../../hir/modules/module.sev" as model_hir_module_module
+import MirAnalysis, callable_declarations from "../../../../mir/mir/src/model.sev"
 import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import package
 
@@ -21,26 +21,19 @@ def interface_type(type_id: model_syntax_symbol_symbol.TypeId) -> string:
         return "f64"
     return ""
 
-def scalar_interface(module: borrow model_hir_module_module.Module, resolution: package.Resolution, names: list[string], symbols: list[string], libraries: list[string] = []) -> string:
+def scalar_interface(module: borrow MirAnalysis, resolution: package.Resolution, names: list[string], symbols: list[string], libraries: list[string] = []) -> string:
     if len(resolution.packages) == 0:
         return ""
-    for item in borrow module.items:
-        match item:
-            case BindingItem:
-                if int(binding.span.source_id) not in module.prelude_sources:
-                    return ""
-            case ExpressionItem:
-                if int(expression.span.source_id) not in module.prelude_sources:
-                    return ""
-            case _:
-                throw Error("unimplemented (sev_compiler/boundaries/driver/src/pipeline/package_interface.sev)")
+    # A scalar foreign interface cannot reproduce source initializers.
+    if len(module.initializers) != 0:
+        return ""
     owner = resolution.packages[0]
     exports = package.string_array(package.setting(owner.manifest.entries, "package", "export", "[]"))
     lines: list[string] = []
     for name in exports:
         semantic_only := false
-        for function in module.generic_functions:
-            if function.name == name:
+        for function in callable_declarations(module):
+            if function.name == name and len(function.type_parameters) != 0:
                 semantic_only = true
         for declaration in module.traits:
             if declaration.name == name:
@@ -48,13 +41,13 @@ def scalar_interface(module: borrow model_hir_module_module.Module, resolution: 
         for declaration in module.records:
             if declaration.name == name:
                 semantic_only = true
-        for declaration in module.types:
+        for declaration in module.program.graph.types:
             if declaration.name == name:
                 semantic_only = true
         if semantic_only:
             continue
         found := 0
-        for function in borrow module.functions:
+        for function in borrow callable_declarations(module):
             if function.name != name:
                 continue
             found += 1

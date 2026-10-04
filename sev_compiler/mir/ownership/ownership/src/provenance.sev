@@ -1,4 +1,4 @@
-import "../../../../hir/modules/module.sev" as model_hir_module_module
+import MirContext from "../../../mir/src/model.sev"
 import "../../../cfg/cfg.sev" as model_mir_cfg_cfg
 import "../../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
@@ -19,19 +19,21 @@ def origin_at(body: model_mir_cfg_cfg.CfgBody, block: model_syntax_block_block.B
     return body.origin
 
 
-def frame(module: model_hir_module_module.Module, origin: model_syntax_block_block.CallableOrigin, label: string = "") -> diagnostics.CallFrame:
+def frame(module: MirContext, origin: model_syntax_block_block.CallableOrigin, label: string = "") -> diagnostics.CallFrame:
     name = origin.name if label == "" else label + ": " + origin.name
-    path := module.path
+    path := ""
+    address ?= module.callable.source
+    if address != None:
+        path = module.analysis.program.graph.units[address.unit].file.path
     line := 0
     column := 0
     span ?= origin.span
     if span != None:
-        files = module.debug_files[:] + module.quality_files[:]
-        input ?= module.source_file
-        if input != None:
-            files.append(input)
-        for file in files:
-            if file.id == span.source_id and span.start <= len(file.characters):
+        for unit in module.analysis.program.graph.units:
+            if unit.file.source == span.source_id:
+                path = unit.file.path
+        for file in module.analysis.files:
+            if file.source_id == span.source_id and span.start <= len(file.characters):
                 path = file.path
                 line = 1
                 column = 1
@@ -45,7 +47,7 @@ def frame(module: model_hir_module_module.Module, origin: model_syntax_block_blo
     return diagnostics.CallFrame(string(origin.definition.package), name, path, line, column)
 
 
-def memory_diagnostic(module: model_hir_module_module.Module, message: string, origin: model_syntax_block_block.OperationOrigin, related: model_syntax_block_block.OperationOrigin | None = None) -> diagnostics.Diagnostic:
+def memory_diagnostic(module: MirContext, message: string, origin: model_syntax_block_block.OperationOrigin, related: model_syntax_block_block.OperationOrigin | None = None) -> diagnostics.Diagnostic:
     frames: list[diagnostics.CallFrame] = []
     previous ?= related
     if previous != None:

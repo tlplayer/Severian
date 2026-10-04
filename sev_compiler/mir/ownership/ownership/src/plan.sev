@@ -1,4 +1,4 @@
-import "../../../../hir/modules/module.sev" as model_hir_module_module
+import MirContext, require_registered from "../../../mir/src/model.sev"
 import "../../../cfg/cfg.sev" as model_mir_cfg_cfg
 import "../../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
@@ -28,7 +28,7 @@ class OwnershipPlan:
 # MIR is the executable ownership boundary. Source effects remain attached to
 # typed bodies, while availability, initialization and stack escapes are checked
 # on the completed graph and repeated after transformations before emission.
-def analyze_ownership(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBody, parameters: list[model_syntax_symbol_symbol.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
+def analyze_ownership(module: MirContext, body: model_mir_cfg_cfg.CfgBody, parameters: list[model_syntax_symbol_symbol.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
     try:
         cfg.verify_availability(body, parameters)
     catch failure: diagnostics.Diagnostic:
@@ -85,7 +85,7 @@ def stack_owner(plan: borrow OwnershipPlan, value: model_syntax_symbol_symbol.Va
     return storage_origin(plan, value) != None
 
 
-def verify_escapes(module: model_hir_module_module.Module, body: borrow model_mir_cfg_cfg.CfgBody, plan: borrow OwnershipPlan) -> unit | diagnostics.Diagnostic:
+def verify_escapes(module: MirContext, body: borrow model_mir_cfg_cfg.CfgBody, plan: borrow OwnershipPlan) -> unit | diagnostics.Diagnostic:
     reachable = cfg.reachable_blocks(body)
     for block in borrow body.blocks:
         if block.cfg_index not in reachable:
@@ -108,5 +108,10 @@ def verify_escapes(module: model_hir_module_module.Module, body: borrow model_mi
                     return error(provenance.memory_diagnostic(module, "returned view outlives its local storage owner", provenance.origin_at(body, block, int(len(block.operations))), owner))
 
 
-def authorize_lowering(module: borrow model_hir_module_module.Module, body: borrow model_mir_cfg_cfg.CfgBody, parameters: borrow list[model_syntax_symbol_symbol.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
-    return analyze_ownership(module, body, parameters)
+def authorize_lowering(module: MirContext, body: borrow model_mir_cfg_cfg.CfgBody, parameters: borrow list[model_syntax_symbol_symbol.ValueId]) -> OwnershipPlan | diagnostics.Diagnostic:
+    require_registered(module)
+    if module.callable.body != body or module.callable.cfg_revision != module.callable.revision:
+        return error(provenance.memory_diagnostic(module, "ownership authorization requires the verified current callable CFG", body.origin))
+    plan = analyze_ownership(module, body, parameters)
+    module.callable.ownership_revision = module.callable.revision
+    return plan

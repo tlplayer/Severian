@@ -25,7 +25,7 @@ import "timing.sev" as timing
 import "package_interface.sev" as package_interface
 import "mir_archive.sev" as mir_archive
 import "package:interface/interface/src/semantic_payload.sev" as semantic_payload
-import "package:backend/backend/src/native_mlir.sev" as native
+import "package:backend/src/native_mlir.sev" as native
 import "quality.sev" as quality
 import "editor.sev" as editor
 import "prelude_package.sev" as prelude_package

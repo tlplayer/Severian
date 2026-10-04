@@ -69,13 +69,13 @@ def run(*args, capture=False, cwd=ROOT, timeout=None):
     return result.stdout.strip() if capture else None
 
 
-def report_message(step, category, message):
+def report_message(step, category, message, source=None):
     root = Path(os.environ['SEVERIAN_BUILD_REPORT_DIR']) / step
-    for name in ('error', 'lint', 'warning'):
+    for name in ('error', 'lint', 'warning', 'trace'):
         (root / name).mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', dir=root / category,
                                      delete=False) as output:
-        json.dump({'message': message}, output, indent=2)
+        json.dump({'source': str(source or ('build/' + step)), 'message': message}, output, indent=2)
         output.write('\n')
 
 
@@ -98,21 +98,40 @@ def run_reported(step, *args, cargo=False):
                 if event.get('reason') == 'compiler-message':
                     diagnostic = event['message']
                     rendered = diagnostic.get('rendered') or diagnostic['message']
-                    print(rendered, end='' if rendered.endswith('\n') else '\n', flush=True)
                     transcript.append(rendered)
                     if diagnostic['level'] in ('error', 'warning'):
-                        report_message(step, diagnostic['level'], rendered)
+                        report_message(step, diagnostic['level'], rendered, next((span['file_name'] for span in diagnostic.get('spans', []) if span.get('is_primary')), None))
                     continue
                 if event.get('reason'):
                     continue
-            print(line, end='', flush=True)
             transcript.append(line)
             if line.lstrip().startswith('warning:'):
                 report_message(step, 'warning', line)
         status = child.wait()
+    report_message(step, 'trace', 'command: ' + repr(command) + '\n' + ''.join(transcript))
     if status:
         report_message(step, 'error', ''.join(transcript) or f'{command!r} exited {status}')
         raise subprocess.CalledProcessError(status, command)
+
+
+
+def consolidate_reports(root):
+    """Overwrite the readable view; JSON records retain source identities and callers."""
+    groups = {}
+    for path in sorted(root.rglob('*.json')):
+        record = json.loads(path.read_text())
+        source = record.get('source') or 'build/update'
+        stage = '/'.join(path.relative_to(root).parts[:-1])
+        key = (stage, tuple(record.get('span') or ()), record.get('message', ''))
+        groups.setdefault(source, {}).setdefault(key, set()).update(record.get('callers', []))
+    with (root / 'log.txt').open('w') as output:
+        output.write('Build trace (grouped by source file)\n')
+        for source, records in sorted(groups.items()):
+            output.write(f'\n===== {source} =====\n')
+            for (stage, span, message), callers in sorted(records.items()):
+                output.write(f'\n[{stage}]\n{message}\n')
+                for caller in sorted(callers - {source}):
+                    output.write(f'  required by: {caller}\n')
 
 
 def update_checkout():
@@ -179,7 +198,8 @@ def main():
             shutil.rmtree(reports)
         reports.mkdir(parents=True)
         os.environ['SEVERIAN_BUILD_REPORT_DIR'] = str(reports)
-        print(f'Build reports: {reports}', flush=True)
+        (reports / 'log.txt').write_text('Build trace (grouped by source file)\n')
+        print(f'Build log: {reports / "log.txt"}', flush=True)
         if not args.local:
             update_checkout()
         # Always invoke concrete artifacts, so changing the default cannot
@@ -234,3 +254,7 @@ if __name__ == '__main__':
     except (RuntimeError, OSError, subprocess.SubprocessError) as error:
         print(f'Compiler update failed: {error}', file=sys.stderr)
         sys.exit(1)
+    finally:
+        reports = os.environ.get('SEVERIAN_BUILD_REPORT_DIR')
+        if reports and Path(reports).is_dir():
+            consolidate_reports(Path(reports))

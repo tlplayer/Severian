@@ -1,4 +1,4 @@
-import "../../../hir/modules/module.sev" as model_hir_module_module
+import MirContext, require_registered from "model.sev"
 import "../../cfg/branch.sev" as model_mir_cfg_branch
 import "../../cfg/cfg.sev" as model_mir_cfg_cfg
 import "../../../syntax/generic/value.sev" as model_mir_value
@@ -15,8 +15,8 @@ import source
 import diagnostics
 
 
-def origin(module: model_hir_module_module.Module, name: string, span: source.Span) -> model_mir_cfg_branch.CfgTerminator:
-    for definition in module.traits:
+def origin(module: MirContext, name: string, span: source.Span) -> model_mir_cfg_branch.CfgTerminator:
+    for definition in module.analysis.traits:
         if definition.grammar and definition.name == name:
             return model_mir_cfg_branch.CfgTerminator(model_mir_cfg_branch.CfgExit.Dead, definition.definition, span)
     throw Error("missing source grammar contract " + name)
@@ -28,21 +28,32 @@ def successors(exit: model_mir_cfg_branch.CfgExit) -> list[model_mir_cfg_branch.
             return [edge]
         case Conditional:
             return [taken, otherwise]
-        case _:
+        case Raise:
+            return []
+        case Finish:
+            return []
+        case FinishFields:
+            return []
+        case Dead:
             return []
 
 
-def finish(module: model_hir_module_module.Module, context: ExecutionContext, span: source.Span, parameters: list[model_syntax_symbol_symbol.ValueId] = []) -> bool | diagnostics.Diagnostic:
+def finish(module: MirContext, context: ExecutionContext, span: source.Span, parameters: list[model_syntax_symbol_symbol.ValueId] = []) -> bool | diagnostics.Diagnostic:
+    require_registered(module)
+    module.callable.changed()
+    module.callable.body = context.body
     origin = origin(module, "Return", span)
     if open(context):
         terminate(context, model_mir_cfg_branch.CfgExit.Finish(None) if context.body.return_type.index == 2 else model_mir_cfg_branch.CfgExit.Dead, origin)
     verify(module, context.body)
     prune_unreachable(context.body)
     verify_availability(context.body, parameters)
-    return verify(module, context.body)
+    verify(module, context.body)
+    module.callable.cfg_revision = module.callable.revision
+    return true
 
 
-def verify(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBody) -> bool | diagnostics.Diagnostic:
+def verify(module: MirContext, body: model_mir_cfg_cfg.CfgBody) -> bool | diagnostics.Diagnostic:
     if body.entry < 0 or body.entry >= len(body.blocks):
         return error(diagnostics.Diagnostic("E000230", "CFG entry block does not exist", None))
     block_index := 0
@@ -59,43 +70,12 @@ def verify(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBo
             return error(diagnostics.Diagnostic("E000230", "CFG block requires exactly one terminator", None))
         if terminator != None:
             resolved := false
-            for definition in module.traits:
+            for definition in module.analysis.traits:
                 if definition.grammar and definition.definition.module == terminator.grammar.module and definition.definition.declaration.value == terminator.grammar.declaration.value:
                     resolved = true
             if not resolved:
                 return error(diagnostics.Diagnostic("E000230", "CFG edge requires resolved grammar provenance", terminator.span))
-            match terminator.exit:
-                case Conditional:
-                    if module.values[condition.index].type_id.index != 1:
-                        return error(diagnostics.Diagnostic("E000230", "CFG branch requires bool", terminator.span))
-                case Raise:
-                    type_id = module.values[value.index].type_id
-                    valid := false
-                    for record in module.records:
-                        if record.type_id.index == type_id.index and len(model_syntax_function_function.outcome_variants(record)) != 0:
-                            valid = true
-                    if not valid:
-                        return error(diagnostics.Diagnostic("E000230", "CFG raise requires a typed outcome", terminator.span))
-                    if body.return_type.index != 2 and body.return_type.index != type_id.index:
-                        return error(diagnostics.Diagnostic("E000230", "CFG error outcome does not match function boundary", terminator.span))
-                case FinishFields:
-                    expected = storage_types.value_fields(body.return_type, module.records)
-                    if len(values) != len(expected):
-                        return error(diagnostics.Diagnostic("E000230", "CFG return field count mismatch", terminator.span))
-                    position := 0
-                    for returned in values:
-                        if module.values[returned.index].type_id.index != expected[position].index:
-                            return error(diagnostics.Diagnostic("E000230", "CFG return field type mismatch", terminator.span))
-                        position += 1
-                case Finish:
-                    returned ?= value
-                    if returned != None:
-                        if module.values[returned.index].type_id.index != body.return_type.index:
-                            return error(diagnostics.Diagnostic("E000230", "CFG return type mismatch", terminator.span))
-                    elif body.return_type.index != 2:
-                        return error(diagnostics.Diagnostic("E000230", "CFG return requires a value", terminator.span))
-                case _:
-                    throw diagnostics.diagnostic("E000230", "unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
+            verify_exit(module, body, terminator)
             for edge in successors(terminator.exit):
                 if edge.target < 0 or edge.target >= len(body.blocks):
                     return error(diagnostics.Diagnostic("E000230", "CFG successor does not exist", terminator.span))
@@ -104,20 +84,60 @@ def verify(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBo
                     return error(diagnostics.Diagnostic("E000230", "CFG successor argument count mismatch", terminator.span))
                 index := 0
                 for argument in edge.arguments:
-                    if module.values[argument.index].type_id.index != module.values[parameters[index].index].type_id.index:
+                    if module.callable.values[argument.index].type_id.index != module.callable.values[parameters[index].index].type_id.index:
                         return error(diagnostics.Diagnostic("E000230", "CFG successor argument type mismatch", terminator.span))
                     index += 1
     return true
 
 
+def verify_exit(module: MirContext, body: model_mir_cfg_cfg.CfgBody, terminator: model_mir_cfg_branch.CfgTerminator) -> bool | diagnostics.Diagnostic:
+    match terminator.exit:
+        case Conditional:
+            if module.callable.values[condition.index].type_id.index != 1:
+                return error(diagnostics.Diagnostic("E000230", "CFG branch requires bool", terminator.span))
+        case Raise:
+            type_id = module.callable.values[value.index].type_id
+            valid := false
+            for record in module.analysis.records:
+                if record.type_id.index == type_id.index and len(model_syntax_function_function.outcome_variants(record)) != 0:
+                    valid = true
+            if not valid:
+                return error(diagnostics.Diagnostic("E000230", "CFG raise requires a typed outcome", terminator.span))
+            if body.return_type.index != 2 and body.return_type.index != type_id.index:
+                return error(diagnostics.Diagnostic("E000230", "CFG error outcome does not match function boundary", terminator.span))
+        case FinishFields:
+            expected = storage_types.value_fields(body.return_type, module.analysis.records)
+            if len(values) != len(expected):
+                return error(diagnostics.Diagnostic("E000230", "CFG return field count mismatch", terminator.span))
+            position := 0
+            for returned in values:
+                if module.callable.values[returned.index].type_id.index != expected[position].index:
+                    return error(diagnostics.Diagnostic("E000230", "CFG return field type mismatch", terminator.span))
+                position += 1
+        case Finish:
+            returned ?= value
+            if returned != None:
+                if module.callable.values[returned.index].type_id.index != body.return_type.index:
+                    return error(diagnostics.Diagnostic("E000230", "CFG return type mismatch", terminator.span))
+            elif body.return_type.index != 2:
+                return error(diagnostics.Diagnostic("E000230", "CFG return requires a value", terminator.span))
+        case Jump:
+            return true
+        case Dead:
+            return true
+    return true
 
-def value(module: model_hir_module_module.Module, type_id: model_syntax_symbol_symbol.TypeId) -> model_syntax_symbol_symbol.ValueId:
-    id = model_syntax_symbol_symbol.ValueId(u32(len(module.values)))
-    module.values.append(model_mir_value.Value(id, type_id))
+
+
+def value(module: MirContext, type_id: model_syntax_symbol_symbol.TypeId) -> model_syntax_symbol_symbol.ValueId:
+    module.callable.changed()
+    id = model_syntax_symbol_symbol.ValueId(u32(len(module.callable.values)))
+    module.callable.values.append(model_mir_value.Value(id, type_id))
     return id
 
 
-def simplify_storage(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBody):
+def simplify_storage(module: MirContext, body: model_mir_cfg_cfg.CfgBody):
+    module.callable.changed()
     slots: list[model_syntax_symbol_symbol.ValueId] = []
     counts: list[int] = []
     initialized: list[model_syntax_symbol_symbol.ValueId] = []
@@ -128,7 +148,7 @@ def simplify_storage(module: model_hir_module_module.Module, body: model_mir_cfg
         for operation in block.operations:
             match operation:
                 case Allocate:
-                    if type_id.index == 3 or storage_types.buffer_element(type_id, module.records).index != 0:
+                    if type_id.index == 3 or storage_types.buffer_element(type_id, module.analysis.records).index != 0:
                         slots.append(result)
                         counts.append(0)
                         initialized.append(result)
@@ -220,7 +240,8 @@ def simplify_storage_block(block: model_syntax_block_block.Block, slots: list[mo
     return block
 
 
-def promote_storage(module: model_hir_module_module.Module, body: model_mir_cfg_cfg.CfgBody):
+def promote_storage(module: MirContext, body: model_mir_cfg_cfg.CfgBody):
+    module.callable.changed()
     simplify_storage(module, body)
     slots: list[model_syntax_symbol_symbol.ValueId] = []
     initial: list[model_syntax_symbol_symbol.ValueId] = []
@@ -233,7 +254,7 @@ def promote_storage(module: model_hir_module_module.Module, body: model_mir_cfg_
             position += 1
             match operation:
                 case Allocate:
-                    if type_id.index == 3 or storage_types.buffer_element(type_id, module.records).index != 0:
+                    if type_id.index == 3 or storage_types.buffer_element(type_id, module.analysis.records).index != 0:
                         slots.append(result)
                         empty = value(module, type_id)
                         initial.append(empty)
@@ -248,12 +269,12 @@ def promote_storage(module: model_hir_module_module.Module, body: model_mir_cfg_
         body.blocks[selected.cfg_index] = promote_storage_block(module, selected, body.entry, slots, initial, prefix, prefix_origins)
 
 
-def promote_storage_block(module: model_hir_module_module.Module, selected: model_syntax_block_block.Block, entry: int, slots: list[model_syntax_symbol_symbol.ValueId], initial: list[model_syntax_symbol_symbol.ValueId], prefix: list[model_syntax_function_function.Operation], prefix_origins: list[model_syntax_block_block.OperationOrigin]) -> model_syntax_block_block.Block:
+def promote_storage_block(module: MirContext, selected: model_syntax_block_block.Block, entry: int, slots: list[model_syntax_symbol_symbol.ValueId], initial: list[model_syntax_symbol_symbol.ValueId], prefix: list[model_syntax_function_function.Operation], prefix_origins: list[model_syntax_block_block.OperationOrigin]) -> model_syntax_block_block.Block:
     current := initial[:]
     if selected.cfg_index != entry:
         current = []
         for slot in slots:
-            parameter = value(module, module.values[initial[len(current)].index].type_id)
+            parameter = value(module, module.callable.values[initial[len(current)].index].type_id)
             selected.parameters.append(parameter)
             current.append(parameter)
     operations: list[model_syntax_function_function.Operation] := []

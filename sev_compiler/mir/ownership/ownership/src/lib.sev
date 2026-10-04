@@ -1,10 +1,14 @@
-import "../../../../hir/modules/module.sev" as model_hir_module_module
-import "plan.sev" as _dependency_plan
-import validate_module from "validate/mod.sev"
+import MirAnalysis, MirContext from "../../../mir/src/model.sev"
+import authorize_lowering from "plan.sev"
+import Diagnostic from "../../../../syntax/primitive/error/diagnostic.sev"
 
-def validate(program: model_hir_module_module.Program):
-    for module in program.modules:
-        validate_module(module)
+def validate(analysis: MirAnalysis) -> unit | Diagnostic:
+    for realization in analysis.callables:
+        if realization.key not in analysis.selected:
+            continue
+        body ?= realization.body
+        if body != None:
+            authorize_lowering(MirContext(analysis, realization), body, realization.declaration.values)
     return unit
 
 import "cfg.sev" as _dependency_cfg

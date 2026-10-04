@@ -1,0 +1,2 @@
+# Parsing and graph construction remain owned by the compiler.
+from compiler_parser import parser, parse_source

@@ -295,8 +295,8 @@ def recognition_order() -> list[SyntaxDeclaration]:
         SyntaxDeclaration("primitive/int/declarations.sev", "IndexPrimitive"),
         SyntaxDeclaration("primitive/pointer/declarations.sev", "PointerPrimitive"),
         SyntaxDeclaration("primitive/unit/declarations.sev", "UnitPrimitive"),
-        SyntaxDeclaration("symbols/none.sev", "NoneValuePrimitive"),
-        SyntaxDeclaration("symbols/absent.sev", "AbsentPrimitive"),
+        SyntaxDeclaration("symbol/none.sev", "NoneValuePrimitive"),
+        SyntaxDeclaration("symbol/absent.sev", "AbsentPrimitive"),
         SyntaxDeclaration("symbol/symbol.sev", "Symbol"),
     ]
 

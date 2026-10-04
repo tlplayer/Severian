@@ -4,17 +4,84 @@ use std::process::Command;
 use std::collections::BTreeSet;
 use crate::build_reports::Reports;
 
-pub(crate) fn prepare(manifest: &Manifest) -> Result<(), String> {
-    prepare_reported(manifest, None)
+pub(crate) struct Prepared {
+    pub(crate) roots: BTreeSet<std::path::PathBuf>,
+    pub(crate) packages: BTreeSet<std::path::PathBuf>,
+    pub(crate) failed: bool,
 }
 
-pub(crate) fn prepare_reported(manifest: &Manifest, reports: Option<&Reports>) -> Result<(), String> {
+pub(crate) fn prepare_reachable(
+    compiler: &severian_driver::Compiler,
+    manifest: Option<&Manifest>,
+    sources: &[std::path::PathBuf],
+    reports: Option<&Reports>,
+) -> Result<Prepared, String> {
+    let mut roots = sources.iter().cloned().collect::<BTreeSet<_>>();
+    if std::env::var_os("SEVERIAN_ACTIVE_GENERATOR").is_some_and(|value| !value.is_empty()) {
+        return Ok(Prepared { roots, packages: BTreeSet::new(), failed: false });
+    }
+    let mut prepared = BTreeSet::new();
+    let mut required_packages = BTreeSet::new();
+    let mut generator_failed = false;
+    // Discover before running recipes, then repeat after each wave: generated
+    // sources may add imports. Failed provisional edges are reported only after
+    // their owning generators have had the opportunity to produce the source.
+    loop {
+        let before = (roots.len(), required_packages.len());
+        for source in roots.clone() {
+            let discovery = compiler.discover_modules(&source).map_err(|error| error.to_string())?;
+            for path in discovery.attempted.iter().chain(discovery.graph.modules.iter().map(|module| &module.path)) {
+                if let Some(owner) = severian_driver::build_reports::owner_manifest(path) {
+                    if let Some(root) = owner.parent().and_then(|path| path.canonicalize().ok()) {
+                        required_packages.insert(root);
+                    }
+                }
+            }
+        }
+        let mut pending = BTreeSet::new();
+        if let Some(manifest) = manifest {
+            for package in manifest.package_graph.packages.values() {
+                if !required_packages.contains(&package.root) || prepared.contains(&package.root) { continue; }
+                pending.insert(package.root.clone());
+                if let Some(recipes) = package.manifest.get("build").and_then(|build| build.get("generators")).and_then(toml::Value::as_array) {
+                    for recipe in recipes.iter().filter_map(toml::Value::as_str) {
+                        let recipe = package.root.join(recipe);
+                        if recipe.extension().is_some_and(|extension| extension == "sev") { roots.insert(recipe); }
+                    }
+                }
+            }
+            // Reach a fixed point over recipe imports before executing any
+            // recipe, then run dependency packages before their consumers.
+            if before != (roots.len(), required_packages.len()) { continue; }
+            if !pending.is_empty() {
+                let selected = pending.iter().filter(|root| {
+                    let package = manifest.package_graph.packages.values().find(|package| &package.root == *root).unwrap();
+                    !package.dependencies.values().any(|id| pending.contains(&manifest.package_graph.packages[id].root))
+                }).cloned().collect::<BTreeSet<_>>();
+                if selected.is_empty() { return Err("reachable generator packages contain a dependency cycle".into()); }
+                if let Err(error) = prepare_reported(manifest, reports, Some(&selected)) {
+                    if let Some(reports) = reports {
+                        reports.record("generator", "error", &manifest.root, &error)?;
+                        generator_failed = true;
+                    } else { return Err(error); }
+                }
+                prepared.extend(selected);
+                continue;
+            }
+        }
+        break;
+    }
+    Ok(Prepared { roots, packages: required_packages, failed: generator_failed })
+}
+
+pub(crate) fn prepare_reported(manifest: &Manifest, reports: Option<&Reports>, selected: Option<&BTreeSet<std::path::PathBuf>>) -> Result<(), String> {
     if std::env::var_os("SEVERIAN_ACTIVE_GENERATOR").is_some_and(|value| !value.is_empty()) {
         return Ok(());
     }
     let mut failures = Vec::new();
     let mut reported_stderr = BTreeSet::new();
     for package in manifest.package_graph.packages.values() {
+        if selected.is_some_and(|selected| !selected.contains(&package.root)) { continue; }
         let result = (|| -> Result<(), String> {
             let Some(value) = package.manifest.get("build").and_then(|build| build.get("generators")) else { return Ok(()); };
             Catalog::load()?.validate("build.generators", &value.to_string())?;
@@ -39,12 +106,13 @@ pub(crate) fn prepare_reported(manifest: &Manifest, reports: Option<&Reports>) -
                     };
                     if let Some(reports) = reports { command.env(crate::build_reports::ENV, &reports.root); }
                     let output = command.arg(&recipe).output().map_err(|error| format!("{}: {error}", recipe.display()))?;
-                    print!("{}", String::from_utf8_lossy(&output.stdout));
+                    if reports.is_none() { print!("{}", String::from_utf8_lossy(&output.stdout)); }
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    if should_print_stderr(&stderr, output.status.success(), &mut reported_stderr) {
+                    if reports.is_none() && should_print_stderr(&stderr, output.status.success(), &mut reported_stderr) {
                         eprint!("{stderr}");
                     }
                     if let Some(reports) = reports {
+                        reports.record("generator", "trace", &recipe, &format!("status: {}\nstdout:\n{}\nstderr:\n{}", output.status, String::from_utf8_lossy(&output.stdout), stderr))?;
                         for warning in stderr.lines().filter(|line| line.trim_start().starts_with("warning:")) {
                             reports.record("generator", "warning", &recipe, warning)?;
                         }

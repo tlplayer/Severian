@@ -12,7 +12,7 @@ import package_command from "../../build/build/src/package_command.sev"
 import compile_package_unit, compile_prelude_package, metadata, mir_archive from "../../build/build/src/package_compiler.sev"
 import serve_package_session from "../../build/build/src/package_session.sev"
 import "../../build/build/src/pipeline/source.sev" as compiler
-import "../../../library/package/compile/backend/backend/src/native_mlir.sev" as backend
+import "package:backend/src/native_mlir.sev" as backend
 import "../../build/build/src/profiling.sev" as profiling
 
 @c(symbol="exit")

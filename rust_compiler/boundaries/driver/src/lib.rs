@@ -9,6 +9,7 @@ pub mod explicit_imports;
 pub mod package_lint;
 mod components;
 pub mod config;
+pub mod build_reports;
 mod pipeline;
 mod runtime_paths;
 mod timing;

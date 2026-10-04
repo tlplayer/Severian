@@ -1,4 +1,4 @@
-import "../../../hir/modules/module.sev" as model_hir_module_module
+import MirAnalysis, MirContext from "model.sev"
 import "../../cfg/cfg.sev" as model_mir_cfg_cfg
 import Operation, value from "cfg.sev"
 
@@ -57,8 +57,8 @@ class AnalysisManager:
 
 trait Pass:
     def metadata() -> PassMetadata
-    def run_module(module: model_hir_module_module.Module, analyses: AnalysisManager) -> unit | PassError
-    def run_function(body: model_mir_cfg_cfg.CfgBody, analyses: AnalysisManager) -> unit | PassError
+    def run_module(module: MirAnalysis, analyses: AnalysisManager) -> unit | PassError
+    def run_function(context: MirContext, body: model_mir_cfg_cfg.CfgBody, analyses: AnalysisManager) -> unit | PassError
 
 
 class PassManager:
@@ -70,17 +70,24 @@ class PassManager:
     def add(pass: Pass):
         passes.append(pass)
 
-    def run(module: model_hir_module_module.Module, stage: IrStage) -> IrStage | PassError:
+    def run(module: MirAnalysis, stage: IrStage) -> IrStage | PassError:
         analyses = AnalysisManager()
         for pass in passes:
             metadata = pass.metadata()
             if metadata.accepted_stage != stage:
                 return error(PassError(metadata.name, "pass received the wrong IR stage"))
             if metadata.kind == Module:
+                for realization in module.callables:
+                    realization.changed()
                 pass.run_module(module, analyses)
             else:
-                for body in module.cfg_bodies:
-                    pass.run_function(body, analyses)
+                for realization in module.callables:
+                    if realization.key not in module.selected:
+                        continue
+                    body ?= realization.body
+                    if body != None:
+                        realization.changed()
+                        pass.run_function(MirContext(module, realization), body, analyses)
             analyses.invalidate_except(metadata.preserved_analyses)
             stage = metadata.produced_stage
         return stage

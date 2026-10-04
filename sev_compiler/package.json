@@ -29,7 +29,7 @@
   "dependencies": {
     "backend": {
       "package": "sev-mlir-backend",
-      "path": "../library/package/compile/backend"
+      "path": "lir/backend"
     },
     "semantic": {
       "package": "sev-compiler-semantic",

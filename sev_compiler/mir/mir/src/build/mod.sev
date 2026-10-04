@@ -1,11 +1,13 @@
-import "../../../../hir/modules/module.sev" as model_hir_module_module
+import MirAnalysis from "../model.sev"
 import diagnostics
 import "../callable.sev" as callable
+import "../quality.sev" as quality
+import "../verify.sev" as verification
 
 
 # Both driver entries construct CFG and obtain MIR ownership authorization.
-def build(program: model_hir_module_module.Program) -> model_hir_module_module.Module | diagnostics.Diagnostic:
-    result := model_hir_module_module.empty_module()
-    for module in program.modules:
-        result = callable.build_callables(module)
-    return result
+def build(analysis: MirAnalysis, exports: list[string] = []) -> MirAnalysis | diagnostics.Diagnostic:
+    callable.build_callables(analysis, exports)
+    quality.quality_branches(analysis)
+    verification.verify(analysis)
+    return analysis
