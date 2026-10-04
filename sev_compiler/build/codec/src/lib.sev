@@ -280,7 +280,7 @@ def ensure(codec: Codec, value: string) -> unit | Error:
                     child = resolve(codec, field.type, model.namespace)
                     encode.append("    " + put(codec, child, "value." + field.name))
                     read_field(codec, decode, child, index)
-                    argument = "field_" + string(index)
+                    argument := "field_" + string(index)
                     source_identity = (field.name in ["source", "source_id"] and child in ["u32", "u32 | None"]) or (value == "source.SourceFile" and field.name == "id")
                     if codec.mode == "interface" and source_identity:
                         mapped = "source_" + string(index)

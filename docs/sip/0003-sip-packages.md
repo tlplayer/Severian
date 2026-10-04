@@ -225,6 +225,13 @@ class FooBarClass: Foobar
 
 This should result in monomorphized implementations of the polymorphic types
 
+## Problems
+
+1. Missing packages
+When a package is removed due to dead code or the references are stale we should mark it and suggest alternative packages
+
+Refactor caused package A to be deprecated, B relies on A but never used A. B's build should not fail until a code dep is referenced on A. 
+Until then build proceeds. We then capture that A was never used and suggest deprecation as lint 
 
 
 ## References

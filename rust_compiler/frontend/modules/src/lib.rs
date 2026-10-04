@@ -196,6 +196,7 @@ pub struct ResolvedImport {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedPackage {
+    pub unavailable_dependencies: BTreeMap<String, String>,
     pub id: PackageId,
     pub root: PathBuf,
     pub library: PathBuf,
@@ -215,6 +216,7 @@ pub fn resolve(root: &Path) -> Result<ModuleGraph, Diagnostic> {
         packages: BTreeMap::from([(
             package,
             ResolvedPackage {
+                unavailable_dependencies: BTreeMap::new(),
                 id: package,
                 root: root.parent().unwrap_or_else(|| Path::new(".")).to_owned(),
                 library: root.to_owned(),
@@ -528,6 +530,12 @@ fn package_source(
             Some(import.span),
         )
     })?;
+    if let Some(reason) = current.unavailable_dependencies.get(package) {
+        return Err(Diagnostic::new(
+            "E000124", format!("package import `{package}` requires a missing dependency: {reason}"),
+            Some(import.span),
+        ).with_help("restore the dependency or remove the import that requires it"));
+    }
     let dependency = current.dependencies.get(package).ok_or_else(|| {
         Diagnostic::new(
             "E000124",
@@ -611,10 +619,12 @@ mod tests {
             root: PackageId(0),
             packages: BTreeMap::from([
                 (PackageId(0), ResolvedPackage {
+                    unavailable_dependencies: BTreeMap::new(),
                     id: PackageId(0), root: root.parent().unwrap().to_owned(),
                     library: root.clone(), dependencies: BTreeMap::new(),
                 }),
                 (PackageId(9), ResolvedPackage {
+                    unavailable_dependencies: BTreeMap::new(),
                     id: PackageId(9), root: registry.parent().unwrap().to_owned(),
                     library: registry.clone(), dependencies: BTreeMap::new(),
                 }),
@@ -697,6 +707,7 @@ mod tests {
                 (
                     root_package,
                     ResolvedPackage {
+                        unavailable_dependencies: BTreeMap::new(),
                         id: root_package,
                         root: root.clone(),
                         library: root.join("root.sev"),
@@ -706,6 +717,7 @@ mod tests {
                 (
                     tensor_package,
                     ResolvedPackage {
+                        unavailable_dependencies: BTreeMap::new(),
                         id: tensor_package,
                         root: package.parent().unwrap().to_owned(),
                         library: package.clone(),
@@ -738,6 +750,7 @@ mod tests {
                 (
                     root_package,
                     ResolvedPackage {
+                        unavailable_dependencies: BTreeMap::new(),
                         id: root_package,
                         root: root.clone(),
                         library: root.join("root.sev"),
@@ -747,6 +760,7 @@ mod tests {
                 (
                     io_package,
                     ResolvedPackage {
+                        unavailable_dependencies: BTreeMap::new(),
                         id: io_package,
                         root: package.parent().unwrap().to_owned(),
                         library: package.clone(),

@@ -1250,8 +1250,10 @@ fn inherit_trait_defaults(ast: &mut severian_ast::Module) -> Result<(), Diagnost
         let severian_ast::Item::Class(class) = item else { continue; };
         let explicit_methods = class.methods.iter().map(|method| method.name.clone()).collect::<BTreeSet<_>>();
         let explicit_fields = class.fields.iter().map(|field| field.name.clone()).collect::<BTreeSet<_>>();
-        let mut methods = BTreeMap::new();
-        let mut fields = BTreeMap::new();
+        let mut methods = BTreeMap::<String, Vec<_>>::new();
+        let mut fields = BTreeMap::<String, Vec<_>>::new();
+        let mut field_order = Vec::new();
+        let mut bases = BTreeMap::<String, Vec<String>>::new();
         let mut visited = BTreeSet::new();
         let mut pending = class.traits.iter().cloned().map(|bound| (bound, Vec::<String>::new())).collect::<Vec<_>>();
         while let Some((bound, path)) = pending.pop() {
@@ -1260,35 +1262,79 @@ fn inherit_trait_defaults(ast: &mut severian_ast::Module) -> Result<(), Diagnost
             if path.iter().any(|ancestor| ancestor == name) {
                 return Err(Diagnostic::new("E000218", "trait inheritance cycle", Some(bound.span)));
             }
-            if !visited.insert(render_type_annotation(&bound)) { continue; }
+            let owner = render_type_annotation(&bound);
+            if !visited.insert(owner.clone()) { continue; }
             let substitutions = declaration.type_parameters.iter().cloned().zip(arguments.iter().cloned()).collect::<BTreeMap<_, _>>();
             let generic = package::generic::Substitution::from_iter(substitutions.iter().map(|(name, value)| (name.clone(), render_type_annotation(value))));
             for method in declaration.methods.iter().filter(|method| method.body.is_some()) {
                 if explicit_methods.contains(&method.name) { continue; }
-                if let Some((owner, span)) = methods.get(&method.name) {
-                    if *span == method.span || path.contains(owner) { continue; }
-                    return Err(Diagnostic::new("E000218", format!("ambiguous default method `{}.{}`", class.name, method.name), Some(method.span)));
-                }
-                methods.insert(method.name.clone(), (name.to_owned(), method.span));
-                class.methods.push(package::generic::specialize_member(method, &generic));
+                methods.entry(method.name.clone()).or_default().push((
+                    owner.clone(), package::generic::specialize_member(method, &generic),
+                ));
             }
             for field in declaration.properties.iter().filter(|field| field.default.is_some()) {
                 if explicit_fields.contains(&field.name) { continue; }
-                if let Some((owner, span)) = fields.get(&field.name) {
-                    if *span == field.span || path.contains(owner) { continue; }
-                    return Err(Diagnostic::new("E000218", format!("ambiguous default field `{}.{}`", class.name, field.name), Some(field.span)));
+                if !fields.contains_key(&field.name) {
+                    field_order.push(field.name.clone());
                 }
-                fields.insert(field.name.clone(), (name.to_owned(), field.span));
-                class.fields.push(package::generic::specialize_property(field, &generic));
+                fields.entry(field.name.clone()).or_default().push((
+                    owner.clone(), package::generic::specialize_property(field, &generic),
+                ));
             }
             let mut path = path;
             path.push(name.to_owned());
             for base in &declaration.bases {
-                pending.push((substitute_type_annotation(base, &substitutions), path.clone()));
+                let base = substitute_type_annotation(base, &substitutions);
+                bases.entry(owner.clone()).or_default().push(render_type_annotation(&base));
+                pending.push((base, path.clone()));
             }
+        }
+        // Select only after collecting the whole inheritance graph. A derived
+        // declaration wins regardless of the order of direct bounds or diamonds.
+        // The owner includes type arguments: one source span can supply distinct
+        // (and conflicting) defaults for Base[int] and Base[string].
+        for (name, candidates) in methods {
+            class.methods.push(select_trait_default(candidates, &bases).ok_or_else(|| {
+                Diagnostic::new("E000218", format!("ambiguous default method `{}.{name}`", class.name), Some(class.span))
+            })?);
+        }
+        for name in field_order {
+            let candidates = fields.remove(&name).expect("collected default field");
+            class.fields.push(select_trait_default(candidates, &bases).ok_or_else(|| {
+                Diagnostic::new("E000218", format!("ambiguous default field `{}.{name}`", class.name), Some(class.span))
+            })?);
         }
     }
     Ok(())
+}
+
+fn select_trait_default<T>(
+    candidates: Vec<(String, T)>,
+    bases: &BTreeMap<String, Vec<String>>,
+) -> Option<T> {
+    let owners = candidates.iter().map(|(owner, _)| owner.clone()).collect::<Vec<_>>();
+    let mut selected = None;
+    for (owner, value) in candidates {
+        let overridden = owners.iter().any(|other| {
+            if other == &owner { return false; }
+            let mut pending = vec![other];
+            let mut visited = BTreeSet::new();
+            while let Some(current) = pending.pop() {
+                if current == &owner { return true; }
+                if visited.insert(current) {
+                    if let Some(parents) = bases.get(current) {
+                        pending.extend(parents);
+                    }
+                }
+            }
+            false
+        });
+        if !overridden {
+            if selected.is_some() { return None; }
+            selected = Some(value);
+        }
+    }
+    selected
 }
 
 fn returns_value(body: &[AstStatement]) -> bool {
@@ -21515,6 +21561,58 @@ mod tests {
         );
         let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
         assert_eq!(normalize_extensions(&ast).unwrap_err().code, "E000218");
+    }
+
+    #[test]
+    fn trait_defaults_choose_derived_members_in_both_bound_orders_and_diamonds() {
+        let declarations = "trait Base:\n    value: int = 1\n    def read() -> int:\n        return 1\ntrait Derived: Base\n    value: int = 2\n    def read() -> int:\n        return 2\ntrait Sibling: Base\n";
+        for bounds in ["Base + Derived", "Derived + Base", "Sibling + Derived", "Derived + Sibling"] {
+            let source = SourceFile::virtual_source("defaults.sev", format!(
+                "{declarations}class Box: {bounds}\n    marker: bool = false\n"
+            ));
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            let expected = ast.items.iter().find_map(|item| match item {
+                severian_ast::Item::Trait(declaration) if declaration.name == "Derived" => Some(declaration),
+                _ => None,
+            }).unwrap();
+            let normalized = normalize_extensions(&ast).unwrap();
+            let class = normalized.items.iter().find_map(|item| match item {
+                severian_ast::Item::Class(class) => Some(class),
+                _ => None,
+            }).unwrap();
+            assert_eq!(class.methods.len(), 1, "{bounds}");
+            assert_eq!(class.methods[0].body, expected.methods[0].body, "{bounds}");
+            assert_eq!(class.fields.len(), 2, "{bounds}");
+            assert_eq!(class.fields[1].default, expected.properties[0].default, "{bounds}");
+        }
+    }
+
+    #[test]
+    fn trait_defaults_distinguish_generic_owners_even_with_the_same_source_span() {
+        for member in ["value: int = 1", "def read() -> int:\n        return 1"] {
+            for bounds in ["Base[int] + Base[string]", "Base[string] + Base[int]"] {
+                let source = SourceFile::virtual_source("defaults.sev", format!(
+                    "trait Base[T]:\n    {member}\nclass Box: {bounds}\n    marker: bool = false\n"
+                ));
+                let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+                assert_eq!(normalize_extensions(&ast).unwrap_err().code, "E000218");
+            }
+        }
+    }
+
+    #[test]
+    fn trait_defaults_share_diamond_members_and_preserve_field_declaration_order() {
+        let source = SourceFile::virtual_source("defaults.sev",
+            "trait Base:\n    z: int = 1\n    a: int = 2\n    def read() -> int:\n        return self.z\ntrait Left: Base\ntrait Right: Base\nclass Box: Left + Right\n    marker: bool = false\n"
+        );
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let normalized = normalize_extensions(&ast).unwrap();
+        let class = normalized.items.iter().find_map(|item| match item {
+            severian_ast::Item::Class(class) => Some(class),
+            _ => None,
+        }).unwrap();
+        assert_eq!(class.methods.len(), 1);
+        assert_eq!(class.fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(), ["marker", "z", "a"]);
     }
 
     #[test]

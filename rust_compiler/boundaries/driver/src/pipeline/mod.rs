@@ -1139,6 +1139,7 @@ impl Compiler {
                 packages: BTreeMap::from([(
                     root,
                     severian_modules::ResolvedPackage {
+                        unavailable_dependencies: BTreeMap::new(),
                         id: root,
                         root: source.parent().unwrap_or_else(|| Path::new(".")).to_owned(),
                         library: source.to_owned(),
@@ -2453,6 +2454,7 @@ fn merge_package_graph(
                 destination.packages.insert(
                     id,
                     severian_modules::ResolvedPackage {
+                        unavailable_dependencies: BTreeMap::new(),
                         id,
                         root: source_package.root.clone(),
                         library: source_package.library.clone(),
@@ -2470,6 +2472,9 @@ fn merge_package_graph(
             .dependencies
             .into_iter()
             .map(|(name, dependency)| (name, translated[&dependency]));
+        destination.packages.get_mut(&destination_id)
+            .expect("translated package is present in the destination graph")
+            .unavailable_dependencies.extend(source_package.unavailable_dependencies);
         destination
             .packages
             .get_mut(&destination_id)

@@ -269,6 +269,8 @@ pub struct ResolvedPackageGraph {
 
 #[derive(Debug, Clone)]
 pub struct ResolvedPackage {
+    pub unavailable_dependencies: BTreeMap<String, String>,
+    pub unavailable_dev_dependencies: BTreeMap<String, String>,
     pub id: severian_modules::PackageId,
     pub root: PathBuf,
     pub name: String,
@@ -432,13 +434,19 @@ impl Manifest {
             .packages
             .iter()
             .map(|(id, package)| {
+                let mut unavailable_dependencies = package.unavailable_dependencies.clone();
                 let mut dependencies = package.dependencies.clone();
                 if include_root_dev && *id == self.package_graph.root {
+                    for alias in package.dev_dependencies.keys() {
+                        unavailable_dependencies.remove(alias);
+                    }
                     dependencies.extend(package.dev_dependencies.clone());
+                    unavailable_dependencies.extend(package.unavailable_dev_dependencies.clone());
                 }
                 (
                     *id,
                     severian_modules::ResolvedPackage {
+                        unavailable_dependencies,
                         id: *id,
                         root: package.root.clone(),
                         library: package.library.clone(),
@@ -702,21 +710,20 @@ impl<'a> PackageGraphBuilder<'a> {
             })
             .unwrap_or_else(|| root.join("src/lib.sev"));
         if require_library && !library.is_file() {
-            return Err(format!(
-                "dependency `{name}` has no library source at {}",
-                library.display()
-            ));
+            eprintln!("warning: dependency `{name}` has no library source at {}; an import requiring it will fail", library.display());
         }
         let id = severian_modules::PackageId(self.next_id);
         self.next_id += 1;
-        let dependencies = self.resolve_dependencies(&root, &name, &document.dependencies)?;
-        let dev_dependencies =
+        let (dependencies, unavailable_dependencies) = self.resolve_dependencies(&root, &name, &document.dependencies)?;
+        let (dev_dependencies, unavailable_dev_dependencies) =
             self.resolve_dependencies(&root, &name, &document.dev_dependencies)?;
         self.visiting.remove(&manifest_path);
         self.resolved.insert(manifest_path, id);
         self.packages.insert(
             id,
             ResolvedPackage {
+                unavailable_dependencies,
+                unavailable_dev_dependencies,
                 id,
                 root,
                 name,
@@ -734,40 +741,50 @@ impl<'a> PackageGraphBuilder<'a> {
         root: &Path,
         owner: &str,
         declarations: &BTreeMap<String, DependencyDeclaration>,
-    ) -> Result<BTreeMap<String, severian_modules::PackageId>, String> {
-        declarations
-            .iter()
-            .map(|(alias, declaration)| {
-                let path = dependency_path(alias, declaration).map_err(|error| {
-                    format!("package `{owner}` dependency `{alias}` could not resolve: {error}")
-                })?;
-                let manifest = document::path(&root.join(path));
-                let id = self.resolve(&manifest, true).map_err(|error| {
-                    format!("while resolving package `{owner}` dependency `{alias}`: {error}")
-                })?;
-                let dependency = self
-                    .packages
-                    .get(&id)
-                    .expect("resolved dependency was inserted into the package graph");
-                if let Some(expected) = dependency_package_name(alias, declaration) {
-                    if dependency.name != expected {
-                        return Err(format!(
-                            "package `{owner}` dependency `{alias}` requested package `{expected}` but resolved `{}`",
-                            dependency.name
-                        ));
-                    }
+    ) -> Result<(BTreeMap<String, severian_modules::PackageId>, BTreeMap<String, String>), String> {
+        let mut resolved = BTreeMap::new();
+        let mut unavailable = BTreeMap::new();
+        for (alias, declaration) in declarations {
+            let path = dependency_path(alias, declaration).map_err(|error| {
+                format!("package `{owner}` dependency `{alias}` could not resolve: {error}")
+            })?;
+            let manifest = document::path(&root.join(path));
+            match fs::metadata(&manifest) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    let reason = format!("package `{owner}` dependency `{alias}` is missing at {}", manifest.display());
+                    eprintln!("warning: {reason}; an import requiring it will fail");
+                    unavailable.insert(alias.clone(), reason);
+                    continue;
                 }
-                if let Some(expected) = dependency_version(declaration) {
-                    let actual = manifest_package_version(&dependency.manifest);
-                    if actual != expected {
-                        return Err(format!(
-                            "package `{owner}` dependency `{alias}` requires version `{expected}` but resolved `{actual}`"
-                        ));
-                    }
+                Err(error) => return Err(format!("could not inspect {}: {error}", manifest.display())),
+                Ok(_) => {}
+            }
+            let id = self.resolve(&manifest, true).map_err(|error| {
+                format!("while resolving package `{owner}` dependency `{alias}`: {error}")
+            })?;
+            let dependency = self
+                .packages
+                .get(&id)
+                .expect("resolved dependency was inserted into the package graph");
+            if let Some(expected) = dependency_package_name(alias, declaration) {
+                if dependency.name != expected {
+                    return Err(format!(
+                        "package `{owner}` dependency `{alias}` requested package `{expected}` but resolved `{}`",
+                        dependency.name
+                    ));
                 }
-                Ok((alias.clone(), id))
-            })
-            .collect()
+            }
+            if let Some(expected) = dependency_version(declaration) {
+                let actual = manifest_package_version(&dependency.manifest);
+                if actual != expected {
+                    return Err(format!(
+                        "package `{owner}` dependency `{alias}` requires version `{expected}` but resolved `{actual}`"
+                    ));
+                }
+            }
+            resolved.insert(alias.clone(), id);
+        }
+        Ok((resolved, unavailable))
     }
 }
 
@@ -818,14 +835,7 @@ fn dependency_path(alias: &str, declaration: &DependencyDeclaration) -> Result<P
 fn registry_package(name: &str, version: &str, registry: Option<&str>) -> Result<PathBuf, String> {
     let root = registry_root(registry)?;
     let source = registry_release_path(&root, name, version)?.join("source");
-    if document::path(&source).is_file() {
-        Ok(source)
-    } else {
-        Err(format!(
-            "package `{name}` version `{version}` is not present in registry `{}`; publish or pull it first",
-            root.display()
-        ))
-    }
+    Ok(source)
 }
 
 pub fn registry_release_path(root: &Path, name: &str, version: &str) -> Result<PathBuf, String> {
@@ -1110,6 +1120,93 @@ mod tests {
         }
         std::fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    #[test]
+    fn missing_dependencies_are_deferred_until_source_imports_require_them() {
+        let root = temporary_package("deferred-missing");
+        fs::create_dir_all(root.join("helper")).unwrap();
+        fs::write(root.join("package.json"), r#"{
+            "package": {"name": "root"},
+            "dependencies": {
+                "gone": {"path": "gone"},
+                "helper": {"path": "helper"}
+            },
+            "dev-dependencies": {"dev_gone": {"path": "dev_gone"}}
+        }"#).unwrap();
+        fs::write(root.join("helper/package.json"), r#"{
+            "package": {"name": "helper"}, "lib": {"path": "lib.sev"},
+            "dependencies": {"nested_gone": {"path": "../nested_gone"}}
+        }"#).unwrap();
+        fs::write(root.join("helper/lib.sev"), "def value() -> int:\n    return 1\n").unwrap();
+        fs::write(root.join("local.sev"), "def local() -> int:\n    return 0\n").unwrap();
+        let source = root.join("main.sev");
+        fs::write(&source, "import helper\nimport \"local.sev\" as local\n").unwrap();
+        let manifest = Manifest::load(&root.join("package.json"), &Catalog::load().unwrap()).unwrap();
+        let mut graph = manifest.module_graph(false);
+        let owner = &graph.packages[&graph.root];
+        assert!(owner.unavailable_dependencies.contains_key("gone"));
+        assert!(!owner.unavailable_dependencies.contains_key("dev_gone"));
+        let test_graph = manifest.module_graph(true);
+        assert!(test_graph.packages[&test_graph.root].unavailable_dependencies.contains_key("dev_gone"));
+        assert!(severian_modules::resolve_with_packages(&source, &graph).is_ok());
+        graph.packages.get_mut(&graph.root).unwrap().dependencies.insert("gone".into(), graph.root);
+        for import in ["import gone\n", "import value from gone\n", "import \"package:gone/lib.sev\" as gone\n"] {
+            fs::write(&source, import).unwrap();
+            let error = severian_modules::resolve_with_packages(&source, &graph).unwrap_err();
+            assert_eq!(error.code, "E000124");
+            assert!(error.message.contains("missing dependency"));
+            assert!(error.message.contains("gone"));
+            assert!(error.span.is_some());
+        }
+        fs::write(&source, "import \"gone/lib.sev\" as gone\n").unwrap();
+        assert_eq!(severian_modules::resolve_with_packages(&source, &graph).unwrap_err().code, "E000123");
+        fs::write(&source, "import helper\n").unwrap();
+        fs::write(root.join("helper/lib.sev"), "import nested_gone\n").unwrap();
+        assert!(severian_modules::resolve_with_packages(&source, &graph).unwrap_err().message.contains("nested_gone"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_dependencies_cover_registry_entries_and_absent_library_sources() {
+        let root = temporary_package("deferred-registry");
+        fs::create_dir_all(root.join("empty")).unwrap();
+        fs::write(root.join("empty/package.json"), r#"{
+            "package": {"name": "empty"}, "lib": {"path": "missing.sev"}
+        }"#).unwrap();
+        let manifest = serde_json::json!({
+            "package": {"name": "root"},
+            "dependencies": {
+                "empty": {"path": "empty"},
+                "unpublished": {"version": "1.0.0", "registry": root.join("registry")}
+            }
+        });
+        fs::write(root.join("package.json"), manifest.to_string()).unwrap();
+        let manifest = Manifest::load(&root.join("package.json"), &Catalog::load().unwrap()).unwrap();
+        let graph = manifest.module_graph(false);
+        assert!(graph.packages[&graph.root].unavailable_dependencies.contains_key("unpublished"));
+        let source = root.join("main.sev");
+        fs::write(&source, "def main():\n    return\n").unwrap();
+        assert!(severian_modules::resolve_with_packages(&source, &graph).is_ok());
+        for import in ["import unpublished\n", "import empty\n"] {
+            fs::write(&source, import).unwrap();
+            assert!(severian_modules::resolve_with_packages(&source, &graph).is_err());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_dependencies_do_not_hide_invalid_existing_manifests() {
+        let root = temporary_package("deferred-invalid");
+        fs::create_dir_all(root.join("broken")).unwrap();
+        fs::write(root.join("package.json"), r#"{
+            "package": {"name": "root"},
+            "dependencies": {"broken": {"path": "broken"}}
+        }"#).unwrap();
+        fs::write(root.join("broken/package.json"), "{invalid").unwrap();
+        let error = Manifest::load(&root.join("package.json"), &Catalog::load().unwrap()).unwrap_err();
+        assert!(error.contains("invalid"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

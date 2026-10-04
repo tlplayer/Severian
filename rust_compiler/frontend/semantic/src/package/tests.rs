@@ -58,10 +58,12 @@ fn package_facade_exports_named_modules_with_nominal_types() {
         root: PackageId(0),
         packages: BTreeMap::from([
             (PackageId(0), severian_modules::ResolvedPackage {
+                unavailable_dependencies: BTreeMap::new(),
                 id: PackageId(0), root: root.clone(), library: root.join("entry.sev"),
                 dependencies: BTreeMap::from([("ownership".into(), PackageId(1))]),
             }),
             (PackageId(1), severian_modules::ResolvedPackage {
+                unavailable_dependencies: BTreeMap::new(),
                 id: PackageId(1), root: dependency.clone(), library: dependency.join("facade.sev"),
                 dependencies: BTreeMap::new(),
             }),
@@ -226,6 +228,7 @@ fn selective_facades_preserve_nominal_identity_in_reverse_graph_order() {
         root: PackageId(0),
         packages: ["entry", "facade", "middle", "leaf"].iter().enumerate().map(|(id, name)| {
             (PackageId(id as u32), severian_modules::ResolvedPackage {
+                unavailable_dependencies: BTreeMap::new(),
                 id: PackageId(id as u32),
                 root: root.clone(),
                 library: root.join(format!("{name}.sev")),
@@ -849,6 +852,7 @@ fn package_dependency_generic_call_keeps_definition_and_substitution_in_hir_and_
             (
                 app,
                 severian_modules::ResolvedPackage {
+                    unavailable_dependencies: BTreeMap::new(),
                     id: app,
                     root: app_root.clone(),
                     library: app_source.clone(),
@@ -858,6 +862,7 @@ fn package_dependency_generic_call_keeps_definition_and_substitution_in_hir_and_
             (
                 tensor,
                 severian_modules::ResolvedPackage {
+                    unavailable_dependencies: BTreeMap::new(),
                     id: tensor,
                     root: tensor_root,
                     library: tensor_source,
@@ -1176,6 +1181,7 @@ fn qualified_generic_class_application_stays_a_constructor_outcome() {
             (
                 app,
                 severian_modules::ResolvedPackage {
+                    unavailable_dependencies: BTreeMap::new(),
                     id: app,
                     root: app_root,
                     library: app_source.clone(),
@@ -1188,6 +1194,7 @@ fn qualified_generic_class_application_stays_a_constructor_outcome() {
             (
                 dependency,
                 severian_modules::ResolvedPackage {
+                    unavailable_dependencies: BTreeMap::new(),
                     id: dependency,
                     root: dependency_root,
                     library: dependency_source,
