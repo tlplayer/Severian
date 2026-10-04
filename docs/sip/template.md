@@ -14,7 +14,17 @@ Superseded by:
 
 ## Context
 
+## Goal(s)
+
 ## Problem(s)
+
+## Responsibilities
+
+## Data Models
+
+## API
+
+## Structure
 
 ## Examples
 

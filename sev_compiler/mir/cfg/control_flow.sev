@@ -1,6 +1,0 @@
-enum ControlFlow:
-    None
-    Branch
-    Loop
-    Return
-    Error
