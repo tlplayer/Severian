@@ -201,3 +201,19 @@ test "a declared block rejects an absent or incorrectly indented body":
     malformed = lexer(virtual_source("indent.sev", "if true:\n  true\n"))
     assert(malformed is TokenStream)
     assert(parser(malformed) is list[Diagnostic])
+
+
+test "block lines preserve indentation windows and quoted block markers":
+    source = virtual_source("quoted-block.sev", "if true:\n    \"if false: # text\"\n")
+    tokens = lexer(source)
+    assert(tokens is TokenStream)
+    lines = token_lines(tokens)
+    assert(len(lines) == 2)
+    assert(lines[0].prefix.text == "")
+    assert(lines[1].prefix.text == "    ")
+    assert(lines[1].prefix.span == Span(source.id, 9, 13))
+    assert(len(lines[1].tokens) == 1)
+    quoted = lines[1].tokens[0]
+    assert(quoted.lexeme.text == "\"if false: # text\"")
+    assert(quoted.span.source_id == source.id)
+    assert(source.text[quoted.span.start:quoted.span.end] == quoted.lexeme.text)

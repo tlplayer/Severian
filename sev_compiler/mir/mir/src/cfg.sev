@@ -4,7 +4,7 @@ import "../../cfg/cfg.sev" as model_mir_cfg_cfg
 import "../../../syntax/generic/value.sev" as model_mir_value
 import "../../../syntax/block/block.sev" as model_syntax_block_block
 import "../../../syntax/function/function.sev" as model_syntax_function_function
-import "../../../syntax/literal/value.sev" as model_syntax_literal_value
+import "../../../syntax/grammar/resolution.sev" as model_syntax_literal_value
 import "../../../syntax/symbol/symbol.sev" as model_syntax_symbol_symbol
 import "package:ownership/ownership/src/cfg.sev" as ownership_cfg
 import "../../cfg/availability.sev" as availability
@@ -237,7 +237,7 @@ def promote_storage(module: model_hir_module_module.Module, body: model_mir_cfg_
                         slots.append(result)
                         empty = value(module, type_id)
                         initial.append(empty)
-                        prefix.append(model_syntax_function_function.Operation.Constant(model_syntax_literal_value.StringValue("") if type_id.index == 3 else model_syntax_literal_value.NoneValue(), empty))
+                        prefix.append(model_syntax_function_function.Operation.Constant(model_syntax_literal_value.LiteralValueOf[string]("") if type_id.index == 3 else model_syntax_literal_value.LiteralValueOf[None](None), empty))
                         prefix_origins.append(origin)
                     else:
                         prefix.append(operation)
@@ -334,12 +334,10 @@ def prune_unreachable(body: model_mir_cfg_cfg.CfgBody):
         for operation in block.operations:
             match operation:
                 case Constant:
-                    match value:
-                        case BooleanValue:
-                            constants.append(int(result.index))
-                            booleans.append(value)
-                        case _:
-                            throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
+                    boolean = value.read[bool](source.Span(0, 0, 0))
+                    if boolean is bool:
+                        constants.append(int(result.index))
+                        booleans.append(boolean)
                 case _:
                     throw Error("unimplemented (sev_compiler/transforms/mir/src/cfg.sev)")
     for block in body.blocks:

@@ -186,6 +186,23 @@ test "lexer emits every fixed symbol with its longest spelling":
         print(token.kind + " " + token.lexeme.text)
 
 
+test "keywords retain their classification without splitting identifiers":
+    for spelling, kind in [("if", "IF"), ("while", "WHILE"), ("for", "FOR"), ("enum", "ENUM"), ("throw", "THROW"), ("not", "NOT"), ("copy", "COPY"), ("move", "MOVE"), ("in", "IN"), ("and", "AND"), ("or", "OR"), ("is", "IS")]:
+        source = virtual_source("keywords.sev", spelling)
+        result = lexer(source)
+        assert(result is TokenStream)
+        assert(len(result.tokens) == 1)
+        assert(result.tokens[0].kind == kind)
+        assert(result.tokens[0].lexeme.text == spelling)
+        assert(result.tokens[0].span == Span(source.id, 0, u32(len(spelling))))
+        for suffix in ["_value", "2", "λ"]:
+            longer = lexer(virtual_source("identifier.sev", spelling + suffix))
+            assert(longer is TokenStream)
+            assert(len(longer.tokens) == 1)
+            assert(longer.tokens[0].kind == "IDENTIFIER")
+            assert(longer.tokens[0].lexeme.text == spelling + suffix)
+
+
 test "quoted and structural forms retain their complete source":
 
     examples = [

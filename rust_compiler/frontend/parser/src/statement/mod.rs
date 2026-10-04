@@ -2020,7 +2020,9 @@ impl Parser<'_> {
                 let method = self.function_declaration(member_decorators)?;
                 member_has_body = method.body.is_some();
                 methods.push(method);
-            } else if self.at_identifier("sentence") || self.at_identifier("grammar") {
+            } else if (self.at_identifier("sentence") || self.at_identifier("grammar"))
+                && !self.looks_like_member_property()
+            {
                 let mut declaration = self.sentence_declaration()?;
                 declaration.function.decorators = member_decorators;
                 sentences.push(declaration);
@@ -2172,7 +2174,9 @@ impl Parser<'_> {
                 } else {
                     methods.push(function);
                 }
-            } else if self.at_identifier("sentence") || self.at_identifier("grammar") {
+            } else if (self.at_identifier("sentence") || self.at_identifier("grammar"))
+                && !self.looks_like_member_property()
+            {
                 sentences.push(self.sentence_declaration()?);
                 member_has_body = true;
             } else if self.at_identifier("operator") {
@@ -5315,6 +5319,34 @@ mod named_operator_tests {
 #[cfg(test)]
 mod block_sentence_tests {
     use super::*;
+
+    #[test]
+    fn symbol_keyword_and_block_test_sources_parse() {
+        for (path, text) in [
+            ("tokenize.sev", include_str!("../../../../../sev_compiler/frontend/lexer/tokenize.sev")),
+            ("keyword.sev", include_str!("../../../../../sev_compiler/syntax/keywords/keyword.sev")),
+            ("parser.sev", include_str!("../../../../../sev_compiler/frontend/parser/parser.sev")),
+        ] {
+            let source = SourceFile::virtual_source(path, text);
+            parse(&scan(&source).unwrap()).unwrap_or_else(|error| panic!("{path}: {error:?}"));
+        }
+    }
+
+    #[test]
+    fn grammar_and_sentence_field_names_do_not_start_declarations() {
+        let source = SourceFile::virtual_source("grammar-fields.sev",
+            "class Definition:\n    grammar: Grammar\n    sentence: Sentence\n    grammar literal[\"x\"]() -> string:\n        return \"x\"\ntrait Provider:\n    grammar: Grammar\n    sentence: Sentence\n    sentence item[\"x\"]() -> string:\n        return \"x\"\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let Item::Class(class) = &module.items[0] else { panic!("class") };
+        assert_eq!(class.fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(), ["grammar", "sentence"]);
+        assert_eq!(class.fields[0].annotation.simple_name(), Some("Grammar"));
+        assert_eq!(class.sentences.len(), 1);
+        assert!(class.sentences[0].lexical);
+        let Item::Trait(owner) = &module.items[1] else { panic!("trait") };
+        assert_eq!(owner.properties.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(), ["grammar", "sentence"]);
+        assert_eq!(owner.sentences.len(), 1);
+        assert!(!owner.sentences[0].lexical);
+    }
 
     #[test]
     fn trait_grammar_and_sentence_preserve_receiver_constraints_and_following_members() {

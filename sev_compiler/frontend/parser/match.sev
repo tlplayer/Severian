@@ -6,19 +6,19 @@ import Lexeme from "../../syntax/generic/lexeme.sev"
 import Span from "../source/source.sev"
 import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import ParserDiagnostic from "diagnostic.sev"
-import GrammarMatch, GrammarResolution, GrammarValue from "contract.sev"
+import GrammarMatch, GrammarResolution, LiteralValue from "contract.sev"
 import Block from "../../syntax/block/block.sev"
 import TypeDeclaration from "../../syntax/function/syntax.sev"
 import Expression from "../../syntax/function/function.sev"
 import GrammarContext from "sequence.sev"
 import ProofResult from "../../syntax/constraint/model.sev"
-import GrammarValueOf from "../../syntax/grammar/resolution.sev"
+import LiteralValueOf from "../../syntax/grammar/resolution.sev"
 import context_receiver, context_receiver_state, select_grammar from "sequence.sev"
 
 
 # The token already carries declaration identity and the original lexeme.
 # Construction runs only after the parser selects a unique grammar.
-def match_declared_token(input: list[TokenTerm], label: string, construct: (Lexeme) -> GrammarValue, prefix: string = "", suffix: string = "", captured: bool = false) -> GrammarMatch | None | Diagnostic:
+def match_declared_token(input: list[TokenTerm], label: string, construct: (Lexeme) -> LiteralValue, prefix: string = "", suffix: string = "", captured: bool = false) -> GrammarMatch | None | Diagnostic:
     if len(input) == 0:
         return None
     token = input[0]
@@ -36,13 +36,13 @@ def match_declared_token(input: list[TokenTerm], label: string, construct: (Lexe
     return GrammarMatch(1, lambda: finish_declared_token(construct, spelling, token.span, label), identity=label + ":" + string(token.span.start) + ":" + string(token.span.end))
 
 
-def finish_declared_token(construct: (Lexeme) -> GrammarValue, spelling: Lexeme, span: Span, label: string) -> GrammarResolution | Diagnostic:
+def finish_declared_token(construct: (Lexeme) -> LiteralValue, spelling: Lexeme, span: Span, label: string) -> GrammarResolution | Diagnostic:
     value = construct(spelling)
     node = ResolvedGrammarNode(value, span, label)
     return GrammarResolution(nodes=[node])
 
 
-def match_contextual_token(input: list[TokenTerm], label: string, context: GrammarContext, accepts: (Lexeme, GrammarContext) -> ProofResult, construct: (Lexeme, GrammarContext) -> GrammarValue | Diagnostic, prefix: string = "", suffix: string = "", captured: bool = false) -> GrammarMatch | None | Diagnostic:
+def match_contextual_token(input: list[TokenTerm], label: string, context: GrammarContext, accepts: (Lexeme, GrammarContext) -> ProofResult, construct: (Lexeme, GrammarContext) -> LiteralValue | Diagnostic, prefix: string = "", suffix: string = "", captured: bool = false) -> GrammarMatch | None | Diagnostic:
     if len(input) == 0:
         return None
     token = input[0]
@@ -62,7 +62,7 @@ def match_contextual_token(input: list[TokenTerm], label: string, context: Gramm
     return GrammarMatch(1, lambda: finish_contextual_token(accepts, construct, spelling, context, token.span, label), check=lambda: accepts(spelling, context), identity=label + ":" + string(token.span.start) + ":" + string(token.span.end))
 
 
-def finish_contextual_token(accepts: (Lexeme, GrammarContext) -> ProofResult, construct: (Lexeme, GrammarContext) -> GrammarValue | Diagnostic, spelling: Lexeme, context: GrammarContext, span: Span, label: string) -> GrammarResolution | Diagnostic:
+def finish_contextual_token(accepts: (Lexeme, GrammarContext) -> ProofResult, construct: (Lexeme, GrammarContext) -> LiteralValue | Diagnostic, spelling: Lexeme, context: GrammarContext, span: Span, label: string) -> GrammarResolution | Diagnostic:
     if accepts(spelling, context) != ProofResult.Proven:
         return ParserDiagnostic("selected grammar receiver and constraints are not established", span, "parser.constraint")
     value = construct(spelling, context)
@@ -84,10 +84,10 @@ def contextual_matcher_accept(value: Lexeme, context: GrammarContext) -> ProofRe
     return ProofResult.Proven if value.text == receiver.spelling else ProofResult.Refuted
 
 
-def contextual_matcher_construct(value: Lexeme, context: GrammarContext) -> GrammarValue | Diagnostic:
+def contextual_matcher_construct(value: Lexeme, context: GrammarContext) -> LiteralValue | Diagnostic:
     receiver = context_receiver[ContextualMatcherFixture](context)
     receiver.constructions += 1
-    return GrammarValueOf[string](value.text)
+    return LiteralValueOf[string](value.text)
 
 
 test "contextual token grammar preserves boundaries and constructs only after selection":
@@ -97,7 +97,7 @@ test "contextual token grammar preserves boundaries and constructs only after se
     next_span = Span(source.id, 3, 7)
     following = Token("identifier", Lexeme("next", next_span), next_span)
     receiver = ContextualMatcherFixture("λ")
-    context = GrammarContext(receiver=GrammarValueOf[ContextualMatcherFixture](receiver))
+    context = GrammarContext(receiver=LiteralValueOf[ContextualMatcherFixture](receiver))
     matched = match_contextual_token([token, following], "Fixture.value", context, contextual_matcher_accept, contextual_matcher_construct, "[", "]", true)
     assert(matched is GrammarMatch)
     assert(matched.consumed == 1)
@@ -124,7 +124,7 @@ test "contextual token grammar does not select missing or incompatible receivers
     assert(matched is GrammarMatch)
     assert(matched.admissible() == ProofResult.Unknown)
     assert(select_grammar([matched], span) is Diagnostic)
-    context.receiver = GrammarValueOf[string]("wrong receiver")
+    context.receiver = LiteralValueOf[string]("wrong receiver")
     assert(matched.admissible() == ProofResult.Refuted)
     assert(select_grammar([matched], span) is Diagnostic)
     assert(match_contextual_token([token], "Fixture.fixed", context, contextual_matcher_accept, contextual_matcher_construct, "@@") == None)
@@ -133,8 +133,23 @@ test "contextual token grammar does not select missing or incompatible receivers
     assert(match_contextual_token([Token("EOF", Lexeme("", end), end)], "Fixture.value", context, contextual_matcher_accept, contextual_matcher_construct, captured=true) == None)
 
 
-def matcher_test_construct(value: Lexeme) -> GrammarValue:
-    return GrammarValueOf[bool](value.text == "true")
+def matcher_test_construct(value: Lexeme) -> LiteralValue:
+    return LiteralValueOf[bool](value.text == "true")
+
+
+test "competing literal grammars report ambiguity without constructing either result":
+    source = virtual_source("conflict.sev", "0")
+    span = Span(source.id, 0, 1)
+    token = Token("literal", Lexeme("0", span), span)
+    receiver = ContextualMatcherFixture("0")
+    context = GrammarContext(receiver=LiteralValueOf[ContextualMatcherFixture](receiver))
+    first = match_contextual_token([token], "First.literal", context, contextual_matcher_accept, contextual_matcher_construct, captured=true)
+    second = match_contextual_token([token], "Second.literal", context, contextual_matcher_accept, contextual_matcher_construct, captured=true)
+    assert(first is GrammarMatch)
+    assert(second is GrammarMatch)
+    assert(select_grammar([first, second], span) is Diagnostic)
+    assert(select_grammar([second, first], span) is Diagnostic)
+    assert(receiver.constructions == 0)
 
 
 test "token matching preserves concrete values":

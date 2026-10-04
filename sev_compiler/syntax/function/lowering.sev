@@ -1,6 +1,6 @@
 import ArtifactId, AttrValue, AttributeId, CompilerId, FunctionId, OpId, ProviderId, StableId, TypeId, ValueId from "../symbol/symbol.sev"
 import source
-import LiteralValue from "../literal/value.sev"
+import LiteralValue, LiteralValueOf from "../grammar/resolution.sev"
 import Add, Associativity, BinaryOperator, BitwiseAnd, BitwiseOr, BitwiseXor, CompilerExpectation, CompilerTestCase, Contains, Decorator, DecoratorArgument, DecoratorValue, Divide, Equal, Fixity, FloorDivide, GenericConstraint, Greater, GreaterEqual, ImportDeclaration, ImportSubject, LeftShift, Less, LessEqual, LogicalAnd, LogicalOr, Move, Multiply, Negative, Not, NotEqual, Operator, OperatorDeclaration, OperatorDomain, OperatorParameter, OperatorSignature, OperatorSyntax, Positive, Power, PropertyDeclaration, Remainder, RightShift, ScalarOperation, Subtract, TestCaseRow, TestDeclaration, TestExpectation, TestMode, TestModeArguments, TestStream, TraitDeclaration, TypeConstraint, TypeDeclaration, TypePattern, UnaryOperator, Y, operator_syntax, test_mode_name from "syntax.sev"
 import AssertionLocation from "../source.sev"
 import Constant from "../literal/lowered.sev"

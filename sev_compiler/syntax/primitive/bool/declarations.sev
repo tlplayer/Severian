@@ -1,4 +1,4 @@
-import LiteralValue from "../../literal/value.sev"
+import LiteralValue, LiteralValueOf from "../../grammar/resolution.sev"
 import scalar_mlir from "../mlir.sev"
 import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../contract.sev"
 
@@ -15,7 +15,7 @@ class BoolPrimitive: Primitive
     representation: PrimitiveRepresentation = PrimitiveRepresentation.BooleanBit
     token_kind: string = "Identifier"
     literal_family: string = ""
-    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Identifier", "true", LiteralValue.BooleanValue(true)), LiteralSyntax("Identifier", "false", LiteralValue.BooleanValue(false))]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Identifier", "true", LiteralValueOf[bool](true)), LiteralSyntax("Identifier", "false", LiteralValueOf[bool](false))]
     default_literal: bool = true
 
 

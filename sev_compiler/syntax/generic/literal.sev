@@ -1,8 +1,8 @@
-import LiteralValue from "../literal/value.sev"
+import LiteralValue from "../grammar/resolution.sev"
 
 
-# One-token construction sentences. None captures the spelling recognized by
-# the type's lexical rule; a concrete token declares an exact source spelling.
+# Legacy atomic spelling metadata. Type-owned grammars perform recognition and
+# construction; an optional concrete result retains its own type.
 class LiteralSyntax:
     token_kind: string
     token: string | None = None

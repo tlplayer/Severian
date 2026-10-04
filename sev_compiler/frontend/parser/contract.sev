@@ -45,6 +45,6 @@ class GrammarMatch:
 ((list[TokenTerm]) -> GrammarMatch | None | Diagnostic) as GrammarMatcher
 
 
-import GrammarValue, ResolvedGrammarNode from "../../syntax/grammar/resolution.sev"
+import LiteralValue, ResolvedGrammarNode from "../../syntax/grammar/resolution.sev"
 
 import CapturedGrammar from "sequence.sev"

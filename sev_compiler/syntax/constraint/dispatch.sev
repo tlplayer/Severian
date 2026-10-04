@@ -2,6 +2,7 @@ import ConstraintGraph, ConstraintStage, DispatchFamily, ProofResult from "model
 import DefinitionID, constraint_schedule from "graph.sev"
 import ConstraintId, ConstraintRequirement, DispatchCandidate from "model.sev"
 import Expression, ExpressionKind, LiteralValue from "../function/function.sev"
+import LiteralValueOf from "../grammar/resolution.sev"
 import DeclarationId, Span from "../source.sev"
 
 
@@ -113,7 +114,7 @@ def evaluate_dispatch_constraints(family: DispatchFamily, graph: ConstraintGraph
 
 test "progressive dispatch retains unknown candidates and excludes refuted ones":
     location = Span(0, 0, 1)
-    condition = Expression(ExpressionKind.LiteralValue(LiteralValue.BooleanValue(true)), location)
+    condition = Expression(ExpressionKind.LiteralValue(LiteralValueOf[bool](true)), location)
     graph = ConstraintGraph([
         ConstraintRequirement(ConstraintId(0), condition, result=ProofResult.Unknown),
         ConstraintRequirement(ConstraintId(1), condition, result=ProofResult.Refuted),

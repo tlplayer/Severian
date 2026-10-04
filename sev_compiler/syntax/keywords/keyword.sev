@@ -15,3 +15,19 @@ def recognize_keyword(source: SourceFile, start: u32, spelling: string) -> u32 |
         if following.is_alphanumeric() or following == "_":
             return None
     return end
+
+
+import virtual_source from "../../frontend/source/source.sev"
+
+
+test "keyword boundaries preserve longer identifiers and Unicode neighbors":
+    for spelling in ["if", "while", "for", "enum", "throw", "not", "copy", "move", "in", "and", "or", "is"]:
+        source = virtual_source("keyword.sev", spelling + ":")
+        assert(recognize_keyword(source, 0, spelling) == len(spelling))
+        for suffix in ["x", "2", "_", "λ"]:
+            assert(recognize_keyword(virtual_source("suffix.sev", spelling + suffix), 0, spelling) == None)
+        for prefix in ["x", "2", "_", "λ"]:
+            assert(recognize_keyword(virtual_source("prefix.sev", prefix + spelling), 1, spelling) == None)
+        source = virtual_source("offset.sev", "(" + spelling + ")")
+        assert(recognize_keyword(source, 1, spelling) == len(spelling) + 1)
+        assert(recognize_keyword(source, u32(len(source.characters)), spelling) == None)

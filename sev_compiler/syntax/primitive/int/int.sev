@@ -953,3 +953,12 @@ test "integer comparison of similar literals/floats":
     assert(x == 0.0)
     assert(x == float(0))
     assert(x +1 == float(1.0))
+
+
+test "integer grammar accepts whole integers and rejects floating spellings":
+    assert(int.literal_base("0") == 10)
+    assert(int.literal_base("123") == 10)
+    assert(int.literal_base("0.0") == 0)
+    assert(int.literal_base(".0") == 0)
+    assert(int.literal_base("1e2") == 0)
+    assert(int.literal_base("0name") == 0)

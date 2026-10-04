@@ -1,5 +1,5 @@
 import ProofResult from "../../syntax/constraint/model.sev"
-import GrammarMatch, GrammarResolution, GrammarValue from "contract.sev"
+import GrammarMatch, GrammarResolution, LiteralValue from "contract.sev"
 import TokenTerm from "../../syntax/generic/token.sev"
 import B from "../../syntax/generic/block.sev"
 import Block from "../../syntax/block/block.sev"
@@ -14,11 +14,11 @@ class GrammarContext:
     parent: B | None = None
     body: B = Block()
     previous: B | None = None
-    fields: dict[string, GrammarValue] = {}
+    fields: dict[string, LiteralValue] = {}
     span: Span | None = None
     # Explicit receivers allow grammars owned by traits other than B. Block
     # grammars may use the enclosing block when no explicit receiver is set.
-    receiver: GrammarValue | None = None
+    receiver: LiteralValue | None = None
 
 
 class CapturedGrammar:
@@ -199,7 +199,7 @@ def context_receiver[T](context: GrammarContext) -> T:
     return context_value[T](context.parent)
 
 
-import GrammarValueOf from "../../syntax/grammar/resolution.sev"
+import LiteralValueOf from "../../syntax/grammar/resolution.sev"
 
 
 test "grammar receiver checks retain missing and incompatible context":
@@ -208,7 +208,7 @@ test "grammar receiver checks retain missing and incompatible context":
     context = GrammarContext(parent=block)
     assert(context_receiver_state[B](context) == ProofResult.Proven)
     assert(context_receiver[B](context).indentation_unit == "    ")
-    context.receiver = GrammarValueOf[string]("explicit")
+    context.receiver = LiteralValueOf[string]("explicit")
     assert(context_receiver_state[B](context) == ProofResult.Refuted)
     assert(context_receiver_state[string](context) == ProofResult.Proven)
     assert(context_receiver[string](context) == "explicit")

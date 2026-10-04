@@ -309,8 +309,8 @@ fn boxed_adapter(raw: &ast::FunctionDeclaration, adapter_name: &str, registry_al
     let span = raw.span;
     let mut adapter = raw.clone();
     adapter.name = adapter_name.into();
-    adapter.result = ast::TypeAnnotation { kind: ast::TypeAnnotationKind::Union(vec![annotation(&format!("{registry_alias}GrammarValue"), span), annotation(&format!("{registry_alias}Diagnostic"), span)]), span };
-    adapter.body = Some(vec![Statement::Return { value: Some(call(&format!("{registry_alias}grammar_value"), vec![call(&raw.name, raw.parameters.iter().map(|parameter| name(&parameter.name, span)).collect(), span)], span)), span }]);
+    adapter.result = ast::TypeAnnotation { kind: ast::TypeAnnotationKind::Union(vec![annotation(&format!("{registry_alias}LiteralValue"), span), annotation(&format!("{registry_alias}Diagnostic"), span)]), span };
+    adapter.body = Some(vec![Statement::Return { value: Some(call(&format!("{registry_alias}literal_value"), vec![call(&raw.name, raw.parameters.iter().map(|parameter| name(&parameter.name, span)).collect(), span)], span)), span }]);
     adapter
 }
 

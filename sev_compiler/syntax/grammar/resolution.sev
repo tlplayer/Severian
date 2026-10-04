@@ -8,14 +8,14 @@ import ParserDiagnostic from "../../frontend/parser/diagnostic.sev"
 
 # A heterogeneous collection retains each payload's concrete type through its
 # implementation. Adding a grammar result does not extend a compiler union.
-trait GrammarValue:
+trait LiteralValue:
     def read[T](span: Span) -> T | Diagnostic
     def block() -> B | None
     def type_declaration() -> TypeDeclaration | None
     def expression() -> Expression | None
 
 
-class GrammarValueOf[T]: GrammarValue
+class LiteralValueOf[T]: LiteralValue
     value: T
 
     def read[R](span: Span) -> R | Diagnostic:
@@ -39,15 +39,30 @@ class GrammarValueOf[T]: GrammarValue
         return None
 
 
-def grammar_value[T](value: T) -> GrammarValue | Diagnostic:
+def literal_value[T](value: T) -> LiteralValue | Diagnostic:
     if value is Diagnostic:
         return value
-    return GrammarValueOf[T](value)
+    return LiteralValueOf[T](value)
 
 
 class ResolvedGrammarNode:
-    value: GrammarValue
+    value: LiteralValue
     span: Span
     declaration: string
     children: list[ResolvedGrammarNode] = []
     owner: SourceBlockId | None = None
+
+
+test "grammar results retain scalar and container types without literal variants":
+    span = Span(0, 0, 1)
+    integer: LiteralValue = LiteralValueOf[int](0)
+    decimal: LiteralValue = LiteralValueOf[float](0.0)
+    assert(integer.read[int](span) == 0)
+    assert(decimal.read[float](span) == 0.0)
+    assert(integer.read[string](span) is Diagnostic)
+    items: LiteralValue = LiteralValueOf[list[int]]([0, 1, 2, 3])
+    mapping: LiteralValue = LiteralValueOf[dict[string, int]]({"key": 7})
+    pair: LiteralValue = LiteralValueOf[(int, int, int)]((1, 2, 3))
+    assert(items.read[list[int]](span) == [0, 1, 2, 3])
+    assert(mapping.read[dict[string, int]](span) == {"key": 7})
+    assert(pair.read[(int, int, int)](span) == (1, 2, 3))

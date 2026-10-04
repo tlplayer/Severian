@@ -355,7 +355,7 @@ def model_sources() -> list[string]:
         "sev_compiler/syntax/generic/lexeme.sev",
         "sev_compiler/syntax/literal/bool.sev",
         "sev_compiler/syntax/literal/lowered.sev",
-        "sev_compiler/syntax/literal/value.sev",
+        "sev_compiler/syntax/grammar/resolution.sev",
         "sev_compiler/syntax/lowered.sev",
         "library/core/collections/array/src/array.sev",
         "library/core/collections/array/src/storage.sev",

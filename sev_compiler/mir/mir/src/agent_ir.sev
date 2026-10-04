@@ -32,21 +32,22 @@ def span_json(span: source.Span, files: list[source.SourceFile]) -> string | Err
 def metadata_value(expression: model_syntax_function_function.Expression) -> string:
     match expression.kind:
         case LiteralValue:
-            match value:
-                case NoneValue:
-                    return "null"
-                case BooleanValue:
-                    return "true" if value else "false"
-                case IntegerValue:
-                    return spelling
-                case StringValue:
-                    return quoted(value)
-                case FloatValue:
-                    return quoted(spelling)
-                case CharacterValue:
-                    return string(value)
-                case _:
-                    return "null"
+            boolean = value.read[bool](expression.span)
+            if boolean is bool:
+                return "true" if boolean else "false"
+            integer = value.read[int](expression.span)
+            if integer is int:
+                return string(integer)
+            text = value.read[string](expression.span)
+            if text is string:
+                return quoted(text)
+            decimal = value.read[float](expression.span)
+            if decimal is float:
+                return quoted(string(decimal))
+            character = value.read[char](expression.span)
+            if character is char:
+                return string(u32(character))
+            return "null"
         case Name:
             return "null" if name == "absent" else quoted(name)
         case SourceSymbol:

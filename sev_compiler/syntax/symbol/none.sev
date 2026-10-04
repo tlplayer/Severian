@@ -1,4 +1,4 @@
-import LiteralValue from "../literal/value.sev"
+import LiteralValue, LiteralValueOf from "../grammar/resolution.sev"
 import scalar_mlir from "../primitive/mlir.sev"
 import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../primitive/contract.sev"
 
@@ -18,7 +18,7 @@ class NoneValuePrimitive: Primitive
     representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
     token_kind: string = "Identifier"
     literal_family: string = ""
-    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Identifier", "None", LiteralValue.NoneValue)]
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Identifier", "None", LiteralValueOf[None](None))]
     default_literal: bool = true
 
 

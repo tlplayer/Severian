@@ -12,11 +12,9 @@ class Loan:
 def constant_index(expression: model_syntax_function_function.Expression) -> int:
     match expression.kind:
         case LiteralValue:
-            match value:
-                case IntegerValue:
-                    return int(spelling)
-                case _:
-                    throw Error("unimplemented (sev_compiler/transforms/mir/ownership/src/loans.sev)")
+            integer = value.read[int](expression.span)
+            if integer is int:
+                return integer
         case _:
             throw Error("unimplemented (sev_compiler/transforms/mir/ownership/src/loans.sev)")
     return -1

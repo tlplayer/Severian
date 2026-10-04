@@ -86,19 +86,19 @@ test "if owns conditional CFG lowering through explicit context":
 
 
 import Expression, ExpressionKind from "../function/function.sev"
-import LiteralValue from "../literal/value.sev"
+import LiteralValue, LiteralValueOf from "../grammar/resolution.sev"
 
 
 # Shared by source branch construction and its semantic realization. Repeated
 # conditions are a short-circuit conjunction, including the empty conjunction.
 def branch_condition(conditions: list[Expression], span: source.Span) -> Expression:
-    result = Expression(ExpressionKind.LiteralValue(LiteralValue.BooleanValue(true)), span)
+    result = Expression(ExpressionKind.LiteralValue(LiteralValueOf[bool](true)), span)
     index := int(len(conditions)) - 1
     if index >= 0:
         result = conditions[index]
         index -= 1
     while index >= 0:
-        rejected = Expression(ExpressionKind.LiteralValue(LiteralValue.BooleanValue(false)), span)
+        rejected = Expression(ExpressionKind.LiteralValue(LiteralValueOf[bool](false)), span)
         result = Expression(ExpressionKind.Conditional(conditions[index], result, rejected), span)
         index -= 1
     return result
@@ -115,7 +115,7 @@ test "declared branch conditions preserve order and short circuit":
             assert(then_value == second)
             match else_value.kind:
                 case LiteralValue:
-                    assert(value == LiteralValue.BooleanValue(false))
+                    assert(value.read[bool](span) == false)
                 case _:
                     assert(false)
         case _:

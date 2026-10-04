@@ -7,7 +7,7 @@ import "control_flow.sev" as control_flow
 import source
 import hashing from "../../syntax/function/lowering.sev"
 import AttrValue, AttributeId, DefinitionID, LocalId, OpId, Substitution, SymbolKind, TypeId, VariantId from "../../syntax/symbol/symbol.sev"
-import LiteralValue from "../../syntax/literal/value.sev"
+import LiteralValue, LiteralValueOf from "../../syntax/grammar/resolution.sev"
 import Associativity, BinaryOperator, DecoratorValue, Move, UnaryOperator from "../../syntax/function/syntax.sev"
 import ExpressionConversion, ExpressionKind, Operation, ResolvedCallee from "../../syntax/function/function.sev"
 import CoveragePoint from "../../syntax/source.sev"

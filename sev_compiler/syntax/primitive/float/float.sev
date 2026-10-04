@@ -899,3 +899,12 @@ test with cases "float x int" with
     assert(a != b)
     assert(float_type(2.0) == b)
     assert(b == float_type(2.0))
+
+
+test "float grammar owns decimal and exponent spellings":
+    assert(float.literal_valid("0.0"))
+    assert(float.literal_valid(".0"))
+    assert(float.literal_valid("1e2"))
+    assert(not float.literal_valid("0"))
+    assert(not float.literal_valid("0.0name"))
+    assert(not float.literal_valid("1e"))
