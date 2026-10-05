@@ -4,6 +4,10 @@ import process
 import os
 
 
+trait PipelineAction:
+    def execute() -> unit | Error
+
+
 class Step:
     name: string
     arguments: list[string]
@@ -16,6 +20,8 @@ class Step:
     stdout_fixture: string = ""
     stderr_fixture: string = ""
     memory_bytes: int = 3000000000
+    action: PipelineAction | None = None
+    provider: string = ""
 
 
 class Result:
@@ -66,8 +72,8 @@ def validate(steps: list[Step]) -> unit | Error:
         for dependency in step.dependencies:
             if dependency not in names:
                 throw Error("pipeline dependency must precede its consumer: " + dependency)
-        if step.enabled and (len(step.arguments) == 0 or step.timeout <= 0 or step.memory_bytes <= 0):
-            throw Error("pipeline step requires a command and positive time/memory limits: " + step.name)
+        if step.enabled and ((len(step.arguments) == 0 and step.action == None) or step.timeout <= 0 or step.memory_bytes <= 0):
+            throw Error("pipeline step requires a command or action and positive time/memory limits: " + step.name)
         names.append(step.name)
 
 
@@ -127,6 +133,7 @@ def save(report: Report) -> unit | Error:
         for argument in result.step.arguments:
             arguments.append(json_string(argument))
         row := "{\"name\":" + json_string(result.step.name)
+        row += ",\"provider\":" + json_string(result.step.provider)
         row += ",\"group\":" + json_string(result.step.group)
         row += ",\"stage\":" + json_string(result.step.stage)
         row += ",\"status\":" + json_string(result.status)
@@ -159,6 +166,14 @@ def save(report: Report) -> unit | Error:
 
 
 def execute(step: Step, stdout: string, stderr: string) -> Result | Error:
+    action ?= step.action
+    if action != None:
+        started = host.monotonic()
+        try:
+            action.execute()
+            return Result(step, "pass", 0, host.monotonic() - started)
+        catch failure: Error:
+            return Result(step, "fail", 1, host.monotonic() - started, diagnostic=failure.message)
     metrics = stderr + ".resources"
     words = process.guarded_command(step.arguments, step.timeout, step.memory_bytes, metrics)
     quoted: list[string] = []

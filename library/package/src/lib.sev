@@ -8,7 +8,7 @@ import Edit, add, edit, init, new, options, remove, render_legacy_manifest, rend
 import frozen_manifest, install, materialize, publish, run_reference, select from "distribution.sev"
 import cached_inputs_match, compile_unit, decode_resolution, encode_resolution, fork_compilation_unit, realization_root, source_cache_root, unit_cache_root, unit_packages, unit_resolution, wait_compilation_unit from "compiler.sev"
 import Option, default_catalog, validate_configuration from "config.sev"
-import Report, Result, Step, host, json_string, pipeline, save, summarize, validate from "pipeline.sev"
+import PipelineAction, Report, Result, Step, host, json_string, pipeline, save, summarize, validate from "pipeline.sev"
 import append_native_provider, compiler_build_info, native_arguments, native_build_info, native_package, native_provider_identity from "native.sev"
 import enforce_lint, lint, lint_identity from "lint.sev"
 
@@ -18,3 +18,5 @@ import SemanticPlan, SemanticUnit, SourceMembership, resolved_source_owner, sema
 import ObjectUnit, object_units from "object_units.sev"
 import "stages.sev" as _dependency_489
 from profile import ProfileSession, profile_begin, profile_stage
+
+import command_line from "cli.sev"

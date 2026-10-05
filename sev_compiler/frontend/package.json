@@ -1,0 +1,44 @@
+{
+  "package": {
+    "name": "sev-compiler-frontend",
+    "version": "0.1.0",
+    "edition": "2026",
+    "publish": true
+  },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "language": {
+    "explicit-imports": true
+  },
+  "dependencies": {
+    "source": {
+      "package": "sev-compiler-source",
+      "path": "source"
+    },
+    "lexer": {
+      "package": "sev-compiler-lexer",
+      "path": "lexer"
+    },
+    "parser": {
+      "package": "sev-compiler-parser",
+      "path": "parser"
+    },
+    "hir": {
+      "package": "sev-compiler-hir",
+      "path": "../hir"
+    },
+    "syntax": {
+      "package": "sev-compiler-syntax",
+      "path": "../syntax"
+    },
+    "mlir": {
+      "package": "sev-compiler-mlir",
+      "path": "../mlir"
+    },
+    "cfg": {
+      "package": "sev-compiler-cfg",
+      "path": "../cfg"
+    }
+  }
+}

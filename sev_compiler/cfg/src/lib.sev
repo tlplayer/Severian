@@ -1,0 +1,105 @@
+# Generic control-flow contracts have no dependency on syntax or MIR.
+class Edge[V]:
+    target: int
+    arguments: list[V] = []
+
+enum Exit[V]:
+    Jump(edge: Edge[V])
+    Conditional(condition: V, taken: Edge[V], otherwise: Edge[V])
+    Raise(value: V)
+    Finish(value: V | None)
+    FinishFields(values: list[V])
+    Dead
+
+class Terminator[V, G, Span]:
+    exit: Exit[V]
+    grammar: G
+    span: Span
+
+trait ControlFlow[V, B]:
+    def block() -> int
+    def condition(value: bool) -> V
+    def body(value: B)
+    def branch(value: V, taken: int, otherwise: int)
+    def at(block: int)
+    def fallthrough(block: int)
+
+class FlowBlock[V]:
+    exit: Exit[V] | None = None
+
+class FlowBuilder[V, B]: ControlFlow[V, B]
+    condition_value: (bool) -> V
+    lower_body: (B) -> unit
+    blocks: list[FlowBlock[V]] = []
+    current: int = -1
+
+    def block() -> int:
+        index = int(len(self.blocks))
+        self.blocks.append(FlowBlock[V]())
+        if self.current < 0:
+            self.current = index
+        return index
+
+    def require_block(index: int):
+        if index < 0 or index >= len(self.blocks):
+            throw Error("CFG target does not belong to this body")
+
+    def condition(value: bool) -> V:
+        self.require_open()
+        return self.condition_value(value)
+
+    def require_open():
+        self.require_block(self.current)
+        if self.blocks[self.current].exit != None:
+            throw Error("CFG block is already terminated")
+
+    def body(value: B):
+        self.require_open()
+        self.lower_body(value)
+
+    def branch(value: V, taken: int, otherwise: int):
+        self.require_open()
+        self.require_block(taken)
+        self.require_block(otherwise)
+        self.blocks[self.current].exit = Exit[V].Conditional(value, Edge[V](taken), Edge[V](otherwise))
+
+    def at(block: int):
+        self.require_block(block)
+        self.current = block
+
+    def fallthrough(block: int):
+        self.require_open()
+        self.require_block(block)
+        self.blocks[self.current].exit = Exit[V].Jump(Edge[V](block))
+
+    def finish(value: V | None = None):
+        self.require_open()
+        self.blocks[self.current].exit = Exit[V].Finish(value)
+
+    def verify():
+        if len(self.blocks) == 0:
+            throw Error("CFG requires an entry block")
+        for block in self.blocks:
+            if block.exit == None:
+                throw Error("CFG contains an unterminated block")
+
+def boolean_value(value: bool) -> int:
+    return 1 if value else 0
+
+def ignore_body(value: int):
+    assert(value >= 0)
+
+test "CFG implementation rejects a second terminator":
+    graph = FlowBuilder[int, int](boolean_value, ignore_body)
+    entry = graph.block()
+    exit = graph.block()
+    graph.branch(graph.condition(true), exit, exit)
+    rejected := false
+    try:
+        graph.fallthrough(exit)
+    catch failure: Error:
+        rejected = true
+    assert(rejected)
+    graph.at(exit)
+    graph.finish()
+    graph.verify()

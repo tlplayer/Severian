@@ -71,15 +71,9 @@ class BlockFieldValue:
     value: BlockCaptureValue
 
 
-# Provider lowering uses explicit compiler context instead of free cfg/lower
-# names. Implementations supply behavior; the compiler supplies these operations.
-trait BlockLowering:
-    def block() -> int
-    def condition(value: bool) -> ValueId
-    def body(value: B)
-    def branch(value: ValueId, taken: int, otherwise: int)
-    def at(block: int)
-    def fallthrough(block: int)
+import "../../cfg/src/lib.sev" as cfg
+
+cfg.ControlFlow[ValueId, B] as BlockLowering
 
 
 # B is the source structure shared by discovery and resolved block bodies.

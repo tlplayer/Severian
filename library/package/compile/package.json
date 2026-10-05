@@ -5,8 +5,12 @@
     "edition": "2026",
     "description": "Package compilation adapters for the current Severian compiler"
   },
-  "lib": { "path": "src/lib.sev" },
-  "language": { "explicit-imports": true },
+  "lib": {
+    "path": "src/lib.sev"
+  },
+  "language": {
+    "explicit-imports": true
+  },
   "dependencies": {
     "compiler_lexer": {
       "path": "../../../sev_compiler/frontend/lexer",
@@ -19,6 +23,10 @@
     "compiler_source": {
       "path": "../../../sev_compiler/frontend/source",
       "package": "sev-compiler-source"
+    },
+    "compiler_frontend": {
+      "path": "../../../sev_compiler/frontend",
+      "package": "sev-compiler-frontend"
     }
   }
 }

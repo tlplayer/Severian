@@ -1,7 +1,7 @@
 import Y from "symbol.sev"
 import source
 import Block, DeclarationId, DefinitionID, FunctionParameter, TypeAnnotation, span from "../function/function.sev"
-import ScalarOperation,Associativity, OperatorSyntax from "../function/syntax.sev"
+import ScalarOperation, Associativity, OperatorSyntax from "../function/syntax.sev"
 
 enum GrammarPrimitive:
     LowerExpression

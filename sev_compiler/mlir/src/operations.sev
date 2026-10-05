@@ -1,0 +1,32 @@
+import MlirTypeBinding from "types.sev"
+
+class MlirOperationBinding:
+    dialect: string
+    name: string
+    operands: list[MlirTypeBinding]
+    results: list[MlirTypeBinding]
+
+trait MlirOperationProvider:
+    mlir_operation: MlirOperationBinding
+
+trait OperationMapping:
+    def resolve(provider: MlirOperationProvider) -> MlirOperationBinding | Error
+
+class DeclaredOperationMapping: OperationMapping
+    def resolve(provider: MlirOperationProvider) -> MlirOperationBinding | Error:
+        binding = provider.mlir_operation
+        if binding.dialect == "" or binding.name == "":
+            throw Error("MLIR operation requires a dialect and operation name")
+        for type in binding.operands:
+            type.render()
+        for type in binding.results:
+            type.render()
+        return binding
+
+class ExampleAddition: MlirOperationProvider
+    mlir_operation: MlirOperationBinding = MlirOperationBinding("arith", "addi", [MlirTypeBinding("i32"), MlirTypeBinding("i32")], [MlirTypeBinding("i32")])
+
+test "operation mapping retains declared operand and result types":
+    binding = DeclaredOperationMapping().resolve(ExampleAddition())
+    assert(binding.dialect == "arith" and binding.name == "addi")
+    assert(len(binding.operands) == 2 and binding.results[0].render() == "i32")

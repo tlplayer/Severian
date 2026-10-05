@@ -27,14 +27,6 @@
     }
   ],
   "dependencies": {
-    "backend": {
-      "package": "sev-mlir-backend",
-      "path": "lir/backend"
-    },
-    "semantic": {
-      "package": "sev-compiler-semantic",
-      "path": "hir/semantic"
-    },
     "environment": {
       "path": "../library/system/environment",
       "package": "environment"
@@ -86,10 +78,6 @@
     "interfaces": {
       "package": "package.interface",
       "path": "../library/package/interface"
-    },
-    "build": {
-      "package": "sev-compiler-build",
-      "path": "build"
     }
   },
   "xxi": {

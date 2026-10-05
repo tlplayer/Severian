@@ -1,0 +1,86 @@
+import FrontendState, FrontendStage, stages, inspect from compile
+import load from "package:compile/frontend/source.sev"
+import PipelineAction, Step, pipeline from "pipeline.sev"
+import open, inside from "manifest.sev"
+import plan from "build.sev"
+import Build from "model.sev"
+import write_text from "host.sev"
+
+class CompilerStageAction: PipelineAction
+    stage: FrontendStage
+    state: FrontendState
+    def execute() -> unit | Error:
+        self.stage.apply(self.state)
+
+
+def frontend_file(input: string, package_name: string, module: string, output: string) -> int | Error:
+    state = FrontendState(load(input), package_name, module)
+    steps: list[Step] = []
+    previous: list[string] = []
+    for stage in stages():
+        steps.append(Step(stage.name, [], ".", dependencies=previous[:], stage=stage.name, action=CompilerStageAction(stage, state), provider=stage.provider))
+        previous = [stage.name]
+    report = pipeline(steps, "package.pkg/frontend")
+    if report.failed > 0 or report.blocked > 0:
+        for result in report.results:
+            if result.status == "fail":
+                print(input + ": " + result.step.name + ": " + result.diagnostic)
+        for diagnostic in state.diagnostics:
+            print(input + ": " + diagnostic.note)
+        return 1
+    text = inspect(state)
+    if output == "":
+        print(text)
+    else:
+        write_text(output, text)
+    return 0
+
+
+def command_line(arguments: list[string]) -> int | Error:
+    input := ""
+    output := ""
+    binary := ""
+    cursor := 1
+    if len(arguments) > 1 and arguments[1] in ["inspect", "check", "build"]:
+        cursor += 1
+    while cursor < len(arguments):
+        argument = arguments[cursor]
+        if argument in ["--help", "-h"]:
+            print("usage: sev inspect|check|build FILE|PACKAGE [--bin NAME] [--emit program] [-o OUTPUT]\nPipeline: MLIR -> syntax (CFG contracts) -> lexer -> parser -> HIR Program. Stops before MIR.")
+            return 0
+        if argument == "--version":
+            print("sev 0.1.0 (source frontend; stops at HIR Program)")
+            return 0
+        if argument in ["-o", "--output", "--bin", "--emit"]:
+            cursor += 1
+            if cursor >= len(arguments):
+                throw Error(argument + " requires a value")
+            value = arguments[cursor]
+            if argument in ["-o", "--output"]:
+                output = value
+            elif argument == "--bin":
+                binary = value
+            elif argument == "--emit" and value != "program":
+                throw Error("this pipeline stops at Program; requested emission is unavailable")
+        elif argument.starts_with("-"):
+            throw Error("unsupported frontend option: " + argument)
+        elif input == "":
+            input = argument
+        else:
+            throw Error("unexpected argument: " + argument)
+        cursor += 1
+    if input == "":
+        input = "."
+    if input.ends_with(".sev"):
+        return frontend_file(input, "", "main", output)
+    project = open(input)
+    planned = plan(project, Build(target=binary))
+    if output != "" and len(planned.units) != 1:
+        throw Error("one output requires one selected target")
+    status := 0
+    for unit in planned.units:
+        owner = planned.resolution.packages[unit.package_index]
+        selected = frontend_file(inside(owner.root, unit.target.path), owner.manifest.name, unit.target.name, output)
+        if selected != 0:
+            status = selected
+    return status

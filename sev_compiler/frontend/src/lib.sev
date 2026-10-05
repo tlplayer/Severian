@@ -1,0 +1,94 @@
+import SourceFile from "../source/source.sev"
+import TokenStream from "../lexer/stream.sev"
+import RegistryLexer from "../lexer/lexer.sev"
+import parser from "../parser/parser.sev"
+import BlockGraph from "../../hir/hir/src/dependencies.sev"
+import Program, partition from "../../hir/hir/src/program.sev"
+import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
+import "../../syntax/recognition.sev" as syntax
+import PointerPrimitive from "../../syntax/primitive/pointer/declarations.sev"
+import MlirTypeBinding, TypeMapping, DeclaredTypeMapping from "../../mlir/src/types.sev"
+
+class FrontendState:
+    source: SourceFile
+    package: string = ""
+    module: string = "main"
+    tokens: TokenStream | None = None
+    graph: BlockGraph | None = None
+    program: Program | None = None
+    diagnostics: list[Diagnostic] = []
+    pointer: MlirTypeBinding | None = None
+    types: TypeMapping | None = None
+
+trait FrontendStage:
+    name: string
+    provider: string
+    def apply(state: FrontendState) -> unit | Error
+
+class MlirStage: FrontendStage
+    name: string = "mlir"
+    provider: string = "sev-compiler-mlir"
+    def apply(state: FrontendState) -> unit | Error:
+        state.types = DeclaredTypeMapping()
+
+class SyntaxStage: FrontendStage
+    name: string = "syntax"
+    provider: string = "sev-compiler-syntax"
+    def apply(state: FrontendState) -> unit | Error:
+        types ?= state.types
+        if types == None:
+            throw Error("syntax requires MLIR type mapping")
+        pointer = PointerPrimitive()
+        types.resolve(pointer)
+        state.pointer = pointer.mlir
+        syntax.registry()
+
+class LexerStage: FrontendStage
+    name: string = "lexer"
+    provider: string = "sev-compiler-lexer"
+    def apply(state: FrontendState) -> unit | Error:
+        result = RegistryLexer().lex(state.source)
+        if result is list[Diagnostic]:
+            state.diagnostics = result
+            throw Error("lexer rejected source")
+        state.tokens = result
+
+class ParserStage: FrontendStage
+    name: string = "parser"
+    provider: string = "sev-compiler-parser"
+    def apply(state: FrontendState) -> unit | Error:
+        tokens ?= state.tokens
+        if tokens == None:
+            throw Error("parser requires lexer output")
+        result = parser(tokens, state.package, state.module)
+        if result is list[Diagnostic]:
+            state.diagnostics = result
+            throw Error("parser rejected source")
+        state.graph = result
+
+class HirStage: FrontendStage
+    name: string = "hir"
+    provider: string = "sev-compiler-hir"
+    def apply(state: FrontendState) -> unit | Error:
+        graph ?= state.graph
+        if graph == None:
+            throw Error("HIR requires parser output")
+        state.program = partition(graph)
+
+
+def stages() -> list[FrontendStage]:
+    return [MlirStage(), SyntaxStage(), LexerStage(), ParserStage(), HirStage()]
+
+
+def inspect(state: FrontendState) -> string | Error:
+    program ?= state.program
+    if program == None:
+        throw Error("frontend has no realized Program")
+    return "Program: " + string(len(program.modules)) + " modules, " + string(len(program.submodules)) + " submodules\n" + program.graph.print()
+
+
+test "parser stage requires actual lexer output":
+    state = FrontendState(SourceFile(0, "missing.sev", "true"))
+    result ?= ParserStage().apply(state)
+    assert(result is Error)
+    assert(state.graph == None and state.program == None)

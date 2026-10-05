@@ -1,3 +1,5 @@
 # Package-facing adapters; compiler stages retain their own implementations.
 import unit_arguments from "driver.sev"
 import "../frontend/lib.sev" as frontend
+
+import FrontendState, FrontendStage, stages, inspect from compiler_frontend

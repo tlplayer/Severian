@@ -1,5 +1,7 @@
 {
-  "language": { "explicit-imports": true },
+  "language": {
+    "explicit-imports": true
+  },
   "package": {
     "name": "sev-compiler-primitives",
     "version": "0.1.0",
@@ -17,6 +19,14 @@
     "source": {
       "path": "../../frontend/source",
       "package": "sev-compiler-source"
+    },
+    "cfg": {
+      "path": "../../cfg",
+      "package": "sev-compiler-cfg"
+    },
+    "mlir": {
+      "path": "../../mlir",
+      "package": "sev-compiler-mlir"
     }
   }
 }

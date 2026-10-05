@@ -1,12 +1,19 @@
 import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider from "../type/mlir.sev"
 import AssertionOrigin, CoveragePoint from "../source.sev"
 import source
+import B, Block from "../block/block.sev"
+import Constructor, Conversion, ConversionKind, Size, TypeRef from "../generic/type.sev"
+import Lexeme, LexemeTerm, TokenTerm from "../generic/token.sev"
+import SourceFile, SourceMap, Span, load, span, utf8_offset, virtual_source from "../source.sev"
+import array_mlir, byte_view_mlir, index_mlir, memref_mlir, ranked_memref_storage, scalar_mlir, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir from "../primitive/mlir.sev"
+import LiteralValue as Constant from "../grammar/resolution.sev"
+import "../block/control_flow.sev" as control_flow
+import "../../../library/core/utils/src/hash.sev" as hashing
 import AbiId, ArtifactId, BindingId, CompilerId, DeclarationId, DefinitionID, FfiId, FunctionId, GenericParamId, HirId, InterfaceId, OpId, ProviderId, Substitution, SymbolId, TypeBinding, TypeId, ValueId, VariantId, semantic_key from "../symbol/symbol.sev"
 import TypeAnnotation, TypeAnnotationKind, named_type, simple_type_name from "../type/annotation.sev"
 import LoweredFloatFormat, LoweredType from "../lowered.sev"
 import Associativity, BinaryOperator, Decorator, DecoratorValue, GenericConstraint, OperatorDeclaration, OperatorSyntax, TestMode, operator_syntax from "syntax.sev"
 import Grammar, MatchArm from "../sentence/sentence.sev"
-import B, Block, Callee, CfgBody, CfgStatement, Constant, Constructor, Conversion, ConversionKind, Conversions, Effects, Evaluation, LazyOperand, Lexeme, LexemeTerm, LocalDecl, Operand, Place, Projection, Rvalue, Size, SourceFile, SourceMap, Span, SwitchCase, TokenTerm, TypeRef, array_mlir, byte_view_mlir, cfg_blocks, control_flow, empty_cfg, hashing, index_mlir, load, local_place, memref_mlir, ranked_memref_storage, scalar_mlir, span, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source from "../../mir/cfg/cfg.sev"
 import AttachmentRole, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, DispatchCandidate, DispatchFamily, ProofResult, WithAttachment from "../constraint/model.sev"
 import LiteralSyntax, LiteralConstruction, PrimitiveAlias, PrimitiveCategory, PrimitiveRepresentation from "../primitive/contract.sev"
 import LiteralValue, LiteralValueOf from "../grammar/resolution.sev"
@@ -99,10 +106,6 @@ class FunctionDeclaration:
     type_arguments: list[TypeBinding] = []
     pack_specialization: bool = false
     constructor: bool = false
-    cfg_index: int = -1
-    # ABI sentinel for the seed record/list representation; never populated.
-    # Executable bodies are indexed in Module.cfg_bodies.
-    cfg: CfgBody | None = None
     result_mode: string = ""
     result_origin: int = -1
     prelude: bool = false
