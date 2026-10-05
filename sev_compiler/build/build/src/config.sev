@@ -1,9 +1,0 @@
-import package
-
-# Compatibility entry for callers of the broader driver. The package library
-# owns manifest types, parsing, discovery and configuration validation.
-def load_manifest(location: string) -> package.Manifest | Error:
-    return package.open(location).manifest
-
-def default_catalog() -> list[package.Option]:
-    return package.default_catalog()

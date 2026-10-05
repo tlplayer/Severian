@@ -1,4 +1,0 @@
-import codec
-
-def main():
-    codec.main()

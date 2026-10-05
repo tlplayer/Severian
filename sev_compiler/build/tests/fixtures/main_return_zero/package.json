@@ -1,9 +1,0 @@
-{
-  "package": {
-    "name": "main-return-zero",
-    "version": "0.1.0",
-    "edition": "2026",
-    "publish": false
-  },
-  "bin": [{"name": "main-return-zero", "path": "main.sev"}]
-}

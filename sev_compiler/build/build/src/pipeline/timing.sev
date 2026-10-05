@@ -1,3 +1,0 @@
-from package import ProfileSession as Timings
-from package import profile_begin as begin
-from package import profile_stage as finish_stage

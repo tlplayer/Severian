@@ -1,3 +1,0 @@
-left: i32 = 1
-right: i32 = 2
-sum: i32 = left + right

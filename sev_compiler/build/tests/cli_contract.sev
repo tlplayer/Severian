@@ -1,8 +1,0 @@
-import package
-
-test "driver request defaults use package vocabulary":
-    request = package.Build()
-    assert(request.target == "")
-    assert(request.platform == "")
-    assert(request.profile == "")
-    assert(not request.locked)

@@ -1,6 +1,0 @@
-def main():
-    return 0
-
-
-test "entry exposes its integer exit status":
-    assert(main() == 0)
