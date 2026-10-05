@@ -3357,6 +3357,13 @@ fn specialize_expression(expression: &mut severian_ast::Expression, substitution
             specialize_expression(condition, substitution);
             specialize_expression(fallback, substitution);
         }
+        ExpressionKind::Binary { operator: severian_ast::BinaryOperator::Identity, left, right }
+            if matches!(&right.kind, ExpressionKind::Name(name) if substitution.get(name).is_some_and(|replacement|
+                !replacement.chars().all(|character| character.is_alphanumeric() || matches!(character, '_' | '.')))) => {
+                // Keep the type parameter identity. Semantic analysis resolves
+                // it from the specialization, including structural union types.
+                specialize_expression(left, substitution);
+            }
         ExpressionKind::Fallback { value, fallback }
         | ExpressionKind::Binary {
             left: value,

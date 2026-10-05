@@ -8,6 +8,7 @@ import Span from "../source/source.sev"
 import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import ParserDiagnostic from "diagnostic.sev"
 import "../../syntax/recognition.sev" as syntax
+import SyntaxDeclaration from "../../syntax/recognition.sev"
 
 
 class GrammarContext:
@@ -173,13 +174,14 @@ def match_contract(input: list[TokenTerm], required: T | None, context: GrammarC
 
 def match_declared_sentence(input: list[TokenTerm], label: string) -> GrammarMatch | None | Diagnostic:
     for declaration, grammar in syntax.registry():
-        if declaration.name == label:
-            matches = match_sequence(input, grammar, GrammarContext())
-            if matches is Diagnostic:
-                return matches
-            if len(matches) == 0:
-                return None
-            return select_grammar(matches, input[0].span)
+        if declaration is SyntaxDeclaration:
+            if declaration.name == label:
+                matches = match_sequence(input, grammar, GrammarContext())
+                if matches is Diagnostic:
+                    return matches
+                if len(matches) == 0:
+                    return None
+                return select_grammar(matches, input[0].span)
     return None
 
 

@@ -3024,6 +3024,196 @@ mod tests {
     }
 
     #[test]
+    fn generic_type_guards_unwrap_optional_trait_parameters_natively() {
+        let root = temporary_package();
+        let definitions = r#"trait T:
+    marker: int
+trait B:
+    name: string
+class Block: B
+    name: string
+class Other: B
+    name: string
+def context_value[T](value: B | None) -> T:
+    if value is T:
+        return value
+    throw Error("wrong context")
+def valid() -> int:
+    block = Block("kept" + " payload")
+    trait_value = context_value[B](block)
+    assert(trait_value.name == "kept payload")
+    concrete = context_value[Block](block)
+    assert(concrete.name == "kept payload")
+    assert(trait_value.name == "kept payload")
+    optional = context_value[B | None](None)
+    assert(optional == None)
+    return 0
+"#;
+        for (name, body, success) in [
+            ("valid", "    return valid()\n", true),
+            ("missing", "    context_value[B](None)\n    return 0\n", false),
+            ("incompatible", "    context_value[Block](Other(\"other\"))\n    return 0\n", false),
+        ] {
+            let source = root.join(format!("{name}.sev"));
+            let executable = root.join(name);
+            std::fs::write(&source, format!("{definitions}def main() -> int:\n{body}")).unwrap();
+            Compiler::new(TargetSpec::host()).unwrap().compile_file(&source, &executable).unwrap();
+            let output = std::process::Command::new(&executable).output().unwrap();
+            assert_eq!(output.status.success(), success, "{name}: {}", String::from_utf8_lossy(&output.stderr));
+            if !success {
+                assert!(String::from_utf8_lossy(&output.stderr).contains("wrong context"));
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn union_widening_preserves_payloads_and_evaluates_producers_once() {
+        let root = temporary_package();
+        let source = root.join("widen.sev");
+        let executable = root.join("widen");
+        std::fs::write(root.join("values.sev"), r#"class A:
+    text: string
+class B:
+    text: string
+class Counter:
+    calls: int = 0
+def produce(counter: Counter, first: bool) -> A | B:
+    counter.calls = counter.calls + 1
+    if first:
+        return A("left" + " payload")
+    return B("right" + " payload")
+"#).unwrap();
+        std::fs::write(&source, r#"import A, B, Counter, produce from "values.sev"
+class Slot:
+    value: A | B | None = None
+def widened(counter: Counter, first: bool) -> A | B | None:
+    return produce(counter, first)
+def absent() -> A | None:
+    return None
+def verify(candidate: A | B | None, first: bool):
+    value = candidate
+    if value is A:
+        assert(first)
+        assert(value.text == "left payload")
+        return
+    if value is B:
+        assert(not first)
+        assert(value.text == "right payload")
+        return
+    assert(false)
+def main() -> int:
+    counter = Counter()
+    verify(widened(counter, true), true)
+    assert(counter.calls == 1)
+    verify(widened(counter, false), false)
+    assert(counter.calls == 2)
+    verify(produce(counter, true), true)
+    assert(counter.calls == 3)
+    stored: A | B | None = produce(counter, false)
+    assert(counter.calls == 4)
+    verify(stored, false)
+    verify(stored, false)
+    slot = Slot()
+    assert(slot.value == None)
+    slot.value = produce(counter, true)
+    assert(counter.calls == 5)
+    verify(slot.value, true)
+    verify(slot.value, true)
+    missing: A | B | None = absent()
+    assert(missing == None)
+    return 0
+"#).unwrap();
+        Compiler::new(TargetSpec::host()).unwrap().compile_file(&source, &executable).unwrap();
+        let output = std::process::Command::new(&executable).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mixed_registry_labels_require_declaration_type_before_name_access() {
+        let root = temporary_package();
+        let source = root.join("lookup.sev");
+        let executable = root.join("lookup");
+        std::fs::write(root.join("registry.sev"), r#"trait Symbol:
+    token: int = 0
+class Keyword: Symbol
+    spelling: string
+class SyntaxDeclaration: Symbol
+    path: string
+    name: string
+def registry() -> list[(Symbol, int)]:
+    return [(Keyword("target"), 99), (SyntaxDeclaration("other.sev", "other"), 1), (SyntaxDeclaration("target.sev", "target"), 7)]
+"#).unwrap();
+        std::fs::write(&source, r#"import "registry.sev" as syntax
+import SyntaxDeclaration from "registry.sev"
+def lookup(label: string) -> int:
+    for declaration, value in syntax.registry():
+        if declaration is SyntaxDeclaration:
+            if declaration.name == label:
+                return value
+    return 0
+def main() -> int:
+    assert(lookup("target") == 7)
+    assert(lookup("other") == 1)
+    assert(lookup("missing") == 0)
+    return 0
+"#).unwrap();
+        Compiler::new(TargetSpec::host()).unwrap().compile_file(&source, &executable).unwrap();
+        let output = std::process::Command::new(&executable).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn imported_tuple_list_iteration_destructures_natively() {
+        let root = temporary_package();
+        let source = root.join("iteration.sev");
+        let executable = root.join("iteration");
+        std::fs::write(root.join("registry.sev"), r#"trait Label:
+    name: string
+class Named: Label
+    name: string
+class Entry:
+    value: int
+class Counter:
+    calls: int = 0
+def registry(counter: Counter) -> list[(Label, Entry)]:
+    counter.calls = counter.calls + 1
+    return [(Named("skip"), Entry(1)), (Named("keep"), Entry(2)), (Named("stop"), Entry(3)), (Named("unreachable"), Entry(100))]
+def empty() -> list[(Label, Entry)]:
+    return []
+"#).unwrap();
+        std::fs::write(&source, r#"import * from "registry.sev" as syntax
+def main() -> int:
+    counter = syntax.Counter()
+    total := 0
+    label = "outer"
+    for label, grammar in syntax.registry(counter):
+        if label.name == "skip":
+            continue
+        total += grammar.value
+        if label.name == "stop":
+            break
+    assert(total == 5)
+    assert(counter.calls == 1)
+    assert(label == "outer")
+    for label, grammar in syntax.empty():
+        assert(false)
+    for pair in [(4, 5)]:
+        left, right = pair
+        assert(left + right == 9)
+    for left, right in [(6, 7)]:
+        assert(left + right == 13)
+    return 0
+"#).unwrap();
+        Compiler::new(TargetSpec::host()).unwrap().compile_file(&source, &executable).unwrap();
+        let output = std::process::Command::new(&executable).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn stored_callbacks_retain_captures_and_support_unit_results_natively() {
         let root = temporary_package();
         let source = root.join("callbacks.sev");

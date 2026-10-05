@@ -374,6 +374,7 @@ impl Analyzer<'_> {
     pub(super) fn union_guard_projection(
         &mut self,
         condition: &AstExpression,
+        allow_mutable: bool,
     ) -> Result<Option<(String, Option<Expression>, Option<Expression>)>, Diagnostic> {
         if let AstExpressionKind::Unary {
             operator: AstUnaryOperator::Not,
@@ -381,7 +382,7 @@ impl Analyzer<'_> {
         } = &condition.kind
         {
             return self
-                .union_guard_projection(operand)
+                .union_guard_projection(operand, allow_mutable)
                 .map(|guard| guard.map(|(name, yes, no)| (name, no, yes)));
         }
         let AstExpressionKind::Binary {
@@ -396,7 +397,7 @@ impl Analyzer<'_> {
             return Ok(None);
         };
         if let AstExpressionKind::Name(name) = &left.kind {
-            if self
+            if !allow_mutable && self
                 .names
                 .get(name)
                 .is_some_and(|(_, variable, _)| self.mutable_variables.contains(variable))
@@ -437,6 +438,29 @@ impl Analyzer<'_> {
         let Some(members) = self.union_types.get(&value.type_id).cloned() else {
             return Ok(None);
         };
+        if Some(target) != self.types.resolve_name("None")
+            && members.iter().any(|member| self.is_trait_object(*member) || *member == any_type_id()) {
+            let yes = self.map_union_expression(value.clone(), &members, target, |analyzer, member| {
+                if member.type_id == target || analyzer.trait_object_accepts(member.type_id, target) {
+                    analyzer.coerce(member, target, false)
+                } else if analyzer.is_trait_object(member.type_id) || member.type_id == any_type_id() {
+                    if analyzer.is_trait_object(target) {
+                        analyzer.wrap_trait_object(member, target, true)
+                    } else {
+                        let span = member.span;
+                        let storage = analyzer.trait_object_storage(member);
+                        Ok(analyzer.erased_record_read(storage, target, span))
+                    }
+                } else {
+                    Ok(analyzer.throw_expression("unreachable union member after a type guard", target, member.span))
+                }
+            })?;
+            // A failed dynamic test does not exclude the entire trait member.
+            let remaining = members.iter().copied().filter(|member|
+                *member != target && !self.trait_object_accepts(*member, target)).collect::<Vec<_>>();
+            let no = self.union_subset_projection(value, &members, &remaining)?;
+            return Ok(Some(if positive { (name, Some(yes), no) } else { (name, no, Some(yes)) }));
+        }
         let (yes, no): (Vec<_>, Vec<_>) = members
             .iter()
             .copied()
@@ -983,6 +1007,14 @@ mod tests {
         let context = severian_bootstrap::load().unwrap();
         let program = analyze(&ast, &context.types).unwrap();
         severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn optional_trait_guard_does_not_survive_parameter_reassignment() {
+        let source = severian_source::SourceFile::virtual_source("mutation.sev", "trait B:\n    name: string\ndef invalid(value: B | None) -> B:\n    if value is B:\n        value = None\n        return value\n    throw Error(\"missing\")\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let context = severian_bootstrap::load().unwrap();
+        assert!(analyze(&ast, &context.types).is_err());
     }
 
     #[test]

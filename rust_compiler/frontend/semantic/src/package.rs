@@ -1,6 +1,6 @@
 use crate::{
     analyze_with_package_functions, AnalysisContext, AnalysisMode, PackageClass, PackageConstant,
-    PackageEnum, PackageFunction, PackageList,
+    PackageEnum, PackageFunction, PackageList, PackageCollection,
 };
 use severian_ast::{GenericConstraint, ImportSubject, Item, TypeAnnotation, TypeAnnotationKind};
 use severian_diagnostics::Diagnostic;
@@ -542,10 +542,12 @@ fn analyze_package_impl(
                 )?;
                 let mut callable_types = Vec::new();
                 let mut callable_unions = Vec::new();
+                let mut collections = Vec::new();
                 for annotation in signature.parameters.iter().chain(std::iter::once(&signature.result)) {
-                    collect_callable_layouts(&mut types, annotation, definition.module, &package_classes, &package_lists, &index, &mut callable_types, &mut callable_unions)?;
+                    collect_signature_layouts(&mut types, annotation, definition.module, &package_classes, &package_lists, &index, &mut callable_types, &mut callable_unions, &mut collections)?;
                 }
                 Ok(PackageFunction {
+                    collections,
                     callable_types,
                     callable_unions,
                     lookup: binding.lookup,
@@ -1315,26 +1317,42 @@ fn collect_scoped_binding_ids(block: &severian_hir::Block, ids: &mut Vec<u32>) {
     }
 }
 
-fn collect_callable_layouts(
+fn collect_signature_layouts(
     types: &mut severian_universal::TypeContext, annotation: &TypeAnnotation, module: ModuleId,
     classes: &[PackageClass], lists: &[PackageList], index: &ProgramIndex,
     callables: &mut Vec<(Vec<TypeId>, TypeId)>, unions: &mut Vec<Vec<TypeId>>,
+    collections: &mut Vec<PackageCollection>,
 ) -> Result<(), Diagnostic> {
     let expanded = expand_type_alias(annotation, module, index)?;
     match &expanded.kind {
         TypeAnnotationKind::Function { parameters, result } => {
             for annotation in parameters.iter().chain(std::iter::once(result.as_ref())) {
-                collect_callable_layouts(types, annotation, module, classes, lists, index, callables, unions)?;
+                collect_signature_layouts(types, annotation, module, classes, lists, index, callables, unions, collections)?;
             }
             let parameters = parameters.iter().map(|annotation| resolve_package_type(types, annotation, module, classes, lists, index)).collect::<Result<Vec<_>, _>>()?;
             let result = resolve_package_type(types, result, module, classes, lists, index)?;
             callables.push((parameters, result));
         }
         TypeAnnotationKind::Union(members) => {
-            for member in members { collect_callable_layouts(types, member, module, classes, lists, index, callables, unions)?; }
+            for member in members { collect_signature_layouts(types, member, module, classes, lists, index, callables, unions, collections)?; }
             unions.push(members.iter().map(|member| resolve_package_type(types, member, module, classes, lists, index)).collect::<Result<Vec<_>, _>>()?);
         }
-        _ => {}
+        _ => {
+            if let Some((name, arguments)) = expanded.named_parts() {
+                for argument in arguments {
+                    collect_signature_layouts(types, argument, module, classes, lists, index, callables, unions, collections)?;
+                }
+                if matches!(name, "list" | "tuple" | "map") {
+                    let elements = arguments.iter().map(|argument| resolve_package_type(types, argument, module, classes, lists, index)).collect::<Result<Vec<_>, _>>()?;
+                    match (name, elements.as_slice()) {
+                        ("list", [element]) => collections.push(PackageCollection::List(*element)),
+                        ("tuple", _) => collections.push(PackageCollection::Tuple(elements)),
+                        ("map", [key, value]) => collections.push(PackageCollection::Map(*key, *value)),
+                        _ => {}
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }

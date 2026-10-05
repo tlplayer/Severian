@@ -98,6 +98,7 @@ pub fn analyze_with_context_and_types(
 
 #[derive(Debug, Clone)]
 pub(crate) struct PackageFunction {
+    pub collections: Vec<PackageCollection>,
     pub callable_types: Vec<(Vec<TypeId>, TypeId)>,
     pub callable_unions: Vec<Vec<TypeId>>,
     pub lookup: String,
@@ -114,6 +115,13 @@ pub(crate) struct PackageFunction {
     pub result: TypeId,
     pub result_union: Option<Vec<TypeId>>,
     pub specificity: u8,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum PackageCollection {
+    List(TypeId),
+    Tuple(Vec<TypeId>),
+    Map(TypeId, TypeId),
 }
 
 #[derive(Debug, Clone)]
@@ -394,6 +402,13 @@ pub(crate) fn analyze_with_package_functions(
         .map(|definition| definition.id)
         .collect::<Vec<_>>();
     for function in visible_functions {
+        for collection in &function.collections {
+            match collection {
+                PackageCollection::List(element) => { analyzer.instantiate_list_type(*element); }
+                PackageCollection::Tuple(elements) => { analyzer.instantiate_tuple_type(elements); }
+                PackageCollection::Map(key, value) => { analyzer.instantiate_map_type(*key, *value); }
+            }
+        }
         for members in &function.callable_unions { analyzer.instantiate_union_type(members); }
         for (parameters, result) in &function.callable_types { analyzer.instantiate_function_type(parameters, *result); }
         for function_type in function
@@ -3525,25 +3540,13 @@ impl Analyzer<'_> {
                     return Ok(Statement::Sequence(sequence));
                 }
                 let slice_element = self.slice_elements.get(&iterable_value.type_id).copied();
+                let destructure_item = second_binding.is_some()
+                    && (slice_element.is_some() || self.list_elements.contains_key(&iterable_value.type_id));
                 let item_bindings = if let Some(element_type) = slice_element {
-                    if second_binding.is_some() {
-                        return Err(Diagnostic::new(
-                            "E000211",
-                            "slice iteration provides one loop value",
-                            Some(*span),
-                        ));
-                    }
                     vec![(binding.clone(), element_type, 0)]
                 } else if let Some(element_type) =
                     self.list_elements.get(&iterable_value.type_id).copied()
                 {
-                    if second_binding.is_some() {
-                        return Err(Diagnostic::new(
-                            "E000211",
-                            "list iteration provides one loop value",
-                            Some(*span),
-                        ));
-                    }
                     vec![(binding.clone(), element_type, 0)]
                 } else if self.set_type == Some(iterable_value.type_id) {
                     if second_binding.is_some() {
@@ -3665,7 +3668,7 @@ impl Analyzer<'_> {
 
                 let outer_names = self.names.clone();
                 let outer_declarations = self.declarations.clone();
-                let mut loop_binding_ids = Vec::with_capacity(item_bindings.len());
+                let mut loop_prefix = Vec::with_capacity(item_bindings.len());
                 for (name, element_type, storage_index) in item_bindings {
                     let body_iterable_reference = Expression {
                         id: self.next_id(),
@@ -3736,6 +3739,16 @@ impl Analyzer<'_> {
                             *span,
                         )
                     };
+                    if destructure_item {
+                        let names = vec![binding.clone(), second_binding.clone().unwrap()];
+                        // Loop bindings shadow outer names, just like a single loop binding.
+                        for name in &names {
+                            self.names.remove(name);
+                            self.declarations.remove(name);
+                        }
+                        loop_prefix.push(self.lower_destructure_value(&names, item, true, *span, bindings)?);
+                        continue;
+                    }
                     let loop_binding_id = self.new_binding_id();
                     let loop_variable = severian_hir::VariableId(loop_binding_id.0);
                     self.mutable_variables.insert(loop_variable);
@@ -3751,7 +3764,7 @@ impl Analyzer<'_> {
                     self.names
                         .insert(name.clone(), (loop_binding_id, loop_variable, element_type));
                     self.declarations.insert(name);
-                    loop_binding_ids.push(loop_binding_id);
+                    loop_prefix.push(Statement::Binding(loop_binding_id));
                 }
                 self.loop_depth += 1;
                 let lowered = self.block(body, bindings, result_type);
@@ -3759,11 +3772,8 @@ impl Analyzer<'_> {
                 let mut loop_body = lowered?;
                 self.names = outer_names;
                 self.declarations = outer_declarations;
-                for loop_binding_id in loop_binding_ids.into_iter().rev() {
-                    loop_body
-                        .statements
-                        .insert(0, Statement::Binding(loop_binding_id));
-                }
+                loop_prefix.append(&mut loop_body.statements);
+                loop_body.statements = loop_prefix;
 
                 let next_index_id = self.new_binding_id();
                 let one = self.integer_expression("1", usize_type, *span);
@@ -4437,7 +4447,12 @@ impl Analyzer<'_> {
                 let outer_declarations = self.declarations.clone();
                 let outer_substitutions = self.value_substitutions.clone();
                 let optional_guard = self.optional_guard_projection(condition_ast);
-                let union_guard = self.union_guard_projection(condition_ast)?;
+                let mut guard_names = BTreeSet::new();
+                collect_expression_names(condition_ast, &mut guard_names);
+                let allow_mutable = guard_names.iter().all(|name|
+                    guard_branch_preserves_binding(then_block, name)
+                        && guard_branch_preserves_binding(else_block, name));
+                let union_guard = self.union_guard_projection(condition_ast, allow_mutable)?;
                 if let Some((name, Some(value), _)) = &union_guard { self.value_substitutions.insert(name.clone(), value.clone()); }
                 if let Some((name, true, value)) = &optional_guard {
                     self.value_substitutions.insert(name.clone(), value.clone());
@@ -4520,7 +4535,10 @@ impl Analyzer<'_> {
                 self.value_substitutions = outer_substitutions;
                 if let Some((name, yes, no)) = union_guard {
                     let surviving = if then_returns && !else_returns { no } else if else_returns && !then_returns { yes } else { None };
-                    if let Some(value) = surviving { self.value_substitutions.insert(name, value); }
+                    let mutable = self.names.get(&name).is_some_and(|(_, variable, _)| self.mutable_variables.contains(variable));
+                    if !mutable {
+                        if let Some(value) = surviving { self.value_substitutions.insert(name, value); }
+                    }
                 }
                 if let Some((name, present_when_true, value)) = optional_guard {
                     // An immutable optional stays narrowed on the surviving
@@ -6338,6 +6356,9 @@ impl Analyzer<'_> {
             || self.trait_object_accepts(actual, expected)
             || self.union_types.get(&expected).is_some_and(|members|
                 members.iter().any(|member| self.accepts_expression_type(actual, *member)))
+            || (self.union_types.contains_key(&expected)
+                && self.union_types.get(&actual).is_some_and(|members|
+                    members.iter().all(|member| self.accepts_expression_type(*member, expected))))
     }
 
     fn expression_inner(
@@ -6864,9 +6885,14 @@ impl Analyzer<'_> {
                         expected,
                     );
                 }
+                let expected_elements = expected.and_then(|ty| self.tuple_elements.get(&ty)).cloned();
+                if expected_elements.as_ref().is_some_and(|elements| elements.len() != values.len()) {
+                    return Err(semantic_error("tuple does not satisfy the expected arity".into(), ast.span));
+                }
                 let mut fields = Vec::with_capacity(values.len());
-                for value in values {
-                    fields.push(self.expression(value, None)?);
+                for (index, value) in values.iter().enumerate() {
+                    let element = expected_elements.as_ref().map(|elements| elements[index]);
+                    fields.push(self.expression(value, element)?);
                 }
                 let element_types = fields.iter().map(|field| field.type_id).collect::<Vec<_>>();
                 let tuple_type = self.instantiate_tuple_type(&element_types);
@@ -9013,6 +9039,7 @@ impl Analyzer<'_> {
                     qualified.dedup();
                     candidates = qualified;
                 }
+                let mut incompatible_results = Vec::new();
                 let mut matches = Vec::new();
                 for function in candidates {
                     if let Some(explicit) = &explicit_type_arguments {
@@ -9028,14 +9055,13 @@ impl Analyzer<'_> {
                         .fallible_types
                         .get(&signature.result)
                         .map_or(signature.result, |fallible| fallible.success);
-                    if expected
-                        .is_some_and(|expected| !self.accepts_expression_type(exposed_result, expected))
-                    {
-                        continue;
-                    }
                     if let Some((arguments, conversions, evaluation_order)) =
                         self.resolve_signature_arguments(&signature, arguments, ast.span)?
                     {
+                        if expected.is_some_and(|expected| !self.accepts_expression_type(exposed_result, expected)) {
+                            incompatible_results.push(exposed_result);
+                            continue;
+                        }
                         matches.push((
                             conversions,
                             self.function_specificity[&function],
@@ -9074,6 +9100,16 @@ impl Analyzer<'_> {
                     }
                 }
                 if best.is_empty() {
+                    if let Some(expected) = expected.filter(|_| !incompatible_results.is_empty()) {
+                        let results = incompatible_results.iter()
+                            .map(|ty| self.constructor_argument_type_name(*ty))
+                            .collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(", ");
+                        return Err(Diagnostic::new(
+                            "E000206",
+                            format!("call to `{name}` has compatible arguments, but result type(s) `{results}` do not satisfy expected type `{}`", self.constructor_argument_type_name(expected)),
+                            Some(ast.span),
+                        ).with_help("handle every possible result variant or use a compatible destination type"));
+                    }
                     if name == "print"
                         && !arguments.is_empty()
                         && arguments.iter().all(|argument| argument.name.is_none())
@@ -9650,21 +9686,33 @@ impl Analyzer<'_> {
                 }
                 if *operator == AstBinaryOperator::Identity {
                     if let Some(type_name) = callable_path(right) {
-                        if self.trait_names.contains(&type_name) {
+                        if !self.active_type_aliases.contains_key(&type_name) && self.trait_names.contains(&type_name) {
                             let value = self.expression(left, None)?;
                             return self.trait_membership(value, &type_name, ast.span);
                         }
-                        let target = self
-                            .class_instances
-                            .get(&(type_name.clone(), Vec::new()))
-                            .map(|instance| instance.ty)
-                            .or_else(|| self.active_type_aliases.get(&type_name).copied())
+                        let target = self.active_type_aliases.get(&type_name).copied()
+                            .or_else(|| self.class_instances.get(&(type_name.clone(), Vec::new())).map(|instance| instance.ty))
                             .or_else(|| self.types.resolve_name(&type_name))
                             .or_else(|| self.resolve_source_type(&TypeAnnotation::named(&type_name, Vec::new(), right.span)).ok());
                         if let Some(target) = target {
                             let left = self.expression(left, None)?;
+                            if left.type_id == target {
+                                return Ok(self.static_type_predicate(left, true, ast.span));
+                            }
                             if self.is_trait_object(target) { return self.trait_type_membership(left, target, ast.span); }
-                            if let Some(members) = self.union_types.get(&left.type_id) {
+                            if let Some(members) = self.union_types.get(&left.type_id).cloned() {
+                                if members.iter().any(|member| self.is_trait_object(*member) || *member == any_type_id()) {
+                                    let boolean = self.types.resolve_name("bool").unwrap();
+                                    return self.map_union_expression(left, &members, boolean, |analyzer, member| {
+                                        if analyzer.is_trait_object(member.type_id) || member.type_id == any_type_id() {
+                                            let storage = analyzer.trait_object_storage(member);
+                                            Ok(analyzer.erased_record_is(storage, target, ast.span))
+                                        } else {
+                                            let matches = member.type_id == target;
+                                            Ok(analyzer.static_type_predicate(member, matches, ast.span))
+                                        }
+                                    });
+                                }
                                 if let Some(ordinal) = members.iter().position(|member| *member == target) {
                                     return Ok(self.union_tag_condition(left, ordinal, ast.span));
                                 }
@@ -10638,6 +10686,11 @@ impl Analyzer<'_> {
                 if let [member] = compatible.as_slice() {
                     let expression = self.wrap_trait_object(expression, *member, false)?;
                     return self.union_expression(expected, &members, expression);
+                }
+                if let Some(source_members) = self.union_types.get(&expression.type_id).cloned() {
+                    if source_members.iter().all(|member| self.accepts_expression_type(*member, expected)) {
+                        return self.widen_union_expression(expression, &source_members, expected);
+                    }
                 }
             }
         }
@@ -12440,6 +12493,34 @@ impl Analyzer<'_> {
         self.map_union_expression(union, members, expected, |analyzer, field| analyzer.coerce(field, expected, true))
     }
 
+    fn widen_union_expression(
+        &mut self,
+        union: Expression,
+        members: &[TypeId],
+        expected: TypeId,
+    ) -> Result<Expression, Diagnostic> {
+        let actual = union.type_id;
+        let span = union.span;
+        let symbol = format!("__sev_union_widen_{}_{}", actual.0, expected.0);
+        let definition = self.ensure_runtime_function(&symbol, &[actual], expected);
+        let helper = self.runtime_functions.iter().find(|function| function.definition == definition).unwrap();
+        if helper.body.is_none() {
+            let binding = helper.parameters[0].binding;
+            // Pass the producer once; branch projections read only this parameter.
+            let value = Expression {
+                id: self.next_id(), type_id: actual, span,
+                kind: ExpressionKind::Binding(binding),
+            };
+            let result = self.map_union_expression(value, members, expected, |analyzer, field| {
+                analyzer.coerce(field, expected, false)
+            })?;
+            let helper = self.runtime_functions.iter_mut().find(|function| function.definition == definition).unwrap();
+            helper.call_type = CallType::Severian;
+            helper.body = Some(Block { statements: vec![Statement::Return(Some(result))] });
+        }
+        Ok(self.runtime_call(&symbol, &[actual], expected, vec![union], span))
+    }
+
     fn map_union_expression(
         &mut self, union: Expression, members: &[TypeId], expected: TypeId,
         mut convert: impl FnMut(&mut Self, Expression) -> Result<Expression, Diagnostic>,
@@ -12597,6 +12678,10 @@ impl Analyzer<'_> {
     }
 
     fn constructor_argument_type_name(&self, ty: TypeId) -> String {
+        if let Some(members) = self.union_types.get(&ty) {
+            return members.iter().map(|member| self.constructor_argument_type_name(*member))
+                .collect::<Vec<_>>().join(" | ");
+        }
         if let Some((element, length)) = self.array_elements.get(&ty) {
             return format!(
                 "array[{}, {length}]",
@@ -21484,6 +21569,39 @@ enum ControlFlow {
     Returns,
 }
 
+// Mutable storage can be refined within a branch only while its value is stable.
+// Calls that receive the binding may mutate it; keep those branches conservative.
+fn guard_branch_preserves_binding(statements: &[AstStatement], name: &str) -> bool {
+    fn expression_safe(value: &AstExpression, name: &str) -> bool {
+        match &value.kind {
+            AstExpressionKind::Name(_) | AstExpressionKind::Literal(_) => true,
+            AstExpressionKind::Member { object, .. } => expression_safe(object, name),
+            AstExpressionKind::Index { object, index } => expression_safe(object, name) && expression_safe(index, name),
+            AstExpressionKind::Unary { operator, operand }
+                if matches!(operator, AstUnaryOperator::Positive | AstUnaryOperator::Negative | AstUnaryOperator::Not | AstUnaryOperator::Copy) => expression_safe(operand, name),
+            AstExpressionKind::Binary { left, right, .. } => expression_safe(left, name) && expression_safe(right, name),
+            _ => {
+                let mut names = BTreeSet::new();
+                collect_expression_names(value, &mut names);
+                !names.contains(name)
+            }
+        }
+    }
+    statements.iter().all(|statement| match statement {
+        AstStatement::Return { value, .. } => value.as_ref().is_none_or(|value| expression_safe(value, name)),
+        AstStatement::Expression(value) | AstStatement::Defer { expression: value, .. } => expression_safe(value, name),
+        AstStatement::Binding(binding) => binding.name != name && expression_safe(&binding.value, name),
+        AstStatement::Destructure { names, value, .. } => !names.iter().any(|bound| bound == name) && expression_safe(value, name),
+        AstStatement::Assert { condition, message, .. } => expression_safe(condition, name)
+            && message.as_ref().is_none_or(|value| expression_safe(value, name)),
+        AstStatement::If { condition, then_block, else_block, .. } => expression_safe(condition, name)
+            && guard_branch_preserves_binding(then_block, name) && guard_branch_preserves_binding(else_block, name),
+        AstStatement::Unsafe { body, .. } | AstStatement::Placement { body, .. } => guard_branch_preserves_binding(body, name),
+        AstStatement::Break { .. } | AstStatement::Continue { .. } => true,
+        _ => false,
+    })
+}
+
 fn block_flow(statements: &[AstStatement]) -> ControlFlow {
     for statement in statements {
         let flow = match statement {
@@ -21915,6 +22033,32 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn union_widening_rejects_missing_members_and_reports_result_mismatch() {
+        for (body, message) in [
+            ("    return produce()\n", "compatible arguments, but result type"),
+            ("    value: A | None = produce()\n    return value\n", "compatible arguments, but result type"),
+            ("    value = produce()\n    return value\n", "expression does not satisfy"),
+        ] {
+            let source = SourceFile::virtual_source("union.sev", format!("class A:\n    value: int\nclass B:\n    value: int\ndef produce() -> A | B:\n    return B(7)\ndef narrow() -> A | None:\n{body}"));
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            let context = severian_bootstrap::load().unwrap();
+            let error = analyze(&ast, &context.types).unwrap_err();
+            assert!(error.message.contains(message), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn tuple_list_iteration_rejects_non_tuple_and_wrong_arity() {
+        for (element, expected) in [("int", "requires a tuple"), ("(int, int, int)", "tuple has 3 element(s)")] {
+            let source = SourceFile::virtual_source("loop.sev", format!("def visit(values: list[{element}]):\n    for first, second in values:\n        pass\n"));
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            let context = severian_bootstrap::load().unwrap();
+            let error = analyze(&ast, &context.types).unwrap_err();
+            assert!(error.message.contains(expected), "{error:?}");
+        }
     }
 
     #[test]
