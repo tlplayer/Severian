@@ -6,6 +6,7 @@ import RegisteredGrammar from "../../syntax/recognition.sev"
 import "../../syntax/recognition.sev" as syntax
 import LexicalDiagnostic from "diagnostic.sev"
 import Lexeme from "../../syntax/generic/lexeme.sev"
+import Token from "../../syntax/generic/token.sev"
 import Y from "../../syntax/generic/symbol.sev"
 import Span from "../source/source.sev"
 import TokenStream from "stream.sev"

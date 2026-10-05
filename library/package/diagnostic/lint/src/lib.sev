@@ -778,3 +778,17 @@ def enforce(project: Project, identity: string, force: bool = false, testing: bo
         failed = failed or d.level == "error" or (testing and d.rule in ["L0004", "L0005", "L0009", "L0010"])
     if failed:
         throw Error("package lint policy failed")
+
+
+test "lint accepts the lexer exported token type and token stream":
+    input = source.virtual_source("token.sev", "name")
+    span = source.Span(input.source_id, 0, 4)
+    token = lexer.Token("Identifier", lexer.Lexeme("name", span), span)
+    tokens: list[lexer.Token] = [token]
+    stream = lexer.TokenStream(input, tokens)
+    result = LintSource(input.path, input.text, stream.tokens, [1], [1], [0], [])
+    assert(len(result.tokens) == 1)
+    assert(result.tokens[0].kind == "Identifier")
+    assert(result.tokens[0].lexeme.text == "name")
+    assert(result.tokens[0].span.source_id == input.source_id)
+    assert(result.tokens[0].span.start == 0 and result.tokens[0].span.end == 4)
