@@ -711,9 +711,14 @@ impl CfgLowering<'_> {
                 });
                 Ok(result)
             }
-            severian_mir::Operand::Function(definition) => Err(
-                LoweringError::UnsupportedCfgOperation(format!("function value {definition:?}")),
-            ),
+            severian_mir::Operand::Function(definition) => {
+                let function = self.mir.functions.iter().find(|function| function.definition == *definition)
+                    .ok_or_else(|| LoweringError::UnsupportedCfgOperation(format!("function value {definition:?}")))?;
+                let function = FunctionId(function.id.0);
+                let result = self.new_value(LoweredType::Bytes);
+                operations.push(LirOperation::FunctionAddress { function, result });
+                Ok(result)
+            }
         }
     }
 
@@ -774,6 +779,18 @@ impl CfgLowering<'_> {
                 target,
                 ..
             } => {
+                if let severian_mir::Callee::FunctionValue(callee) = callee {
+                    let callee = self.lower_operand(body, callee, operations)?;
+                    let arguments = arguments.iter().map(|argument| self.lower_operand(body, argument, operations))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let result_type = destination.as_ref().map(|place| self.place_type(body, place)).transpose()?.unwrap_or(LoweredType::Unit);
+                    let result = self.new_value(result_type);
+                    operations.push(LirOperation::IndirectCall { callee, arguments, result });
+                    if let Some(destination) = destination {
+                        operations.push(LirOperation::Store { place: self.lower_place(destination), value: result });
+                    }
+                    return Ok(severian_lir::Terminator::Goto(severian_lir::BlockId(target.0)));
+                }
                 let function = self.resolve_callee(callee)?;
                 let mut lowered_arguments = Vec::new();
                 if let severian_mir::Callee::Method { receiver, .. } = callee {

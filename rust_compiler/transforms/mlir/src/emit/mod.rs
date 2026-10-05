@@ -1903,7 +1903,7 @@ fn render_cfg_operation(
         } => {
             render_mlir_operation(output, module, mnemonic, parameters.as_deref(), operands, *result, &indentation)?;
         }
-        Operation::Call { .. } => {
+        Operation::Call { .. } | Operation::FunctionAddress { .. } | Operation::IndirectCall { .. } => {
             render_block(output, module, &Block { operations: vec![operation.clone()] }, indent, None, &mut 0)?;
         }
         Operation::RuntimeCall {
@@ -3177,6 +3177,26 @@ fn render_block(
                     cfg_place_address(place)?,
                     mlir_type(&ty)?
                 ));
+            }
+            Operation::FunctionAddress { function: target, result } => {
+                let target = function(module, *target)?;
+                let parameters = target.parameter_types.iter().map(mlir_type).collect::<Result<Vec<_>, _>>()?.join(", ");
+                let result_type = if target.result == LoweredType::Unit { "()".into() } else { mlir_type(&target.result)? };
+                let signature = format!("({parameters}) -> {result_type}");
+                output.push_str(&format!("{indentation}%fn{} = func.constant @{} : {signature}\n{indentation}%v{} = builtin.unrealized_conversion_cast %fn{} : {signature} to !llvm.ptr\n", result.0, function_symbol(target), result.0, result.0));
+            }
+            Operation::IndirectCall { callee, arguments, result } => {
+                let parameters = arguments.iter().map(|value| mlir_type(&value_type(module, *value)?)).collect::<Result<Vec<_>, MlirError>>()?.join(", ");
+                let result_type = value_type(module, *result)?;
+                let result_text = if result_type == LoweredType::Unit { "()".into() } else { mlir_type(&result_type)? };
+                let signature = format!("({parameters}) -> {result_text}");
+                let arguments = arguments.iter().map(|value| format!("%v{}", value.0)).collect::<Vec<_>>().join(", ");
+                output.push_str(&format!("{indentation}%callee{} = builtin.unrealized_conversion_cast %v{} : !llvm.ptr to {signature}\n", result.0, callee.0));
+                let assignment = if result_type == LoweredType::Unit { String::new() } else { format!("%v{} = ", result.0) };
+                output.push_str(&format!("{indentation}{assignment}func.call_indirect %callee{}({arguments}) : {signature}\n", result.0));
+                if result_type == LoweredType::Unit {
+                    output.push_str(&format!("{indentation}%v{} = arith.constant 0 : i8\n", result.0));
+                }
             }
             Operation::Call {
                 function: target,

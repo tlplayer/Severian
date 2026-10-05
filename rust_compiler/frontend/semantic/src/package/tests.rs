@@ -714,10 +714,35 @@ fn imported_generic_overload_is_specialized_after_declaration_collection() {
             .hir
             .modules
             .iter()
-            .map(|module| module.functions.len())
+            .map(|module| module.functions.iter().filter(|function| typed.index.definitions.contains_key(&function.definition)).count())
             .sum::<usize>(),
         3
     );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn imported_callback_signatures_keep_callable_storage_and_bodies() {
+    let root = temporary();
+    std::fs::write(root.join("callbacks.sev"), "class Callback:\n    invoke: (int) -> int\ndef apply(callback: (int) -> int, value: int) -> int:\n    answer = callback(value)\n    return answer\ndef make(offset: int) -> Callback:\n    return Callback(lambda value: value + offset)\n").unwrap();
+    std::fs::write(root.join("main.sev"), "import apply, make from \"callbacks.sev\"\ndef plus_one(value: int) -> int:\n    return value + 1\ndef main() -> int:\n    saved = make(5)\n    assert(saved.invoke(7) == 12)\n    return apply(plus_one, 8)\n").unwrap();
+    let graph = severian_modules::resolve(&root.join("main.sev")).unwrap();
+    let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+    assert!(typed.hir.modules.iter().flat_map(|module| &module.functions).any(|function| function.name == "apply" && function.body.is_some()));
+    severian_mir::build(&typed.hir).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn imported_trait_method_materializes_the_providers_generic_payload() {
+    let root = temporary();
+    std::fs::write(root.join("holder.sev"), "trait Readable:\n    def read[R](fallback: R) -> R\nclass Holder[T]: Readable\n    value: T\n    def read[R](fallback: R) -> R:\n        if self.value is R:\n            return self.value\n        return fallback\ndef make() -> Readable:\n    return Holder[int](7)\n").unwrap();
+    std::fs::write(root.join("consumer.sev"), "import Readable from \"holder.sev\"\ndef read(value: Readable) -> int:\n    return value.read[int](0)\n").unwrap();
+    std::fs::write(root.join("main.sev"), "import make from \"holder.sev\"\nimport read from \"consumer.sev\"\ndef main() -> int:\n    return read(make())\n").unwrap();
+    let graph = severian_modules::resolve(&root.join("main.sev")).unwrap();
+    let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+    assert!(typed.hir.modules.iter().flat_map(|module| &module.functions).any(|function| function.name.contains("Holder") && function.name.contains("read$") && function.body.is_some()));
+    severian_mir::build(&typed.hir).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -1244,7 +1269,7 @@ fn uncalled_generic_declarations_are_indexed_without_forcing_a_body_instance() {
     let universal = severian_bootstrap::load().unwrap();
     let typed = analyze_package(&graph, &universal).unwrap();
     assert_eq!(typed.index.definitions.len(), 1);
-    assert!(typed.hir.modules[0].functions.is_empty());
+    assert!(!typed.hir.modules[0].functions.iter().any(|function| typed.index.definitions.contains_key(&function.definition)));
     std::fs::remove_dir_all(root).unwrap();
 }
 

@@ -37,6 +37,19 @@ static size_t sev_utf8_width(unsigned char byte) {
     return 1;
 }
 
+/* These single-character predicates match StringOperations' ASCII contract. */
+_Bool __sev_string_is_digit(const char *value) {
+    return value[0] >= '0' && value[0] <= '9' && value[1] == '\0';
+}
+
+_Bool __sev_string_is_alphabetic(const char *value) {
+    return ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) && value[1] == '\0';
+}
+
+_Bool __sev_string_is_alphanumeric(const char *value) {
+    return __sev_string_is_alphabetic(value) || __sev_string_is_digit(value);
+}
+
 static size_t sev_utf8_length(const char *value) {
     size_t result = 0;
     for (size_t offset = 0; value[offset] != '\0';) {

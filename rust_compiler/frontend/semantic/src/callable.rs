@@ -155,7 +155,7 @@ impl Analyzer<'_> {
             body.statements.push(self.contract_assertion(contract)?);
         }
         body.statements
-            .extend(self.block(ast_body, bindings, result_type)?.statements);
+            .extend(self.block_contents(ast_body, bindings, result_type)?.statements);
         let deferred = ast_function
             .contracts
             .iter()
@@ -419,6 +419,7 @@ impl Analyzer<'_> {
             })
             .unwrap_or_default();
         aliases.insert("Self".into(), owner.ty);
+        aliases.extend(self.active_type_aliases.iter().filter(|(name, _)| name.starts_with("__sev_method_type_")).map(|(name, ty)| (name.clone(), *ty)));
         let parameters = method
             .parameters
             .iter()
@@ -618,7 +619,8 @@ fn visit_expression(expression: &mut Expression, visit: &mut impl FnMut(&mut Exp
                 visit_expression(field, visit);
             }
         }
-        ExpressionKind::Call { arguments, .. } => {
+        ExpressionKind::Call { callee, arguments, .. } => {
+            if let severian_hir::Callee::FunctionValue(value) = callee { visit_expression(value, visit); }
             for argument in arguments {
                 visit_expression(argument, visit);
             }

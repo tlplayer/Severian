@@ -540,7 +540,14 @@ fn analyze_package_impl(
                     &package_lists,
                     &index,
                 )?;
+                let mut callable_types = Vec::new();
+                let mut callable_unions = Vec::new();
+                for annotation in signature.parameters.iter().chain(std::iter::once(&signature.result)) {
+                    collect_callable_layouts(&mut types, annotation, definition.module, &package_classes, &package_lists, &index, &mut callable_types, &mut callable_unions)?;
+                }
                 Ok(PackageFunction {
+                    callable_types,
+                    callable_unions,
                     lookup: binding.lookup,
                     id: stable_instance_function_id(binding.definition, &binding.substitution),
                     definition: binding.definition,
@@ -1308,6 +1315,30 @@ fn collect_scoped_binding_ids(block: &severian_hir::Block, ids: &mut Vec<u32>) {
     }
 }
 
+fn collect_callable_layouts(
+    types: &mut severian_universal::TypeContext, annotation: &TypeAnnotation, module: ModuleId,
+    classes: &[PackageClass], lists: &[PackageList], index: &ProgramIndex,
+    callables: &mut Vec<(Vec<TypeId>, TypeId)>, unions: &mut Vec<Vec<TypeId>>,
+) -> Result<(), Diagnostic> {
+    let expanded = expand_type_alias(annotation, module, index)?;
+    match &expanded.kind {
+        TypeAnnotationKind::Function { parameters, result } => {
+            for annotation in parameters.iter().chain(std::iter::once(result.as_ref())) {
+                collect_callable_layouts(types, annotation, module, classes, lists, index, callables, unions)?;
+            }
+            let parameters = parameters.iter().map(|annotation| resolve_package_type(types, annotation, module, classes, lists, index)).collect::<Result<Vec<_>, _>>()?;
+            let result = resolve_package_type(types, result, module, classes, lists, index)?;
+            callables.push((parameters, result));
+        }
+        TypeAnnotationKind::Union(members) => {
+            for member in members { collect_callable_layouts(types, member, module, classes, lists, index, callables, unions)?; }
+            unions.push(members.iter().map(|member| resolve_package_type(types, member, module, classes, lists, index)).collect::<Result<Vec<_>, _>>()?);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn resolve_package_type(
     types: &mut severian_universal::TypeContext,
     annotation: &TypeAnnotation,
@@ -1451,10 +1482,11 @@ fn resolve_package_type(
             if arguments.len() < minimum || arguments.len() > maximum {
                 return Err(Diagnostic::new("E000204", format!("trait `{name}` expects {minimum}..={maximum} type argument(s), received {}", arguments.len()), Some(annotation.span)));
             }
-            for argument in arguments {
-                resolve_package_type(types, argument, module, classes, lists, index)?;
-            }
-            return Ok(crate::any_type_id());
+            let arguments = arguments.iter().map(|argument|
+                resolve_package_type(types, argument, module, classes, lists, index)
+            ).collect::<Result<Vec<_>, _>>()?;
+            let identity = trait_identity(index, module, name).expect("resolved trait identity");
+            return super::trait_object::register_type(types, &identity, name, &arguments, annotation.span);
         }
         if !arguments.is_empty() {
             if let Some(class) = package_class_for_lookup(classes, module, name) {
@@ -1545,7 +1577,8 @@ fn resolve_package_type(
             return Ok(class.ty);
         }
         if package_trait_for_lookup(index, module, name) {
-            return Ok(crate::any_type_id());
+            let identity = trait_identity(index, module, name).expect("resolved trait identity");
+            return super::trait_object::register_type(types, &identity, name, &[], annotation.span);
         }
     }
     crate::resolve_type_annotation(types, annotation)
@@ -1661,6 +1694,10 @@ pub(super) fn trait_identity(index: &ProgramIndex, module: ModuleId, name: &str)
         matches!(index.definitions.get(&id)?.kind, DefKind::Trait(_))
             .then(|| format!("{:x}:{:x}:{:x}", id.package, id.module, id.declaration.0))
     })
+}
+
+pub(super) fn resolve_trait_definitions(index: &ProgramIndex, module: ModuleId, name: &str) -> Vec<DefId> {
+    generic::resolve_path(module, name, index)
 }
 
 pub(super) fn trait_type_arity(index: &ProgramIndex, module: ModuleId, name: &str) -> Option<(usize, usize)> {
@@ -2989,7 +3026,8 @@ fn remap_expression_bindings(expression: &mut Expression, offset: u32) {
         ExpressionKind::Convert { operand, .. } => {
             remap_expression_bindings(operand, offset);
         }
-        ExpressionKind::Call { arguments, .. } => {
+        ExpressionKind::Call { callee, arguments, .. } => {
+            if let severian_hir::Callee::FunctionValue(value) = callee { remap_expression_bindings(value, offset); }
             for argument in arguments {
                 remap_expression_bindings(argument, offset);
             }

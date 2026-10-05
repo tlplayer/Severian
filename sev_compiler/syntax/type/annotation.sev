@@ -24,14 +24,6 @@ def simple_type_name(annotation: TypeAnnotation) -> string | None:
         case Named:
             if len(arguments) == 0:
                 return name
-        case Union:
-            return None
-        case Function:
-            return None
-        case DimensionConstant:
-            return None
-        case DimensionRuntime:
-            return None
-        case ShapeSpread:
+        case Union | Function | DimensionConstant | DimensionRuntime | ShapeSpread:
             return None
     return None

@@ -284,6 +284,15 @@ pub enum Operation {
         place: Place,
         value: ValueId,
     },
+    FunctionAddress {
+        function: FunctionId,
+        result: ValueId,
+    },
+    IndirectCall {
+        callee: ValueId,
+        arguments: Vec<ValueId>,
+        result: ValueId,
+    },
     Call {
         function: FunctionId,
         arguments: Vec<ValueId>,

@@ -1353,7 +1353,7 @@ impl BodyBuilder {
             .collect()
     }
 
-    fn callee(&self, callee: &HirCallee) -> Callee {
+    fn callee(&mut self, callee: &HirCallee) -> Callee {
         match callee {
             HirCallee::Direct {
                 instance,
@@ -1365,7 +1365,7 @@ impl BodyBuilder {
                 substitution: substitution.clone(),
             },
             HirCallee::FunctionValue(expression) => Callee::FunctionValue(Operand::Copy(
-                self.expressions[&(self.current, *expression)].clone(),
+                self.expression(expression),
             )),
             HirCallee::Method {
                 implementation,

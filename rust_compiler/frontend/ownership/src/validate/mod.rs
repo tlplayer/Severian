@@ -418,7 +418,10 @@ fn validate_slice_expression(
             call_names,
             regions,
         )?,
-        ExpressionKind::Call { arguments, .. } => {
+        ExpressionKind::Call { callee, arguments, .. } => {
+            if let severian_hir::Callee::FunctionValue(value) = callee {
+                validate_slice_expression(value, bindings, slice_types, array_types, call_names, regions)?;
+            }
             for argument in arguments {
                 validate_slice_expression(
                     argument,
@@ -801,7 +804,8 @@ fn validate_expression(
             "value addressed before it is available",
             Some(expression.span),
         )),
-        ExpressionKind::Call { arguments, .. } => {
+        ExpressionKind::Call { callee, arguments, .. } => {
+            if let severian_hir::Callee::FunctionValue(value) = callee { validate_expression(value, declared)?; }
             for argument in arguments {
                 validate_expression(argument, declared)?;
             }
@@ -849,7 +853,7 @@ mod slice_tests {
         BoundaryType, Callee, ClassDeclaration, FunctionDeclaration, FunctionId, FunctionParameter,
         HirId,
     };
-    use severian_source::{u32, Span};
+    use severian_source::Span;
     use severian_universal::{CompileRoute, DeclarationId, DefId, Substitution, TypeId};
 
     fn pointer_write(binding: BindingId, ty: TypeId) -> Expression {

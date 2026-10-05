@@ -362,7 +362,7 @@ impl<'a> Resolver<'a> {
             .packages
             .values()
             .filter(|candidate| canonical.starts_with(&candidate.root))
-            .max_by_key(|candidate| candidate.root.components().count())
+            .max_by_key(|candidate| (candidate.root.components().count(), candidate.id == package))
             .map_or(package, |candidate| candidate.id);
         self.used_packages.insert(package);
         if self.visited.contains(&canonical) || self.failed.contains(&canonical) {

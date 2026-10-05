@@ -1175,6 +1175,12 @@ impl Parser<'_> {
     }
 
     fn block_statement(&mut self) -> Result<Statement, Diagnostic> {
+        if self.at_identifier("pass") {
+            let span = self.next().span;
+            return Ok(Statement::Expression(Expression {
+                kind: ExpressionKind::Literal(Literal::Unit), span,
+            }));
+        }
         if self.at_identifier("yield") {
             let start = self.next().span;
             let value = self.expression(0)?;
@@ -2215,6 +2221,8 @@ impl Parser<'_> {
                 member_has_body = true;
             } else if matches!(self.peek().kind, TokenKind::String(_)) {
                 // Standalone block strings are declaration documentation.
+                self.next();
+            } else if self.at_identifier("pass") && member_decorators.is_empty() {
                 self.next();
             } else if !member_decorators.is_empty() {
                 return Err(self.error("expected `def` or `operator` after class member decorator"));
@@ -4130,6 +4138,9 @@ impl Parser<'_> {
         let mut cursor = self.cursor + 1;
         let mut nested = 0usize;
         while let Some(token) = self.tokens.get(cursor) {
+            if nested == 0 && matches!(&token.kind, TokenKind::Identifier(name) if name == "lambda") {
+                return false;
+            }
             match token.kind {
                 TokenKind::LeftParen | TokenKind::LeftBracket | TokenKind::LeftBrace => nested += 1,
                 TokenKind::RightParen | TokenKind::RightBracket | TokenKind::Comma
@@ -4591,6 +4602,7 @@ impl Parser<'_> {
         if let Some(open) = self.take(&TokenKind::LeftParen) {
             self.line_breaks();
             let mut elements = Vec::new();
+            let mut comma = false;
             if !self.at(&TokenKind::RightParen) {
                 loop {
                     elements.push(self.type_annotation()?);
@@ -4598,7 +4610,9 @@ impl Parser<'_> {
                     if self.take(&TokenKind::Comma).is_none() {
                         break;
                     }
+                    comma = true;
                     self.line_breaks();
+                    if self.at(&TokenKind::RightParen) { break; }
                 }
             }
             let close = self.expect(&TokenKind::RightParen, "expected `)` after tuple type")?;
@@ -4612,6 +4626,11 @@ impl Parser<'_> {
                     },
                     span: Span::new(open.span.source, open.span.start, end),
                 });
+            }
+            if elements.len() == 1 && !comma {
+                let mut grouped = elements.pop().unwrap();
+                grouped.span = Span::new(open.span.source, open.span.start, close.span.end);
+                return Ok(grouped);
             }
             return Ok(TypeAnnotation::named(
                 "tuple",

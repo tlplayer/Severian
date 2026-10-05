@@ -1,3 +1,5 @@
+import Expression from "../function/function.sev"
+import ValueId from "../symbol/symbol.sev"
 import Y from "symbol.sev"
 import source
 import Block, DeclarationId, DefinitionID, FunctionParameter, TypeAnnotation, span from "../function/function.sev"
@@ -74,7 +76,7 @@ trait G:
     foldable: bool
     operations: dict[T, ScalarOperation]
 
-    def valid(left: Ex, right: Ex) -> bool
-    def semantic(left: Ex, right: Ex) -> X
+    def valid(left: Expression, right: Expression) -> bool
+    def semantic(left: Expression, right: Expression) -> ValueId
 
 

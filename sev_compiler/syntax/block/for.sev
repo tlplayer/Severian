@@ -1,3 +1,4 @@
+import Expression from "../function/function.sev"
 import B from "../generic/block.sev"
 import G from "../generic/grammar.sev"
 import Y from "../generic/symbol.sev"
@@ -18,7 +19,7 @@ trait For: G
     symbol: Y = ForKeyword()
     control_flow: ControlFlow = Loop
 
-    def semantic(condition: Ex, body: B, advance: B):
+    def semantic(condition: Expression, body: B, advance: B):
         header = cfg.block()
         execute = cfg.block()
         step = cfg.block()

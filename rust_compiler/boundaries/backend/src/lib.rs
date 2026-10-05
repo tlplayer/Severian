@@ -239,9 +239,9 @@ fn render_block(
 ) -> Result<(), BackendError> {
     for operation in &block.operations {
         match operation {
-            Operation::Variant { .. } => {
+            Operation::Variant { .. } | Operation::FunctionAddress { .. } | Operation::IndirectCall { .. } => {
                 return Err(BackendError::UnsupportedOperation(
-                    "sum payload storage requires the MLIR pipeline".into(),
+                    "sum payloads and callable values require the MLIR pipeline".into(),
                 ));
             }
             Operation::Coverage { key } => {

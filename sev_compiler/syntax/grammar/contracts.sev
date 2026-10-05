@@ -1,3 +1,6 @@
+import Expression from "../function/function.sev"
+import ValueId from "../symbol/symbol.sev"
+import B from "../generic/block.sev"
 import Error from "../primitive/error/error.sev"
 import For from "../block/for.sev"
 import Throw from "../keywords/throw.sev"
@@ -303,7 +306,7 @@ trait If: G
     precedence: int = 10
     control_flow: ControlFlow = Branch
 
-    def semantic(condition: Ex, then_body: B, else_body: B):
+    def semantic(condition: Expression, then_body: B, else_body: B):
         value = lower(condition)
         taken = cfg.block()
         otherwise = cfg.block()
@@ -337,7 +340,7 @@ trait Continue: G
 trait Return: G
     control_flow: ControlFlow = Return
 
-    def semantic(value: Ex | absent):
+    def semantic(value: Expression | absent):
         result = lower(value)
         cfg.return(result)
 
@@ -345,7 +348,7 @@ trait Return: G
 trait Conditional: G
     control_flow: ControlFlow = Branch
 
-    def semantic(condition: Ex, then_value: Ex, else_value: Ex) -> X:
+    def semantic(condition: Expression, then_value: Expression, else_value: Expression) -> ValueId:
         value = lower(condition)
         taken = cfg.block()
         otherwise = cfg.block()
@@ -365,7 +368,7 @@ trait Conditional: G
 trait Assign: G
     control_flow: ControlFlow = Mutation
 
-    def semantic(destination: Ex, value: Ex):
+    def semantic(destination: Expression, value: Expression):
         target = place(destination)
         right = lower(value)
         store(target, right)
@@ -377,7 +380,7 @@ trait AddAssign: G
     operation: string = "+"
     control_flow: ControlFlow = Mutation
 
-    def semantic(destination: Ex, value: Ex, update: Ex):
+    def semantic(destination: Expression, value: Expression, update: Expression):
         target = place(destination)
         previous = load(target)
         right = lower(value)
@@ -391,7 +394,7 @@ trait SubtractAssign: G
     operation: string = "-"
     control_flow: ControlFlow = Mutation
 
-    def semantic(destination: Ex, value: Ex, update: Ex):
+    def semantic(destination: Expression, value: Expression, update: Expression):
         target = place(destination)
         previous = load(target)
         right = lower(value)
@@ -405,7 +408,7 @@ trait MultiplyAssign: G
     operation: string = "*"
     control_flow: ControlFlow = Mutation
 
-    def semantic(destination: Ex, value: Ex, update: Ex):
+    def semantic(destination: Expression, value: Expression, update: Expression):
         target = place(destination)
         previous = load(target)
         right = lower(value)
@@ -419,7 +422,7 @@ trait DivideAssign: G
     operation: string = "/"
     control_flow: ControlFlow = Mutation
 
-    def semantic(destination: Ex, value: Ex, update: Ex):
+    def semantic(destination: Expression, value: Expression, update: Expression):
         target = place(destination)
         previous = load(target)
         right = lower(value)
@@ -433,7 +436,7 @@ trait RemainderAssign: G
     operation: string = "%"
     control_flow: ControlFlow = Mutation
 
-    def semantic(destination: Ex, value: Ex, update: Ex):
+    def semantic(destination: Expression, value: Expression, update: Expression):
         target = place(destination)
         previous = load(target)
         right = lower(value)
@@ -447,7 +450,7 @@ trait RemainderAssign: G
 trait Outcome: G
     control_flow: ControlFlow = Error
 
-    def semantic(value: Ex):
+    def semantic(value: Expression):
         result = lower(value)
         valid = outcome.success(result)
         taken = cfg.block()
@@ -463,7 +466,7 @@ trait Outcome: G
 trait Throws: G
     control_flow: ControlFlow = Error
 
-    def semantic(value: Ex, expected: Ex, failure: B):
+    def semantic(value: Expression, expected: Expression, failure: B):
         caught = cfg.block()
         cfg.catch(caught, expected)
         lower(value)

@@ -1,12 +1,14 @@
 #![forbid(unsafe_code)]
 
 mod callable;
+mod closure;
 mod constructor;
 mod destruction;
 mod mlir;
 mod package;
 mod queries;
 mod scope;
+mod trait_object;
 
 use scope::LexicalScope;
 
@@ -96,6 +98,8 @@ pub fn analyze_with_context_and_types(
 
 #[derive(Debug, Clone)]
 pub(crate) struct PackageFunction {
+    pub callable_types: Vec<(Vec<TypeId>, TypeId)>,
+    pub callable_unions: Vec<Vec<TypeId>>,
     pub lookup: String,
     pub id: FunctionId,
     pub definition: DefId,
@@ -295,6 +299,10 @@ pub(crate) fn analyze_with_package_functions(
                     .cloned(),
             )
             .collect(),
+        trait_declarations: registry_ast.items.iter().filter_map(|item| match item {
+            severian_ast::Item::Trait(declaration) => Some((declaration.name.clone(), declaration.clone())),
+            _ => None,
+        }).collect(),
         classes: ast
             .items
             .iter()
@@ -365,6 +373,7 @@ pub(crate) fn analyze_with_package_functions(
         execution_placement: None,
         next_class_type: u32::MAX,
     };
+    analyzer.install_trait_object_layouts()?;
     analyzer.install_package_types(
         package_classes,
         package_lists,
@@ -385,6 +394,8 @@ pub(crate) fn analyze_with_package_functions(
         .map(|definition| definition.id)
         .collect::<Vec<_>>();
     for function in visible_functions {
+        for members in &function.callable_unions { analyzer.instantiate_union_type(members); }
+        for (parameters, result) in &function.callable_types { analyzer.instantiate_function_type(parameters, *result); }
         for function_type in function
             .parameters
             .iter()
@@ -787,15 +798,6 @@ pub(crate) fn analyze_with_package_functions(
         {
             continue;
         }
-        if function
-            .parameters
-            .iter()
-            .any(|parameter| analyzer.function_types.contains_key(&parameter.contract.ty))
-        {
-            // Higher-order source functions are specialized at their call sites.
-            // Their unspecialized body has no concrete callable implementation.
-            continue;
-        }
         analyzer.lower_callable_body(
             ast_function,
             function,
@@ -1035,6 +1037,7 @@ pub(crate) fn analyze_with_package_functions(
                 .contains_key(&parameter.contract.ty) || analyzer.types.destruction(parameter.contract.ty).is_some())
                 && analyzer.types.primitive(parameter.contract.ty).is_none()
                 && effect != ParameterEffect::Move
+                && !parameter.contract.modifiers.iter().any(|modifier| modifier.name == "callable_value")
             {
                 parameter
                     .contract
@@ -1622,6 +1625,7 @@ struct Analyzer<'a> {
     )>,
     signatures: BTreeMap<FunctionId, FunctionSignature>,
     trait_names: BTreeSet<String>,
+    trait_declarations: BTreeMap<String, severian_ast::TraitDeclaration>,
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
     enum_declarations: BTreeMap<String, severian_ast::EnumDeclaration>,
     enums: BTreeMap<String, EnumInstance>,
@@ -2065,6 +2069,13 @@ impl Analyzer<'_> {
                 let variant = self.enums[enum_name].variants[*ordinal].name.clone();
                 return Some((enum_name.clone(), variant));
             }
+            if self.enum_constructor_candidate(&path, None) {
+                let matches = self.enums.values().flat_map(|instance| instance.variants.iter()
+                    .filter(|variant| enum_variant_path_matches(&path, &instance.name, &variant.name))
+                    .map(|variant| (instance.name.clone(), variant.name.clone())))
+                    .collect::<BTreeSet<_>>();
+                if matches.len() == 1 { return matches.into_iter().next(); }
+            }
         }
         if let AstExpressionKind::Name(name) = &expression.kind {
             if let Some((_, variable, _)) = self.names.get(name) {
@@ -2473,8 +2484,14 @@ impl Analyzer<'_> {
                         return Err(Diagnostic::new("E000204", format!("trait `{name}` expects {minimum}..={maximum} type argument(s), received {}", arguments.len()), Some(annotation.span)));
                     }
                 }
-                for argument in arguments { self.resolve_source_type(argument)?; }
-                return Ok(self.ensure_any_type());
+                let arguments = arguments.iter().map(|argument| self.resolve_source_type(argument))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let identity = self.package_index.zip(self.type_resolution_module)
+                    .and_then(|(index, module)| package::trait_identity(index, module, name))
+                    .unwrap_or_else(|| name.to_owned());
+                let ty = trait_object::register_type(self.types, &identity, name, &arguments, annotation.span)?;
+                self.ensure_trait_object_layout(ty);
+                return Ok(ty);
             }
         }
         if let severian_ast::TypeAnnotationKind::Function { parameters, result } = &annotation.kind
@@ -2695,6 +2712,9 @@ impl Analyzer<'_> {
             if let Some(instance) = self.class_instances.get(&(name.to_owned(), Vec::new())) {
                 return Ok(instance.ty);
             }
+            if self.classes.get(name).is_some_and(|class| class.type_parameters.is_empty()) {
+                return self.instantiate_class(name, &[], annotation.span).map(|instance| instance.ty);
+            }
             let mut matching = self
                 .class_instances
                 .iter()
@@ -2818,7 +2838,9 @@ impl Analyzer<'_> {
             .transpose()?
             .or(update_type);
         let (value, pending_lambda) =
-            if let AstExpressionKind::Lambda { parameters, body } = &ast_binding.value.kind {
+            if expected.is_some_and(|ty| self.function_types.contains_key(&ty)) {
+                (self.expression(&ast_binding.value, expected)?, None)
+            } else if let AstExpressionKind::Lambda { parameters, body } = &ast_binding.value.kind {
                 if is_update {
                     return Err(Diagnostic::new(
                         "E000205",
@@ -4404,10 +4426,19 @@ impl Analyzer<'_> {
                 let then_returns = block_flow(then_block) == ControlFlow::Returns;
                 let else_returns = block_flow(else_block) == ControlFlow::Returns;
                 let condition = self.condition_expression(condition_ast)?;
+                if let Some(selected) = self.static_type_condition(&condition) {
+                    let selected = if selected { then_block } else { else_block };
+                    let body = self.block(selected, bindings, result_type)?;
+                    return Ok(Statement::Sequence(Block { statements: vec![
+                        Statement::Expression(condition), Statement::Sequence(body),
+                    ] }));
+                }
                 let outer_names = self.names.clone();
                 let outer_declarations = self.declarations.clone();
                 let outer_substitutions = self.value_substitutions.clone();
                 let optional_guard = self.optional_guard_projection(condition_ast);
+                let union_guard = self.union_guard_projection(condition_ast)?;
+                if let Some((name, Some(value), _)) = &union_guard { self.value_substitutions.insert(name.clone(), value.clone()); }
                 if let Some((name, true, value)) = &optional_guard {
                     self.value_substitutions.insert(name.clone(), value.clone());
                 }
@@ -4425,6 +4456,18 @@ impl Analyzer<'_> {
                         if let Some((binding, _, binding_type)) =
                             self.names.get(binding_name).copied()
                         {
+                            if self.is_trait_object(binding_type) || binding_type == any_type_id() {
+                                let target = self.resolve_source_type(&TypeAnnotation::named(type_name, Vec::new(), right.span))?;
+                                let value = Expression { id: self.next_id(), type_id: binding_type,
+                                    kind: ExpressionKind::Binding(binding), span: left.span };
+                                let narrowed = if self.is_trait_object(target) {
+                                    self.wrap_trait_object(value, target, true)?
+                                } else {
+                                    let storage = self.trait_object_storage(value);
+                                    self.erased_record_read(storage, target, left.span)
+                                };
+                                self.value_substitutions.insert(binding_name.clone(), narrowed);
+                            }
                             if let Some(fallible) = self.fallible_types.get(&binding_type).copied()
                             {
                                 let target = self
@@ -4467,6 +4510,7 @@ impl Analyzer<'_> {
                 self.names.clone_from(&outer_names);
                 self.declarations.clone_from(&outer_declarations);
                 self.value_substitutions.clone_from(&outer_substitutions);
+                if let Some((name, _, Some(value))) = &union_guard { self.value_substitutions.insert(name.clone(), value.clone()); }
                 if let Some((name, false, value)) = &optional_guard {
                     self.value_substitutions.insert(name.clone(), value.clone());
                 }
@@ -4474,6 +4518,10 @@ impl Analyzer<'_> {
                 self.names = outer_names;
                 self.declarations = outer_declarations;
                 self.value_substitutions = outer_substitutions;
+                if let Some((name, yes, no)) = union_guard {
+                    let surviving = if then_returns && !else_returns { no } else if else_returns && !then_returns { yes } else { None };
+                    if let Some(value) = surviving { self.value_substitutions.insert(name, value); }
+                }
                 if let Some((name, present_when_true, value)) = optional_guard {
                     // An immutable optional stays narrowed on the surviving
                     // path when the branch containing None cannot reach it.
@@ -6243,21 +6291,38 @@ impl Analyzer<'_> {
         ast: &AstExpression,
         expected: Option<TypeId>,
     ) -> Result<Expression, Diagnostic> {
+        if let Some(ty) = expected.filter(|ty| self.function_types.contains_key(ty)) {
+            if let Some(value) = self.closure_value(ast, ty)? { return Ok(value); }
+        }
+        if let Some(union) = expected {
+            let callables = self.union_types.get(&union).into_iter().flatten().copied()
+                .filter(|ty| self.function_types.contains_key(ty)).collect::<Vec<_>>();
+            if let [callable] = callables.as_slice() {
+                if let Some(value) = self.closure_value(ast, *callable)? { return self.coerce(value, union, false); }
+            }
+        }
         if expected == Some(any_type_id()) {
             let expression = self.expression_inner(ast, None)?;
             return self.box_any_value(expression, ast.span);
         }
-        // A structural literal in an optional context is checked against its
-        // present member, then injected into the union by ordinary coercion.
-        // The union identity is never erased from the resulting expression.
+        if let Some(expected) = expected.filter(|ty| self.is_trait_object(*ty)) {
+            let expression = self.expression_inner(ast, None)?;
+            return self.coerce(expression, expected, false);
+        }
+        // A structural literal selects its unique compatible union member;
+        // the resulting value is still injected into the declared union.
         let contextual = if matches!(&ast.kind,
             AstExpressionKind::Tuple(_) | AstExpressionKind::List(_)
             | AstExpressionKind::Map(_) | AstExpressionKind::Set(_))
         {
             expected.and_then(|ty| self.union_types.get(&ty)).and_then(|members| {
-                let none = self.types.resolve_name("None")?;
-                if !members.contains(&none) { return None; }
-                let present = members.iter().copied().filter(|member| *member != none).collect::<Vec<_>>();
+                let present = members.iter().copied().filter(|member| match &ast.kind {
+                    AstExpressionKind::List(_) => self.list_elements.contains_key(member),
+                    AstExpressionKind::Tuple(_) => self.tuple_elements.contains_key(member),
+                    AstExpressionKind::Map(_) => self.map_elements.contains_key(member),
+                    AstExpressionKind::Set(_) => self.set_type == Some(*member),
+                    _ => false,
+                }).collect::<Vec<_>>();
                 match present.as_slice() { [only] => Some(*only), _ => None }
             }).or(expected)
         } else { expected };
@@ -6270,7 +6335,9 @@ impl Analyzer<'_> {
 
     fn accepts_expression_type(&self, actual: TypeId, expected: TypeId) -> bool {
         self.types.assignable(actual, expected)
-            || self.union_types.get(&expected).is_some_and(|members| members.contains(&actual))
+            || self.trait_object_accepts(actual, expected)
+            || self.union_types.get(&expected).is_some_and(|members|
+                members.iter().any(|member| self.accepts_expression_type(actual, *member)))
     }
 
     fn expression_inner(
@@ -6643,7 +6710,10 @@ impl Analyzer<'_> {
             }
             AstExpressionKind::Throw { error } => {
                 let mut error = self.expression(error, None)?;
-                if !self.is_error_type(error.type_id) {
+                if self.trait_object_is_error(error.type_id) {
+                    let span = error.span;
+                    error = self.trait_object_field(error, "note", self.types.resolve_name("string"), span)?;
+                } else if !self.is_error_type(error.type_id) {
                     return Err(Diagnostic::new(
                         "E000215",
                         "only an error value may be thrown",
@@ -6944,6 +7014,9 @@ impl Analyzer<'_> {
                     }
                 }
                 let object = self.expression(object, None)?;
+                if self.is_trait_object(object.type_id) {
+                    return self.trait_object_field(object, name, expected, ast.span);
+                }
                 if self
                     .resolve_tensor_element_type(object.type_id, ast.span)
                     .is_some()
@@ -7557,7 +7630,9 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if let Some(call) = self.dynamic_method_call(callee, arguments, expected, ast.span)? { return Ok(call); }
                 if matches!(&callee.kind, AstExpressionKind::Name(name) if name != "self" && self.names.contains_key(name)) {
+                    if let Some(call) = self.closure_call(callee, arguments, expected, ast.span)? { return Ok(call); }
                     return self.callable_call(callee, arguments, expected, ast.span)?
                         .ok_or_else(|| Diagnostic::new("E000205", "resolved binding is not callable", Some(callee.span)));
                 }
@@ -8468,11 +8543,7 @@ impl Analyzer<'_> {
                 if let Some(call) = self.callable_call(callee, arguments, expected, ast.span)? {
                     return Ok(call);
                 }
-                if self.source_call_has_callable_parameter(ast) {
-                    if let Some(inlined) = self.inline_source_call(ast, expected)? {
-                        return Ok(inlined);
-                    }
-                }
+                if let Some(call) = self.closure_call(callee, arguments, expected, ast.span)? { return Ok(call); }
                 if let Some(builder) = self.class_builder_expression(ast, expected)? {
                     return Ok(builder);
                 }
@@ -8822,17 +8893,16 @@ impl Analyzer<'_> {
                 if matches!(callable_path(callee).as_deref(), Some("size" | "len"))
                     && arguments.len() == 1
                 {
+                    let count_type = self.types.resolve_name(if callable_path(callee).as_deref() == Some("len") { "int" } else { "usize" }).unwrap();
                     let value = self.expression(&arguments[0].value, None)?;
                     if self.types.memory_buffer_element(value.type_id).is_some() {
-                        return Ok(self.memory_buffer_length(value, ast.span));
+                        let length = self.memory_buffer_length(value, ast.span);
+                        return self.coerce(length, count_type, true);
                     }
                     if self.list_elements.contains_key(&value.type_id) {
                         let storage = self.list_storage_expression(value, ast.span);
                         let storage_type = storage.type_id;
-                        let result = self
-                            .types
-                            .resolve_name("usize")
-                            .expect("bootstrap defines usize");
+                        let result = count_type;
                         return Ok(self.runtime_call(
                             "__sev_list_len",
                             &[storage_type],
@@ -8844,10 +8914,7 @@ impl Analyzer<'_> {
                     if self.map_elements.contains_key(&value.type_id) {
                         let storage = self.collection_storage_expression(value, 0, ast.span);
                         let storage_type = storage.type_id;
-                        let result = self
-                            .types
-                            .resolve_name("usize")
-                            .expect("bootstrap defines usize");
+                        let result = count_type;
                         return Ok(self.runtime_call(
                             "__sev_list_len",
                             &[storage_type],
@@ -8861,10 +8928,7 @@ impl Analyzer<'_> {
                         .resolve_name("string")
                         .expect("bootstrap defines string");
                     if value.type_id == string {
-                        let result = self
-                            .types
-                            .resolve_name("usize")
-                            .expect("bootstrap defines usize");
+                        let result = count_type;
                         return Ok(self.runtime_call(
                             "__sev_string_length",
                             &[string],
@@ -9558,6 +9622,7 @@ impl Analyzer<'_> {
                             .class_instances
                             .get(&(type_name.clone(), Vec::new()))
                             .map(|instance| instance.ty)
+                            .or_else(|| self.active_type_aliases.get(type_name).copied())
                             .or_else(|| self.types.resolve_name(type_name));
                         if let Some(target) = target.filter(|target| self.is_error_type(*target)) {
                             let left = self.expression(left, None)?;
@@ -9584,18 +9649,27 @@ impl Analyzer<'_> {
                     }
                 }
                 if *operator == AstBinaryOperator::Identity {
-                    if let AstExpressionKind::Name(type_name) = &right.kind {
-                        if self.trait_names.contains(type_name) {
+                    if let Some(type_name) = callable_path(right) {
+                        if self.trait_names.contains(&type_name) {
                             let value = self.expression(left, None)?;
-                            return self.trait_membership(value, type_name, ast.span);
+                            return self.trait_membership(value, &type_name, ast.span);
                         }
                         let target = self
                             .class_instances
                             .get(&(type_name.clone(), Vec::new()))
                             .map(|instance| instance.ty)
-                            .or_else(|| self.types.resolve_name(type_name));
+                            .or_else(|| self.active_type_aliases.get(&type_name).copied())
+                            .or_else(|| self.types.resolve_name(&type_name))
+                            .or_else(|| self.resolve_source_type(&TypeAnnotation::named(&type_name, Vec::new(), right.span)).ok());
                         if let Some(target) = target {
                             let left = self.expression(left, None)?;
+                            if self.is_trait_object(target) { return self.trait_type_membership(left, target, ast.span); }
+                            if let Some(members) = self.union_types.get(&left.type_id) {
+                                if let Some(ordinal) = members.iter().position(|member| *member == target) {
+                                    return Ok(self.union_tag_condition(left, ordinal, ast.span));
+                                }
+                                return Ok(self.static_type_predicate(left, false, ast.span));
+                            }
                             if let Some(fallible) = self.fallible_types.get(&left.type_id).copied()
                             {
                                 let boolean = self
@@ -9635,18 +9709,12 @@ impl Analyzer<'_> {
                             if (self.types.primitive(target).is_some() || self.class_instances_by_type.contains_key(&target))
                                 && !self.union_types.contains_key(&left.type_id)
                             {
-                                let boolean = self
-                                    .types
-                                    .resolve_name("bool")
-                                    .expect("bootstrap defines bool");
-                                return Ok(Expression {
-                                    id: self.next_id(),
-                                    type_id: boolean,
-                                    kind: ExpressionKind::Literal(LiteralValue::Boolean(
-                                        left.type_id == target,
-                                    )),
-                                    span: ast.span,
-                                });
+                                if self.is_trait_object(left.type_id) || left.type_id == any_type_id() {
+                                    let storage = self.trait_object_storage(left);
+                                    return Ok(self.erased_record_is(storage, target, ast.span));
+                                }
+                                let matches = left.type_id == target;
+                                return Ok(self.static_type_predicate(left, matches, ast.span));
                             }
                         }
                     }
@@ -10564,6 +10632,21 @@ impl Analyzer<'_> {
             if !explicit && members.contains(&expression.type_id) {
                 return self.union_expression(expected, &members, expression);
             }
+            if !explicit {
+                let compatible = members.iter().copied().filter(|member|
+                    self.trait_object_accepts(expression.type_id, *member)).collect::<Vec<_>>();
+                if let [member] = compatible.as_slice() {
+                    let expression = self.wrap_trait_object(expression, *member, false)?;
+                    return self.union_expression(expected, &members, expression);
+                }
+            }
+        }
+        if self.is_trait_object(expected) {
+            return self.wrap_trait_object(expression, expected, explicit);
+        }
+        if expected == any_type_id() {
+            let span = expression.span;
+            return self.box_any_value(expression, span);
         }
         if explicit {
             if requested.is_none() {
@@ -11827,6 +11910,7 @@ impl Analyzer<'_> {
     }
 
     fn trait_membership(&mut self, value: Expression, required: &str, span: severian_source::Span) -> Result<Expression, Diagnostic> {
+        let value = self.trait_object_storage(value);
         let boolean = self.types.resolve_name("bool").unwrap();
         if let Some(members) = self.union_types.get(&value.type_id).cloned() {
             return self.map_union_expression(value, &members, boolean, |analyzer, member| {
@@ -12276,6 +12360,8 @@ impl Analyzer<'_> {
                 result,
             },
         );
+        let pointer = self.instantiate_pointer_type(self.types.resolve_name("u8").unwrap());
+        let any = self.ensure_any_type();
         self.lowered_classes.push(HirClassDeclaration {
             variants: Vec::new(),
             id: ty,
@@ -12288,7 +12374,7 @@ impl Analyzer<'_> {
                     .join(", "),
                 result.0
             ),
-            fields: Vec::new(),
+            fields: vec![HirClassFieldDeclaration { name: "__code".into(), ty: pointer }, HirClassFieldDeclaration { name: "__environment".into(), ty: any }],
         });
         ty
     }
@@ -12720,6 +12806,8 @@ impl Analyzer<'_> {
             return false;
         }
         self.enum_variants.contains_key(path)
+            || (!path.contains('.') && self.enums.values().any(|instance|
+                instance.variants.iter().any(|variant| variant.name == path)))
             || expected.is_some_and(|ty| self.enums.values().any(|instance| {
                 instance.ty == ty && instance.variants.iter().any(|variant| {
                     enum_variant_path_matches(path, &instance.name, &variant.name)
@@ -14190,7 +14278,7 @@ impl Analyzer<'_> {
         match name {
             _ if self.any_type == Some(element) => Ok("any"),
             Some("int") | Some("i8") | Some("i16") | Some("i32") | Some("i64") | Some("isize")
-            | Some("u16") | Some("u64") | Some("usize") => Ok("i64"),
+            | Some("u16") | Some("u32") | Some("u64") | Some("usize") => Ok("i64"),
             Some("float") => Ok("float"),
             Some("f64") => Ok("f64"),
             Some("u8") => Ok("u8"),
@@ -14210,6 +14298,9 @@ impl Analyzer<'_> {
             }
             _ if self.class_instances_by_type.contains_key(&element)
                 || self.union_types.contains_key(&element)
+                || self.is_trait_object(element)
+                || self.function_types.contains_key(&element)
+                || self.tuple_elements.contains_key(&element)
                 || self.fallible_types.contains_key(&element) => Ok("aggregate"),
             _ => Err(Diagnostic::new(
                 "E000211",
@@ -16076,38 +16167,6 @@ impl Analyzer<'_> {
         Ok(validated)
     }
 
-    fn source_call_has_callable_parameter(&self, ast: &AstExpression) -> bool {
-        let AstExpressionKind::Call { callee, arguments } = &ast.kind else {
-            return false;
-        };
-        let Some(name) = callable_path(callee) else {
-            return false;
-        };
-        let functions = self.source_functions.get(&name).or_else(|| {
-            if !self.allow_qualified_function_suffix {
-                return None;
-            }
-            let qualified = self
-                .source_functions
-                .iter()
-                .filter(|(candidate, _)| candidate.rsplit('.').next() == Some(name.as_str()))
-                .map(|(_, functions)| functions)
-                .collect::<Vec<_>>();
-            (qualified.len() == 1).then(|| qualified[0])
-        });
-        functions.is_some_and(|functions| {
-            functions.iter().any(|function| {
-                function.parameters.len() == arguments.len()
-                    && function.parameters.iter().any(|parameter| {
-                        matches!(
-                            parameter.annotation.kind,
-                            severian_ast::TypeAnnotationKind::Function { .. }
-                        )
-                    })
-            })
-        })
-    }
-
     fn function_annotation(
         &mut self,
         annotation: &TypeAnnotation,
@@ -16525,6 +16584,9 @@ impl Analyzer<'_> {
         argument: &AstExpression,
         expected: TypeId,
     ) -> Option<(Expression, ConversionRank)> {
+        if self.function_types.contains_key(&expected) {
+            return self.expression(argument, Some(expected)).ok().map(|value| (value, ConversionRank::Exact));
+        }
         if expected == any_type_id() {
             let value = self.expression(argument, None).ok()?;
             let exact = value.type_id == expected;
@@ -16560,8 +16622,7 @@ impl Analyzer<'_> {
                         rank =
                             conversion_rank(self.types, actual, expected, self.conversion_policy())
                                 .or_else(|| {
-                                    self.union_types
-                                        .contains_key(&expected)
+                                    (self.union_types.contains_key(&expected) || self.trait_object_accepts(actual, expected))
                                         .then_some(ConversionRank::General)
                                 })?;
                     }
@@ -16588,6 +16649,7 @@ impl Analyzer<'_> {
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
         let any = self.ensure_any_type();
+        let value = self.trait_object_storage(value);
         if value.type_id == any {
             return Ok(value);
         }
@@ -18101,6 +18163,9 @@ impl Analyzer<'_> {
                 .resolve_name("int")
                 .expect("bootstrap defines int");
             let (symbol, parameters, result, resolved_arguments) = match name.as_str() {
+                "is_digit" if arguments.is_empty() => ("__sev_string_is_digit", vec![string], bool_type, vec![object]),
+                "is_alphabetic" if arguments.is_empty() => ("__sev_string_is_alphabetic", vec![string], bool_type, vec![object]),
+                "is_alphanumeric" if arguments.is_empty() => ("__sev_string_is_alphanumeric", vec![string], bool_type, vec![object]),
                 "byte_length" if arguments.is_empty() => (
                     "__sev_string_byte_length",
                     vec![string],
@@ -22559,7 +22624,7 @@ def interpolate(text: string) -> string:
         ));
         assert!(matches!(
             argument(definition("store")).map(|argument| &argument.kind),
-            Some(ExpressionKind::Move(_))
+            Some(ExpressionKind::Borrow { exclusive: false, .. })
         ));
     }
 
@@ -23389,7 +23454,8 @@ def interpolate(text: string) -> string:
         let ast = severian_parser::parse(&tokens).unwrap();
         let build = analyze(&ast, &context.types).unwrap();
         assert!(build.modules[0].tests.is_empty());
-        assert_eq!(build.modules[0].functions.len(), 1);
+        assert_eq!(build.modules[0].functions.iter().filter(|function| function.name == "helper").count(), 1);
+        assert!(!build.modules[0].functions.iter().any(|function| function.name.contains("_test_")));
 
         let tests = analyze_with_context(
             &ast,
@@ -23793,8 +23859,8 @@ def interpolate(text: string) -> string:
             .find(|function| function.name == "apply")
             .unwrap();
         assert!(
-            apply.body.is_none(),
-            "higher-order body should be specialized"
+            apply.body.is_some(),
+            "higher-order body must accept stored callable values"
         );
         assert!(module
             .classes

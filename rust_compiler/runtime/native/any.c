@@ -36,6 +36,19 @@ _Bool __sev_any_implements(sev_any value, const char *identity, _Bool primitive)
     return value.tag >= 0 && value.tag <= 8 && primitive;
 }
 
+_Bool __sev_any_record_is(sev_any value, int64_t type) {
+    if (value.tag != 9) return 0;
+    const sev_any_record *record = (const void *)(intptr_t)value.payload;
+    return record->type == type;
+}
+
+void *__sev_any_record_read_aggregate(const sev_any *value, int64_t type) {
+    if (!__sev_any_record_is(*value, type)) abort();
+    const sev_any_record *record = (const void *)(intptr_t)value->payload;
+    __sev_storage_retain(record->value);
+    return record->value;
+}
+
 void __sev_any_retain(sev_any value) {
     if (value.tag == 0 || (value.tag >= 6 && value.tag <= 9))
         __sev_storage_retain((void *)(intptr_t)value.payload);
@@ -259,10 +272,17 @@ int main(void) {
     assert(__sev_any_implements((sev_any){1, 4}, "|Copy|", 1));
     assert(!__sev_any_implements((sev_any){1, 4}, "|Marker|", 0));
     assert(!__sev_any_implements((sev_any){-1, 0}, "|Copy|", 1));
+    assert(__sev_any_record_is(boxed, 23));
+    assert(!__sev_any_record_is(boxed, 24));
+    assert(!__sev_any_record_is((sev_any){1, 23}, 23));
+    int64_t *read = __sev_any_record_read_aggregate(&boxed, 23);
+    assert(*read == 42);
     __sev_any_retain(boxed);
     __sev_any_release(boxed);
     assert(destroyed_records == 0);
     __sev_any_release(boxed);
+    assert(destroyed_records == 0);
+    __sev_storage_release(read);
     assert(destroyed_records == 1);
     return 0;
 }

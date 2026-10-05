@@ -2338,7 +2338,7 @@ pub(super) fn resolve_path(module: ModuleId, path: &str, index: &ProgramIndex) -
     let Some(first) = parts.next() else {
         return Vec::new();
     };
-    let Some(mut resolution) = index.modules[&module].scope.bindings.get(first) else {
+    let Some(mut resolution) = index.modules.get(&module).and_then(|module| module.scope.bindings.get(first)) else {
         return Vec::new();
     };
     for part in parts {

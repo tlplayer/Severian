@@ -66,7 +66,8 @@ def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, co
     key = grammar.syntax.path + ":" + grammar.syntax.name + ":" + string(input[0].span.start)
     if key in active:
         return []
-    stack = active + [key]
+    stack = active[:]
+    stack.append(key)
     states := [SequenceState(0, [])]
     capture_index := 0
     for field in grammar.sequence:
@@ -79,7 +80,9 @@ def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, co
             case Capture:
                 repeated = capture_index in grammar.repetitions
                 for state in states:
-                    frontier := [SequenceState(state.cursor, state.captures + [CapturedGrammar(name)])]
+                    initial_captures = state.captures[:]
+                    initial_captures.append(CapturedGrammar(name))
+                    frontier := [SequenceState(state.cursor, initial_captures)]
                     if repeated:
                         following.extend(frontier)
                     while len(frontier) > 0:
@@ -94,7 +97,9 @@ def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, co
                                 if candidate.consumed <= 0 or candidate.consumed > len(input) - partial.cursor:
                                     return ParserDiagnostic("capture did not make bounded progress", input[partial.cursor].span, "parser.capture")
                                 captures = partial.captures[:]
-                                captures[-1] = CapturedGrammar(name, captures[-1].matches + [candidate])
+                                matched = captures[-1].matches[:]
+                                matched.append(candidate)
+                                captures[-1] = CapturedGrammar(name, matched)
                                 next_frontier.append(SequenceState(partial.cursor + candidate.consumed, captures))
                         following.extend(next_frontier)
                         frontier = next_frontier if repeated else []
@@ -105,19 +110,21 @@ def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, co
     matches: list[GrammarMatch] = []
     for state in states:
         if state.cursor > 0:
-            matches.append(sequence_candidate(grammar, state, context, input))
+            matches.append(sequence_candidate(grammar, state, context, input, grammar.syntax))
     return matches
 
 
-def sequence_candidate(grammar: syntax.RegisteredGrammar, state: SequenceState, context: GrammarContext, input: list[TokenTerm]) -> GrammarMatch:
+def sequence_candidate(grammar: syntax.RegisteredGrammar, state: SequenceState, context: GrammarContext, input: list[TokenTerm], declaration: syntax.SyntaxDeclaration) -> GrammarMatch:
     span = Span(input[0].span.source_id, input[0].span.start, input[state.cursor - 1].span.end)
     # Each candidate owns its source window; probing another interpretation
     # must not replace the span retained by this candidate's constructor.
     context = GrammarContext(context.parent, context.body, context.previous, context.fields, span, context.receiver)
-    return GrammarMatch(state.cursor, lambda: construct_sequence(grammar, state.captures, context, span), check=lambda: check_sequence(grammar, state.captures, context), captures=state.captures, identity=grammar.syntax.path + ":" + grammar.syntax.name + ":" + string(span.start) + ":" + string(span.end))
+    return GrammarMatch(state.cursor, lambda: construct_sequence(grammar, state.captures, context, span), check=lambda: check_sequence(grammar, state.captures, context), captures=state.captures, identity=declaration.path + ":" + declaration.name + ":" + string(span.start) + ":" + string(span.end))
 
 
 def construct_sequence(grammar: syntax.RegisteredGrammar, captures: list[CapturedGrammar], context: GrammarContext, span: Span) -> GrammarResolution | Diagnostic:
+    if not (grammar.syntax is syntax.SyntaxDeclaration):
+        return ParserDiagnostic("sequence grammar requires a declaration identity", span, "parser.grammar")
     admissible = check_sequence(grammar, captures, context)
     if admissible is Diagnostic:
         return admissible

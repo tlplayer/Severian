@@ -93,7 +93,7 @@ pub enum Callee {
         function: DefId,
         substitution: Substitution,
     },
-    FunctionValue(HirId),
+    FunctionValue(Box<Expression>),
     Method {
         implementation: DefId,
         receiver: HirId,

@@ -3024,6 +3024,18 @@ mod tests {
     }
 
     #[test]
+    fn stored_callbacks_retain_captures_and_support_unit_results_natively() {
+        let root = temporary_package();
+        let source = root.join("callbacks.sev");
+        let executable = root.join("callbacks");
+        std::fs::write(&source, "class Callback:\n    invoke: () -> string\nclass Sink:\n    invoke: (int) -> unit\ndef make(text: string) -> Callback:\n    return Callback(lambda: text)\ndef receive(value: int):\n    assert(value == 7)\ndef main() -> int:\n    saved = make(\"captured \" + \"text\")\n    other = make(\"another\")\n    assert(saved.invoke() == \"captured text\")\n    assert(other.invoke() == \"another\")\n    sink = Sink(receive)\n    sink.invoke(7)\n    return 0\n").unwrap();
+        Compiler::new(TargetSpec::host()).unwrap().compile_file(&source, &executable).unwrap();
+        let output = std::process::Command::new(&executable).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn zero_error_limit_reports_more_than_five_parser_failures() {
         let root = temporary_package();
         let source = root.join("invalid.sev");

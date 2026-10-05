@@ -1,3 +1,4 @@
+import Expression from "../function/function.sev"
 import G from "../generic/grammar.sev"
 import Fixity from "../function/syntax.sev"
 import B from "../generic/block.sev"
@@ -21,7 +22,7 @@ trait While: G
     precedence: int = 10
     control_flow: ControlFlow = Loop
 
-    def semantic(condition: Ex, body: B):
+    def semantic(condition: Expression, body: B):
         header = cfg.block()
         execute = cfg.block()
         exit = cfg.block()

@@ -1,3 +1,4 @@
+import Expression from "../function/function.sev"
 import G from "../generic/grammar.sev"
 import Y from "../generic/symbol.sev"
 import TokenForm from "../generic/token.sev"
@@ -17,6 +18,6 @@ trait Throw: G
     symbol: Y = ThrowKeyword()
     control_flow: ControlFlow = Error
 
-    def semantic(value: Ex):
+    def semantic(value: Expression):
         result = lower(value)
         cfg.throw(result)

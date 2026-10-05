@@ -890,6 +890,15 @@ output = f"""module {{
     }
 
     #[test]
+    fn lambda_argument_is_not_an_interval_slice() {
+        let source = SourceFile::virtual_source("lambda-argument.sev", "value = Callback(lambda item: item + 1)\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Binding(binding) = &module.items[0] else { panic!("expected binding"); };
+        let severian_ast::ExpressionKind::Call { arguments, .. } = &binding.value.kind else { panic!("expected call"); };
+        assert!(matches!(&arguments[0].value.kind, severian_ast::ExpressionKind::Lambda { parameters, .. } if parameters == &["item"]));
+    }
+
+    #[test]
     fn generic_bounds_and_with_constraints_share_one_ast() {
         let source = SourceFile::virtual_source(
             "constraints.sev",
