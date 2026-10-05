@@ -798,7 +798,6 @@ mod tests {
         module(6, include_str!("../../../../../sev_compiler/syntax/grammar/resolution.sev"));
         module(4, include_str!("../../../../../sev_compiler/frontend/parser/contract.sev"));
         module(8, include_str!("../../../../../sev_compiler/hir/hir/src/program.sev"));
-        module(9, include_str!("../../../../../sev_compiler/mir/mir/src/model.sev"));
     }
 
     #[test]

@@ -2308,6 +2308,8 @@ impl Parser<'_> {
     fn enum_declaration(&mut self) -> Result<EnumDeclaration, Diagnostic> {
         let start = self.next().span;
         let (name, _) = self.identifier("expected an enum name")?;
+        let (type_parameters, mut constraints, type_parameter_defaults) = self.type_parameters()?;
+        constraints.extend(self.declaration_constraints()?);
         self.expect(&TokenKind::Colon, "expected `:` after enum name")?;
         self.expect(&TokenKind::Newline, "expected a newline after enum header")?;
         while self.take(&TokenKind::Newline).is_some() {}
@@ -2407,6 +2409,9 @@ impl Parser<'_> {
         }
         Ok(EnumDeclaration {
             name,
+            type_parameters,
+            type_parameter_defaults,
+            constraints,
             variants,
             span: Span::new(start.source, start.start, end),
         })
@@ -5421,5 +5426,20 @@ mod block_sentence_tests {
         assert_eq!(sentence.function.parameters[0].annotation.simple_name(), Some("bool"));
         assert_eq!(sentence.function.constraints.len(), 1);
         assert!(sentence.function.body.is_some());
+    }
+}
+
+#[cfg(test)]
+mod generic_enum_tests {
+    use super::*;
+
+    #[test]
+    fn generic_enum_parameters_defaults_and_payloads_are_retained() {
+        let source = SourceFile::virtual_source("enum.sev", "enum Exit[V, T = int, B = bool]:\n    Finish(value: V)\n    Pair(left: T, right: B)\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let Item::Enum(declaration) = &module.items[0] else { panic!("expected enum") };
+        assert_eq!(declaration.type_parameters, ["V", "T", "B"]);
+        assert_eq!(declaration.type_parameter_defaults[1].as_ref().unwrap().simple_name(), Some("int"));
+        assert_eq!(declaration.variants[0].fields[0].annotation.simple_name(), Some("V"));
     }
 }

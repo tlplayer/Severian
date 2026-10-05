@@ -40,6 +40,39 @@ A block implements B and establishes a semantic region. Its implementing declara
 
 ## Examples
 
+Blocks compose other blocks
+
+```
+class A:
+    class B:
+        value: int = 0
+    def B_value():
+        return B().value
+
+#Useful in tests
+test with compiler "Needs custom import":
+    class X:
+        value: int = 10
+        _read_only: bool = true 
+    x = X() 
+    assert(x.value == 10)
+    reject:
+        x._read_only = false
+
+test "Needs custom import":
+    import profile
+    start = profile.time()
+    A().B_value()
+    stop = profile.time()
+    assert(stop-start < 5)
+
+test with profile "golden path profile" with 
+{
+    suffix time < 5s
+}:
+    A().B_Value()
+```
+
 ### Global scope blocks
 The global block holds global variables and other blocks
 ```sev
@@ -97,6 +130,26 @@ class Point:
 
 ### Trait Blocks
 
+traits are both properties of classes and the interface of the language. 
+
+```sev
+trait Interface:
+    def foobar()
+    def default_functionality():
+        return "default implementation that would be annoying to remake on all implementers to fulfill interface"
+        
+
+class Implementation: Interface
+    def foobar():
+        return 1
+
+test "Traits are callable to their dispatch":
+    assert(interface.foobar())
+
+test "Implementations get default behavior":
+    assert(Implementation().default_functionality() is string)
+```
+
 ### Conditional blocks
 if blocks can have chain/sibling blocks
 ```
@@ -110,11 +163,93 @@ else:
     block
 ```
 
-## Interface
 
+## With
+
+With blocks have access to some really nice hooking/properties of the block
+
+prefix: happens before the block. This is the default behavior in a with block
+suffix: happens after the block is done
+fix: this makes sure during the block a behavior is observed. A Promise to entry/inside/exit
+
+```
+def positive(x) with
+{
+    x > 0 -> Error("x must be positive")
+}:
+    return x
+
+def negative(x) with
+{
+    suffix x < 0 -> Error("x must be negative on exit")
+}:
+    return -x
+
+def zero(x) with
+{
+    fix x == 0 -> Error("x must be 0")
+}:
+    return x
+
+```
+
+It's also useful for initializing variables and fields and scope them out when unneeded.
+For example
+
+```
+#historical method
+
+i = 0
+while i < 0:
+    print(i)
+    i+=1
+
+#The above has a couple problems, i is in global scope so say you have two loops
+
+i = 0
+while i < 0:
+    print(i)
+    i+=1
+
+#You could forget to change this to a different param, lints sometimes say use a different variable etc. 
+i = 0
+while i < 0:
+    print(i)
+    #Could forget to increment
+    i+=1
+
+#The prefered method is to make it part of the scope
+
+while i < 0 with i := 0
+    print(i)
+    i += 1
+
+#This is better, but forgetting i += 1 is going to get/bite you
+
+while i < 0 with 
+{
+    i := 0,
+    defer i += 1 # defer is an alias for suffix 
+}:
+    print(i)
+
+
+#We've removed some pinch points but there are more useful scenarios, grid search for one
+grid = [[0]*10]
+grid[(rand(0..9),rand(0..9))] = 1
+while with
+{
+    i,j := 0,0, #initialization happens once := /=
+    0 <= i < 10 -> continue,
+    0 <= j < 10 -> continue,
+    suffix grid[i][j] == goal -> return i,j,
+}
+
+
+```
 
 ## Data Model
 
-## Testing
 
+## Testing
 

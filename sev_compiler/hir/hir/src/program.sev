@@ -34,7 +34,7 @@ def address_key(address: BlockAddress) -> string:
 def partition(graph: BlockGraph) -> Program:
     program = Program(graph)
     blocks: list[BlockAddress] = []
-    indices: dict[string, int] = {}
+    indices: map[string, int] = {}
     for unit in range(len(graph.units)):
         for block in graph.units[unit].file.blocks:
             address = BlockAddress(unit, block.id)

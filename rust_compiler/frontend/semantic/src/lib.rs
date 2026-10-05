@@ -83,6 +83,7 @@ pub fn analyze_with_context_and_types(
         &[],
         &[],
         &[],
+        None,
         &package_trait_names,
         &[],
         &[],
@@ -151,6 +152,7 @@ pub(crate) fn analyze_with_package_functions(
     test_function_ids: &[FunctionId],
     package_classes: &[PackageClass],
     package_enums: &[PackageEnum],
+    package_index: Option<&package::ProgramIndex>,
     package_trait_names: &BTreeMap<severian_modules::ModuleId, Vec<String>>,
     package_lists: &[PackageList],
     package_constants: &[PackageConstant],
@@ -164,7 +166,8 @@ pub(crate) fn analyze_with_package_functions(
     let lossless_conversion = compiler_lossless_conversion(ast);
     let mut local_class_constructors = BTreeMap::new();
     for declaration in ast.items.iter().filter_map(|item| match item {
-        severian_ast::Item::Class(declaration) => Some(declaration),
+        severian_ast::Item::Class(declaration) => Some(declaration.clone()),
+        severian_ast::Item::Enum(declaration) if !declaration.type_parameters.is_empty() => Some(declaration.storage_class()),
         _ => None,
     }) {
         let existing = package_classes
@@ -234,6 +237,8 @@ pub(crate) fn analyze_with_package_functions(
     let namespace_hooks = collect_trait_namespace_hooks(registry_ast)?;
     let mut analyzer = Analyzer {
         types,
+        package_index,
+        type_resolution_module: source_module,
         names: LexicalScope::default(),
         mutable_variables: BTreeSet::new(),
         value_substitutions: BTreeMap::new(),
@@ -297,9 +302,20 @@ pub(crate) fn analyze_with_package_functions(
                 severian_ast::Item::Class(declaration) => {
                     Some((declaration.name.clone(), declaration.clone()))
                 }
+                severian_ast::Item::Enum(declaration) if !declaration.type_parameters.is_empty() => {
+                    Some((declaration.name.clone(), declaration.storage_class()))
+                }
                 _ => None,
             })
             .collect(),
+        enum_declarations: package_enums.iter().flat_map(|enumeration| {
+            enumeration.lookups.get(&source_module.unwrap_or(enumeration.module))
+                .into_iter().flatten().map(move |lookup| (lookup.clone(), enumeration.declaration.clone()))
+        }).chain(package_enums.iter().map(|enumeration| (package::internal_type_name(enumeration.module, &enumeration.declaration.name), enumeration.declaration.clone())))
+        .chain(ast.items.iter().filter_map(|item| match item {
+            severian_ast::Item::Enum(declaration) => Some((declaration.name.clone(), declaration.clone())),
+            _ => None,
+        })).filter(|(_, declaration)| !declaration.type_parameters.is_empty()).collect(),
         enums: BTreeMap::new(),
         enum_variants: BTreeMap::new(),
         enum_binding_variants: BTreeMap::new(),
@@ -1560,6 +1576,8 @@ fn compiler_lossless_conversion(ast: &severian_ast::Module) -> bool {
 }
 
 struct Analyzer<'a> {
+    package_index: Option<&'a package::ProgramIndex>,
+    type_resolution_module: Option<severian_modules::ModuleId>,
     types: &'a mut TypeContext,
     names: LexicalScope<(BindingId, severian_hir::VariableId, TypeId)>,
     mutable_variables: BTreeSet<severian_hir::VariableId>,
@@ -1605,6 +1623,7 @@ struct Analyzer<'a> {
     signatures: BTreeMap<FunctionId, FunctionSignature>,
     trait_names: BTreeSet<String>,
     classes: BTreeMap<String, severian_ast::ClassDeclaration>,
+    enum_declarations: BTreeMap<String, severian_ast::EnumDeclaration>,
     enums: BTreeMap<String, EnumInstance>,
     enum_variants: BTreeMap<String, (String, usize)>,
     enum_binding_variants: BTreeMap<severian_hir::VariableId, (String, String)>,
@@ -1938,7 +1957,7 @@ impl Analyzer<'_> {
                 }
             }
         }
-        for declaration in &declarations {
+        for declaration in declarations.iter().filter(|declaration| declaration.type_parameters.is_empty()) {
             let ty = self
                 .class_instances
                 .get(&(declaration.name.clone(), Vec::new()))
@@ -1972,7 +1991,7 @@ impl Analyzer<'_> {
             );
         }
         let integer = self.tag_type();
-        for declaration in declarations {
+        for declaration in declarations.into_iter().filter(|declaration| declaration.type_parameters.is_empty()) {
             let ty = self.enums[&declaration.name].ty;
             let mut fields = vec![HirClassFieldDeclaration {
                 name: "__tag".into(),
@@ -2135,6 +2154,9 @@ impl Analyzer<'_> {
             self.class_defining_modules
                 .insert(package_class.ty, package_class.module);
             if !package_class.declaration.type_parameters.is_empty() {
+                let internal = package::internal_type_name(package_class.module, &package_class.declaration.name);
+                self.classes.insert(internal.clone(), package_class.declaration.clone());
+                self.generic_class_constructors.insert(internal, package_class.ty);
                 for lookup in package_class
                     .lookups
                     .get(&package_class.module)
@@ -2244,6 +2266,7 @@ impl Analyzer<'_> {
             if let Some(names) = package_trait_names.get(&package_class.module) {
                 self.trait_names = names.iter().cloned().collect();
             }
+            let previous_module = self.type_resolution_module.replace(package_class.module);
             let resolved_fields = (|| {
                 if package_class.declaration.primitive {
                     return Ok(Vec::new());
@@ -2261,6 +2284,7 @@ impl Analyzer<'_> {
                     .collect::<Result<Vec<_>, Diagnostic>>()
             })();
             self.trait_names = previous_trait_names;
+            self.type_resolution_module = previous_module;
             let mut fields = resolved_fields?;
             if is_error && fields.is_empty() {
                 fields.push(HirClassFieldDeclaration {
@@ -2398,6 +2422,10 @@ impl Analyzer<'_> {
     }
 
     fn resolve_source_type(&mut self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
+        if let (Some(index), Some(module)) = (self.package_index, self.type_resolution_module) {
+            let expanded = package::expand_type_alias(annotation, module, index)?;
+            if expanded != *annotation { return self.resolve_source_type(&expanded); }
+        }
         if let Some(("array", [element])) = annotation.named_parts() {
             let element = self.resolve_source_type(element)?;
             return self.types.instantiate_memory_buffer(element).map_err(|error| {
@@ -4843,8 +4871,13 @@ impl Analyzer<'_> {
             self.declarations.clone_from(&outer_declarations);
             self.value_substitutions.clone_from(&outer_substitutions);
             let pattern = case.binding.as_deref().unwrap_or("_");
+            let qualified_variant = if let Some((owner, variant)) = pattern.rsplit_once('.') {
+                let owner = TypeAnnotation::named(owner, Vec::new(), case.span);
+                self.resolve_source_type(&owner).ok().filter(|ty| *ty == instance.ty).map(|_| variant)
+            } else { None };
             let variant = instance.variants.iter().enumerate().find(|(_, variant)| {
                 pattern == variant.name || pattern == format!("{}.{}", instance.name, variant.name)
+                    || qualified_variant == Some(variant.name.as_str())
             });
             let (condition, selected) = if let Some((ordinal, variant)) = variant {
                 if !handled.insert(ordinal) {
@@ -6152,6 +6185,48 @@ impl Analyzer<'_> {
         ast: &AstExpression,
         expected: Option<TypeId>,
     ) -> Result<Expression, Diagnostic> {
+        if let (Some(index), Some(module), AstExpressionKind::Call { callee, arguments }) = (self.package_index, self.type_resolution_module, &ast.kind) {
+            let application = class_application(callee).map(|(name, arguments)| (name, arguments.to_vec()))
+                .or_else(|| callable_path(callee).map(|name| (name, Vec::new())));
+            if let Some((name, parameters)) = application {
+                if !self.names.contains_key(name.split('.').next().unwrap_or(&name)) {
+                    let annotation = TypeAnnotation::named(name, parameters, callee.span);
+                    let expanded = package::expand_type_alias(&annotation, module, index)?;
+                    if expanded != annotation {
+                        if let Some((name, parameters)) = expanded.named_parts() {
+                            let mut target = AstExpression { kind: AstExpressionKind::Name(name.to_owned()), span: callee.span };
+                            if !parameters.is_empty() {
+                                target = AstExpression { kind: AstExpressionKind::TypeApplication { callee: Box::new(target), arguments: parameters.to_vec() }, span: callee.span };
+                            }
+                            return self.expression_inner(&AstExpression { kind: AstExpressionKind::Call { callee: Box::new(target), arguments: arguments.clone() }, span: ast.span }, expected);
+                        }
+                    }
+                }
+            }
+        }
+        let (candidate, arguments) = match &ast.kind {
+            AstExpressionKind::Call { callee, arguments } => (callee.as_ref(), arguments.as_slice()),
+            _ => (ast, &[][..]),
+        };
+        if let AstExpressionKind::Member { object, name: variant } = &candidate.kind {
+            let application = enum_type_application(object)
+                .or_else(|| callable_path(object).map(|name| (name, Vec::new())));
+            if let Some((name, parameters)) = application {
+                if !self.names.contains_key(name.split('.').next().unwrap_or(&name)) {
+                    let annotation = TypeAnnotation::named(name, parameters, object.span);
+                    let expanded = if let (Some(index), Some(module)) = (self.package_index, self.type_resolution_module) {
+                        package::expand_type_alias(&annotation, module, index)?
+                    } else { annotation };
+                    if let Some((name, parameters)) = expanded.named_parts() {
+                        if self.enum_declarations.contains_key(name) && !parameters.is_empty() {
+                            let instance = self.instantiate_class(name, parameters, candidate.span)?;
+                            let path = format!("{name}[#{}].{variant}", instance.ty.0);
+                            return self.enum_constructor(&path, arguments, expected, ast.span);
+                        }
+                    }
+                }
+            }
+        }
         match &ast.kind {
             AstExpressionKind::Symbol(symbol) => Err(Diagnostic::new(
                 "E000204",
@@ -10872,6 +10947,13 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
+        if self.enum_declarations.contains_key(class) {
+            return Err(Diagnostic::new(
+                "E000221",
+                format!("generic enum `{class}` requires a named variant constructor"),
+                Some(span),
+            ));
+        }
         let instance = if type_arguments.is_empty() {
             self.class_instances
                 .get(&(class.to_owned(), Vec::new()))
@@ -11606,6 +11688,34 @@ impl Analyzer<'_> {
     }
 
     fn instantiate_class_types(
+        &mut self, name: &str, concrete: &[TypeId], span: severian_source::Span,
+    ) -> Result<ClassInstance, Diagnostic> {
+        let previous_module = self.type_resolution_module;
+        if let Some(module) = self.generic_class_constructors.get(name).and_then(|ty| self.class_defining_modules.get(ty)) {
+            self.type_resolution_module = Some(*module);
+        }
+        let result = self.instantiate_class_storage(name, concrete, span);
+        self.type_resolution_module = previous_module;
+        let instance = result?;
+        if let Some(declaration) = self.enum_declarations.get(name) {
+            let key = format!("{name}[#{}]", instance.ty.0);
+            self.enums.insert(key.clone(), EnumInstance {
+                ty: instance.ty, name: name.to_owned(), fields: instance.fields.clone(),
+                variants: declaration.variants.clone(),
+            });
+            for (ordinal, variant) in declaration.variants.iter().enumerate() {
+                self.enum_variants.insert(format!("{key}.{}", variant.name), (key.clone(), ordinal));
+            }
+            if let Some(class) = self.lowered_classes.iter_mut().find(|class| class.id == instance.ty) {
+                class.variants = declaration.variants.iter().enumerate().map(|(ordinal, variant)| {
+                    (0..variant.fields.len()).map(|payload| enum_payload_index(&declaration.variants, ordinal, payload) as u32).collect()
+                }).collect();
+            }
+        }
+        Ok(instance)
+    }
+
+    fn instantiate_class_storage(
         &mut self,
         name: &str,
         concrete: &[TypeId],
@@ -12366,7 +12476,7 @@ impl Analyzer<'_> {
                 instance
                     .variants
                     .iter()
-                    .position(|variant| enum_variant_path_matches(path, enum_name, &variant.name))
+                    .position(|variant| enum_variant_path_matches(path, &instance.name, &variant.name))
                     .map(|ordinal| (enum_name.clone(), ordinal))
             })
         });
@@ -12379,7 +12489,7 @@ impl Analyzer<'_> {
             // expected type: inferred locals have no such context yet.
             let mut candidates = self.enums.iter().flat_map(|(enum_name, instance)| {
                 instance.variants.iter().enumerate().filter_map(move |(ordinal, variant)| {
-                    enum_variant_path_matches(path, enum_name, &variant.name)
+                    enum_variant_path_matches(path, &instance.name, &variant.name)
                         .then(|| (enum_name.clone(), ordinal))
                 })
             });
@@ -12448,9 +12558,9 @@ impl Analyzer<'_> {
             return false;
         }
         self.enum_variants.contains_key(path)
-            || expected.is_some_and(|ty| self.enums.iter().any(|(name, instance)| {
+            || expected.is_some_and(|ty| self.enums.values().any(|instance| {
                 instance.ty == ty && instance.variants.iter().any(|variant| {
-                    enum_variant_path_matches(path, name, &variant.name)
+                    enum_variant_path_matches(path, &instance.name, &variant.name)
                 })
             }))
     }
@@ -20419,6 +20529,29 @@ fn ast_operator_spelling(operator: severian_ast::OperatorSyntax) -> &'static str
         .unwrap_or("<source-defined operator>")
 }
 
+// Before name resolution, `Type[T].member` has the same syntax as indexing.
+// Interpret it as a type application only after its owner resolves to an enum.
+fn enum_type_application(expression: &AstExpression) -> Option<(String, Vec<TypeAnnotation>)> {
+    match &expression.kind {
+        AstExpressionKind::TypeApplication { callee, arguments } => Some((callable_path(callee)?, arguments.clone())),
+        AstExpressionKind::Index { object, index } => {
+            let arguments = match &index.kind {
+                AstExpressionKind::Tuple(values) => values.as_slice(),
+                _ => std::slice::from_ref(index.as_ref()),
+            };
+            Some((callable_path(object)?, arguments.iter().map(enum_type_argument).collect::<Option<Vec<_>>>()?))
+        }
+        _ => None,
+    }
+}
+
+fn enum_type_argument(expression: &AstExpression) -> Option<TypeAnnotation> {
+    if let Some((name, arguments)) = enum_type_application(expression) {
+        return Some(TypeAnnotation::named(name, arguments, expression.span));
+    }
+    callable_path(expression).map(|name| TypeAnnotation::named(name, Vec::new(), expression.span))
+}
+
 fn class_application(expression: &AstExpression) -> Option<(String, &[TypeAnnotation])> {
     let AstExpressionKind::TypeApplication { callee, arguments } = &expression.kind else {
         return None;
@@ -22648,6 +22781,54 @@ def interpolate(text: string) -> string:
             }
         ));
         severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn generic_enums_specialize_payloads_and_preserve_variants() {
+        let (program, _) = analyze_source("enum Exit[V]:\n    Finish(value: V)\n    Dead\ndef integer() -> Exit[int]:\n    return Exit[int].Finish(7)\ndef text() -> Exit[string]:\n    return Exit[string].Finish(\"ok\")\ndef dead() -> Exit[int]:\n    return Exit[int].Dead\ndef read(exit: Exit[int]) -> int:\n    match exit:\n        case Finish:\n            return value\n        case Dead:\n            return 0\n");
+        let classes = &program.modules[0].classes;
+        assert_eq!(classes.len(), 2);
+        assert_ne!(classes[0].id, classes[1].id);
+        assert_ne!(classes[0].fields[1].ty, classes[1].fields[1].ty);
+        assert!(classes.iter().all(|class| class.variants == vec![vec![1], vec![]]));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn generic_enums_accept_multiple_parameters_nested_payloads_and_context() {
+        analyze_source("class Box[T]:\n    value: T\nenum Choice[T, B]:\n    Value(value: Box[T])\n    Block(block: B)\ndef choose() -> Choice[int, string]:\n    return Choice[int, string].Value(Box[int](3))\ndef contextual() -> Choice[int, string]:\n    return Block(\"body\")\n");
+    }
+
+    #[test]
+    fn generic_enums_support_cfg_payloads_and_default_type_parameters() {
+        let (program, _) = analyze_source("class Edge[V]:\n    value: V\nenum Exit[V = int]:\n    Jump(edge: Edge[V])\n    Finish(value: V | None)\n    Fields(values: list[V])\n    Dead\ndef jump() -> Exit[int]:\n    return Exit[int].Jump(Edge[int](1))\ndef finish() -> Exit[int]:\n    return Exit[int].Finish(None)\ndef fields() -> Exit[int]:\n    return Exit[int].Fields([1, 2])\ndef default() -> Exit:\n    return Dead\n");
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn generic_enums_use_enclosing_class_parameters() {
+        let (program, _) = analyze_source("enum Exit[V]:\n    Finish(value: V)\nclass Builder[V]:\n    value: V\n    def finish() -> Exit[V]:\n        return Exit[V].Finish(value)\ndef selected() -> Exit[int]:\n    return Builder[int](3).finish()\n");
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn generic_enums_do_not_change_indexed_member_access() {
+        analyze_source("class Item[T]:\n    value: T\nenum Exit[V]:\n    Finish(value: V)\ndef read(items: list[Item[int]]) -> int:\n    return items[0].value\n");
+    }
+
+    #[test]
+    fn generic_enums_reject_wrong_payload_arity_and_specialization() {
+        let context = severian_bootstrap::load().unwrap();
+        for body in [
+            "def bad() -> Exit[int]:\n    return Exit[int](0, 1)\n",
+            "def bad() -> Exit[int]:\n    return Exit[int].Finish(\"wrong\")\n",
+            "def bad() -> Exit[int]:\n    return Exit[int, string].Finish(1)\n",
+            "def bad() -> Exit[int]:\n    return Exit[string].Finish(\"wrong\")\n",
+        ] {
+            let source = SourceFile::virtual_source("bad-enum.sev", &format!("enum Exit[V]:\n    Finish(value: V)\n{body}"));
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            assert!(analyze(&ast, &context.types).is_err(), "{body}");
+        }
     }
 
     #[test]

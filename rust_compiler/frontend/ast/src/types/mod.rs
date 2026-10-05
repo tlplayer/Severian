@@ -506,6 +506,35 @@ pub struct EnumVariant {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDeclaration {
     pub name: String,
+    pub type_parameters: Vec<String>,
+    pub type_parameter_defaults: Vec<Option<TypeAnnotation>>,
+    pub constraints: Vec<GenericConstraint>,
     pub variants: Vec<EnumVariant>,
     pub span: Span,
+}
+
+impl EnumDeclaration {
+    /// Storage specialization shares the class type-substitution machinery.
+    /// Variant boundaries remain on the enum and are restored in HIR.
+    pub fn storage_class(&self) -> ClassDeclaration {
+        let mut fields = vec![PropertyDeclaration {
+            name: "__tag".into(), annotation: TypeAnnotation::named("int", Vec::new(), self.span),
+            default: None, constraints: Vec::new(), span: self.span,
+        }];
+        for (ordinal, variant) in self.variants.iter().enumerate() {
+            for field in &variant.fields {
+                let mut field = field.clone();
+                field.name = format!("__variant_{ordinal}_{}", field.name);
+                fields.push(field);
+            }
+        }
+        ClassDeclaration {
+            decorators: Vec::new(), name: self.name.clone(), primitive: false,
+            type_parameters: self.type_parameters.clone(),
+            type_parameter_defaults: self.type_parameter_defaults.clone(),
+            constraints: self.constraints.clone(), traits: Vec::new(), aliases: Vec::new(),
+            fields, constructors: Vec::new(), methods: Vec::new(), sentences: Vec::new(),
+            operators: Vec::new(), tests: Vec::new(), span: self.span,
+        }
+    }
 }

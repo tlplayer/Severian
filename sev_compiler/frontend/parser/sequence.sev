@@ -14,7 +14,7 @@ class GrammarContext:
     parent: B | None = None
     body: B = Block()
     previous: B | None = None
-    fields: dict[string, LiteralValue] = {}
+    fields: map[string, LiteralValue] = {}
     span: Span | None = None
     # Explicit receivers allow grammars owned by traits other than B. Block
     # grammars may use the enclosing block when no explicit receiver is set.

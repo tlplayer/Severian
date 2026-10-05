@@ -29,12 +29,12 @@ This is to allow complexity sorting
 ```sev
 
 enum BigO:
-    constant
-    linear
-    quadratic
-    exponential
-    combinatorial
-    undefined
+    constant(0) {0}
+    linear(1)
+    quadratic(2)
+    undefined(3)
+    exponential(4)
+    combinatorial(5)
 
 class FunctionComplexity:
     time: BigO = undefined
@@ -44,15 +44,15 @@ class FunctionComplexity:
 
 trait F: B
     complexity: FunctionComplexity | absent
-
+    params: list[]
 
 #Example of a well formed function
 
 def foobar(a:int) -> int | Error with
 {
     fix 0 <= a <= 100 
-    F.complexity.space := BigO.constant
-    F.complexity.time := BigO.constant
+    foobar.complexity.space := BigO.constant
+    foobar.complexity.time := BigO.constant
 }:
     return a
 

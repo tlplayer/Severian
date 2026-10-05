@@ -208,6 +208,7 @@ pub struct ProgramIndex {
     pub packages: BTreeMap<PackageId, Vec<ModuleId>>,
     pub modules: BTreeMap<ModuleId, ModuleScope>,
     pub definitions: BTreeMap<DefId, Definition>,
+    pub type_aliases: BTreeMap<DefId, severian_ast::TypeDeclaration>,
     pub exports: BTreeMap<ModuleId, ExportMap>,
     pub methods: BTreeMap<String, Vec<MethodDecl>>,
     pub fields: BTreeMap<String, Vec<FieldDecl>>,
@@ -279,6 +280,7 @@ pub fn import_index(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diagnost
     let mut index = collect_declarations(&graph)
         .map_err(|diagnostic| module_graph.contextualize(diagnostic, "import resolution"))?;
     resolve_imports(&graph, &mut index);
+    resolve_declaration_aliases(&graph, &mut index)?;
     Ok(index)
 }
 
@@ -312,6 +314,7 @@ fn analyze_package_impl(
     let mut index = collect_declarations(module_graph)?;
     let plan = imports::resolve_required_imports(module_graph, &index, imports::collect_import_requirements(module_graph));
     imports::apply_import_plan(&mut index, &plan);
+    resolve_declaration_aliases(module_graph, &mut index)?;
     for module in index.modules.values() {
         for (name, resolution) in &module.scope.bindings {
             if let Resolution::Ambiguous(ids) = resolution {
@@ -636,6 +639,7 @@ fn analyze_package_impl(
             &test_function_ids,
             &package_classes,
             &package_enums,
+            Some(&index),
             &package_trait_names,
             &package_lists,
             &package_constants,
@@ -839,42 +843,7 @@ fn collect_package_classes(
         .flat_map(|module| {
             module.ast.items.iter().filter_map(move |item| match item {
                 Item::Class(declaration) => Some((module.id, declaration.clone())),
-                Item::Enum(declaration) => {
-                    let mut fields = vec![severian_ast::PropertyDeclaration {
-                        name: "__tag".into(),
-                        annotation: TypeAnnotation::named("int", Vec::new(), declaration.span),
-                        default: None,
-                        constraints: Vec::new(),
-                        span: declaration.span,
-                    }];
-                    for (ordinal, variant) in declaration.variants.iter().enumerate() {
-                        for field in &variant.fields {
-                            let mut field = field.clone();
-                            field.name = format!("__variant_{ordinal}_{}", field.name);
-                            fields.push(field);
-                        }
-                    }
-                    Some((
-                        module.id,
-                        severian_ast::ClassDeclaration {
-                            decorators: Vec::new(),
-                            name: declaration.name.clone(),
-                            primitive: false,
-                            type_parameters: Vec::new(),
-                            type_parameter_defaults: Vec::new(),
-                            constraints: Vec::new(),
-                            traits: Vec::new(),
-                            aliases: Vec::new(),
-                            fields,
-                            constructors: Vec::new(),
-                            methods: Vec::new(),
-                            sentences: Vec::new(),
-                            operators: Vec::new(),
-                            tests: Vec::new(),
-                            span: declaration.span,
-                        },
-                    ))
-                }
+                Item::Enum(declaration) => Some((module.id, declaration.storage_class())),
                 _ => None,
             })
         })
@@ -1054,6 +1023,131 @@ fn install_primitive_class_operators(
     Ok(())
 }
 
+/// A declaration alias adds a spelling, not a second nominal type or callable.
+/// Resolve before collecting type layouts and function specializations so every
+/// consumer sees the original DefId, including facade and namespace imports.
+fn resolve_declaration_aliases(graph: &ModuleGraph, index: &mut ProgramIndex) -> Result<(), Diagnostic> {
+    let aliases = graph.modules.iter().flat_map(|module| {
+        module.ast.items.iter().filter_map(move |item| {
+            let Item::Type(alias) = item else { return None; };
+            if !alias.type_parameters.is_empty() { return None; }
+            let target = alias.definition.as_ref()?.simple_name()?;
+            Some((module.id, alias.name.clone(), target.to_owned(), alias.span))
+        })
+    }).filter_map(|(module, name, target, span)| {
+        index.definitions.values().find(|definition| {
+            definition.module == module && definition.name == name && matches!(definition.kind, DefKind::Type)
+        }).map(|definition| (definition.id, (module, target, span)))
+    }).collect::<BTreeMap<_, _>>();
+
+    fn canonical(
+        resolution: &Resolution, index: &ProgramIndex,
+        aliases: &BTreeMap<DefId, (ModuleId, String, severian_source::Span)>,
+        active: &mut BTreeSet<DefId>, cache: &mut BTreeMap<DefId, Resolution>,
+    ) -> Result<Resolution, Diagnostic> {
+        let Resolution::Def(id) = resolution else { return Ok(resolution.clone()); };
+        let Some((module, target, span)) = aliases.get(id) else { return Ok(resolution.clone()); };
+        if let Some(resolved) = cache.get(id) { return Ok(resolved.clone()); }
+        if !active.insert(*id) {
+            return Err(Diagnostic::new("E000204", format!("cyclic declaration alias `{}`", index.definitions[id].name), Some(*span)));
+        }
+        let mut parts = target.split('.');
+        let head = parts.next().expect("a named alias has a target");
+        let mut resolved = index.modules.get(module).and_then(|module| module.scope.bindings.get(head)).cloned();
+        for member in parts {
+            resolved = match resolved {
+                Some(ref resolution) => match canonical(resolution, index, aliases, active, cache)? {
+                    Resolution::Module(module) => index.exports.get(&module).and_then(|exports| exports.get(member)).cloned(),
+                    _ => None,
+                },
+                None => None,
+            };
+        }
+        let result = match resolved {
+            Some(resolution) => canonical(&resolution, index, aliases, active, cache)?,
+            // Structural and builtin type aliases are not declaration bindings.
+            None => resolution.clone(),
+        };
+        active.remove(id);
+        cache.insert(*id, result.clone());
+        Ok(result)
+    }
+
+    let mut cache = BTreeMap::new();
+    for id in aliases.keys() {
+        canonical(&Resolution::Def(*id), index, &aliases, &mut BTreeSet::new(), &mut cache)?;
+    }
+    for resolution in index.modules.values_mut().flat_map(|module| module.scope.bindings.values_mut())
+        .chain(index.exports.values_mut().flat_map(|exports| exports.values_mut()))
+    {
+        if let Resolution::Def(id) = resolution {
+            if let Some(target) = cache.get(id) { *resolution = target.clone(); }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn internal_type_name(module: ModuleId, name: &str) -> String {
+    format!("source.{:032x}.{name}", module.0)
+}
+
+/// Expand in the alias's lexical scope, preserving nominal declaration names.
+/// Type arguments supplied by a caller retain the caller's lexical scope.
+pub(crate) fn expand_type_alias(annotation: &TypeAnnotation, module: ModuleId, index: &ProgramIndex) -> Result<TypeAnnotation, Diagnostic> {
+    fn lookup<'a>(name: &str, module: ModuleId, index: &'a ProgramIndex) -> Option<&'a Resolution> {
+        let mut parts = name.split('.');
+        let mut result = index.modules.get(&module)?.scope.bindings.get(parts.next()?)?;
+        for part in parts {
+            let Resolution::Module(module) = result else { return None; };
+            result = index.exports.get(module)?.get(part)?;
+        }
+        Some(result)
+    }
+    fn expand(annotation: &TypeAnnotation, module: ModuleId, index: &ProgramIndex, qualify: bool, active: &mut BTreeSet<DefId>) -> Result<TypeAnnotation, Diagnostic> {
+        let kind = match &annotation.kind {
+            TypeAnnotationKind::Named { name, arguments } => {
+                let resolved = lookup(name, module, index);
+                if let Some(Resolution::Def(id)) = resolved {
+                    if let Some(alias) = index.type_aliases.get(id).filter(|alias| alias.definition.is_some()) {
+                        if alias.type_parameters.len() != arguments.len() {
+                            return Err(Diagnostic::new("E000204", format!("alias `{name}` expects {} type argument(s), received {}", alias.type_parameters.len(), arguments.len()), Some(annotation.span)));
+                        }
+                        let mut substitution = BTreeMap::new();
+                        for (parameter, argument) in alias.type_parameters.iter().zip(arguments) {
+                            substitution.insert(parameter.clone(), expand(argument, module, index, true, active)?);
+                        }
+                        if !active.insert(*id) {
+                            return Err(Diagnostic::new("E000204", format!("cyclic type alias `{name}`"), Some(annotation.span)));
+                        }
+                        let target = crate::substitute_type_annotation(alias.definition.as_ref().unwrap(), &substitution);
+                        let result = expand(&target, index.definitions[id].module, index, true, active)?;
+                        active.remove(id);
+                        return Ok(result);
+                    }
+                }
+                let name = if qualify {
+                    match resolved {
+                        Some(Resolution::Def(id)) if matches!(index.definitions[id].kind, DefKind::Class(_) | DefKind::Type) => {
+                            let definition = &index.definitions[id];
+                            internal_type_name(definition.module, &definition.name)
+                        }
+                        _ => name.clone(),
+                    }
+                } else { name.clone() };
+                TypeAnnotationKind::Named { name, arguments: arguments.iter().map(|argument| expand(argument, module, index, qualify, active)).collect::<Result<_, _>>()? }
+            }
+            TypeAnnotationKind::Union(members) => TypeAnnotationKind::Union(members.iter().map(|member| expand(member, module, index, qualify, active)).collect::<Result<_, _>>()?),
+            TypeAnnotationKind::Function { parameters, result } => TypeAnnotationKind::Function {
+                parameters: parameters.iter().map(|parameter| expand(parameter, module, index, qualify, active)).collect::<Result<_, _>>()?,
+                result: Box::new(expand(result, module, index, qualify, active)?),
+            },
+            kind => kind.clone(),
+        };
+        Ok(TypeAnnotation { kind, span: annotation.span })
+    }
+    expand(annotation, module, index, false, &mut BTreeSet::new())
+}
+
 fn visible_class_names(
     source: ModuleId,
     class: &PackageClass,
@@ -1183,6 +1277,10 @@ fn resolve_package_type(
     lists: &[PackageList],
     index: &ProgramIndex,
 ) -> Result<TypeId, Diagnostic> {
+    let expanded = expand_type_alias(annotation, module, index)?;
+    if expanded != *annotation {
+        return resolve_package_type(types, &expanded, module, classes, lists, index);
+    }
     if let Some(("array", [element])) = annotation.named_parts() {
         let element = resolve_package_type(types, element, module, classes, lists, index)?;
         return types.instantiate_memory_buffer(element).map_err(|error| {
@@ -1475,7 +1573,7 @@ fn package_class_for_lookup<'a>(
     name: &str,
 ) -> Option<&'a PackageClass> {
     classes.iter().find(|class| {
-        class
+        name == internal_type_name(class.module, &class.declaration.name) || class
             .lookups
             .get(&module)
             .is_some_and(|lookups| lookups.iter().any(|lookup| lookup == name))
@@ -1687,7 +1785,7 @@ fn imported_function_bindings(
             }
             resolution => {
                 for definition in resolution_definitions(resolution) {
-                    if definition.module != module.0 {
+                    if definition.module != module.0 || index.definitions[&definition].name != *name {
                         for substitution in function_instances(definition, index, specializations) {
                             stubs.push(FunctionBinding {
                                 lookup: name.clone(),
@@ -2086,13 +2184,11 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                         id,
                     )
                 }
-                Item::Type(declaration) => item_identity(
-                    module.package,
-                    module.id,
-                    "type",
-                    &declaration.name,
-                    DefKind::Type,
-                ),
+                Item::Type(declaration) => {
+                    let identity = item_identity(module.package, module.id, "type", &declaration.name, DefKind::Type);
+                    index.type_aliases.insert(identity.2, declaration.clone());
+                    identity
+                },
                 Item::Trait(declaration) => item_identity(
                     module.package,
                     module.id,
@@ -2924,6 +3020,136 @@ mod export_visibility_tests {
         std::fs::write(&entry, "import __foo from \"foo.sev\"\n").unwrap();
         let graph = severian_modules::resolve(&entry).unwrap();
         assert_eq!(import_index(&graph).unwrap_err().code, "E000124");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod generic_enum_tests {
+    use super::*;
+
+    #[test]
+    fn generic_enums_keep_imported_alias_identity_and_payload_types() {
+        let root = std::env::temp_dir().join(format!("sev-generic-enum-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("types.sev"), "enum Choice[T, B]:\n    Value(value: T)\n    Block(block: B)\ndef make() -> Choice[int, string]:\n    return Choice[int, string].Value(3)\n").unwrap();
+        std::fs::write(root.join("main.sev"), "import Choice as Pick from \"types.sev\"\ndef choose() -> Pick[int, string]:\n    return Pick[int, string].Block(\"body\")\n").unwrap();
+        let graph = severian_modules::resolve(&root.join("main.sev")).unwrap();
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        let results = typed.hir.modules.iter().flat_map(|module| &module.functions)
+            .filter(|function| matches!(function.name.as_str(), "choose" | "make"))
+            .map(|function| function.result.ty).collect::<BTreeSet<_>>();
+        assert_eq!(results.len(), 1);
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod declaration_alias_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    fn graph(files: &[(&str, &str)]) -> (std::path::PathBuf, ModuleGraph) {
+        let root = std::env::temp_dir().join(format!("sev-alias-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&root).unwrap();
+        for (name, text) in files { std::fs::write(root.join(name), text).unwrap(); }
+        let graph = severian_modules::resolve(&root.join(files[0].0)).unwrap();
+        (root, graph)
+    }
+
+    #[test]
+    fn declaration_alias_preserves_local_type_constructor_and_method() {
+        let (root, graph) = graph(&[("main.sev", "class DefinitionId:\n    value: int\n    def read() -> int:\n        return value\nDefinitionId as DefinitionID\nDefinitionID as Identity\nclass Holder:\n    definition: Identity\ndef selected() -> int:\n    identity = DefinitionID(7)\n    holder = Holder(identity)\n    selected = holder.definition\n    return selected.read()\n")]);
+        let index = import_index(&graph).unwrap();
+        let names = &index.modules[&graph.modules[0].id].scope.bindings;
+        assert_eq!(names["DefinitionId"], names["DefinitionID"]);
+        assert_eq!(names["DefinitionId"], names["Identity"]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        assert_eq!(typed.hir.modules.iter().flat_map(|module| &module.classes).filter(|class| class.name == "DefinitionId").count(), 1);
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn declaration_alias_reexports_functions_and_generic_constructors() {
+        let (root, graph) = graph(&[
+            ("main.sev", "import * from \"facade.sev\" as api\ndef selected() -> int:\n    container = api.Container[int](7)\n    value = container.value\n    return api.apply(value)\n"),
+            ("facade.sev", "import * from \"origin.sev\"\nBox as Container\noperation as apply\n"),
+            ("origin.sev", "class Box[T]:\n    value: T\ndef operation(value: int) -> int:\n    return value + 1\n"),
+        ]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn declaration_alias_preserves_local_function_identity() {
+        let (root, graph) = graph(&[("main.sev", "def operation(value: int) -> int:\n    return value + 1\noperation as apply\ndef selected() -> int:\n    return apply(7)\n")]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        assert_eq!(typed.hir.modules.iter().flat_map(|module| &module.functions).filter(|function| function.name == "operation").count(), 1);
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn applied_alias_resolves_imported_cfg_field_and_constructor() {
+        let (root, graph) = graph(&[
+            ("main.sev", "import CfgTerminator from \"aliases.sev\"\nclass Block:\n    terminator: CfgTerminator | None = None\ndef make() -> CfgTerminator:\n    return CfgTerminator(7, \"grammar\", true)\ndef read(value: CfgTerminator) -> int:\n    return value.exit\n"),
+            ("aliases.sev", "import \"cfg.sev\" as cfg\ncfg.Terminator[int, string, bool] as CfgTerminator\n"),
+            ("cfg.sev", "class Terminator[V, G, Span]:\n    exit: V\n    grammar: G\n    span: Span\n"),
+        ]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        let make = typed.hir.modules.iter().flat_map(|module| &module.functions).find(|function| function.name == "make").unwrap();
+        let read = typed.hir.modules.iter().flat_map(|module| &module.functions).find(|function| function.name == "read").unwrap();
+        assert_eq!(make.result.ty, read.parameters[0].contract.ty);
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn applied_alias_arguments_keep_their_declaring_scope_through_reexports() {
+        let (root, graph) = graph(&[
+            ("main.sev", "import Again from \"facade.sev\"\nclass ValueId:\n    value: string\ndef read(value: Again) -> int:\n    field = value.item\n    return field.value\n"),
+            ("facade.sev", "import Wrapped from \"aliases.sev\"\nWrapped as Again\n"),
+            ("aliases.sev", "import \"provider.sev\" as cfg\nimport ValueId from \"provider.sev\"\ncfg.Box[ValueId] as Wrapped\n"),
+            ("provider.sev", "class ValueId:\n    value: int\nclass Box[T]:\n    item: T\n"),
+        ]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn applied_alias_preserves_cfg_enum_variants_in_construction_and_matching() {
+        let (root, graph) = graph(&[
+            ("main.sev", "import CfgExit, CfgTerminator from \"aliases.sev\"\ndef make() -> CfgTerminator:\n    exit = CfgExit.Finish(7)\n    return CfgTerminator(exit, \"grammar\", true)\ndef read(exit: CfgExit) -> int:\n    match exit:\n        case Finish:\n            return value\n        case Dead:\n            return 0\n"),
+            ("aliases.sev", "import \"cfg.sev\" as cfg\ncfg.Exit[int] as CfgExit\ncfg.Terminator[int, string, bool] as CfgTerminator\n"),
+            ("cfg.sev", "enum Exit[V]:\n    Finish(value: V)\n    Dead\nclass Terminator[V, G, Span]:\n    exit: Exit[V]\n    grammar: G\n    span: Span\n"),
+        ]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn applied_alias_parameters_and_cycle_diagnostics() {
+        let (root, graph) = graph(&[("main.sev", "class Box[T]:\n    value: T\nBox[T] as Wrapped[T]\ndef make() -> Wrapped[int]:\n    return Wrapped[int](7)\n")]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        let (root, graph) = self::graph(&[("main.sev", "class Box[T]:\n    value: T\nBox[Cycle] as Cycle\ndef bad(value: Cycle):\n    return\n")]);
+        let error = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap_err();
+        assert!(error.message.contains("cyclic type alias"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn declaration_alias_cycles_report_the_alias() {
+        let (root, graph) = graph(&[("main.sev", "B as A\nA as B\ndef main():\n    return\n")]);
+        let error = import_index(&graph).unwrap_err();
+        assert!(error.message.contains("cyclic declaration alias"));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

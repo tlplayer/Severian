@@ -21,7 +21,7 @@ class SourceFile:
     path: string
     text: string
     #Know what files and symbols are coming from outside the file
-    imports: dict[string, list[string]] = dict[string, list[string]]()
+    imports: map[string, list[string]] = {}
     characters: list[string]
     # Derived lazily, shared by repeated tooling span queries, never archived.
     byte_offsets: list[int] = []

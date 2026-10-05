@@ -165,11 +165,17 @@ impl Uses {
                 });
             }
             Item::Enum(e) => {
-                for v in &e.variants {
-                    for p in &v.fields {
-                        self.property(p);
+                self.scope(e.type_parameters.clone(), |s| {
+                    s.constraints(&e.constraints);
+                    for default in e.type_parameter_defaults.iter().flatten() {
+                        s.annotation(default);
                     }
-                }
+                    for v in &e.variants {
+                        for p in &v.fields {
+                            s.property(p);
+                        }
+                    }
+                });
             }
             Item::Class(c) => {
                 self.decorators(&c.decorators);
