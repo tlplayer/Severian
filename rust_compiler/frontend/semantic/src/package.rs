@@ -118,6 +118,7 @@ pub struct TraitDecl {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassDecl {
+    pub primitive: bool,
     pub type_parameters: Vec<String>,
     pub fields: Vec<severian_ast::PropertyDeclaration>,
     pub constructors: Vec<severian_ast::FunctionDeclaration>,
@@ -1129,14 +1130,33 @@ pub(crate) fn expand_type_alias(annotation: &TypeAnnotation, module: ModuleId, i
                     match resolved {
                         Some(Resolution::Def(id)) if matches!(index.definitions[id].kind, DefKind::Class(_) | DefKind::Type) => {
                             let definition = &index.definitions[id];
-                            internal_type_name(definition.module, &definition.name)
+                            if matches!(&definition.kind, DefKind::Class(class) if class.primitive && class.type_parameters.is_empty()) {
+                                definition.name.clone()
+                            } else {
+                                internal_type_name(definition.module, &definition.name)
+                            }
                         }
                         _ => name.clone(),
                     }
                 } else { name.clone() };
                 TypeAnnotationKind::Named { name, arguments: arguments.iter().map(|argument| expand(argument, module, index, qualify, active)).collect::<Result<_, _>>()? }
             }
-            TypeAnnotationKind::Union(members) => TypeAnnotationKind::Union(members.iter().map(|member| expand(member, module, index, qualify, active)).collect::<Result<_, _>>()?),
+            TypeAnnotationKind::Union(members) => {
+                let mut flattened = Vec::new();
+                for member in members {
+                    let expanded = expand(member, module, index, qualify, active)?;
+                    let members = match expanded.kind {
+                        TypeAnnotationKind::Union(members) => members,
+                        _ => vec![expanded],
+                    };
+                    for member in members {
+                        if !flattened.iter().any(|known| annotation_matches(known, &member)) {
+                            flattened.push(member);
+                        }
+                    }
+                }
+                TypeAnnotationKind::Union(flattened)
+            },
             TypeAnnotationKind::Function { parameters, result } => TypeAnnotationKind::Function {
                 parameters: parameters.iter().map(|parameter| expand(parameter, module, index, qualify, active)).collect::<Result<_, _>>()?,
                 result: Box::new(expand(result, module, index, qualify, active)?),
@@ -1146,6 +1166,21 @@ pub(crate) fn expand_type_alias(annotation: &TypeAnnotation, module: ModuleId, i
         Ok(TypeAnnotation { kind, span: annotation.span })
     }
     expand(annotation, module, index, false, &mut BTreeSet::new())
+}
+
+/// Named fundamental families retain the bootstrap's concrete default storage.
+/// Their expanded member set is used for generic bounds, never trait admission.
+pub(crate) fn primitive_family_storage(original: &TypeAnnotation, expanded: &TypeAnnotation, module: ModuleId, index: &ProgramIndex, types: &severian_universal::TypeContext) -> Option<TypeId> {
+    let TypeAnnotationKind::Union(members) = &expanded.kind else { return None; };
+    let name = original.simple_name()?;
+    let definitions = generic::resolve_path(module, name, index);
+    let canonical = match definitions.as_slice() {
+        [id] => index.definitions[id].name.as_str(),
+        _ => name,
+    };
+    let ty = types.resolve_name(canonical)?;
+    types.primitive(ty)?;
+    members.iter().all(|member| member.simple_name().and_then(|name| types.resolve_name(name)).is_some_and(|member| types.primitive(member).is_some())).then_some(ty)
 }
 
 fn visible_class_names(
@@ -1279,6 +1314,7 @@ fn resolve_package_type(
 ) -> Result<TypeId, Diagnostic> {
     let expanded = expand_type_alias(annotation, module, index)?;
     if expanded != *annotation {
+        if let Some(ty) = primitive_family_storage(annotation, &expanded, module, index, types) { return Ok(ty); }
         return resolve_package_type(types, &expanded, module, classes, lists, index);
     }
     if let Some(("array", [element])) = annotation.named_parts() {
@@ -2211,6 +2247,7 @@ fn collect_declarations(module_graph: &ModuleGraph) -> Result<ProgramIndex, Diag
                     "class",
                     &declaration.name,
                     DefKind::Class(ClassDecl {
+                        primitive: declaration.primitive,
                         type_parameters: declaration.type_parameters.clone(),
                         fields: declaration.fields.clone(),
                         constructors: declaration.constructors.clone(),
@@ -3143,6 +3180,44 @@ mod declaration_alias_tests {
         let error = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap_err();
         assert!(error.message.contains("cyclic type alias"));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn primitive_union_keeps_primitive_identity_and_flattens_families() {
+        let (root, graph) = graph(&[("main.sev", "trait Integer:\n    bits: u16\nclass i8: Integer :\n    bits: u16 = 8\nclass u8: Integer :\n    bits: u16 = 8\nunion signed_int:\n    i8\n    i16\nunion unsigned_int:\n    u8\nunion int:\n    signed_int\n    unsigned_int\n    i8\nint as Number\ndef keep(value: Number) -> int:\n    return value\n")]);
+        let index = import_index(&graph).unwrap();
+        let module = graph.modules[0].id;
+        let span = item_span(&graph.modules[0].ast.items[0]);
+        let annotation = TypeAnnotation::named("int", Vec::new(), span);
+        let expanded = expand_type_alias(&annotation, module, &index).unwrap();
+        let TypeAnnotationKind::Union(members) = expanded.kind else { panic!("expected primitive union") };
+        assert_eq!(members.iter().map(|member| member.simple_name().unwrap()).collect::<Vec<_>>(), ["i8", "i16", "u8"]);
+        let universal = severian_bootstrap::load().unwrap();
+        let typed = analyze_package(&graph, &universal).unwrap();
+        let function = typed.hir.modules.iter().flat_map(|module| &module.functions).find(|function| function.name == "keep").unwrap();
+        assert_eq!(Some(function.parameters[0].contract.ty), universal.types.resolve_name("int"));
+        assert_eq!(function.result.ty, function.parameters[0].contract.ty);
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn primitive_union_bound_accepts_only_listed_types() {
+        let family = "trait Integer:\n    bits: u16\nclass i8: Integer :\n    bits: u16 = 8\nclass u8: Integer :\n    bits: u16 = 8\nclass Custom: Integer\n    bits: u16\nunion signed_int:\n    i8\n    i16\ndef keep[T: signed_int](value: T) -> T:\n    return value\n";
+        for (name, accepted) in [("i8", true), ("u8", false), ("Custom", false)] {
+            let text = format!("{family}def selected(value: {name}) -> {name}:\n    return keep(value)\n");
+            let (root, graph) = graph(&[("main.sev", &text)]);
+            let result = analyze_package(&graph, &severian_bootstrap::load().unwrap());
+            if accepted {
+                let typed = result.unwrap();
+                severian_mir::build(&typed.hir).unwrap();
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(error.code, "E000217", "{error:?}");
+                assert!(error.message.contains("does not satisfy `signed_int`"));
+            }
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

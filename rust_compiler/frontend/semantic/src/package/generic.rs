@@ -1001,11 +1001,26 @@ fn validate_specializations(
                         Some(bound.span),
                     ));
                 };
-                let satisfied = types
-                    .resolve_name(actual_name)
-                    .is_some_and(|actual| satisfies_bound(actual, bound_name, index, types))
-                    || source_class_satisfies_bound(actual_name, bound_name, module_graph, index)
-                    || source_trait_satisfies_bound(actual_name, bound_name, index);
+                let expanded = super::expand_type_alias(bound, index.definitions[definition].module, index)?;
+                let satisfied = if let TypeAnnotationKind::Union(members) = &expanded.kind {
+                    // Closed membership is nominal, not a capability/trait test.
+                    let actual = types.resolve_name(actual_name);
+                    members.iter().any(|member| {
+                        let Some(name) = member.simple_name() else { return false; };
+                        if let Some(actual) = actual {
+                            return types.resolve_name(name) == Some(actual);
+                        }
+                        resolve_path(index.definitions[definition].module, actual_name, index).iter().any(|id| {
+                            let declaration = &index.definitions[id];
+                            super::internal_type_name(declaration.module, &declaration.name) == name
+                        })
+                    })
+                } else {
+                    types.resolve_name(actual_name)
+                        .is_some_and(|actual| satisfies_bound(actual, bound_name, index, types))
+                        || source_class_satisfies_bound(actual_name, bound_name, module_graph, index)
+                        || source_trait_satisfies_bound(actual_name, bound_name, index)
+                };
                 if satisfied {
                     continue;
                 }
@@ -2308,7 +2323,7 @@ fn validate_explicit_type(
     Ok(())
 }
 
-fn resolve_path(module: ModuleId, path: &str, index: &ProgramIndex) -> Vec<DefId> {
+pub(super) fn resolve_path(module: ModuleId, path: &str, index: &ProgramIndex) -> Vec<DefId> {
     let mut parts = path.split('.');
     let Some(first) = parts.next() else {
         return Vec::new();

@@ -2424,7 +2424,10 @@ impl Analyzer<'_> {
     fn resolve_source_type(&mut self, annotation: &TypeAnnotation) -> Result<TypeId, Diagnostic> {
         if let (Some(index), Some(module)) = (self.package_index, self.type_resolution_module) {
             let expanded = package::expand_type_alias(annotation, module, index)?;
-            if expanded != *annotation { return self.resolve_source_type(&expanded); }
+            if expanded != *annotation {
+                if let Some(ty) = package::primitive_family_storage(annotation, &expanded, module, index, self.types) { return Ok(ty); }
+                return self.resolve_source_type(&expanded);
+            }
         }
         if let Some(("array", [element])) = annotation.named_parts() {
             let element = self.resolve_source_type(element)?;
