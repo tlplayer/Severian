@@ -4,7 +4,7 @@ launcher=$(readlink -f -- "$0")
 repository=$(dirname -- "$(dirname -- "$launcher")")
 if [ "${1:-}" = update ]; then
     shift
-    exec python3 "$repository/tools/compiler/update.py" "$@"
+    exec "$repository/rust_compiler/bootstrap/update" "$@"
 fi
 compiler="$repository/package.pkg/release/sev"
 if [ ! -x "$compiler" ]; then

@@ -18,3 +18,7 @@ severian-universal = { path = "../universal" }
 
 [lib]
 path = "src/lib.rs"
+
+[[bin]]
+name = "severian-update"
+path = "update.rs"

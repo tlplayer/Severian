@@ -61,8 +61,8 @@ def record_inputs(files: list[source.SourceFile], resolution: package.Resolution
                     roots.append(directory)
                 break
             directory = path.dirname(directory)
-    # Analysis and MLIR emission do not require a hosted C provider or the
-    # native ownership pass configuration. Record these only when linking.
+    # Analysis and MLIR emission do not require hosted C providers.
+    # Record native provider inputs only when linking.
     if native:
         for resolved in resolution.packages:
             if resolved.archive_path != "":
@@ -86,8 +86,6 @@ def record_inputs(files: list[source.SourceFile], resolution: package.Resolution
                 records.append(package.toml_quote(location) + " = " + package.toml_quote(package.digest(location)))
         quality_runtime = package.canonical(sysroot + "/library/package/diagnostic/runtime/quality.c")
         records.append(package.toml_quote(quality_runtime) + " = " + package.toml_quote(package.digest(quality_runtime) if os.is_file(quality_runtime) else "missing"))
-        ownership_pipeline = package.canonical(sysroot + "/sev_compiler/mir/ownership/mlir.pipeline")
-        records.append(package.toml_quote(ownership_pipeline) + " = " + package.toml_quote(package.digest(ownership_pipeline)))
     package.write_text(destination + ".inputs", records.join("\n") + "\n")
 
 

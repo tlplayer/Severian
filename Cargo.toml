@@ -1,8 +1,5 @@
 [workspace]
 members = [
-    # Repository health and developer automation
-    "tools/health",
-
     # Universal semantic authority
     "rust_compiler/universal",
     "rust_compiler/target",

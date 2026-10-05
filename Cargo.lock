@@ -744,13 +744,6 @@ name = "severian-graph"
 version = "0.1.0"
 
 [[package]]
-name = "severian-health"
-version = "0.1.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
 name = "severian-hir"
 version = "0.1.0"
 dependencies = [

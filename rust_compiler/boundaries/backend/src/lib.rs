@@ -11,6 +11,15 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+// Native MLIR buffer cleanup belongs to the Rust emitter. Run after one-shot
+// bufferization and before conversion to LLVM erases memref alias information.
+const MLIR_BUFFER_DEALLOCATION_PIPELINE: &str = concat!(
+    "builtin.module(",
+    "func.func(lift-cf-to-scf,canonicalize,lift-cf-to-scf),",
+    "buffer-deallocation-pipeline{private-function-dynamic-ownership},",
+    "convert-bufferization-to-memref)",
+);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactKind {
     Executable,
@@ -812,13 +821,10 @@ fn emit_mlir_binary(
         &lowering_arguments.iter().map(String::as_str).collect::<Vec<_>>(),
         module.as_bytes(),
     )?;
-    // The source ownership library defines the same pipeline consumed by sev.
-    // Memref ownership must be resolved before conversion erases its aliases.
-    let ownership_pipeline = include_str!("../../../../sev_compiler/mir/ownership/mlir.pipeline").trim();
     let owned = run_tool(
-        "MLIR ownership",
+        "MLIR buffer deallocation",
         tool("SEVERIAN_MLIR_OPT", "mlir-opt-21"),
-        &["--verify-each", &format!("--pass-pipeline={ownership_pipeline}")],
+        &["--verify-each", &format!("--pass-pipeline={MLIR_BUFFER_DEALLOCATION_PIPELINE}")],
         &buffered,
     )?;
     let lowering_arguments = vec![
