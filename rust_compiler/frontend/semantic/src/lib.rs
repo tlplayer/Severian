@@ -2212,6 +2212,10 @@ impl Analyzer<'_> {
             };
             self.class_instances_by_type
                 .insert(package_class.ty, placeholder.clone());
+            self.class_instances.insert(
+                (package::internal_type_name(package_class.module, &package_class.declaration.name), Vec::new()),
+                placeholder.clone(),
+            );
             if source_module == Some(package_class.module) {
                 self.class_instances.insert(
                     (package_class.declaration.name.clone(), Vec::new()),
@@ -2312,6 +2316,10 @@ impl Analyzer<'_> {
             self.class_instances = resolved_visible_instances;
             self.class_instances_by_type
                 .insert(package_class.ty, instance.clone());
+            self.class_instances.insert(
+                (package::internal_type_name(package_class.module, &package_class.declaration.name), Vec::new()),
+                instance.clone(),
+            );
             if source_module == Some(package_class.module) {
                 self.class_instances.insert(
                     (package_class.declaration.name.clone(), Vec::new()),
@@ -2456,11 +2464,18 @@ impl Analyzer<'_> {
         if annotation.simple_name() == Some("Any") {
             return Ok(self.ensure_any_type());
         }
-        if annotation
-            .simple_name()
-            .is_some_and(|name| self.trait_names.contains(name))
-        {
-            return Ok(self.ensure_any_type());
+        if let Some((name, arguments)) = annotation.named_parts() {
+            if self.trait_names.contains(name) {
+                if let Some((minimum, maximum)) = self.package_index.zip(self.type_resolution_module)
+                    .and_then(|(index, module)| package::trait_type_arity(index, module, name))
+                {
+                    if arguments.len() < minimum || arguments.len() > maximum {
+                        return Err(Diagnostic::new("E000204", format!("trait `{name}` expects {minimum}..={maximum} type argument(s), received {}", arguments.len()), Some(annotation.span)));
+                    }
+                }
+                for argument in arguments { self.resolve_source_type(argument)?; }
+                return Ok(self.ensure_any_type());
+            }
         }
         if let severian_ast::TypeAnnotationKind::Function { parameters, result } = &annotation.kind
         {
@@ -4386,6 +4401,8 @@ impl Analyzer<'_> {
                 else_block,
                 ..
             } => {
+                let then_returns = block_flow(then_block) == ControlFlow::Returns;
+                let else_returns = block_flow(else_block) == ControlFlow::Returns;
                 let condition = self.condition_expression(condition_ast)?;
                 let outer_names = self.names.clone();
                 let outer_declarations = self.declarations.clone();
@@ -4457,6 +4474,15 @@ impl Analyzer<'_> {
                 self.names = outer_names;
                 self.declarations = outer_declarations;
                 self.value_substitutions = outer_substitutions;
+                if let Some((name, present_when_true, value)) = optional_guard {
+                    // An immutable optional stays narrowed on the surviving
+                    // path when the branch containing None cannot reach it.
+                    if (!present_when_true && then_returns && !else_returns)
+                        || (present_when_true && else_returns && !then_returns)
+                    {
+                        self.value_substitutions.insert(name, value);
+                    }
+                }
                 Ok(Statement::If {
                     condition,
                     then_block,
@@ -4762,6 +4788,13 @@ impl Analyzer<'_> {
         let mut catch_all = false;
         let mut arms = Vec::new();
         for case in cases {
+            if !case.variant_patterns.is_empty() {
+                return Err(Diagnostic::new(
+                    "E000215",
+                    "enum variant patterns require an enum matched expression",
+                    Some(case.span),
+                ));
+            }
             if catch_all {
                 return Err(Diagnostic::new(
                     "E000214",
@@ -4850,7 +4883,8 @@ impl Analyzer<'_> {
         // redundant default after all variants. A new variant must require
         // updating the match instead of silently selecting a fallback.
         if let Some(case) = cases.iter().find(|case| {
-            case.annotation.is_none()
+            case.variant_patterns.is_empty()
+                && case.annotation.is_none()
                 && case.binding.as_deref().is_none_or(|name| name == "_")
         }) {
             return Err(Diagnostic::new(
@@ -4873,6 +4907,62 @@ impl Analyzer<'_> {
             self.names.clone_from(&outer_names);
             self.declarations.clone_from(&outer_declarations);
             self.value_substitutions.clone_from(&outer_substitutions);
+            if !case.variant_patterns.is_empty() {
+                let mut condition = None;
+                for pattern in &case.variant_patterns {
+                    let qualified_variant = if let Some((owner, variant)) = pattern.rsplit_once('.') {
+                        let owner = TypeAnnotation::named(owner, Vec::new(), case.span);
+                        self.resolve_source_type(&owner).ok()
+                            .filter(|ty| *ty == instance.ty).map(|_| variant)
+                    } else { None };
+                    let Some((ordinal, variant)) = instance.variants.iter().enumerate().find(|(_, variant)| {
+                        enum_variant_path_matches(pattern, &instance.name, &variant.name)
+                            || qualified_variant == Some(variant.name.as_str())
+                    }) else {
+                        return Err(Diagnostic::new(
+                            "E000215",
+                            format!("`{pattern}` is not a variant of `{}`", instance.name),
+                            Some(case.span),
+                        ));
+                    };
+                    if !handled.insert(ordinal) {
+                        return Err(Diagnostic::new(
+                            "E000214",
+                            format!("enum variant `{}` is handled more than once", variant.name),
+                            Some(case.span),
+                        ));
+                    }
+                    let tag = Expression {
+                        id: self.next_id(), type_id: integer,
+                        kind: ExpressionKind::Field { object: Box::new(subject.clone()), index: 0 },
+                        span: case.span,
+                    };
+                    let ordinal = self.integer_expression(&ordinal.to_string(), integer, case.span);
+                    let next = Expression {
+                        id: self.next_id(), type_id: boolean,
+                        kind: ExpressionKind::Binary {
+                            operator: BinaryOperator::Equal,
+                            left: Box::new(tag), right: Box::new(ordinal),
+                        },
+                        span: case.span,
+                    };
+                    condition = Some(match condition {
+                        None => next,
+                        Some(previous) => Expression {
+                            id: self.next_id(), type_id: boolean,
+                            kind: ExpressionKind::Binary {
+                                operator: BinaryOperator::Or,
+                                left: Box::new(previous), right: Box::new(next),
+                            },
+                            span: case.span,
+                        },
+                    });
+                }
+                // OR patterns do not introduce payload bindings (SIP-0001).
+                // Lower the shared body once, after combining its tag checks.
+                lowered.push((condition, self.block(&case.body, bindings, result_type)?));
+                continue;
+            }
             let pattern = case.binding.as_deref().unwrap_or("_");
             let qualified_variant = if let Some((owner, variant)) = pattern.rsplit_once('.') {
                 let owner = TypeAnnotation::named(owner, Vec::new(), case.span);
@@ -9495,6 +9585,10 @@ impl Analyzer<'_> {
                 }
                 if *operator == AstBinaryOperator::Identity {
                     if let AstExpressionKind::Name(type_name) = &right.kind {
+                        if self.trait_names.contains(type_name) {
+                            let value = self.expression(left, None)?;
+                            return self.trait_membership(value, type_name, ast.span);
+                        }
                         let target = self
                             .class_instances
                             .get(&(type_name.clone(), Vec::new()))
@@ -11671,7 +11765,31 @@ impl Analyzer<'_> {
         Ok(instance)
     }
 
+    fn static_type_predicate(&mut self, value: Expression, matches: bool, span: severian_source::Span) -> Expression {
+        let boolean = self.types.resolve_name("bool").expect("bootstrap defines bool");
+        let parameter = value.type_id;
+        let symbol = format!("__sev_static_type_predicate_{}_{}", parameter.0, matches);
+        let definition = self.ensure_runtime_function(&symbol, &[parameter], boolean);
+        let result = Expression {
+            id: self.next_id(), type_id: boolean,
+            kind: ExpressionKind::Literal(LiteralValue::Boolean(matches)), span,
+        };
+        let function = self.runtime_functions.iter_mut().find(|function| function.definition == definition).unwrap();
+        function.call_type = CallType::Severian;
+        function.body = Some(Block { statements: vec![Statement::Return(Some(result))] });
+        // Keep evaluation of an effectful receiver even though membership is
+        // known from its concrete type.
+        self.runtime_call(&symbol, &[parameter], boolean, vec![value], span)
+    }
+
     fn source_type_satisfies_trait(&self, ty: TypeId, required: &str) -> bool {
+        if let (Some(index), Some(module)) = (self.package_index, self.type_resolution_module) {
+            if let Some(identity) = package::trait_identity(index, module, required) {
+                if self.types.primitive(ty).is_none() {
+                    return self.class_trait_identities(ty).contains(&identity);
+                }
+            }
+        }
         if self.class_traits.get(&ty).is_some_and(|traits| traits.iter().any(|name| name == required)) {
             return true;
         }
@@ -11688,6 +11806,47 @@ impl Analyzer<'_> {
                         .any(|implemented| implemented.simple_name() == Some(required))
                 })
             })
+    }
+
+    fn class_trait_identities(&self, ty: TypeId) -> BTreeSet<String> {
+        let instance = self.class_instances_by_type.get(&ty);
+        let constructor = instance.and_then(|instance| self.generic_class_constructors.get(&instance.name));
+        let module = self.class_defining_modules.get(&ty)
+            .or_else(|| constructor.and_then(|constructor| self.class_defining_modules.get(constructor)))
+            .copied().or(self.type_resolution_module);
+        let declared = self.class_traits.get(&ty).cloned().unwrap_or_else(|| {
+            instance.and_then(|instance| self.classes.get(&instance.name))
+                .map(|class| class.traits.iter().filter_map(|annotation| annotation.named_parts().map(|(name, _)| name.to_owned())).collect())
+                .unwrap_or_default()
+        });
+        declared.into_iter().flat_map(|name| {
+            if let (Some(index), Some(module)) = (self.package_index, module) {
+                package::trait_identities(index, module, &name)
+            } else { BTreeSet::from([name]) }
+        }).collect()
+    }
+
+    fn trait_membership(&mut self, value: Expression, required: &str, span: severian_source::Span) -> Result<Expression, Diagnostic> {
+        let boolean = self.types.resolve_name("bool").unwrap();
+        if let Some(members) = self.union_types.get(&value.type_id).cloned() {
+            return self.map_union_expression(value, &members, boolean, |analyzer, member| {
+                analyzer.trait_membership(member, required, span)
+            });
+        }
+        if value.type_id == any_type_id() {
+            let any = self.ensure_any_type();
+            let string = self.types.resolve_name("string").unwrap();
+            let identity = self.package_index.zip(self.type_resolution_module)
+                .and_then(|(index, module)| package::trait_identity(index, module, required))
+                .unwrap_or_else(|| required.to_owned());
+            let identity = self.string_expression(&format!("|{identity}|"), span);
+            let primitive = Expression { id: self.next_id(), type_id: boolean, span,
+                kind: ExpressionKind::Literal(LiteralValue::Boolean(matches!(required, "Copy" | "Default"))) };
+            return Ok(self.runtime_call("__sev_any_implements", &[any, string, boolean], boolean,
+                vec![value, identity, primitive], span));
+        }
+        let matches = self.source_type_satisfies_trait(value.type_id, required);
+        Ok(self.static_type_predicate(value, matches, span))
     }
 
     fn instantiate_class_types(
@@ -16432,6 +16591,30 @@ impl Analyzer<'_> {
         if value.type_id == any {
             return Ok(value);
         }
+        if self.types.primitive(value.type_id).is_none()
+            && (self.class_instances_by_type.contains_key(&value.type_id)
+                || self.union_types.contains_key(&value.type_id)
+                || self.tuple_elements.contains_key(&value.type_id)
+                || self.list_elements.contains_key(&value.type_id))
+        {
+            if let Some(members) = self.union_types.get(&value.type_id).cloned() {
+                return self.map_union_expression(value, &members, any, |analyzer, member| analyzer.box_any_value(member, span));
+            }
+            if self.class_is_affine(value.type_id, &mut BTreeSet::new()) {
+                return Err(Diagnostic::new("E000221", "an affine value cannot be copied into Any storage", Some(span)));
+            }
+            let integer = self.tag_type();
+            let string = self.types.resolve_name("string").unwrap();
+            let traits = self.class_trait_identities(value.type_id).into_iter()
+                .map(|identity| format!("|{identity}|")) .collect::<String>();
+            let traits = self.string_expression(&traits, span);
+            let type_key = self.integer_expression(&value.type_id.0.to_string(), integer, span);
+            let payload = self.runtime_call("__sev_any_box_aggregate", &[value.type_id, integer, string], integer,
+                vec![value, type_key, traits], span);
+            let tag = self.integer_expression("9", integer, span);
+            return Ok(Expression { id: self.next_id(), type_id: any, span,
+                kind: ExpressionKind::Aggregate { class: any, fields: vec![tag, payload] } });
+        }
         let name = self
             .types
             .definition(value.type_id)
@@ -17918,6 +18101,22 @@ impl Analyzer<'_> {
                 .resolve_name("int")
                 .expect("bootstrap defines int");
             let (symbol, parameters, result, resolved_arguments) = match name.as_str() {
+                "byte_length" if arguments.is_empty() => (
+                    "__sev_string_byte_length",
+                    vec![string],
+                    int_type,
+                    vec![object],
+                ),
+                "byte" if arguments.len() == 1 && arguments[0].name.is_none() => {
+                    let index = self.expression(&arguments[0].value, Some(usize_type))?;
+                    let byte = self.types.resolve_name("u8").expect("bootstrap defines u8");
+                    (
+                        "__sev_string_byte",
+                        vec![string, usize_type],
+                        byte,
+                        vec![object, index],
+                    )
+                }
                 "length" if arguments.is_empty() => (
                     "__sev_string_length",
                     vec![string],
@@ -18087,7 +18286,7 @@ impl Analyzer<'_> {
                 }
                 "length" | "upper" | "contains" | "split" | "strip" | "lower" | "replace"
                 | "starts_with" | "ends_with" | "find" | "count" | "characters" | "bytes"
-                | "frequencies" => {
+                | "frequencies" | "byte_length" | "byte" => {
                     return Err(Diagnostic::new(
                         "E000206",
                         format!("string method `{name}` received incompatible arguments"),
@@ -21654,6 +21853,39 @@ mod tests {
     }
 
     #[test]
+    fn string_byte_access_uses_utf8_runtime_types() {
+        let (program, context) = analyze_source(
+            "def count(value: string) -> int:\n    return value.byte_length()\ndef read(value: string, position: usize) -> u8:\n    return value.byte(position)\n",
+        );
+        let functions = &program.modules[0].functions;
+        let length = functions.iter().find(|function| function.name == "__sev_string_byte_length").unwrap();
+        let read = functions.iter().find(|function| function.name == "__sev_string_byte").unwrap();
+        assert_eq!(length.result.ty, context.types.resolve_name("int").unwrap());
+        assert_eq!(read.result.ty, context.types.resolve_name("u8").unwrap());
+        assert_eq!(read.parameters[1].contract.ty, context.types.resolve_name("usize").unwrap());
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn concrete_trait_membership_preserves_receiver_evaluation() {
+        let source = "trait Marker:\n    value: int\nclass Marked: Marker\n    value: int\nclass Other:\n    value: int\ndef make() -> Marked:\n    print(\"called\")\n    return Marked(1)\ndef selected() -> bool:\n    return make() is Marker\ndef rejected(value: Other) -> bool:\n    return value is Marker\n";
+        let root = std::env::temp_dir().join(format!("sev-trait-membership-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let input = root.join("main.sev");
+        std::fs::write(&input, source).unwrap();
+        let graph = severian_modules::resolve(&input).unwrap();
+        let context = severian_bootstrap::load().unwrap();
+        let program = analyze_package(&graph, &context).unwrap();
+        let predicates = program.hir.modules.iter().flat_map(|module| &module.functions)
+            .filter(|function| function.name.starts_with("__sev_static_type_predicate_"))
+            .collect::<Vec<_>>();
+        assert_eq!(predicates.len(), 2);
+        assert!(predicates.iter().any(|function| function.name.ends_with("_true")));
+        assert!(predicates.iter().any(|function| function.name.ends_with("_false")));
+        severian_mir::build(&program.hir).unwrap();
+    }
+
+    #[test]
     fn unannotated_entry_value_returns_use_the_process_status_contract() {
         for source in [
             "def main():\n    return 0\n",
@@ -21668,6 +21900,30 @@ mod tests {
         }
         let (program, context) = analyze_source("def main():\n    return\n");
         assert_eq!(program.modules[0].functions[0].result.ty, context.types.resolve_name("unit").unwrap());
+    }
+
+    #[test]
+    fn erased_trait_membership_boxes_records_and_preserves_import_alias_identity() {
+        let root = std::env::temp_dir().join(format!("sev-erased-trait-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("contract.sev"), "trait Marker:\n    value: int\ndef matches(value: Any) -> bool:\n    return value is Marker\n").unwrap();
+        std::fs::write(root.join("foreign.sev"), "trait Marker:\n    value: int\nclass Foreign: Marker\n    value: int\n").unwrap();
+        std::fs::write(root.join("main.sev"), "import Marker as Tag, matches from \"contract.sev\"\nimport Foreign from \"foreign.sev\"\ntrait Child: Tag\n    value: int\nclass Marked: Child\n    value: int\nclass Other:\n    value: int\ndef selected() -> bool:\n    value: Any = Marked(7)\n    return matches(value)\ndef main():\n    assert(selected())\n    other: Any = Other(7)\n    assert(not matches(other))\n    foreign: Any = Foreign(7)\n    assert(not matches(foreign))\n").unwrap();
+        let graph = severian_modules::resolve(&root.join("main.sev")).unwrap();
+        let program = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        let symbols = program.hir.modules.iter().flat_map(|module| &module.functions)
+            .map(|function| function.name.as_str()).collect::<Vec<_>>();
+        assert!(symbols.contains(&"__sev_any_box_aggregate"));
+        assert!(symbols.contains(&"__sev_any_implements"));
+        severian_mir::build(&program.hir).unwrap();
+    }
+
+    #[test]
+    fn immutable_optional_remains_narrowed_after_an_early_return_or_throw() {
+        let (program, _) = analyze_source(
+            "def returned(candidate: int | None) -> int:\n    value = candidate\n    if value == None:\n        return 0\n    return value + 1\ndef thrown(candidate: int | None) -> int | Error:\n    value = candidate\n    if value == None:\n        throw Error(\"missing\")\n    return value + 1\ndef alternate(candidate: int | None) -> int:\n    value = candidate\n    if value != None:\n        print(value)\n    else:\n        return 0\n    return value + 1\n",
+        );
+        severian_mir::build(&program).unwrap();
     }
 
     #[test]
@@ -22362,6 +22618,43 @@ def interpolate(text: string) -> string:
         assert!(error
             .message
             .contains("Status.Received -> Status.Connecting"));
+    }
+
+    #[test]
+    fn grouped_enum_cases_share_body_and_cover_all_alternatives() {
+        let (program, _) = analyze_source(
+            "enum Kind:\n    Name(value: string)\n    Integer(value: int)\n    Boolean(value: bool)\n    String(value: string)\ndef read(input: Kind) -> int:\n    match input:\n        case Name | Kind.Integer | Boolean:\n            return 1\n        case String:\n            return 2\n",
+        );
+        let function = program.modules[0].functions.iter().find(|function| function.name == "read").unwrap();
+        let Statement::Sequence(sequence) = &function.body.as_ref().unwrap().statements[0] else { panic!("frozen subject") };
+        assert!(matches!(sequence.statements[0], Statement::Binding(_)));
+        let Statement::If { condition, then_block, .. } = &sequence.statements[1] else { panic!("shared branch") };
+        let ExpressionKind::Binary { operator: BinaryOperator::Or, left, right } = &condition.kind else { panic!("grouped tag checks") };
+        assert!(matches!(left.kind, ExpressionKind::Binary { operator: BinaryOperator::Or, .. }));
+        assert!(matches!(right.kind, ExpressionKind::Binary { operator: BinaryOperator::Equal, .. }));
+        assert_eq!(then_block.statements.len(), 1);
+        assert!(matches!(then_block.statements[0], Statement::Return(_)));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn grouped_enum_cases_reject_duplicates_missing_and_unknown_variants() {
+        let context = severian_bootstrap::load().unwrap();
+        for (arms, code, message) in [
+            ("        case Left | Left:\n            return 1\n", "E000214", "handled more than once"),
+            ("        case Left | Right:\n            return 1\n        case Left:\n            return 2\n", "E000214", "handled more than once"),
+            ("        case Left:\n            return 1\n        case Left | Right:\n            return 2\n", "E000214", "handled more than once"),
+            ("        case Left | Right:\n            return 1\n", "E000216", "missing: Up"),
+            ("        case Left | Unknown:\n            return 1\n", "E000215", "not a variant"),
+            ("        case Left | Right | Up:\n            return value\n", "E000201", "unknown binding `value`"),
+        ] {
+            let text = format!("enum Direction:\n    Left(value: int)\n    Right(value: int)\n    Up(value: int)\ndef read(input: Direction) -> int:\n    match input:\n{arms}");
+            let source = SourceFile::virtual_source("grouped-invalid.sev", &text);
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            let error = analyze(&ast, &context.types).unwrap_err();
+            assert_eq!(error.code, code, "{arms}: {}", error.message);
+            assert!(error.message.contains(message), "{}", error.message);
+        }
     }
 
     #[test]

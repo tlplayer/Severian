@@ -25,9 +25,9 @@ class TokenLine:
 # Structural line breaks and horizontal spacing retain their source windows.
 def token_lines(input: TokenStream) -> list[TokenLine]:
     lines: list[TokenLine] = []
-    terms: list[TokenTerm] = []
+    terms: list[TokenTerm] := []
     prefix := ""
-    start: u32 = 0
+    start: u32 := 0
     for token in input.tokens:
         spelling = token.lexeme.text
         if token.kind == "NEWLINE" or spelling == "\n" or spelling == "\r\n":
@@ -71,7 +71,7 @@ def parser(input: TokenStream, package: string = "", module: string = "") -> Blo
                 root_providers.append(grammar)
     if len(root_providers) > 1:
         return [ParserDiagnostic("multiple grammars provide the global block", root.span, "parser.block")]
-    provider: B = root
+    provider: B := root
     if len(root_providers) == 1:
         constructed = root_providers[0].construct([], root_context)
         if constructed is Diagnostic:
@@ -87,9 +87,9 @@ def parser(input: TokenStream, package: string = "", module: string = "") -> Blo
     root.implementation = provider
     ancestry: list[int] = [0]
     previous: dict[int, B] = {}
-    pending: int | None = None
+    pending: int | None := None
     for line in token_lines(input):
-        parent_index = ancestry[-1]
+        parent_index := ancestry[-1]
         level = providers[parent_index].indentation_level(line.prefix)
         if level is Diagnostic:
             return [level]

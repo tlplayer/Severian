@@ -9,15 +9,20 @@ trait HashFunction:
 @mlir("arith.muli")
 def __hash_multiply(left: u128, right: u128) -> u128
 
+@mlir("arith.xori")
+def __hash_xor(left: u128, right: u128) -> u128
+
 
 class StableHashFunction: HashFunction
     def hash(value: string) -> u128:
         result: u128 := 0x6c62272e07bb014262b821756295c58d
         prime: u128 = 0x0000000001000000000000000000013b
         position := 0
-        count = len(value)
+        count = value.byte_length()
         while position < count:
-            result = __hash_multiply(result ^ u128(u8(value.storage.get(position))), prime)
+            byte = u128(value.byte(usize(position)))
+            mixed = __hash_xor(result, byte)
+            result = __hash_multiply(mixed, prime)
             position += 1
         return result
 

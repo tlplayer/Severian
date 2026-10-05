@@ -307,7 +307,7 @@ enum Operation:
 # Functions use @mlir for operation identity; type declarations use it for a
 # type spelling. Both preserve the same parsed decorator/sentence data.
 def declared_mlir_binding(decorators: list[Decorator], owner: string) -> MlirTypeBinding | None:
-    selected: MlirTypeBinding | None = None
+    selected: MlirTypeBinding | None := None
     for decorator in decorators:
         if decorator.name != "mlir":
             continue
@@ -320,7 +320,7 @@ def declared_mlir_binding(decorators: list[Decorator], owner: string) -> MlirTyp
                 if value == "":
                     throw Error("MLIR type annotation requires a spelling")
                 selected = MlirTypeBinding(value)
-            case _:
+            case Name | Integer | Boolean:
                 throw Error("MLIR type annotation requires a string")
     return selected
 
@@ -336,6 +336,7 @@ def record_mlir_binding(record: RecordDeclaration) -> MlirTypeBinding | None:
 
 
 def annotation_key(annotation: TypeAnnotation, parameters: list[string] = []) -> string:
+    generic_parameters = parameters
     match annotation.kind:
         case Named:
             index := 0
@@ -353,6 +354,18 @@ def annotation_key(annotation: TypeAnnotation, parameters: list[string] = []) ->
                 parts.append(annotation_key(member, parameters))
             # The source order carries tagged-union ABI meaning.
             return semantic_key(parts)
+        case Function:
+            parts = ["function"]
+            for parameter in parameters:
+                parts.append(annotation_key(parameter, generic_parameters))
+            parts.append(annotation_key(result, generic_parameters))
+            return semantic_key(parts)
+        case DimensionConstant:
+            return semantic_key(["dimension", string(value)])
+        case DimensionRuntime:
+            return semantic_key(["runtime-dimension", string(index)])
+        case ShapeSpread:
+            return semantic_key(["shape-spread", annotation_key(named_type(parameter, [], annotation.span), generic_parameters)])
 
 
 def callable_key(function: FunctionDeclaration, owner: string) -> string:
@@ -369,3 +382,18 @@ def callable_key(function: FunctionDeclaration, owner: string) -> string:
         for modifier in parameter.modifiers:
             parts.append(modifier.name)
     return semantic_key(parts)
+
+
+test "annotation keys retain function and dimension structure":
+    location = Span(0, 0, 1)
+    first = named_type("T", [], location)
+    second = named_type("U", [], location)
+    left = TypeAnnotation(TypeAnnotationKind.Function([first], first), location)
+    right = TypeAnnotation(TypeAnnotationKind.Function([second], second), location)
+    assert(annotation_key(left, ["T"]) == annotation_key(right, ["U"]))
+    constant = TypeAnnotation(TypeAnnotationKind.DimensionConstant(3), location)
+    runtime = TypeAnnotation(TypeAnnotationKind.DimensionRuntime(3), location)
+    assert(annotation_key(constant) != annotation_key(runtime))
+    spread = TypeAnnotation(TypeAnnotationKind.ShapeSpread("T"), location)
+    renamed = TypeAnnotation(TypeAnnotationKind.ShapeSpread("U"), location)
+    assert(annotation_key(spread, ["T"]) == annotation_key(renamed, ["U"]))

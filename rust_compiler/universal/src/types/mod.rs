@@ -1458,6 +1458,7 @@ mod tests {
 
 /// Whether a native collection operation acquires its element arguments.
 pub fn native_container_stores_values(symbol: &str) -> bool {
+    if symbol == "__sev_any_box_aggregate" { return true; }
     if let Some(operation) = symbol.strip_prefix("__sev_list_") {
         ["push_", "append_", "set_", "insert_", "appendleft_"].iter().any(|prefix| operation.starts_with(prefix))
     } else if let Some(operation) = symbol.strip_prefix("__sev_set_") {

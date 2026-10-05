@@ -17,7 +17,7 @@ def quoted_end(source: SourceFile, start: u32, prefix: string, delimiter: string
         return None
     if len(delimiter) == 1 and text[start + len(prefix):start + len(prefix) + 3] == delimiter + delimiter + delimiter:
         return None
-    cursor = start + u32(len(opening))
+    cursor := start + u32(len(opening))
     depth := 0
     while cursor < end:
         value = source.characters[cursor]
@@ -37,7 +37,7 @@ def quoted_end(source: SourceFile, start: u32, prefix: string, delimiter: string
                 cursor += 2
                 continue
             if depth > 0 and (value == "\"" or value == "'"):
-                nested_delimiter = value
+                nested_delimiter := value
                 if text[cursor:cursor + 3] == value + value + value:
                     nested_delimiter = value + value + value
                 nested = quoted_end(source, cursor, "", nested_delimiter)
@@ -82,7 +82,7 @@ def comment_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
     end = u32(len(source.characters))
     if start == end or source.characters[start] != "#":
         return None
-    cursor = start + 1
+    cursor := start + 1
     while cursor < end and source.characters[cursor] != "\n" and source.characters[cursor] != "\r":
         cursor += 1
     return cursor
@@ -92,7 +92,7 @@ def whitespace_end(source: SourceFile, start: u32, leading: bool) -> u32 | None 
     at_line_start = start == 0 or source.characters[start - 1] == "\n" or source.characters[start - 1] == "\r"
     if leading != at_line_start:
         return None
-    cursor = start
+    cursor := start
     end = u32(len(source.characters))
     while cursor < end and (source.characters[cursor] == " " or source.characters[cursor] == "\t"):
         cursor += 1
@@ -115,7 +115,7 @@ def identifier_end(source: SourceFile, start: u32) -> u32 | None | Diagnostic:
     # Use the same ASCII character contract as keyword boundaries.
     if not (first.is_alphabetic() or first == "_"):
         return None
-    cursor = start + 1
+    cursor := start + 1
     while cursor < end:
         value = source.characters[cursor]
         if not (value.is_alphanumeric() or value == "_"):

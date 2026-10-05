@@ -92,7 +92,7 @@ import LiteralValue, LiteralValueOf from "../grammar/resolution.sev"
 # Shared by source branch construction and its semantic realization. Repeated
 # conditions are a short-circuit conjunction, including the empty conjunction.
 def branch_condition(conditions: list[Expression], span: source.Span) -> Expression:
-    result = Expression(ExpressionKind.LiteralValue(LiteralValueOf[bool](true)), span)
+    result := Expression(ExpressionKind.LiteralValue(LiteralValueOf[bool](true)), span)
     index := int(len(conditions)) - 1
     if index >= 0:
         result = conditions[index]

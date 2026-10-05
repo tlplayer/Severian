@@ -1883,6 +1883,14 @@ fn visit_expression_for_specializations(
                         .iter()
                         .all(|parameter| substitution.contains_key(parameter))
                     {
+                        for value in substitution.types.values_mut() {
+                            let annotation = TypeAnnotation {
+                                kind: applied_type_spelling(value, expression.span),
+                                span: expression.span,
+                            };
+                            *value = type_annotation_name(&qualify_argument_type(&annotation, module, index))
+                                .expect("generic arguments have a type spelling");
+                        }
                         specializations
                             .entry(definition)
                             .or_default()
@@ -2279,7 +2287,9 @@ fn validate_explicit_type(
     match &annotation.kind {
         TypeAnnotationKind::Named { name, arguments } => {
             if (name == "pointer" && arguments.len() <= 1)
-                || (name == "array" && arguments.len() == 1)
+                || (matches!(name.as_str(), "array" | "list" | "set") && arguments.len() == 1)
+                || (matches!(name.as_str(), "map" | "Result") && arguments.len() == 2)
+                || name == "tuple"
             {
                 for argument in arguments {
                     validate_explicit_type(argument, module, names, index, types)?;
@@ -2832,6 +2842,38 @@ fn source_integer_list(expression: &severian_ast::Expression) -> Option<Vec<u64>
         .collect()
 }
 
+fn qualify_argument_type(annotation: &TypeAnnotation, module: ModuleId, index: &ProgramIndex) -> TypeAnnotation {
+    let kind = match &annotation.kind {
+        TypeAnnotationKind::Named { name, arguments } => {
+            let definitions = resolve_path(module, name, index);
+            let name = match definitions.as_slice() {
+                [id] => {
+                    let definition = &index.definitions[id];
+                    match &definition.kind {
+                        DefKind::Class(class) if !class.primitive => internal_type_name(definition.module, &definition.name),
+                        DefKind::Type if !index.type_aliases.contains_key(id) => internal_type_name(definition.module, &definition.name),
+                        _ => name.clone(),
+                    }
+                }
+                _ => name.clone(),
+            };
+            TypeAnnotationKind::Named {
+                name,
+                arguments: arguments.iter().map(|argument| qualify_argument_type(argument, module, index)).collect(),
+            }
+        }
+        TypeAnnotationKind::Union(members) => TypeAnnotationKind::Union(
+            members.iter().map(|member| qualify_argument_type(member, module, index)).collect(),
+        ),
+        TypeAnnotationKind::Function { parameters, result } => TypeAnnotationKind::Function {
+            parameters: parameters.iter().map(|parameter| qualify_argument_type(parameter, module, index)).collect(),
+            result: Box::new(qualify_argument_type(result, module, index)),
+        },
+        kind => kind.clone(),
+    };
+    TypeAnnotation { kind, span: annotation.span }
+}
+
 fn type_annotation_name(annotation: &TypeAnnotation) -> Option<String> {
     match &annotation.kind {
         TypeAnnotationKind::Named { name, arguments } if arguments.is_empty() => Some(name.clone()),
@@ -3351,7 +3393,40 @@ fn specialize_comprehension_clauses(
     }
 }
 
-fn applied_type_spelling(name: &str, span: severian_source::Span) -> TypeAnnotationKind {
+pub(super) fn applied_type_spelling(name: &str, span: severian_source::Span) -> TypeAnnotationKind {
+    let name = name.trim();
+    if name.starts_with('(') {
+        let mut depth = 0;
+        for (offset, character) in name.char_indices() {
+            match character { '(' => depth += 1, ')' => depth -= 1, _ => {} }
+            if depth == 0 {
+                let tail = name[offset + 1..].trim();
+                if let Some(result) = tail.strip_prefix("->") {
+                    let parameters = &name[1..offset];
+                    return TypeAnnotationKind::Function {
+                        parameters: split_type_spelling(parameters, ',').into_iter()
+                            .filter(|item| !item.trim().is_empty())
+                            .map(|item| TypeAnnotation { kind: applied_type_spelling(item, span), span }).collect(),
+                        result: Box::new(TypeAnnotation { kind: applied_type_spelling(result, span), span }),
+                    };
+                }
+                if tail.is_empty() {
+                    return applied_type_spelling(&name[1..offset], span);
+                }
+                break;
+            }
+        }
+    }
+    let members = split_type_spelling(name, '|');
+    if members.len() > 1 {
+        return TypeAnnotationKind::Union(members.into_iter()
+            .map(|member| TypeAnnotation { kind: applied_type_spelling(member, span), span }).collect());
+    }
+    if let Ok(value) = name.parse::<u64>() { return TypeAnnotationKind::DimensionConstant(value); }
+    if let Some(runtime) = name.strip_prefix('?').and_then(|name| name.parse().ok()) {
+        return TypeAnnotationKind::DimensionRuntime(runtime);
+    }
+    if let Some(parameter) = name.strip_prefix('*') { return TypeAnnotationKind::ShapeSpread(parameter.to_owned()); }
     // Substitutions retain canonical spellings, but an applied type must stay
     // structural in the AST (e.g. T = box[Resource]), not become one identifier.
     if let Some((constructor, tail)) = name.split_once('[') {
@@ -3382,6 +3457,25 @@ fn applied_type_spelling(name: &str, span: severian_source::Span) -> TypeAnnotat
         }
     }
     TypeAnnotationKind::Named { name: name.to_owned(), arguments: Vec::new() }
+}
+
+fn split_type_spelling(name: &str, separator: char) -> Vec<&str> {
+    let mut depth = 0;
+    let mut start = 0;
+    let mut items = Vec::new();
+    for (offset, character) in name.char_indices() {
+        match character {
+            '[' | '(' => depth += 1,
+            ']' | ')' => depth -= 1,
+            _ if character == separator && depth == 0 => {
+                items.push(name[start..offset].trim());
+                start = offset + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    items.push(name[start..].trim());
+    items
 }
 
 fn specialize_annotation(
@@ -3478,6 +3572,45 @@ fn dim_expr_annotation(dimension: &severian_universal::DimExpr) -> TypeAnnotatio
 #[cfg(test)]
 mod environment_tests {
     use super::*;
+
+    #[test]
+    fn generic_substitutions_preserve_unions_inside_callable_and_container_types() {
+        let span = severian_source::Span::new(0, 0, 1);
+        let mut substitution = Substitution::new();
+        substitution.insert_type("T".into(), "(list[B | None], int) -> B | None".into());
+        let specialized = specialize_annotation(&TypeAnnotation::named("T", Vec::new(), span), &substitution);
+        let TypeAnnotationKind::Function { parameters, result } = specialized.kind else { panic!("expected callable"); };
+        assert!(matches!(result.kind, TypeAnnotationKind::Union(ref members) if members.len() == 2));
+        let (_, arguments) = parameters[0].named_parts().unwrap();
+        assert!(matches!(arguments[0].kind, TypeAnnotationKind::Union(ref members) if members.len() == 2));
+        assert_eq!(parameters[1].simple_name(), Some("int"));
+    }
+
+    #[test]
+    fn applied_trait_aliases_resolve_their_arguments_and_reject_wrong_arity() {
+        let root = std::env::temp_dir().join(format!("sev-applied-trait-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("contract.sev"), "trait Sink[V, B]:\n    def emit(value: V, body: B)\n").unwrap();
+        for (arguments, valid) in [("int, string", true), ("int", false), ("int, string, bool", false)] {
+            std::fs::write(root.join("main.sev"), format!("import \"contract.sev\" as contract\ncontract.Sink[{arguments}] as Selected\nclass Holder:\n    sink: Selected\n")).unwrap();
+            let graph = severian_modules::resolve(&root.join("main.sev")).unwrap();
+            let result = analyze_package(&graph, &severian_bootstrap::load().unwrap());
+            assert_eq!(result.is_ok(), valid, "{arguments}: {result:?}");
+            if let Err(error) = result { assert_eq!(error.code, "E000204"); }
+        }
+    }
+
+    #[test]
+    fn imported_generic_keeps_callers_nominal_type_identity() {
+        let root = std::env::temp_dir().join(format!("sev-generic-caller-scope-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("generic.sev"), "class Value:\n    text: string\ndef keep[T](value: T) -> T:\n    return value\n").unwrap();
+        std::fs::write(root.join("main.sev"), "import keep from \"generic.sev\"\nclass Value:\n    number: int\ndef selected(value: Value) -> Value:\n    return keep[Value](value)\ndef nested(value: list[Value]) -> list[Value]:\n    return keep[list[Value]](value)\ndef optional(value: Value | None) -> Value | None:\n    return keep[Value | None](value)\ndef optional_items(value: list[Value | None]) -> list[Value | None]:\n    return keep[list[Value | None]](value)\n").unwrap();
+        let graph = severian_modules::resolve(&root.join("main.sev")).unwrap();
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn generic_type_tests_and_concrete_trait_fields_do_not_require_equality_on_the_receiver() {

@@ -31,7 +31,7 @@ import path
 import process
 import time
 
-import collect_files, exists, files, manifest_file, monotonic, sorted_strings from "../../support/src/lib.sev"
+import source_tokens, collect_files, exists, files, manifest_file, monotonic, sorted_strings from "../../support/src/lib.sev"
 import LintRule, document_nodes, lint_entry, lint_level, lint_rules, validate_lint from "policy.sev"
 import lexer
 import source
@@ -81,7 +81,7 @@ class LintSource:
 # create declarations or uses. Offsets are Unicode character offsets, like Span.
 def lint_source(location: string, text: string) -> LintSource | Error:
     input = source.SourceFile(0, location, text)
-    tokens = lexer.scan_bootstrap(input)
+    tokens = source_tokens(input)
     lines: list[int] = []
     columns: list[int] = []
     depths: list[int] = []
@@ -89,40 +89,53 @@ def lint_source(location: string, text: string) -> LintSource | Error:
     column := 1
     cursor := 0
     depth := 0
+    indentation: list[int] = [0]
+    statement_start := true
     for token in tokens:
         while cursor < int(token.span.start):
-            if input.characters[cursor] == "\n":
+            character = input.characters[cursor]
+            if character == "\r":
                 line += 1
+                column = 1
+            elif character == "\n":
+                if cursor == 0 or input.characters[cursor - 1] != "\r":
+                    line += 1
                 column = 1
             else:
                 column += 1
             cursor += 1
-        if token.kind == "Dedent":
-            depth -= 1
+        if statement_start and token.kind not in ["NEWLINE", "EOF"]:
+            width = column - 1
+            while depth > 0 and width < indentation[depth]:
+                depth -= 1
+            if width > indentation[depth]:
+                depth += 1
+                if depth == len(indentation):
+                    indentation.append(width)
+                else:
+                    indentation[depth] = width
+            statement_start = false
         lines.append(line)
         columns.append(column)
         depths.append(depth)
-        if token.kind == "Indent":
-            depth += 1
+        if token.kind == "NEWLINE":
+            statement_start = true
     result = LintSource(location, text, tokens, lines, columns, depths, [])
     lint_suppressions(result)
     return result
 
 def lint_block_end(input: LintSource, start: int) -> int:
     header := start
-    while header < int(len(input.tokens)) and input.tokens[header].kind != "Newline":
+    while header < int(len(input.tokens)) and input.tokens[header].kind != "NEWLINE":
         header += 1
     following := header + 1
-    while following < int(len(input.tokens)) and input.tokens[following].kind == "Newline":
+    while following < int(len(input.tokens)) and input.tokens[following].kind == "NEWLINE":
         following += 1
-    if following >= int(len(input.tokens)) or input.tokens[following].kind != "Indent":
+    if following >= int(len(input.tokens)) or input.tokens[following].kind == "EOF" or input.depths[following] <= input.depths[start]:
         return min(header + 1, int(len(input.tokens)) - 1)
-    cursor := start
-    entered := false
+    cursor := following
     while cursor < int(len(input.tokens)):
-        if input.depths[cursor] > input.depths[start]:
-            entered = true
-        if entered and input.depths[cursor] <= input.depths[start]:
+        if input.tokens[cursor].kind == "EOF" or (input.tokens[cursor].kind != "NEWLINE" and input.depths[cursor] <= input.depths[start]):
             return cursor
         cursor += 1
     return cursor - 1
@@ -130,23 +143,23 @@ def lint_block_end(input: LintSource, start: int) -> int:
 def lint_declarations(input: LintSource, library: bool, exports: list[string]):
     for index in range(int(len(input.tokens)) - 1):
         token = input.tokens[index]
-        if token.kind == "Identifier" and string(token) == "test" and (index == 0 or input.tokens[index - 1].kind in ["Newline", "Indent", "Dedent"]):
+        if token.kind == "IDENTIFIER" and token.lexeme.text == "test" and (index == 0 or input.tokens[index - 1].kind in ["NEWLINE"]):
             input.tests.append(LintTest(index, lint_block_end(input, index)))
-        if token.kind != "Identifier" or string(token) != "def":
+        if token.kind != "IDENTIFIER" or token.lexeme.text != "def":
             continue
-        name = string(input.tokens[index + 1])
+        name = input.tokens[index + 1].lexeme.text
         cursor := index + 2
-        while cursor < int(len(input.tokens)) and string(input.tokens[cursor]) != "(" and input.tokens[cursor].kind != "Newline":
+        while cursor < int(len(input.tokens)) and input.tokens[cursor].lexeme.text != "(" and input.tokens[cursor].kind != "NEWLINE":
             cursor += 1
         parameters: list[int] = []
         nested := 0
         expecting := true
         cursor += 1
         while cursor < int(len(input.tokens)):
-            spelling = string(input.tokens[cursor])
+            spelling = input.tokens[cursor].lexeme.text
             if spelling == ")" and nested == 0:
                 break
-            if expecting and nested == 0 and input.tokens[cursor].kind == "Identifier":
+            if expecting and nested == 0 and input.tokens[cursor].kind == "IDENTIFIER":
                 if spelling != "self":
                     parameters.append(cursor)
                 expecting = false
@@ -157,11 +170,11 @@ def lint_declarations(input: LintSource, library: bool, exports: list[string]):
             elif spelling == "," and nested == 0:
                 expecting = true
             cursor += 1
-        while cursor < int(len(input.tokens)) and input.tokens[cursor].kind != "Newline":
+        while cursor < int(len(input.tokens)) and input.tokens[cursor].kind != "NEWLINE":
             cursor += 1
         method := false
         for parent in range(index):
-            if input.tokens[parent].kind == "Identifier" and string(input.tokens[parent]) in ["class", "trait"] and input.depths[parent] + 1 == input.depths[index] and lint_block_end(input, parent) > index:
+            if input.tokens[parent].kind == "IDENTIFIER" and input.tokens[parent].lexeme.text in ["class", "trait"] and input.depths[parent] + 1 == input.depths[index] and lint_block_end(input, parent) > index:
                 method = true
         decorated := false
         previous = input.lines[index] - 2
@@ -181,7 +194,7 @@ def lint_suppressions(input: LintSource) -> unit | Error:
         text := raw.strip()
         if text.starts_with("# sev-lint"):
             for token in input.tokens:
-                if int(token.span.start) <= offset and int(token.span.end) > offset and token.kind in ["String", "FormattedString"]:
+                if int(token.span.start) <= offset and int(token.span.end) > offset and token.kind in ["STRING", "BLOCK_STRING", "FORMATTED_STRING", "FORMATTED_BLOCK_STRING"]:
                     text = ""
             whole = text.starts_with("# sev-lint: allow ")
             next_line = text.starts_with("# sev-lint-next-line: allow ")
@@ -228,32 +241,32 @@ def lint_measure(input: LintSource, index: int, measured: int, rule_index: int, 
     output.append(LintDiagnostic(rule.id, input.path, input.lines[index], input.columns[index], end_line, end_column, level, rule.message, measured, limit, rule.remediation))
 
 def lint_read(input: LintSource, index: int) -> bool:
-    if input.tokens[index].kind != "Identifier":
+    if input.tokens[index].kind != "IDENTIFIER":
         return false
-    before = string(input.tokens[index - 1]) if index > 0 else ""
-    after = string(input.tokens[index + 1]) if index + 1 < int(len(input.tokens)) else ""
-    declaration = after == ":" and (index == 0 or input.tokens[index - 1].kind in ["Newline", "Indent", "Dedent"])
+    before = input.tokens[index - 1].lexeme.text if index > 0 else ""
+    after = input.tokens[index + 1].lexeme.text if index + 1 < int(len(input.tokens)) else ""
+    declaration = after == ":" and (index == 0 or input.tokens[index - 1].kind in ["NEWLINE"])
     return before not in [".", "def", "class", "trait", "enum"] and after not in ["=", ":=", "?="] and not declaration
 
 def lint_unused(input: LintSource, callable: LintCallable, entries: list[Entry], output: list[LintDiagnostic]) -> unit | Error:
     bindings = callable.parameters[:]
     for index in range(callable.body, callable.end):
-        if input.tokens[index].kind != "Identifier":
+        if input.tokens[index].kind != "IDENTIFIER":
             continue
-        before = string(input.tokens[index - 1]) if index > 0 else ""
-        after = string(input.tokens[index + 1]) if index + 1 < int(len(input.tokens)) else ""
-        if before != "." and string(input.tokens[index]) not in ["else", "try", "finally", "pass", "break", "continue"] and after in ["=", ":=", "?=", ":"]:
-            if index > 0 and input.tokens[index - 1].kind in ["Newline", "Indent", "Dedent"]:
+        before = input.tokens[index - 1].lexeme.text if index > 0 else ""
+        after = input.tokens[index + 1].lexeme.text if index + 1 < int(len(input.tokens)) else ""
+        if before != "." and input.tokens[index].lexeme.text not in ["else", "try", "finally", "pass", "break", "continue"] and after in ["=", ":=", "?=", ":"]:
+            if index > 0 and input.tokens[index - 1].kind in ["NEWLINE"]:
                 bindings.append(index)
     names: list[string] = []
     for binding in bindings:
-        name = string(input.tokens[binding])
+        name = input.tokens[binding].lexeme.text
         if name.starts_with("_") or name in names:
             continue
         names.append(name)
         used := false
         for index in range(callable.body, callable.end):
-            used = used or (string(input.tokens[index]) == name and lint_read(input, index))
+            used = used or (input.tokens[index].lexeme.text == name and lint_read(input, index))
         if not used:
             lint_measure(input, binding, 1, 3, entries, output)
 
@@ -262,19 +275,19 @@ def lint_metrics(input: LintSource, entries: list[Entry], output: list[LintDiagn
     lint_measure(input, 0, file_count, 0, entries, output)
     for callable in input.callables:
         last := callable.end - 1
-        while last > callable.start and input.tokens[last].kind in ["Newline", "Indent", "Dedent", "Eof"]:
+        while last > callable.start and input.tokens[last].kind in ["NEWLINE", "EOF"]:
             last -= 1
         lint_measure(input, callable.start, input.lines[last] - input.lines[callable.start] + 1, 1, entries, output)
         lint_measure(input, callable.start, int(len(callable.parameters)), 2, entries, output)
         lint_unused(input, callable, entries, output)
         lint_unreachable(input, callable, entries, output)
     for index in range(int(len(input.tokens))):
-        if input.tokens[index].kind != "Identifier":
+        if input.tokens[index].kind != "IDENTIFIER":
             continue
-        spelling = string(input.tokens[index])
+        spelling = input.tokens[index].lexeme.text
         if spelling not in ["class", "match", "if"]:
             continue
-        if index > 0 and input.tokens[index - 1].kind not in ["Newline", "Indent", "Dedent"]:
+        if index > 0 and input.tokens[index - 1].kind not in ["NEWLINE"]:
             continue
         end = lint_block_end(input, index)
         count := 0
@@ -285,16 +298,16 @@ def lint_metrics(input: LintSource, entries: list[Entry], output: list[LintDiagn
             lint_measure(input, index, count, 5, entries, output)
         elif spelling == "match":
             for child in range(index + 1, end):
-                if string(input.tokens[child]) == "case" and input.tokens[child].kind == "Identifier" and input.depths[child] == input.depths[index] + 1:
+                if input.tokens[child].lexeme.text == "case" and input.tokens[child].kind == "IDENTIFIER" and input.depths[child] == input.depths[index] + 1:
                     count += 1
             lint_measure(input, index, count, 6, entries, output)
         else:
             count = 1
             cursor := end
             while cursor < int(len(input.tokens)):
-                if input.tokens[cursor].kind in ["Newline", "Dedent"]:
+                if input.tokens[cursor].kind in ["NEWLINE"]:
                     cursor += 1
-                elif input.depths[cursor] == input.depths[index] and string(input.tokens[cursor]) == "elif":
+                elif input.depths[cursor] == input.depths[index] and input.tokens[cursor].lexeme.text == "elif":
                     count += 1
                     cursor = lint_block_end(input, cursor)
                 else:
@@ -329,15 +342,15 @@ def lint_reachable(inputs: list[LintSource], include_tests: bool = true) -> list
             for index in range(int(len(input.tokens))):
                 if not include_tests and lint_in_test(input, index):
                     continue
-                member = index > 0 and string(input.tokens[index - 1]) == "."
-                if not lint_read(input, index) and not (member and input.tokens[index].kind == "Identifier"):
+                member = index > 0 and input.tokens[index - 1].lexeme.text == "."
+                if not lint_read(input, index) and not (member and input.tokens[index].kind == "IDENTIFIER"):
                     continue
                 active := true
                 for callable in input.callables:
                     if index >= callable.start and index < callable.end:
                         active = callable.name in live and index >= callable.body
                 if active:
-                    name = string(input.tokens[index])
+                    name = input.tokens[index].lexeme.text
                     if name not in live:
                         live.append(name)
                         changed = true
@@ -349,16 +362,16 @@ def lint_reachable(inputs: list[LintSource], include_tests: bool = true) -> list
 def lint_constant(input: LintSource, callable: LintCallable) -> bool:
     body: list[int] = []
     for index in range(callable.body, callable.end):
-        if input.tokens[index].kind not in ["Newline", "Indent", "Dedent", "Eof"]:
+        if input.tokens[index].kind not in ["NEWLINE", "EOF"]:
             body.append(index)
     if len(body) == 1:
-        return string(input.tokens[body[0]]) in ["pass", "return", "..."]
-    if len(body) < 2 or len(body) > 3 or string(input.tokens[body[0]]) != "return":
+        return input.tokens[body[0]].lexeme.text in ["pass", "return", "..."]
+    if len(body) < 2 or len(body) > 3 or input.tokens[body[0]].lexeme.text != "return":
         return false
     value = input.tokens[body[-1]]
     if len(body) == 3:
-        return string(input.tokens[body[1]]) in ["+", "-"] and value.kind in ["Integer", "Float"]
-    return value.kind in ["Integer", "Float", "String", "Character"] or (value.kind == "Identifier" and string(value) in ["true", "false", "None"])
+        return input.tokens[body[1]].lexeme.text in ["+", "-"] and value.kind in ["int.literal", "float.literal"]
+    return value.kind in ["int.literal", "float.literal", "STRING", "BLOCK_STRING", "CHARACTER"] or (value.kind == "IDENTIFIER" and value.lexeme.text in ["true", "false", "None"])
 
 # Follow helper calls so moving assert(true) into a helper cannot satisfy the
 # check. Imported operations count as external behavior; this source pass does
@@ -376,22 +389,22 @@ def lint_tests(input: LintSource, inputs: list[LintSource], entries: list[Entry]
             current = sources[cursor]
             for index in range(starts[cursor], ends[cursor]):
                 token = current.tokens[index]
-                if token.kind != "Identifier":
+                if token.kind != "IDENTIFIER":
                     continue
-                name = string(token)
-                if name == "assert" and index + 1 < ends[cursor] and string(current.tokens[index + 1]) == "(":
+                name = token.lexeme.text
+                if name == "assert" and index + 1 < ends[cursor] and current.tokens[index + 1].lexeme.text == "(":
                     depth := 1
                     for argument in range(index + 2, ends[cursor]):
-                        value = string(current.tokens[argument])
+                        value = current.tokens[argument].lexeme.text
                         if value in ["(", "["]:
                             depth += 1
                         elif value in [")", "]"]:
                             depth -= 1
                         if depth == 0 or (depth == 1 and value == ","):
                             break
-                        if current.tokens[argument].kind == "Identifier" and value not in ["true", "false", "None", "and", "or", "not", "is", "in"]:
+                        if current.tokens[argument].kind == "IDENTIFIER" and value not in ["true", "false", "None", "and", "or", "not", "is", "in"]:
                             checked = true
-                if name in ["accept", "reject"] and index + 1 < ends[cursor] and string(current.tokens[index + 1]) == ":":
+                if name in ["accept", "reject"] and index + 1 < ends[cursor] and current.tokens[index + 1].lexeme.text == ":":
                     checked = true
                     behavior = true
                 if not lint_read(current, index):
@@ -410,9 +423,9 @@ def lint_tests(input: LintSource, inputs: list[LintSource], entries: list[Entry]
                             ends.append(callable.end)
                 # A namespace use must originate in a real import, never text
                 # in a string or an arbitrary object with the same spelling.
-                if index + 3 < ends[cursor] and string(current.tokens[index + 1]) == "." and string(current.tokens[index + 3]) == "(":
+                if index + 3 < ends[cursor] and current.tokens[index + 1].lexeme.text == "." and current.tokens[index + 3].lexeme.text == "(":
                     for imported in range(int(len(current.tokens)) - 1):
-                        if string(current.tokens[imported]) == "import" and current.tokens[imported].kind == "Identifier" and string(current.tokens[imported + 1]) == name:
+                        if current.tokens[imported].lexeme.text == "import" and current.tokens[imported].kind == "IDENTIFIER" and current.tokens[imported + 1].lexeme.text == name:
                             behavior = true
             cursor += 1
         if not checked or not behavior:
@@ -425,32 +438,32 @@ def lint_imports(input: LintSource, entries: list[Entry], output: list[LintDiagn
     grouped := 0
     for index in range(int(len(input.tokens))):
         token = input.tokens[index]
-        spelling = string(token)
-        if input.depths[index] == 0 and token.kind == "Identifier" and spelling == "import":
+        spelling = token.lexeme.text
+        if input.depths[index] == 0 and token.kind == "IDENTIFIER" and spelling == "import":
             active = true
         elif active:
             if spelling == "{":
                 grouped += 1
             elif spelling == "}":
                 grouped -= 1
-            elif lexer.token_is_symbol(token, "*"):
+            elif token.lexeme.text == "*":
                 # Names followed by * are the extensible, resolved import form.
                 # A qualified namespace already identifies its provider.
                 qualified := false
                 following := index + 1
-                while following < len(input.tokens) and input.tokens[following].kind != "Newline":
-                    if string(input.tokens[following]) == "as":
+                while following < len(input.tokens) and input.tokens[following].kind != "NEWLINE":
+                    if input.tokens[following].lexeme.text == "as":
                         qualified = true
                     following += 1
-                explicit_members = index > 0 and string(input.tokens[index - 1]) == ","
+                explicit_members = index > 0 and input.tokens[index - 1].lexeme.text == ","
                 if not qualified and not explicit_members:
                     lint_measure(input, index, 1, 14, entries, output)
-            elif token.kind == "Newline" and grouped == 0:
+            elif token.kind == "NEWLINE" and grouped == 0:
                 # Source-first lists may put the opening brace on the next line.
                 next := index + 1
-                while next < int(len(input.tokens)) and input.tokens[next].kind in ["Newline", "Indent", "Dedent"]:
+                while next < int(len(input.tokens)) and input.tokens[next].kind in ["NEWLINE"]:
                     next += 1
-                active = next < int(len(input.tokens)) and string(input.tokens[next]) == "{"
+                active = next < int(len(input.tokens)) and input.tokens[next].lexeme.text == "{"
 
 def lint_uncached(project: Project, force: bool = false, testing: bool = false) -> list[LintDiagnostic] | Error:
     entries = project.manifest.entries[:]
@@ -556,38 +569,38 @@ def lint_json(diagnostic: LintDiagnostic) -> string:
 def lint_top_level(input: LintSource, library: bool, entries: list[Entry], output: list[LintDiagnostic], peers: list[LintSource] = []) -> unit | Error:
     candidates: list[int] = []
     for index in range(int(len(input.tokens)) - 1):
-        if input.depths[index] != 0 or input.tokens[index].kind != "Identifier":
+        if input.depths[index] != 0 or input.tokens[index].kind != "IDENTIFIER":
             continue
-        spelling = string(input.tokens[index])
-        if spelling == "import" and input.tokens[index + 1].kind == "Identifier":
+        spelling = input.tokens[index].lexeme.text
+        if spelling == "import" and input.tokens[index + 1].kind == "IDENTIFIER":
             end := index + 1
-            while end < int(len(input.tokens)) and input.tokens[end].kind != "Newline":
+            while end < int(len(input.tokens)) and input.tokens[end].kind != "NEWLINE":
                 end += 1
             candidate := index + 1
             selective := false
             for cursor in range(index + 1, end):
-                if string(input.tokens[cursor]) == "from" or string(input.tokens[cursor]) == ",":
+                if input.tokens[cursor].lexeme.text == "from" or input.tokens[cursor].lexeme.text == ",":
                     selective = true
-                if string(input.tokens[cursor]) == "as" and cursor + 1 < end:
+                if input.tokens[cursor].lexeme.text == "as" and cursor + 1 < end:
                     candidate = cursor + 1
             if not selective:
                 candidates.append(candidate)
         elif spelling.starts_with("_") or not library:
-            previous = input.tokens[index - 1].kind if index > 0 else "Newline"
-            if previous in ["Newline", "Dedent"] and string(input.tokens[index + 1]) in ["=", ":=", "?=", ":"] and spelling not in ["else", "try", "finally"]:
+            previous = input.tokens[index - 1].kind if index > 0 else "NEWLINE"
+            if previous in ["NEWLINE"] and input.tokens[index + 1].lexeme.text in ["=", ":=", "?=", ":"] and spelling not in ["else", "try", "finally"]:
                 candidates.append(index)
     for index in candidates:
-        name = string(input.tokens[index])
+        name = input.tokens[index].lexeme.text
         if name.starts_with("_"):
             continue
         used := false
         for other in range(int(len(input.tokens))):
-            used = used or (other != index and string(input.tokens[other]) == name and lint_read(input, other))
+            used = used or (other != index and input.tokens[other].lexeme.text == name and lint_read(input, other))
         for peer in peers:
             if peer.path == input.path:
                 continue
             for other in range(int(len(peer.tokens))):
-                used = used or (string(peer.tokens[other]) == name and lint_read(peer, other))
+                used = used or (peer.tokens[other].lexeme.text == name and lint_read(peer, other))
         if not used:
             lint_measure(input, index, 1, 3, entries, output)
 
@@ -599,16 +612,14 @@ def lint_unreachable(input: LintSource, callable: LintCallable, entries: list[En
     statement_start := true
     for index in range(callable.body, callable.end):
         token = input.tokens[index]
-        if token.kind == "Dedent":
-            if input.depths[index] <= dead_depth:
+        if token.kind == "NEWLINE":
+            statement_start = true
+        elif statement_start and token.kind != "EOF":
+            if dead_depth >= 0 and input.depths[index] < dead_depth:
                 dead_depth = -1
-            statement_start = true
-        elif token.kind in ["Newline", "Indent"]:
-            statement_start = true
-        elif statement_start and token.kind != "Eof":
             if dead_depth >= 0:
                 lint_measure(input, index, 1, 4, entries, output)
-            elif token.kind == "Identifier" and string(token) in ["return", "throw", "break", "continue"]:
+            elif token.kind == "IDENTIFIER" and token.lexeme.text in ["return", "throw", "break", "continue"]:
                 dead_depth = input.depths[index]
             statement_start = false
 
@@ -656,7 +667,7 @@ def lint_signature_type(input: LintSource, start: int, end: int) -> string:
     result := ""
     depth := 0
     for cursor in range(start, end):
-        token = string(input.tokens[cursor])
+        token = input.tokens[cursor].lexeme.text
         if depth == 0 and token in [",", "=", ")", ":"]:
             break
         if token in ["[", "("]:
@@ -682,20 +693,20 @@ def lint_documentation(input: LintSource, entries: list[Entry], output: list[Lin
                 name = label.split(" [")[0]
                 documented_type = lint_documented_type(label)
                 for parameter in callable.parameters:
-                    if string(input.tokens[parameter]) == name and documented_type != "":
+                    if input.tokens[parameter].lexeme.text == name and documented_type != "":
                         complete = complete and documented_type == lint_signature_type(input, parameter + 2, callable.body)
                 complete = complete and name not in documented and line.split(":")[1:].join(":").strip() != ""
                 documented.append(name)
         expected: list[string] = []
         for parameter in callable.parameters:
-            expected.append(string(input.tokens[parameter]))
+            expected.append(input.tokens[parameter].lexeme.text)
         for name in expected:
             complete = complete and name in documented
         for name in documented:
             complete = complete and name in expected
         result_type := "unit"
         for cursor in range(callable.start, callable.body):
-            if string(input.tokens[cursor]) == "->":
+            if input.tokens[cursor].lexeme.text == "->":
                 result_type = lint_signature_type(input, cursor + 1, callable.body)
         for line in document.split("\n"):
             if line.starts_with("Returns ["):
@@ -708,12 +719,12 @@ def lint_documentation(input: LintSource, entries: list[Entry], output: list[Lin
                 reference = line[7:].strip()
                 known := false
                 for token in input.tokens:
-                    known = known or (token.kind == "Identifier" and string(token) == reference)
+                    known = known or (token.kind == "IDENTIFIER" and token.lexeme.text == reference)
                 complete = complete and known
         if not complete:
             lint_measure(input, callable.start, 1, 10, entries, output)
     for index in range(int(len(input.tokens)) - 1):
-        if input.tokens[index].kind == "Identifier" and string(input.tokens[index]) == "class" and not string(input.tokens[index + 1]).starts_with("_") and not lint_test_file(input):
+        if input.tokens[index].kind == "IDENTIFIER" and input.tokens[index].lexeme.text == "class" and not input.tokens[index + 1].lexeme.text.starts_with("_") and not lint_test_file(input):
             document = lint_doc(input, index)
             if document == "" or lint_doc_section(document, "Responsibilities") == "" or lint_doc_section(document, "Invariants") == "":
                 lint_measure(input, index, 1, 11, entries, output)
@@ -725,13 +736,13 @@ def lint_duplicates(inputs: list[LintSource], entries: list[Entry], output: list
             body: list[string] = []
             for index in range(callable.body, callable.end):
                 token = input.tokens[index]
-                if token.kind in ["Newline", "Indent", "Dedent", "Eof"]:
+                if token.kind in ["NEWLINE", "EOF"]:
                     continue
-                spelling := string(token)
+                spelling := token.lexeme.text
                 for parameter in range(int(len(callable.parameters))):
-                    if token.kind == "Identifier" and spelling == string(input.tokens[callable.parameters[parameter]]):
+                    if token.kind == "IDENTIFIER" and spelling == input.tokens[callable.parameters[parameter]].lexeme.text:
                         spelling = "$parameter" + string(parameter)
-                kind = "identifier" if token.kind == "Identifier" else "string" if token.kind == "String" else "token"
+                kind = "identifier" if token.kind == "IDENTIFIER" else "string" if token.kind == "STRING" else "token"
                 body.append(kind + ":" + document_quote(spelling))
             if len(body) < 12:
                 continue
@@ -783,12 +794,43 @@ def enforce(project: Project, identity: string, force: bool = false, testing: bo
 test "lint accepts the lexer exported token type and token stream":
     input = source.virtual_source("token.sev", "name")
     span = source.Span(input.source_id, 0, 4)
-    token = lexer.Token("Identifier", lexer.Lexeme("name", span), span)
+    token = lexer.Token("IDENTIFIER", lexer.Lexeme("name", span), span)
     tokens: list[lexer.Token] = [token]
     stream = lexer.TokenStream(input, tokens)
     result = LintSource(input.path, input.text, stream.tokens, [1], [1], [0], [])
     assert(len(result.tokens) == 1)
-    assert(result.tokens[0].kind == "Identifier")
+    assert(result.tokens[0].kind == "IDENTIFIER")
     assert(result.tokens[0].lexeme.text == "name")
     assert(result.tokens[0].span.source_id == input.source_id)
     assert(result.tokens[0].span.start == 0 and result.tokens[0].span.end == 4)
+
+
+test "lint registry tokens preserve nested blocks and multiline call boundaries":
+    input = lint_source("nested.sev", "def outer():\n    if ready:\n        call(\n            \"def fake():\",\n        )\n    return\n\ndef following():\n    return\n")
+    lint_declarations(input, true, [])
+    assert(len(input.callables) == 2)
+    first = input.callables[0]
+    second = input.callables[1]
+    assert(first.name == "outer" and second.name == "following")
+    assert(first.end == second.start)
+    assert(input.depths[first.start] == 0)
+    nested := -1
+    returned := -1
+    for index in range(first.start, first.end):
+        if input.tokens[index].lexeme.text == "call":
+            nested = index
+        if input.tokens[index].lexeme.text == "return":
+            returned = index
+    assert(nested >= 0 and returned > nested)
+    assert(input.depths[nested] == 2)
+    assert(input.depths[returned] == 1)
+    assert(input.lines[returned] == 6)
+
+
+test "lint locations count CRLF once and Unicode in scalar positions":
+    input = lint_source("unicode.sev", "def λ():\r\n    return \"λ\"\r\n")
+    for index in range(len(input.tokens)):
+        if input.tokens[index].lexeme.text == "return":
+            assert(input.lines[index] == 2)
+            assert(input.columns[index] == 5)
+            assert(input.depths[index] == 1)

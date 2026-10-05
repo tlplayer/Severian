@@ -54,8 +54,9 @@ class TyInterner:
                 case Union:
                     for nested in members:
                         insert_type(canonical, nested)
-                case _:
+                case Primitive | Nominal | Parameter | Infer | Function | Tuple | Reference | Resource:
                     insert_type(canonical, member)
+
         if len(canonical) == 1:
             return canonical[0]
         return intern(TypeKind.Union(canonical))
@@ -79,7 +80,7 @@ class TyInterner:
                 return union(substitute_types(members, arguments))
             case Reference:
                 return intern(TypeKind.Reference(substitute(target, arguments), mutable, lifetime))
-            case _:
+            case Primitive | Infer:
                 return type
 
     def substitute_types(types: list[TypeId], arguments: Substitution) -> list[TypeId]:
@@ -129,15 +130,13 @@ class InferenceContext:
     constraints: list[Constraint] = []
 
     def resolve(interner: TyInterner, type: TypeId) -> TypeId:
-        match interner.kind(type):
-            case Infer:
-                index := 0
-                for known in variables:
-                    if known.index == variable.index:
-                        return resolve(interner, types[index])
-                    index += 1
-            case _:
-                throw Error("unimplemented (sev_compiler/universal/type/system.sev)")
+        variable = inference_variable(interner.kind(type))
+        if variable != None:
+            index := 0
+            for known in variables:
+                if known.index == variable.index:
+                    return resolve(interner, types[index])
+                index += 1
         return type
 
     def constrain_equal(interner: TyInterner, left: TypeId, right: TypeId) -> unit | UnifyError:
@@ -152,11 +151,9 @@ class InferenceContext:
 
     def occurs(interner: TyInterner, needle: InferVarId, type: TypeId) -> bool:
         resolved = resolve(interner, type)
-        match interner.kind(resolved):
-            case Infer:
-                return variable.index == needle.index
-            case _:
-                throw Error("unimplemented (sev_compiler/universal/type/system.sev)")
+        variable = inference_variable(interner.kind(resolved))
+        if variable != None:
+            return variable.index == needle.index
         for child in type_children(interner.kind(resolved)):
             if occurs(interner, needle, child):
                 return true
@@ -167,18 +164,14 @@ class InferenceContext:
         rhs = resolve(interner, right)
         if lhs.index == rhs.index:
             return
-        match interner.kind(lhs):
-            case Infer:
-                bind(interner, variable, rhs)
-                return
-            case _:
-                throw Error("unimplemented (sev_compiler/universal/type/system.sev)")
-        match interner.kind(rhs):
-            case Infer:
-                bind(interner, variable, lhs)
-                return
-            case _:
-                throw Error("unimplemented (sev_compiler/universal/type/system.sev)")
+        left_variable = inference_variable(interner.kind(lhs))
+        if left_variable != None:
+            bind(interner, left_variable, rhs)
+            return
+        right_variable = inference_variable(interner.kind(rhs))
+        if right_variable != None:
+            bind(interner, right_variable, lhs)
+            return
         if not same_constructor(interner.kind(lhs), interner.kind(rhs)):
             throw UnifyError("structural type mismatch", lhs, rhs)
         left_children = type_children(interner.kind(lhs))
@@ -189,6 +182,14 @@ class InferenceContext:
         for child in left_children:
             unify(interner, child, right_children[index])
             index += 1
+
+
+def inference_variable(kind: TypeKind) -> InferVarId | None:
+    match kind:
+        case Infer:
+            return variable
+        case Primitive | Nominal | Parameter | Function | Tuple | Union | Reference | Resource:
+            return None
 
 
 def type_children(kind: TypeKind) -> list[TypeId]:
@@ -209,8 +210,8 @@ def type_children(kind: TypeKind) -> list[TypeId]:
             result.append(signature.result)
         case Reference:
             result.append(target)
-        case _:
-            throw Error("unimplemented (sev_compiler/universal/type/system.sev)")
+        case Primitive | Parameter | Infer:
+            return []
     return result
 
 
@@ -222,45 +223,50 @@ def same_constructor(left: TypeKind, right: TypeKind) -> bool:
             match right:
                 case Nominal:
                     return left_definition == definition and same_parameters(left_arguments, substitution)
-                case _:
+                case Primitive | Parameter | Infer | Function | Tuple | Union | Reference | Resource:
                     return false
+
         case Resource:
             left_definition = definition
             left_arguments = substitution
             match right:
                 case Resource:
                     return left_definition == definition and same_parameters(left_arguments, substitution)
-                case _:
+                case Primitive | Nominal | Parameter | Infer | Function | Tuple | Union | Reference:
                     return false
+
         case Function:
             match right:
                 case Function:
                     return true
-                case _:
+                case Primitive | Nominal | Parameter | Infer | Tuple | Union | Reference | Resource:
                     return false
+
         case Tuple:
             match right:
                 case Tuple:
                     return true
-                case _:
+                case Primitive | Nominal | Parameter | Infer | Function | Union | Reference | Resource:
                     return false
+
         case Union:
             match right:
                 case Union:
                     return true
-                case _:
+                case Primitive | Nominal | Parameter | Infer | Function | Tuple | Reference | Resource:
                     return false
+
         case Reference:
             left_mutable = mutable
             left_lifetime = lifetime
             match right:
                 case Reference:
                     return left_mutable == mutable and left_lifetime.index == lifetime.index
-                case _:
+                case Primitive | Nominal | Parameter | Infer | Function | Tuple | Union | Resource:
                     return false
-        case _:
-            return left == right
 
+        case Primitive | Parameter | Infer:
+            return left == right
 
 def same_parameters(left: Substitution, right: Substitution) -> bool:
     if len(left.arguments) != len(right.arguments):

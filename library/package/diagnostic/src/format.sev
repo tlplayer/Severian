@@ -1,6 +1,7 @@
 import Project, files, read_text, setting, write_text from "host.sev"
 import lexer
 import source
+import source_tokens from "../support/src/lib.sev"
 
 # Keep comments and literal contents intact. Only complete selective import
 # token ranges are rewritten; malformed input remains for parser diagnostics.
@@ -26,32 +27,28 @@ def import_layout(tokens: list[lexer.Token], start: int) -> int:
     cursor := start
     while cursor < len(
         tokens,
-    ) and tokens[cursor].kind in ["Newline", "Indent", "Dedent"]:
+    ) and tokens[cursor].kind in ["NEWLINE"]:
         cursor += 1
     return cursor
 
 def format_imports(text: string) -> string | Error:
     input = source.virtual_source("imports.sev", text)
-    tokens = lexer.scan_bootstrap(input)
+    tokens = source_tokens(input)
     parts: list[string] = []
     retained := 0
     index := 0
     while index + 3 < len(tokens):
         token = tokens[index]
         start = int(token.span.start)
-        if token.kind != "Identifier" or string(
-            token,
-        ) != "from" or (start > 0 and text[start - 1:start] != "\n"):
+        if token.kind != "IDENTIFIER" or token.lexeme.text != "from" or (start > 0 and text[start - 1:start] != "\n"):
             index += 1
             continue
-        if tokens[index + 1].kind != "Identifier" or string(
-            tokens[index + 2],
-        ) != "import":
+        if tokens[index + 1].kind != "IDENTIFIER" or tokens[index + 2].lexeme.text != "import":
             index += 1
             continue
-        package_name = string(tokens[index + 1])
+        package_name = tokens[index + 1].lexeme.text
         cursor := import_layout(tokens, index + 3)
-        grouped = cursor < len(tokens) and string(tokens[cursor]) == "{"
+        grouped = cursor < len(tokens) and tokens[cursor].lexeme.text == "{"
         if grouped:
             cursor = import_layout(tokens, cursor + 1)
         elif cursor != index + 3:
@@ -61,43 +58,43 @@ def format_imports(text: string) -> string | Error:
         valid := true
         end := start
         while cursor < len(tokens):
-            if tokens[cursor].kind != "Identifier":
+            if tokens[cursor].kind != "IDENTIFIER":
                 valid = false
                 break
-            member := string(tokens[cursor])
+            member := tokens[cursor].lexeme.text
             end = int(tokens[cursor].span.end)
             cursor += 1
-            if cursor < len(tokens) and string(tokens[cursor]) == "as":
+            if cursor < len(tokens) and tokens[cursor].lexeme.text == "as":
                 cursor += 1
                 if cursor >= len(
                     tokens,
-                ) or tokens[cursor].kind != "Identifier":
+                ) or tokens[cursor].kind != "IDENTIFIER":
                     valid = false
                     break
-                member += " as " + string(tokens[cursor])
+                member += " as " + tokens[cursor].lexeme.text
                 end = int(tokens[cursor].span.end)
                 cursor += 1
             members.append(member)
             if grouped:
                 cursor = import_layout(tokens, cursor)
-            if cursor >= len(tokens) or string(tokens[cursor]) != ",":
+            if cursor >= len(tokens) or tokens[cursor].lexeme.text != ",":
                 break
             cursor += 1
             if grouped:
                 cursor = import_layout(tokens, cursor)
-                if cursor < len(tokens) and string(tokens[cursor]) == "}":
+                if cursor < len(tokens) and tokens[cursor].lexeme.text == "}":
                     break
         if grouped:
             valid = valid and cursor < len(
                 tokens,
-            ) and string(tokens[cursor]) == "}"
+            ) and tokens[cursor].lexeme.text == "}"
             if valid:
                 end = int(tokens[cursor].span.end)
                 cursor += 1
         else:
             valid = valid and cursor < len(
                 tokens,
-            ) and tokens[cursor].kind in ["Newline", "Eof"]
+            ) and tokens[cursor].kind in ["NEWLINE", "EOF"]
         if valid and len(members) > 0 and not text[start:end].contains("#"):
             parts.append(text[retained:start])
             parts.append(format_import_list(package_name, members, grouped))
@@ -132,11 +129,11 @@ def format_sources(project: Project) -> unit | Error:
 # participate in layout. Each pass expands disjoint calls; later passes handle
 # nested calls whose argument lines still exceed the configured width.
 def format_call_open(tokens: list[lexer.Token], index: int) -> bool:
-    if index == 0 or string(tokens[index]) != "(":
+    if index == 0 or tokens[index].lexeme.text != "(":
         return false
     previous = tokens[index - 1]
-    spelling = string(previous)
-    if previous.kind != "Identifier" and spelling not in [")", "]"]:
+    spelling = previous.lexeme.text
+    if previous.kind != "IDENTIFIER" and spelling not in [")", "]"]:
         return false
     if spelling in ["if", "elif", "else", "while", "for", "with", "match", "case", "return", "throw", "yield", "not", "and", "or", "in", "is", "as"]:
         return false
@@ -145,19 +142,19 @@ def format_call_open(tokens: list[lexer.Token], index: int) -> bool:
         depth := 1
         cursor -= 1
         while cursor >= 0 and depth > 0:
-            if string(tokens[cursor]) == "]":
+            if tokens[cursor].lexeme.text == "]":
                 depth += 1
-            elif string(tokens[cursor]) == "[":
+            elif tokens[cursor].lexeme.text == "[":
                 depth -= 1
             cursor -= 1
-    if cursor > 0 and string(tokens[cursor - 1]) in ["def", "operator"]:
+    if cursor > 0 and tokens[cursor - 1].lexeme.text in ["def", "operator"]:
         return false
     return true
 
 
 def format_call_pass(text: string, width: int) -> string | Error:
     input = source.virtual_source("calls.sev", text)
-    tokens = lexer.scan_bootstrap(input)
+    tokens = source_tokens(input, include_comments=true)
     parts: list[string] = []
     retained := 0
     index := 0
@@ -179,11 +176,16 @@ def format_call_pass(text: string, width: int) -> string | Error:
         argument_start := opening
         cursor := index + 1
         valid := true
+        commented := false
         while cursor < len(tokens) and len(stack) > 0:
             token = tokens[cursor]
-            spelling = string(token)
+            spelling = token.lexeme.text
+            if token.kind == "COMMENT":
+                commented = true
+                cursor += 1
+                continue
             # Literal spelling is opaque, even when it is exactly a delimiter.
-            if token.kind in ["String", "FormattedString", "Character"]:
+            if token.kind in ["STRING", "BLOCK_STRING", "FORMATTED_STRING", "FORMATTED_BLOCK_STRING", "CHARACTER"]:
                 cursor += 1
                 continue
             if spelling in ["(", "[", "{"]:
@@ -221,7 +223,7 @@ def format_call_pass(text: string, width: int) -> string | Error:
             oversized = oversized or len(line.characters()) > width
         # Preserve comments. Already multiline child expressions are visited
         # independently so reflowing a parent never damages their indentation.
-        if not oversized or body.contains("#"):
+        if not oversized or commented:
             index += 1
             continue
         last = text[argument_start:closing].strip()
@@ -263,3 +265,16 @@ def format_calls(text: string, width: int = 80) -> string | Error:
         current = formatted
         formatted = format_call_pass(current, width)
     return current
+
+
+test "format imports consumes registry identifiers and retains comments":
+    assert(format_imports("from example import first,second\n") == "from example import first, second\n")
+    text = "from example import\n{\n    first, # retained\n    second,\n}\n"
+    assert(format_imports(text) == text)
+
+
+test "format calls treats quoted delimiters as opaque tokens":
+    text = "call(\"(, # λ)\", another_argument)\n"
+    formatted = format_calls(text, 20)
+    assert(formatted == "call(\n    \"(, # λ)\",\n    another_argument,\n)\n")
+    assert(format_calls(formatted, 20) == formatted)

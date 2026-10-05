@@ -29,7 +29,7 @@ def recognize_window(input: Window, include_boundary: bool = false) -> list[Lexi
     matches: list[LexicalMatch] = []
     while not input.finished() or include_boundary:
         at_boundary = input.finished()
-        candidates: list[LexicalMatch] = []
+        candidates: list[LexicalMatch] := []
         longest := input.cursor
         for label, sequence in grammars:
             # Each probe gets its own cursor. Trying a declaration cannot move

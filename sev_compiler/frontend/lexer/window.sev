@@ -18,7 +18,7 @@ trait Window:
 
     # Capture a child within this window without copying or modifying source.
     # The child starts at its own start; the parent cursor remains unchanged.
-    def capture(start: u32, end: u32) -> Window | Diagnostic
+    def capture(capture_start: u32, capture_end: u32) -> Window | Diagnostic
     # Describe the full window [start, end), independently of the cursor.
     def span() -> Span
     def text() -> string
@@ -43,10 +43,10 @@ class SourceWindow: Window
     def finished() -> bool:
         return self.cursor == self.end
 
-    def capture(start: u32, end: u32) -> Window | Diagnostic:
-        if start < self.start or start > end or end > self.end:
+    def capture(capture_start: u32, capture_end: u32) -> Window | Diagnostic:
+        if capture_start < self.start or capture_start > capture_end or capture_end > self.end:
             return LexicalDiagnostic("capture would escape source window", self.span(), "lexer.window")
-        return SourceWindow(self.source, start, end, start)
+        return SourceWindow(self.source, capture_start, capture_end, capture_start)
 
     def span() -> Span:
         return Span(self.source.source_id, self.start, self.end)

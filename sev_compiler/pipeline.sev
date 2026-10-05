@@ -4,6 +4,7 @@ import path
 import process
 import source
 import lexer
+import parser
 
 @c(symbol="exit")
 def exit_status(status: i32)
@@ -21,17 +22,20 @@ def repository() -> string | Error:
     throw Error("set SEVERIAN_SYSROOT to the Severian repository")
 
 
-def has_tests(location: string) -> bool:
-    tokens = lexer.scan_bootstrap(source.load(location))
-    depth := 0
-    for token in tokens:
-        if token.kind == "Indent":
-            depth += 1
-        elif token.kind == "Dedent":
-            depth -= 1
-        elif depth == 0 and lexer.token_word(token) == "test":
+def source_has_tests(input: source.SourceFile) -> bool | Error:
+    stream = lexer.lexer(input)
+    if stream is list[lexer.Diagnostic]:
+        for diagnostic in stream:
+            throw Error(diagnostic.note)
+        throw Error("lexing failed without a diagnostic")
+    for line in parser.token_lines(stream):
+        if line.prefix.text == "" and len(line.tokens) > 0 and line.tokens[0].lexeme.text == "test":
             return true
     return false
+
+
+def has_tests(location: string) -> bool | Error:
+    return source_has_tests(source.load(location))
 
 
 def plan(root: string, rebuild: bool = true) -> list[package.Step] | Error:
@@ -83,3 +87,9 @@ def main():
     report = run(rebuild)
     if report.failed > 0 or report.blocked > 0:
         exit_status(1)
+
+
+test "pipeline discovers top level tests from classified token lines":
+    assert(source_has_tests(source.virtual_source("top.sev", "test \"example\":\n    assert(true)\n")))
+    assert(not source_has_tests(source.virtual_source("nested.sev", "class Example:\n    test \"nested\":\n        assert(true)\n")))
+    assert(not source_has_tests(source.virtual_source("quoted.sev", "message = \"test example:\"\n# test ignored:\n")))

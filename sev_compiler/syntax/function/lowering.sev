@@ -35,8 +35,12 @@ def scalar_boundary(function: FunctionDeclaration, name: string) -> string:
                     match argument.value:
                         case String:
                             return value
-                        case _:
-                            throw Error("unimplemented (sev_compiler/universal/declaration/scalar.sev)")
+                        case Name:
+                            throw Error("scalar boundary requires a string literal")
+                        case Integer:
+                            throw Error("scalar boundary requires a string literal")
+                        case Boolean:
+                            throw Error("scalar boundary requires a string literal")
     return ""
 
 
@@ -59,8 +63,12 @@ def scalar_operand_segments(function: FunctionDeclaration) -> list[int]:
                                     throw Error("invalid MLIR operand segment size")
                                 segments.append(size)
                             return segments
-                        case _:
-                            throw Error("unimplemented (sev_compiler/universal/declaration/scalar.sev)")
+                        case Name:
+                            throw Error("MLIR operand segments require a string literal")
+                        case Integer:
+                            throw Error("MLIR operand segments require a string literal")
+                        case Boolean:
+                            throw Error("MLIR operand segments require a string literal")
     return []
 
 
@@ -108,7 +116,11 @@ def scalar_requirements(function: borrow FunctionDeclaration, requirements: Lowe
                                 requirements.passes.append(name)
                         elif name not in requirements.libraries:
                             requirements.libraries.append(name)
-                case _:
+                case Name:
+                    throw Error("lowering requirements require string literals")
+                case Integer:
+                    throw Error("lowering requirements require string literals")
+                case Boolean:
                     throw Error("lowering requirements require string literals")
 
 

@@ -25,7 +25,7 @@ def match_declared_token(input: list[TokenTerm], label: string, construct: (Lexe
     if not (token is Token) or label not in token.declarations:
         return None
 
-    spelling = token.lexeme
+    spelling := token.lexeme
     if captured:
         start = u32(len(prefix))
         end = u32(len(spelling.text) - len(suffix))
@@ -48,7 +48,7 @@ def match_contextual_token(input: list[TokenTerm], label: string, context: Gramm
     token = input[0]
     if token.span.end <= token.span.start:
         return None
-    spelling = token.lexeme
+    spelling := token.lexeme
     if not spelling.text.starts_with(prefix) or not spelling.text.ends_with(suffix):
         return None
     if captured:

@@ -55,6 +55,25 @@ mod tests {
     }
 
     #[test]
+    fn erased_record_traits_retain_payload_until_the_last_owner() {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let executable = std::env::temp_dir().join(format!("severian-any-record-{}", std::process::id()));
+        let compiler = std::env::var_os("CC").unwrap_or_else(|| {
+            if Path::new("/usr/bin/clang-21").is_file() { "/usr/bin/clang-21".into() }
+            else { "clang".into() }
+        });
+        let compiled = Command::new(compiler)
+            .args(["-std=gnu17", "-Wall", "-Wextra", "-Werror", "-ffunction-sections", "-fdata-sections", "-DSEVERIAN_ANY_TEST"])
+            .arg(manifest.join("native/any.c"))
+            .arg(manifest.join("native/owned.c"))
+            .arg(manifest.join("../../library/core/memory/native/memory.c"))
+            .args(["-Wl,--gc-sections", "-pthread", "-o"])
+            .arg(&executable).status().unwrap();
+        assert!(compiled.success());
+        assert!(Command::new(&executable).status().unwrap().success());
+    }
+
+    #[test]
     fn every_tensor_dtype_executes_with_exact_128_bit_storage() {
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
         let source = manifest.join("tests/tensor_dtype.c");

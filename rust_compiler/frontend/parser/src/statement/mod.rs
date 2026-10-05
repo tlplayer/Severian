@@ -1601,6 +1601,7 @@ impl Parser<'_> {
             };
             let pattern_start = self.cursor;
             let (first, _) = self.identifier("expected a case binding, `_`, or type")?;
+            let mut variant_patterns = Vec::new();
             let (binding, annotation) = if self.at(&TokenKind::Colon) {
                 self.next();
                 let binding = (first != "_").then_some(first);
@@ -1620,9 +1621,25 @@ impl Parser<'_> {
             } else {
                 self.cursor = pattern_start;
                 let annotation = self.type_annotation()?;
-                let (name, _) = self.identifier("expected a binding after the case type")?;
-                self.expect(&TokenKind::Colon, "expected `:` after the case binding")?;
-                ((name != "_").then_some(name), Some(annotation))
+                if self.take(&TokenKind::Colon).is_some() {
+                    let alternatives = match annotation.kind {
+                        TypeAnnotationKind::Union(members) => members,
+                        _ => vec![annotation],
+                    };
+                    for alternative in alternatives {
+                        match alternative.kind {
+                            TypeAnnotationKind::Named { name, arguments } if arguments.is_empty() && name != "_" => {
+                                variant_patterns.push(name);
+                            }
+                            _ => return Err(self.error("expected an enum variant in a bare case pattern")),
+                        }
+                    }
+                    (None, None)
+                } else {
+                    let (name, _) = self.identifier("expected a binding after the case type")?;
+                    self.expect(&TokenKind::Colon, "expected `:` after the case binding")?;
+                    ((name != "_").then_some(name), Some(annotation))
+                }
             };
             let (body, end) = if self.at(&TokenKind::Newline) {
                 self.indented_block("case")?
@@ -1634,6 +1651,7 @@ impl Parser<'_> {
             cases.push(MatchCase {
                 binding,
                 annotation,
+                variant_patterns,
                 body,
                 span: Span::new(case_start.source, case_start.start, end),
             });
@@ -5441,5 +5459,27 @@ mod generic_enum_tests {
         assert_eq!(declaration.type_parameters, ["V", "T", "B"]);
         assert_eq!(declaration.type_parameter_defaults[1].as_ref().unwrap().simple_name(), Some("int"));
         assert_eq!(declaration.variants[0].fields[0].annotation.simple_name(), Some("V"));
+    }
+}
+
+#[cfg(test)]
+mod grouped_case_tests {
+    use super::*;
+
+    #[test]
+    fn grouped_enum_cases_preserve_one_body_without_bindings() {
+        let source = SourceFile::virtual_source("grouped.sev",
+            "def read(value: Kind) -> int:\n    match value:\n        case Name | Kind.Integer | Boolean:\n            return 1\n        case text: string:\n            return 2\n");
+        let module = parse(&scan(&source).unwrap()).unwrap();
+        let Item::Function(function) = &module.items[0] else { panic!("function") };
+        let Statement::Match { cases, .. } = &function.body.as_ref().unwrap()[0] else { panic!("match") };
+        assert_eq!(cases.len(), 2);
+        assert_eq!(cases[0].variant_patterns, ["Name", "Kind.Integer", "Boolean"]);
+        assert!(cases[0].binding.is_none());
+        assert!(cases[0].annotation.is_none());
+        assert_eq!(cases[0].body.len(), 1);
+        assert!(cases[1].variant_patterns.is_empty());
+        assert_eq!(cases[1].binding.as_deref(), Some("text"));
+        assert_eq!(cases[1].annotation.as_ref().unwrap().simple_name(), Some("string"));
     }
 }

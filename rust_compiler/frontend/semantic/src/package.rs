@@ -419,6 +419,9 @@ fn analyze_package_impl(
                             }
                         }
                         for substitution in instances.keys() {
+                            if std::env::var_os("SEVERIAN_TRACE_SPECIALIZATIONS").is_some() {
+                                eprintln!("  Specialization {}::{} {:?}", source_module.path.display(), function.name, substitution.bindings());
+                            }
                             own_instances.push((id, substitution.clone()));
                             ast.items
                                 .push(Item::Function(specialize_function(&retained, substitution)));
@@ -531,9 +534,10 @@ fn analyze_package_impl(
                     &definition.name,
                     original,
                     &binding.substitution,
-                    &types,
+                    &mut types,
                     definition.module,
                     &package_classes,
+                    &package_lists,
                     &index,
                 )?;
                 Ok(PackageFunction {
@@ -1443,6 +1447,15 @@ fn resolve_package_type(
         return Ok(crate::map_type_id(key, value));
     }
     if let Some((name, arguments)) = annotation.named_parts() {
+        if let Some((minimum, maximum)) = trait_type_arity(index, module, name) {
+            if arguments.len() < minimum || arguments.len() > maximum {
+                return Err(Diagnostic::new("E000204", format!("trait `{name}` expects {minimum}..={maximum} type argument(s), received {}", arguments.len()), Some(annotation.span)));
+            }
+            for argument in arguments {
+                resolve_package_type(types, argument, module, classes, lists, index)?;
+            }
+            return Ok(crate::any_type_id());
+        }
         if !arguments.is_empty() {
             if let Some(class) = package_class_for_lookup(classes, module, name) {
                 if class.declaration.name == "Tensor" {
@@ -1641,6 +1654,41 @@ fn package_trait_for_lookup(index: &ProgramIndex, module: ModuleId, name: &str) 
                     .is_some_and(|definition| matches!(definition.kind, DefKind::Trait(_)))
             })
     })
+}
+
+pub(super) fn trait_identity(index: &ProgramIndex, module: ModuleId, name: &str) -> Option<String> {
+    generic::resolve_path(module, name, index).into_iter().find_map(|id| {
+        matches!(index.definitions.get(&id)?.kind, DefKind::Trait(_))
+            .then(|| format!("{:x}:{:x}:{:x}", id.package, id.module, id.declaration.0))
+    })
+}
+
+pub(super) fn trait_type_arity(index: &ProgramIndex, module: ModuleId, name: &str) -> Option<(usize, usize)> {
+    generic::resolve_path(module, name, index).into_iter().find_map(|id| {
+        let DefKind::Trait(declaration) = &index.definitions.get(&id)?.kind else { return None; };
+        let maximum = declaration.type_parameters.len();
+        let minimum = declaration.type_parameter_defaults.iter().rposition(Option::is_none)
+            .map_or(0, |position| position + 1);
+        Some((minimum, maximum))
+    })
+}
+
+pub(super) fn trait_identities(index: &ProgramIndex, module: ModuleId, name: &str) -> BTreeSet<String> {
+    let mut pending = generic::resolve_path(module, name, index);
+    let mut seen = BTreeSet::new();
+    let mut identities = BTreeSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) { continue; }
+        let Some(definition) = index.definitions.get(&id) else { continue; };
+        let DefKind::Trait(declaration) = &definition.kind else { continue; };
+        identities.insert(format!("{:x}:{:x}:{:x}", id.package, id.module, id.declaration.0));
+        for base in &declaration.bases {
+            if let Some((name, _)) = base.named_parts() {
+                pending.extend(generic::resolve_path(definition.module, name, index));
+            }
+        }
+    }
+    identities
 }
 
 fn visible_trait_names(module: ModuleId, index: &ProgramIndex) -> Vec<String> {
@@ -2792,9 +2840,10 @@ fn universal_substitution(
     function_name: &str,
     function: &FunctionDecl,
     substitution: &GenericSubstitution,
-    types: &severian_universal::TypeContext,
+    types: &mut severian_universal::TypeContext,
     module: ModuleId,
     classes: &[PackageClass],
+    lists: &[PackageList],
     index: &ProgramIndex,
 ) -> Result<severian_universal::Substitution, Diagnostic> {
     let arguments = function
@@ -2812,35 +2861,14 @@ fn universal_substitution(
                 .map(|name| (severian_universal::GenericParamId(index as u32), name))
         })
         .map(|(parameter, name)| {
-            types
-                .resolve_name(name)
-                .or_else(|| (name == "Any").then_some(crate::any_type_id()))
-                .or_else(|| {
-                    package_trait_for_lookup(index, module, name).then_some(crate::any_type_id())
-                })
-                .or_else(|| {
-                    classes
-                        .iter()
-                        .find(|class| {
-                            class.module == module
-                                && class.declaration.name == (*name).as_str()
-                        })
-                        .or_else(|| {
-                            classes
-                                .iter()
-                                .find(|class| class.declaration.name == (*name).as_str())
-                        })
-                        .map(|class| class.ty)
-                })
+            let annotation = TypeAnnotation {
+                kind: generic::applied_type_spelling(name, function.result.span),
+                span: function.result.span,
+            };
+            resolve_package_type(types, &annotation, module, classes, lists, index)
                 .map(|ty| (parameter, ty))
-                .ok_or_else(|| {
-                    Diagnostic::new(
-                        "E000204",
-                        format!(
-                            "cannot specialize `{function_name}` because inferred type `{name}` is unresolved"
-                        ),
-                        None,
-                    )
+                .map_err(|diagnostic| {
+                    diagnostic.with_note(format!("while specializing `{function_name}` with `{name}`"))
                 })
         })
         .collect::<Result<Vec<_>, _>>()?;

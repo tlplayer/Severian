@@ -118,7 +118,7 @@ def print_block_graph(graph: BlockGraph, address: BlockAddress, indent: string, 
         return indent + "-> " + identity + " [missing block]\n"
     block = file.blocks[address.block.index]
     label = block.name if block.name != "" else block.syntax_name
-    result = indent + "|- " + label + " [" + identity + "]\n"
+    result := indent + "|- " + label + " [" + identity + "]\n"
     visited.append(address)
     path = active[:]
     path.append(address)

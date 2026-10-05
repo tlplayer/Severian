@@ -9,6 +9,14 @@
     "path": "src/lib.sev"
   },
   "dependencies": {
+    "lexer": {
+      "package": "sev-compiler-lexer",
+      "path": "../../../../sev_compiler/frontend/lexer"
+    },
+    "source": {
+      "package": "sev-compiler-source",
+      "path": "../../../../sev_compiler/frontend/source"
+    },
     "file": {
       "path": "../../../system/file"
     },

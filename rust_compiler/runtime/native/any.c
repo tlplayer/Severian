@@ -8,13 +8,41 @@ typedef struct {
     int64_t payload;
 } sev_any;
 
+typedef struct {
+    int64_t type;
+    const char *traits;
+    void *value;
+} sev_any_record;
+
+static void sev_any_record_destroy(void *storage) {
+    sev_any_record *record = storage;
+    __sev_storage_release(record->traits);
+    __sev_storage_release(record->value);
+}
+
+int64_t __sev_any_box_aggregate(void *value, int64_t type, const char *traits) {
+    sev_any_record *record = __sev_storage_new(sizeof(*record), sev_any_record_destroy);
+    __sev_storage_retain(value);
+    __sev_storage_retain(traits);
+    *record = (sev_any_record){type, traits, value};
+    return (int64_t)(intptr_t)record;
+}
+
+_Bool __sev_any_implements(sev_any value, const char *identity, _Bool primitive) {
+    if (value.tag == 9) {
+        const sev_any_record *record = (const void *)(intptr_t)value.payload;
+        return strstr(record->traits, identity) != NULL;
+    }
+    return value.tag >= 0 && value.tag <= 8 && primitive;
+}
+
 void __sev_any_retain(sev_any value) {
-    if (value.tag == 0 || (value.tag >= 6 && value.tag <= 8))
+    if (value.tag == 0 || (value.tag >= 6 && value.tag <= 9))
         __sev_storage_retain((void *)(intptr_t)value.payload);
 }
 
 void __sev_any_release(sev_any value) {
-    if (value.tag == 0 || (value.tag >= 6 && value.tag <= 8))
+    if (value.tag == 0 || (value.tag >= 6 && value.tag <= 9))
         __sev_storage_release((void *)(intptr_t)value.payload);
 }
 
@@ -105,6 +133,8 @@ const char *__sev_any_string(sev_any value) {
             return __sev_string_from_u128(*(unsigned __int128 *)(intptr_t)value.payload);
         case 8:
             return __sev_string_from_f128(*(__float128 *)(intptr_t)value.payload);
+        case 9:
+            return "<record>";
         default:
             return "";
     }
@@ -129,6 +159,8 @@ const char *__sev_any_kind(sev_any value) {
             return "integer";
         case 8:
             return "float";
+        case 9:
+            return "record";
         default:
             return "null";
     }
@@ -197,6 +229,8 @@ _Bool __sev_any_less_equal(sev_any left, sev_any right) {
     return sev_any_compare(left, right) <= 0;
 }
 
+
+
 _Bool __sev_any_greater(sev_any left, sev_any right) {
     return sev_any_compare(left, right) > 0;
 }
@@ -204,3 +238,32 @@ _Bool __sev_any_greater(sev_any left, sev_any right) {
 _Bool __sev_any_greater_equal(sev_any left, sev_any right) {
     return sev_any_compare(left, right) >= 0;
 }
+
+#ifdef SEVERIAN_ANY_TEST
+#include <assert.h>
+static int destroyed_records;
+static void test_record_destroy(void *value) {
+    assert(*(int64_t *)value == 42);
+    destroyed_records++;
+}
+
+int main(void) {
+    int64_t *record = __sev_storage_new(sizeof(*record), test_record_destroy);
+    *record = 42;
+    sev_any boxed = {9, __sev_any_box_aggregate(record, 23, "|abc:def:1||abc:def:2|")};
+    __sev_storage_release(record);
+    assert(__sev_any_implements(boxed, "|abc:def:1|", 0));
+    assert(__sev_any_implements(boxed, "|abc:def:2|", 0));
+    assert(!__sev_any_implements(boxed, "|abc:def:12|", 0));
+    assert(!__sev_any_implements(boxed, "|another:def:1|", 1));
+    assert(__sev_any_implements((sev_any){1, 4}, "|Copy|", 1));
+    assert(!__sev_any_implements((sev_any){1, 4}, "|Marker|", 0));
+    assert(!__sev_any_implements((sev_any){-1, 0}, "|Copy|", 1));
+    __sev_any_retain(boxed);
+    __sev_any_release(boxed);
+    assert(destroyed_records == 0);
+    __sev_any_release(boxed);
+    assert(destroyed_records == 1);
+    return 0;
+}
+#endif

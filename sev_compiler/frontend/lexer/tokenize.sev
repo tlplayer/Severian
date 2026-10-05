@@ -12,10 +12,10 @@ import "../../syntax/recognition.sev" as syntax
 def lexer(input: SourceFile) -> TokenStream | list[Diagnostic]:
     grammars = syntax.registry()
     tokens: list[Token] = []
-    cursor: u32 = 0
+    cursor: u32 := 0
     end = u32(len(input.characters))
     while cursor <= end:
-        candidates: list[Token] = []
+        candidates: list[Token] := []
         longest := cursor
         for label, grammar in grammars:
             name = label.name if label is syntax.SyntaxDeclaration else "Y"
@@ -90,6 +90,9 @@ def lexer(input: SourceFile) -> TokenStream | list[Diagnostic]:
             for declaration in candidate.declarations:
                 if declaration not in selected.declarations:
                     selected.declarations.append(declaration)
+        for candidate in candidates:
+            if candidate.kind not in selected.kinds:
+                selected.kinds.append(candidate.kind)
         if cursor == end:
             stream = TokenStream(input, tokens)
             stream.end.lexeme = selected.lexeme
@@ -195,6 +198,8 @@ test "keywords retain their classification without splitting identifiers":
         assert(result.tokens[0].kind == kind)
         assert(result.tokens[0].lexeme.text == spelling)
         assert(result.tokens[0].span == Span(source.source_id, 0, u32(len(spelling))))
+        assert(kind in result.tokens[0].kinds)
+        assert("IDENTIFIER" in result.tokens[0].kinds)
         for suffix in ["_value", "2", "λ"]:
             longer = lexer(virtual_source("identifier.sev", spelling + suffix))
             assert(longer is TokenStream)

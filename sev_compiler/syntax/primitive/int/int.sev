@@ -452,7 +452,7 @@ class int: Integer:
         if offset == length:
             return 0
 
-        base: u8 = 10
+        base: u8 := 10
         if offset + 1 < length and spelling[offset] == '0':
             prefix = spelling[offset + 1]
             if prefix == 'x' or prefix == 'X':
