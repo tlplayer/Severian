@@ -11,5 +11,8 @@ test:
     assert(alignment[u8]() == 1B)
     assert(alignment[u32]() == 4B)
 
+    #Equivalent calls
     print(bytes[Header]())
+    print(bytes(Header))
     print(alignment[Header]())
+    print(alignment(Header))

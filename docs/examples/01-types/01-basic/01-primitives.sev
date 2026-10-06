@@ -1,9 +1,9 @@
 def main():
-    count: i32 = 10
-    large: i64 = 1_000_000
-    ratio: f64 = 0.5
+    count: int = 10
+    ratio: float = 0.5
     enabled: bool = true
     letter: char = 'a'
+    #Technically this is a count
     word: string = "hello"
 
     print(count)

@@ -1,12 +1,7 @@
-MAX_RETRIES: int = 3
-PI: float = 3.1415926
+MAX_RETRIES: int := view 3
+PI: float := view 3.1415926
+VARIABLE_GLOBAL = 0
 
-def main():
-    print(MAX_RETRIES)
-    print(PI)
-
-test with integ "constant output":
-    print(MAX_RETRIES)
-    print(PI)
-    assert("3" in stdout)
-    assert("3.1415926" in stdout)
+test "constant output":
+    VARIABLE_GLOBAL = 1
+    assert(VARIABLE_GLOBAL == 1)

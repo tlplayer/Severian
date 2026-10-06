@@ -6,7 +6,7 @@ def find_name(found: bool) -> string | None:
 
 def main():
     #Sometimes values may be present so we wrap them in an optional
-    optional_name ?= find_name(false)    
+    optional_name = find_name(false)    
     #Other times, there is a 99.99% probability of being present (os.ls() for example)
     #so there's no question just take the value or throw an error
     known_name: string = find_name(true)

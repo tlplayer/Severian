@@ -97,6 +97,9 @@ geometry/
     ├── bin/<target-triple>/<build-id>/
     ├── debug/
     │   ├── profile/<build-id>/
+    │   ├── build/log.txt # These are replaced every build and are temporary files
+    │   ├── build/error.txt
+    │   ├── build/warn.txt
     │   ├── test/<build-id>/
     │   └── coverage/<build-id>/
     ├── container/<target-triple>/<build-id>/

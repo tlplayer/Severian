@@ -1,11 +1,10 @@
 
 CONSTANT_VARIABLE = view 1
 
-
-    
-
 test:
     mutable = CONSTANT_VARIABLE
+    # The binding is constant cosntant_binding = 10 is a compiler error 
+    # Mutable is 
     constant_binding := mutable
     mutable += 1
     assert()
