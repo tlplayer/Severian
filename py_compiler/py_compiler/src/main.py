@@ -27,7 +27,8 @@ def main(argv=None):
             import unittest
             modules = ["frontend.source.source", "syntax.primitive.catalog", "syntax.symbol.forms",
                        "frontend.lexer.lexer", "frontend.parser.parser", "hir.hir.src.program",
-                       "frontend.src.lib", "mlir.src.lib", "package"]
+                       "frontend.src.lib", "frontend.parser.blocks", "mir.cfg.cfg", "mir.ownership.flow",
+                       "mir.lowering", "mlir.src.lib", "package"]
             suite = unittest.defaultTestLoader.loadTestsFromNames(["py_compiler." + m for m in modules])
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
         if args.command == "tokens":

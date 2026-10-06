@@ -86,7 +86,9 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
         return {"success": False, "diagnostics": len(errors), "sample": [str(e) for e in errors[:5]],
                 "log": str(output / "debug/build/log.txt")}
     program = Program(tuple(c for r in results for c in r.program.constants),
-                      tuple(s for r in results for s in r.program.submodules))
+                      tuple(s for r in results for s in r.program.submodules),
+                      tuple(b for r in results for b in r.program.bodies),
+                      tuple(d for r in results for d in r.program.declarations))
     target_program = lower(program)
     ir = render(target_program)
     # Publishing an artifact requires the actual dialect verifier, not only our structural checks.
@@ -113,6 +115,21 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
         if c.name:
             declarations.append({"name": name, "symbol-id": c.identity, "source": "source/" + c.source,
                                  "contract": contract})
+    for declaration in program.declarations:
+        declarations.append({"name": declaration.name, "symbol-id": declaration.identity,
+                             "source": "source/" + declaration.source,
+                             "contract": encode({"kind": declaration.kind, "fields": declaration.fields,
+                                                 "variants": declaration.variants, "traits": declaration.traits})})
+    for body in program.bodies:
+        if body.declaration:
+            parameters = ", ".join(f"{binding.name}: {binding.type.name}"
+                                   for binding in body.bindings[:len(body.blocks[0].parameters)])
+            declarations.append({"name": f"{body.source}::{body.declaration}", "symbol-id": body.identity,
+                                 "source": "source/" + body.source,
+                                 "contract": f"def {body.declaration}({parameters}) -> {body.result_type.name}"})
+        symbols.append({"id": body.identity, "name": body.name, "kind": "execution-body", "entry": body.name,
+                        "bindings": [{"id": b.identity, "name": b.name, "type": b.type.name,
+                                      "constant": b.constant, "ownership": b.ownership} for b in body.bindings]})
     semantic_id = digest(encode(declarations))
     interface = {"format": "severian.interface", "version": 1, "package": identity,
                  "semantic-id": semantic_id, "metadata": {"build-id": build_id, "path": realization_path},
@@ -124,6 +141,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
                    "interface": {"path": interface_path, "checksum": digest(interface_text)},
                    "artifacts": [{"path": ir_path, "kind": "mlir", "checksum": digest(ir)}],
                    "dependencies": [], "native-artifacts": []}
+    realization["initializers"] = [body.name for body in program.bodies if not body.declaration]
     # No native layout is claimed before target data-layout conversion.
     layouts = {"abi": abi_id, "state": "representation-only", "native-layouts": [],
                "representations": [{"type": t.name, "mlir": t.mlir, "bits": t.bits}

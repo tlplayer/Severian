@@ -11,6 +11,24 @@ class Syntax:
     symbols: tuple = SYMBOLS
 
     @property
+    def block_providers(self):
+        from py_compiler.syntax.block.block import providers
+        return providers()
+
+    @property
+    def sentence_providers(self):
+        from importlib import import_module
+        from py_compiler.syntax.sentence.unimplemented import Unimplemented
+        from py_compiler.syntax.keywords.drop import Drop
+        from py_compiler.syntax.sentence.assignment import Assignment
+        return (Unimplemented(), import_module("py_compiler.syntax.sentence.return").Return(), Drop(), Assignment())
+
+    @property
+    def scope_providers(self):
+        from py_compiler.syntax.keywords.scope import SCOPES
+        return SCOPES
+
+    @property
     def types(self):
         return primitives(self.pointer_bits)
 

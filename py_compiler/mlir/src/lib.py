@@ -22,6 +22,8 @@ class MlirFunction:
 @dataclass(frozen=True)
 class MlirProgram:
     functions: tuple[MlirFunction, ...]
+    bodies: tuple = ()
+    declarations: tuple = ()
 
     def verify(self):
         symbols = set()
@@ -34,13 +36,18 @@ class MlirProgram:
                 raise ValueError(f"missing MLIR provider for {c.type.name}")
             if c.type.family != "unit" and not c.type.mlir:
                 raise ValueError("value has no MLIR representation")
+        for body in self.bodies:
+            if body.name in symbols:
+                raise ValueError("duplicate executable symbol")
+            symbols.add(body.name)
+            body.verify()
 
 
 def lower(program):
     # Constant materializers are implementation symbols, not source functions.
     from hashlib import sha256
     result = MlirProgram(tuple(MlirFunction("__sev_constant_" + sha256(c.identity.encode()).hexdigest(), c)
-                              for c in program.constants))
+                              for c in program.constants), program.bodies, program.declarations)
     result.verify()
     return result
 
@@ -48,6 +55,8 @@ def lower(program):
 def render(program):
     program.verify()
     globals_, functions = [], []
+    declarations = {place.identity: place for body in program.bodies for place in body.storage}
+    globals_.extend("  " + place.declaration() for place in declarations.values())
     for function in program.functions:
         c, symbol = function.constant, function.symbol
         type_, family = c.type.mlir, c.type.family
@@ -80,7 +89,12 @@ def render(program):
         attributes = f" attributes {{sev.type = {quoted(c.type.name)}, sev.source = {quoted(c.source)}, sev.scalar_start = {c.span.start} : i64, sev.scalar_end = {c.span.end} : i64}}"
         functions.append(f"  func.func @{symbol}(){result}{attributes} {{\n" +
                          "\n".join("    " + line for line in body) + "\n  }")
-    return "module {\n" + "\n".join(globals_ + functions) + "\n}\n"
+    from py_compiler.mlir.src.cfg import render_body
+    functions.extend(render_body(body) for body in program.bodies)
+    contracts = [{"name": d.name, "kind": d.kind, "fields": d.fields, "variants": d.variants, "traits": d.traits}
+                 for d in program.declarations]
+    attributes = " attributes {sev.declarations = " + quoted(json.dumps(contracts)) + "}" if contracts else ""
+    return "module" + attributes + " {\n" + "\n".join(globals_ + functions) + "\n}\n"
 
 
 def verifier_path():

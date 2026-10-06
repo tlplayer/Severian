@@ -8,3 +8,7 @@ class Primitive:
     mlir: str
     bits: int = 0
     signed: bool = False
+
+    @property
+    def binding_ownership(self):
+        return "view" if self.family == "string" else "copy"

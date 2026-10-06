@@ -19,9 +19,25 @@ def compile_source(path, text, syntax):
         tokens = lex(source, syntax)
     except Diagnostic as failure:
         return FrontendResult(source, Program((), ()), (failure,))
+    from py_compiler.frontend.parser.blocks import parse_blocks
+    from py_compiler.mir.lowering import prepare
+    root, block_errors = parse_blocks(source, tokens, syntax)
     graph, parse_errors = parse(source, tokens, syntax)
-    program, hir_errors = partition(source, graph, syntax)
-    return FrontendResult(source, program, tuple(parse_errors + hir_errors))
+    # Preserve primitive materializer interfaces for the original literal-only milestone.
+    if not parse_errors and all(n.kind == "sentence" for n in root.children):
+        program, hir_errors = partition(source, graph, syntax)
+        return FrontendResult(source, program, tuple(block_errors + hir_errors))
+    if block_errors:
+        program, hir_errors = partition(source, graph, syntax)
+        return FrontendResult(source, program, tuple(block_errors + hir_errors))
+    try:
+        bodies, declarations = prepare(source, root, syntax)
+        constants = tuple(o.payload for b in bodies for block in b.blocks for o in block.operations if o.kind == "constant")
+        return FrontendResult(source, Program(constants, (), bodies, declarations), ())
+    except Diagnostic as failure:
+        return FrontendResult(source, Program((), ()), (failure,))
+    except ValueError as failure:
+        return FrontendResult(source, Program((), ()), (Diagnostic("HIR/MIR", str(failure), source, root.span),))
 
 
 import unittest

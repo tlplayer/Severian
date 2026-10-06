@@ -28,6 +28,8 @@ class Submodule:
 class Program:
     constants: tuple[Constant, ...]
     submodules: tuple[Submodule, ...]
+    bodies: tuple = ()
+    declarations: tuple = ()
 
 
 def resolve_literal(literal, syntax):

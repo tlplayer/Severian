@@ -1,0 +1,52 @@
+trait Named:
+    name: string
+
+class Label: Named:
+    name: string
+
+enum Colour:
+    Red
+    Green
+    Blue
+
+version := 1
+
+def choose(flag: bool) -> int:
+    value = 1
+    if flag:
+        value = 2
+    elif not flag:
+        value = 3
+    else:
+        value = 4
+    return value
+
+def following_view() -> string:
+    text = "old"
+    alias := text
+    text = "new"
+    return alias
+
+def copied_value() -> string:
+    text = "old"
+    snapshot := copy text
+    text = "new"
+    return snapshot
+
+# Scope qualifiers select distinct bindings. The receiver is passed by reference.
+x = 0
+class foo:
+    x = 1
+    def add(a):
+        local.x: local int = 2 + self.x
+        return local.x + a
+
+    def foo(_x):
+        #x defaults to self.x since it's the closest scope. This avoids ambiguity from self.x and x. 
+        #You cannot pass x into a function besides the constructor that would cause a a compiler error
+        x = _x
+    def global_value() -> int:
+        return global.x
+
+    def pending() -> int:
+        unimplemented

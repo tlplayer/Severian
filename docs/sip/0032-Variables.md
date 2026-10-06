@@ -18,7 +18,7 @@ lifetime:     static
 scope:        local | global | self 
 ownership:    move | borrow | view | copy | mirror | drop 
 mutability:   := | =
-dynamic:      dynamic | any | numeric
+dynamic:      dynamic | any | numeric 
 concurrency:  atomic
 
 ## Context
