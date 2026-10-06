@@ -3268,6 +3268,7 @@ impl Parser<'_> {
             Ok(Statement::FieldAssignment {
                 object: object_expression,
                 field,
+                compound: operator.is_some(),
                 span: Span::new(object_span.source, object_span.start, value.span.end),
                 value,
             })
@@ -3350,6 +3351,7 @@ impl Parser<'_> {
                 Ok(Statement::FieldAssignment {
                     object: *object,
                     field: name,
+                    compound: operator.is_some(),
                     span: Span::new(first.span.source, first.span.start, value.span.end),
                     value,
                 })
@@ -5319,11 +5321,12 @@ mod assignment_tests {
         let body = function.body.as_ref().unwrap();
         assert_eq!(body.len(), 2);
         for (index, statement) in body.iter().enumerate() {
-            let Statement::FieldAssignment { object, field, value, .. } = statement else {
+            let Statement::FieldAssignment { object, field, value, compound, .. } = statement else {
                 panic!("expected an indexed field assignment");
             };
             assert!(matches!(object.kind, ExpressionKind::Index { .. }));
             assert_eq!(field, "kind");
+            assert_eq!(*compound, index == 1);
             if index == 1 {
                 assert!(matches!(value.kind, ExpressionKind::Binary {
                     operator: BinaryOperator::Add, ..

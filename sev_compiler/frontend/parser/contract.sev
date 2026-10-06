@@ -25,21 +25,21 @@ class GrammarMatch:
     identity: string = ""
 
     def admissible() -> ProofResult | Diagnostic:
-        if self.check == None:
+        if check == None:
             return ProofResult.Proven
-        return self.check()
+        return check()
 
     def resolve() -> GrammarResolution | Diagnostic:
-        if self.cached != None:
-            return self.cached
-        if not self.selected:
+        if cached != None:
+            return cached
+        if not selected:
             throw Error("grammar construction requires a selected interpretation")
-        if self.resolving:
+        if resolving:
             throw Error("cyclic grammar construction")
-        self.resolving = true
-        self.cached = self.construct()
-        self.resolving = false
-        return self.cached
+        resolving = true
+        cached = construct()
+        resolving = false
+        return cached
 
 
 ((list[TokenTerm]) -> GrammarMatch | None | Diagnostic) as GrammarMatcher

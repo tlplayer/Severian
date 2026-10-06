@@ -3024,6 +3024,320 @@ mod tests {
     }
 
     #[test]
+    fn map_membership_views_and_enumeration_work_natively() {
+        let root = temporary_package();
+        let source = root.join("map-iteration.sev");
+        let executable = root.join("map-iteration");
+        std::fs::write(&source, r#"class Value:
+    count: int
+def produce(calls: list[int]) -> map[string, int]:
+    calls[0] += 1
+    return {"first": 10, "second": 20}
+def needle(calls: list[int]) -> string:
+    calls[0] += 1
+    return "first"
+def main() -> int:
+    mapping = {"key": "value", "other": "second"}
+    assert("key" in mapping)
+    assert(not ("value" in mapping))
+    assert(not ("missing" in mapping))
+    assert(mapping.contains("other"))
+    keys: list[string] = mapping.keys()
+    values: list[string] = mapping.values()
+    assert(len(keys) == 2)
+    assert(len(values) == 2)
+    assert("key" in keys)
+    assert("value" in values)
+    keys[0] = "changed"
+    values[0] = "changed"
+    assert(mapping["key"] == "value")
+    assert(not ("changed" in mapping))
+    count := 0
+    for key in mapping:
+        assert(key in mapping)
+        count += 1
+    assert(count == 2)
+    for key, value in mapping:
+        assert(mapping[key] == value)
+    calls = [0]
+    count = 0
+    for position, key in enumerate(produce(calls)):
+        assert(position == count)
+        assert(key == "first" or key == "second")
+        count += 1
+    assert(count == 2)
+    assert(calls[0] == 1)
+    for position, value in enumerate(produce(calls).values()):
+        assert(position >= 0)
+        assert(value == 10 or value == 20)
+    assert(calls[0] == 2)
+    for position, key in enumerate(mapping.keys()):
+        assert(position >= 0)
+        assert(key in mapping)
+    records = {"answer": Value(42)}
+    record_values: list[Value] = records.values()
+    assert(record_values[0].count == 42)
+    numbers = {1: 100, 2: 200}
+    assert(1 in numbers)
+    assert(not (100 in numbers))
+    flags = {true: 7}
+    assert(true in flags)
+    assert(not (false in flags))
+    decimals = {1.5: 3}
+    assert(1.5 in decimals)
+    assert(not (2.5 in decimals))
+    empty: map[string, int] = {}
+    assert(not ("missing" in empty))
+    assert(len(empty.keys()) == 0)
+    assert(len(empty.values()) == 0)
+    for position, key in enumerate(empty):
+        assert(false)
+    assert(not (needle(calls) in {}))
+    assert(calls[0] == 3)
+    for position, value in enumerate([4, 5]):
+        assert(value == position + 4)
+    count = 0
+    for position, value in enumerate({4, 5}):
+        assert(position == count)
+        assert(value == 4 or value == 5)
+        count += 1
+    assert(count == 2)
+    return 0
+"#).unwrap();
+        Compiler::new(TargetSpec::host()).unwrap().compile_file(&source, &executable).unwrap();
+        let output = std::process::Command::new(&executable).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compound_condition_guards_allow_generic_methods_on_constructor_results_natively() {
+        let root = temporary_package();
+        let source = root.join("compound-guard.sev");
+        let executable = root.join("compound-guard");
+        std::fs::write(&source, r#"class Span:
+    start: int
+trait Diagnostic: Error
+    note: string
+class Failure: Diagnostic
+    note: string
+class LiteralValueOf[T]:
+    value: T
+    def read[R](span: Span) -> R | Diagnostic:
+        if self.value is R:
+            return self.value
+        return Failure("wrong type")
+class Context:
+    span: Span | None = None
+def context_field[T](context: Context, name: string) -> T:
+    if name == "span" and context.span != None:
+        value = LiteralValueOf[Span](context.span).read[T](context.span)
+        if value is Diagnostic:
+            throw value
+        return value
+    throw Error("missing span")
+def false_disjunction(context: Context, enabled: bool) -> int:
+    if not enabled or context.span == None:
+        return 0
+    else:
+        return context.span.start
+def conditional(context: Context, enabled: bool) -> int:
+    return context.span.start if enabled and context.span != None else 0
+def negated(context: Context, enabled: bool) -> int:
+    if not (not enabled or context.span == None):
+        return context.span.start
+    return 0
+def main() -> int:
+    present = Context(Span(7))
+    empty = Context()
+    value = context_field[Span](present, "span")
+    assert(value.start == 7)
+    assert(false_disjunction(present, true) == 7)
+    assert(false_disjunction(present, false) == 0)
+    assert(false_disjunction(empty, true) == 0)
+    assert(conditional(present, true) == 7)
+    assert(conditional(empty, true) == 0)
+    assert(conditional(present, false) == 0)
+    assert(negated(present, true) == 7)
+    assert(negated(empty, true) == 0)
+    return 0
+"#).unwrap();
+        Compiler::new(TargetSpec::host()).unwrap().compile_file(&source, &executable).unwrap();
+        let output = std::process::Command::new(&executable).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn indexed_field_assignment_writes_back_and_evaluates_receivers_once_natively() {
+        let root = temporary_package();
+        let source = root.join("indexed-fields.sev");
+        let executable = root.join("indexed-fields");
+        std::fs::write(&source, r#"class Candidate:
+    selected: bool
+    count: int
+    label: string
+class Wrapper:
+    child: Candidate
+def candidates(live: list[Candidate], calls: list[int]) -> list[Candidate]:
+    calls[0] += 1
+    return live
+def index(calls: list[int]) -> int:
+    calls[1] += 1
+    return 0
+def main() -> int:
+    live = [Candidate(false, 10, "first"), Candidate(false, 20, "second")]
+    live[0].selected = true
+    assert(live[0].selected)
+    assert(live[0].count == 10)
+    assert(live[0].label == "first")
+    assert(live[1].selected == false)
+    calls = [0, 0]
+    candidates(live, calls)[index(calls)].count += 7
+    assert(live[0].count == 17)
+    assert(calls[0] == 1)
+    assert(calls[1] == 1)
+    candidates(live, calls)[index(calls)].count = candidates(live, calls)[index(calls)].count + 2
+    assert(live[0].count == 19)
+    assert(calls[0] == 3)
+    assert(calls[1] == 3)
+    wrappers = [Wrapper(Candidate(false, 30, "nested"))]
+    wrappers[0].child.selected = true
+    wrappers[0].child.count += 5
+    assert(wrappers[0].child.selected)
+    assert(wrappers[0].child.count == 35)
+    assert(wrappers[0].child.label == "nested")
+    assert(live[1].count == 20)
+    assert(live[1].label == "second")
+    return 0
+"#).unwrap();
+        Compiler::new(TargetSpec::host()).unwrap().compile_file(&source, &executable).unwrap();
+        let output = std::process::Command::new(&executable).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn narrowed_loop_local_names_can_be_reused_after_scope_exit_natively() {
+        let root = temporary_package();
+        let source = root.join("scope.sev");
+        let executable = root.join("scope");
+        std::fs::write(&source, r#"enum ProofResult:
+    Proven
+    Refuted
+class Diagnostic:
+    note: string
+def admissible(success: bool) -> ProofResult | Diagnostic:
+    if success:
+        return ProofResult.Proven
+    return Diagnostic("rejected")
+def select(values: list[bool]) -> ProofResult | Diagnostic:
+    for success in values:
+        proof = admissible(success)
+        if proof is Diagnostic:
+            return proof
+        assert(proof == ProofResult.Proven)
+    proof = admissible(true)
+    if proof is Diagnostic:
+        return proof
+    return proof
+def while_scope() -> int:
+    again := true
+    while again:
+        proof = admissible(true)
+        if proof is Diagnostic:
+            return 0
+        assert(proof == ProofResult.Proven)
+        again = false
+    proof = 42
+    return proof
+def outer_guard(input: int | Diagnostic) -> int:
+    value = input
+    if value is Diagnostic:
+        return 0
+    for item in [1, 2]:
+        proof = admissible(true)
+        if proof is Diagnostic:
+            return 0
+        assert(value == 7)
+    return value
+def main() -> int:
+    first = select([true, true])
+    if first is Diagnostic:
+        return 1
+    assert(first == ProofResult.Proven)
+    empty = select([])
+    if empty is Diagnostic:
+        return 2
+    assert(empty == ProofResult.Proven)
+    rejected = select([false])
+    if rejected is Diagnostic:
+        assert(rejected.note == "rejected")
+    else:
+        return 3
+    assert(while_scope() == 42)
+    assert(outer_guard(7) == 7)
+    return 0
+"#).unwrap();
+        Compiler::new(TargetSpec::host()).unwrap().compile_file(&source, &executable).unwrap();
+        let output = std::process::Command::new(&executable).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn conditional_expression_narrowing_supplies_generic_trait_arguments_natively() {
+        let root = temporary_package();
+        let source = root.join("conditional.sev");
+        let executable = root.join("conditional");
+        std::fs::write(&source, r#"class Span:
+    start: int
+class Problem:
+    message: string
+trait Reader:
+    def read[T](span: Span) -> T | Problem
+class ValueReader: Reader
+    value: int
+    expected_start: int
+    def read[T](span: Span) -> T | Problem:
+        assert(span.start == self.expected_start)
+        if self.value is T:
+            return self.value
+        return Problem("wrong type")
+class Context:
+    receiver: Reader | None = None
+    span: Span | None = None
+enum ProofResult:
+    Unknown
+    Proven
+    Refuted
+def state[T](context: Context) -> ProofResult:
+    if context.receiver != None:
+        location = context.span if context.span != None else Span(0)
+        value = context.receiver.read[T](location)
+        return ProofResult.Refuted if value is Problem else ProofResult.Proven
+    return ProofResult.Unknown
+def reverse(context: Context) -> Span:
+    return Span(0) if context.span == None else context.span
+def main() -> int:
+    assert(state[int](Context()) == ProofResult.Unknown)
+    present = Context(ValueReader(7, 42), Span(42))
+    assert(state[int](present) == ProofResult.Proven)
+    assert(state[string](present) == ProofResult.Refuted)
+    missing = Context(ValueReader(7, 0))
+    assert(state[int](missing) == ProofResult.Proven)
+    assert(state[string](missing) == ProofResult.Refuted)
+    assert(reverse(present).start == 42)
+    assert(reverse(missing).start == 0)
+    return 0
+"#).unwrap();
+        Compiler::new(TargetSpec::host()).unwrap().compile_file(&source, &executable).unwrap();
+        let output = std::process::Command::new(&executable).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn generic_type_guards_unwrap_optional_trait_parameters_natively() {
         let root = temporary_package();
         let definitions = r#"trait T:

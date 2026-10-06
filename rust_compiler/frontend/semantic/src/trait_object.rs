@@ -162,8 +162,13 @@ impl Analyzer<'_> {
         if callable_path(callee).is_some_and(|path| self.functions.contains_key(&path)) {
             return Ok(None);
         }
-        let Ok(object) = self.expression(object, None) else {
-            return Ok(None);
+        let object = match self.expression(object, None) {
+            Ok(object) => object,
+            // A computed receiver is a value, not an unresolved namespace.
+            // Preserve constructor/index diagnostics instead of misreporting
+            // the enclosing generic method as a missing function declaration.
+            Err(error) if callable_path(object).is_none() => return Err(error),
+            Err(_) => return Ok(None),
         };
         if !self.is_trait_object(object.type_id) && explicit.is_empty() {
             return Ok(None);
@@ -369,6 +374,43 @@ impl Analyzer<'_> {
                         .iter()
                         .any(|base| base.simple_name() == Some("Error"))
                 })
+    }
+
+    /// Apply facts guaranteed by one outcome of a Boolean condition. A true
+    /// conjunction and a false disjunction establish both operand outcomes;
+    /// their opposite outcomes do not establish either operand individually.
+    pub(super) fn apply_condition_guards(
+        &mut self,
+        condition: &AstExpression,
+        outcome: bool,
+        allow_mutable: bool,
+    ) -> Result<(), Diagnostic> {
+        match &condition.kind {
+            AstExpressionKind::Unary { operator: AstUnaryOperator::Not, operand } => {
+                self.apply_condition_guards(operand, !outcome, allow_mutable)
+            }
+            AstExpressionKind::Binary { operator, left, right }
+                if (*operator == AstBinaryOperator::And && outcome)
+                    || (*operator == AstBinaryOperator::Or && !outcome) => {
+                let mut names = BTreeSet::new();
+                collect_expression_names(left, &mut names);
+                let right_statement = AstStatement::Expression(right.as_ref().clone());
+                if names.iter().all(|name| guard_branch_preserves_binding(
+                    std::slice::from_ref(&right_statement), name,
+                )) {
+                    self.apply_condition_guards(left, outcome, allow_mutable)?;
+                }
+                self.apply_condition_guards(right, outcome, allow_mutable)
+            }
+            _ => {
+                if let Some((name, yes, no)) = self.union_guard_projection(condition, allow_mutable)? {
+                    if let Some(value) = if outcome { yes } else { no } {
+                        self.value_substitutions.insert(name, value);
+                    }
+                }
+                Ok(())
+            }
+        }
     }
 
     pub(super) fn union_guard_projection(
@@ -998,6 +1040,41 @@ mod tests {
         let context = severian_bootstrap::load().unwrap();
         let program = analyze(&ast, &context.types).unwrap();
         severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn compound_condition_guards_do_not_escape_or_assume_ambiguous_outcomes() {
+        for body in [
+            "    if enabled or context.value != None:\n        return context.value.count\n    return 0\n",
+            "    if enabled and context.value == None:\n        return 0\n    else:\n        return context.value.count\n",
+            "    if enabled and context.value != None:\n        local = context.value.count\n    return context.value.count\n",
+        ] {
+            let source = severian_source::SourceFile::virtual_source("compound-guard.sev", format!(
+                "class Value:\n    count: int\nclass Context:\n    value: Value | None\ndef invalid(enabled: bool, context: Context) -> int:\n{body}"
+            ));
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            let context = severian_bootstrap::load().unwrap();
+            assert!(analyze(&ast, &context.types).is_err(), "{body}");
+        }
+    }
+
+    #[test]
+    fn computed_generic_method_receiver_preserves_constructor_error() {
+        let context = severian_bootstrap::load().unwrap();
+        let mut errors = Vec::new();
+        for (result, expression) in [
+            ("Holder[int]", "Holder[int](\"wrong type\")"),
+            ("int", "Holder[int](\"wrong type\").read[int](0)"),
+        ] {
+            let source = severian_source::SourceFile::virtual_source("receiver.sev", format!(
+                "class Holder[T]:\n    value: T\n    def read[R](fallback: R) -> R:\n        return fallback\ndef invalid() -> {result}:\n    return {expression}\n"
+            ));
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            errors.push(analyze(&ast, &context.types).unwrap_err());
+        }
+        assert_eq!(errors[0].code, errors[1].code);
+        assert_eq!(errors[0].message, errors[1].message);
+        assert!(!errors[1].message.contains("call target must resolve"));
     }
 
     #[test]

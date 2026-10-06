@@ -16,7 +16,7 @@ class GrammarContext:
     body: B = Block()
     previous: B | None = None
     fields: map[string, LiteralValue] = {}
-    span: Span | None = None
+    span: Span
     # Explicit receivers allow grammars owned by traits other than B. Block
     # grammars may use the enclosing block when no explicit receiver is set.
     receiver: LiteralValue | None = None
@@ -193,7 +193,7 @@ def context_value[T](value: B | None) -> T:
 
 def context_receiver_state[T](context: GrammarContext) -> ProofResult:
     if context.receiver != None:
-        location = context.span if context.span != None else Span(0, 0, 0)
+        location = context.span
         value = context.receiver.read[T](location)
         return ProofResult.Refuted if value is Diagnostic else ProofResult.Proven
     if context.parent == None:
@@ -203,7 +203,7 @@ def context_receiver_state[T](context: GrammarContext) -> ProofResult:
 
 def context_receiver[T](context: GrammarContext) -> T:
     if context.receiver != None:
-        location = context.span if context.span != None else Span(0, 0, 0)
+        location = context.span
         value = context.receiver.read[T](location)
         if value is Diagnostic:
             throw value
@@ -314,10 +314,10 @@ def select_grammar(candidates: list[GrammarMatch], span: Span) -> GrammarMatch |
             return ParserDiagnostic("grammar constraints require unresolved capture or context facts", span, "parser.constraint")
         live[0].selected = true
         return live[0]
-
+    return ParserDiagnostic("Could not find a grammar match", span, "parser.select")
 
 def context_field[T](context: GrammarContext, name: string) -> T:
-    if name == "span" and context.span != None:
+    if name == "span":
         value = LiteralValueOf[Span](context.span).read[T](context.span)
         if value is Diagnostic:
             throw value
@@ -330,7 +330,8 @@ def context_field[T](context: GrammarContext, name: string) -> T:
         return context_value[T](context.previous)
     if name in context.fields:
         # The caller retains the original diagnostic on a failed typed read.
-        value = context.fields[name].read[T](context.span)
+        location = context.span 
+        value = context.fields[name].read[T](location)
         if value is Diagnostic:
             throw value
         return value

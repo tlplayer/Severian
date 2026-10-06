@@ -310,6 +310,10 @@ void *__sev_list_copy_i64(void *storage) {
     return sev_list_copy(storage);
 }
 
+void *__sev_list_copy(void *storage) {
+    return sev_list_copy(storage);
+}
+
 void *__sev_list_copy_ptr(void *storage) {
     return sev_list_copy(storage);
 }
@@ -646,6 +650,26 @@ _Bool __sev_list_contains_i64(void *storage, int64_t value) {
     return 0;
 }
 
+_Bool __sev_list_contains_bool(void *storage, _Bool value) {
+    return __sev_list_contains_i64(storage, value);
+}
+
+_Bool __sev_list_contains_u8(void *storage, uint8_t value) {
+    return __sev_list_contains_i64(storage, value);
+}
+
+_Bool __sev_list_contains_f64(void *storage, double value) {
+    sev_list *list = storage;
+    for (size_t index = 0; index < list->length; ++index) {
+        if (sev_f64_from_bits(list->values[index]) == value) return 1;
+    }
+    return 0;
+}
+
+_Bool __sev_list_contains_float(void *storage, double value) {
+    return __sev_list_contains_f64(storage, value);
+}
+
 _Bool __sev_list_contains_ptr(void *storage, const char *value) {
     sev_list *list = storage;
     for (size_t index = 0; index < list->length; ++index) {
@@ -661,6 +685,31 @@ _Bool __sev_list_contains_aggregate(void *storage, const void *value) {
     sev_list *list = storage;
     for (size_t index = 0; index < list->length; ++index) {
         if (sev_aggregate_equal((const void *)list->values[index], value)) return 1;
+    }
+    return 0;
+}
+
+_Bool __sev_list_contains_pair_i64(void *storage, sev_pair_i64 value) {
+    sev_list *list = storage;
+    for (size_t index = 0; index < list->length; ++index) {
+        const sev_pair_i64 *known = (const sev_pair_i64 *)list->values[index];
+        if (known->first == value.first && known->second == value.second) return 1;
+    }
+    return 0;
+}
+
+_Bool __sev_list_contains_any(void *storage, sev_pair_i64 value) {
+    sev_list *list = storage;
+    for (size_t index = 0; index < list->length; ++index) {
+        if (__sev_any_equal(*(const sev_pair_i64 *)list->values[index], value)) return 1;
+    }
+    return 0;
+}
+
+_Bool __sev_list_contains_list(void *storage, sev_list_value value) {
+    sev_list *list = storage;
+    for (size_t index = 0; index < list->length; ++index) {
+        if (__sev_list_equal_any((void *)list->values[index], value.storage)) return 1;
     }
     return 0;
 }

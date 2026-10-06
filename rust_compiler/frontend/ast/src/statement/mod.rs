@@ -62,6 +62,8 @@ pub enum Statement {
         object: Expression,
         field: String,
         value: Expression,
+        /// The binary RHS includes a synthetic read of the assignment target.
+        compound: bool,
         span: Span,
     },
     IndexAssignment {

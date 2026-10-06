@@ -3084,6 +3084,81 @@ impl Analyzer<'_> {
         ))
     }
 
+    /// Materialize an assignment receiver before evaluating its RHS. Synthetic
+    /// names cannot collide with source identifiers and are removed by the caller.
+    fn field_receiver_temporary(
+        &mut self,
+        source: &AstExpression,
+        bindings: &mut Vec<Binding>,
+        statements: &mut Vec<Statement>,
+        temporaries: &mut Vec<String>,
+    ) -> Result<AstExpression, Diagnostic> {
+        let value = self.expression(source, None)?;
+        let id = self.new_binding_id();
+        let variable = severian_hir::VariableId(id.0);
+        let name = format!("$field_receiver_{}", id.0);
+        self.names.insert(name.clone(), (id, variable, value.type_id));
+        temporaries.push(name.clone());
+        bindings.push(Binding {
+            id,
+            variable,
+            type_id: value.type_id,
+            value,
+            mutable: true,
+            preserve_error: false,
+            span: source.span,
+        });
+        statements.push(Statement::Binding(id));
+        Ok(AstExpression { kind: AstExpressionKind::Name(name), span: source.span })
+    }
+
+    /// Records are values: save each projected receiver, then write the changed
+    /// record back through its field/index after the innermost update.
+    fn field_assignment_receiver(
+        &mut self,
+        source: &AstExpression,
+        bindings: &mut Vec<Binding>,
+        statements: &mut Vec<Statement>,
+        writebacks: &mut Vec<AstStatement>,
+        temporaries: &mut Vec<String>,
+    ) -> Result<AstExpression, Diagnostic> {
+        match &source.kind {
+            AstExpressionKind::Name(name) if self.names.contains_key(name) => Ok(source.clone()),
+            AstExpressionKind::Index { object, index } => {
+                let object = self.field_receiver_temporary(object, bindings, statements, temporaries)?;
+                let index = self.field_receiver_temporary(index, bindings, statements, temporaries)?;
+                let read = AstExpression {
+                    kind: AstExpressionKind::Index {
+                        object: Box::new(object.clone()),
+                        index: Box::new(index.clone()),
+                    },
+                    span: source.span,
+                };
+                let receiver = self.field_receiver_temporary(&read, bindings, statements, temporaries)?;
+                writebacks.push(AstStatement::IndexAssignment {
+                    object, index, value: receiver.clone(), span: source.span,
+                });
+                Ok(receiver)
+            }
+            AstExpressionKind::Member { object, name } => {
+                let object = self.field_assignment_receiver(object, bindings, statements, writebacks, temporaries)?;
+                let read = AstExpression {
+                    kind: AstExpressionKind::Member {
+                        object: Box::new(object.clone()), name: name.clone(),
+                    },
+                    span: source.span,
+                };
+                let receiver = self.field_receiver_temporary(&read, bindings, statements, temporaries)?;
+                writebacks.push(AstStatement::FieldAssignment {
+                    object, field: name.clone(), value: receiver.clone(), compound: false,
+                    span: source.span,
+                });
+                Ok(receiver)
+            }
+            _ => self.field_receiver_temporary(source, bindings, statements, temporaries),
+        }
+    }
+
     fn statement(
         &mut self,
         statement: &AstStatement,
@@ -3563,14 +3638,11 @@ impl Analyzer<'_> {
                 } else if let Some((key, value)) =
                     self.map_elements.get(&iterable_value.type_id).copied()
                 {
-                    let Some(value_binding) = second_binding else {
-                        return Err(Diagnostic::new(
-                            "E000211",
-                            "map iteration requires `for key, value in map`",
-                            Some(*span),
-                        ));
-                    };
-                    vec![(binding.clone(), key, 0), (value_binding.clone(), value, 1)]
+                    let mut items = vec![(binding.clone(), key, 0)];
+                    if let Some(value_binding) = second_binding {
+                        items.push((value_binding.clone(), value, 1));
+                    }
+                    items
                 } else {
                     return Err(Diagnostic::new(
                         "E000211",
@@ -3876,6 +3948,7 @@ impl Analyzer<'_> {
                 object,
                 field,
                 value,
+                compound,
                 span,
             } => {
                 if field.starts_with('_')
@@ -3889,11 +3962,34 @@ impl Analyzer<'_> {
                     .with_help("use a public method to update protected or private state"));
                 }
                 let AstExpressionKind::Name(object_name) = &object.kind else {
-                    return Err(Diagnostic::new(
-                        "E000211",
-                        "field assignment requires a named object",
-                        Some(*span),
-                    ));
+                    let mut statements = Vec::new();
+                    let mut writebacks = Vec::new();
+                    let mut temporaries = Vec::new();
+                    let result = (|| {
+                        let receiver = self.field_assignment_receiver(
+                            object, bindings, &mut statements, &mut writebacks, &mut temporaries,
+                        )?;
+                        let mut value = value.clone();
+                        if *compound {
+                            if let AstExpressionKind::Binary { left, .. } = &mut value.kind {
+                                left.kind = AstExpressionKind::Member {
+                                    object: Box::new(receiver.clone()), name: field.clone(),
+                                };
+                            }
+                        }
+                        statements.push(self.statement(&AstStatement::FieldAssignment {
+                            object: receiver, field: field.clone(), value,
+                            compound: false, span: *span,
+                        }, bindings, result_type)?);
+                        for writeback in writebacks.into_iter().rev() {
+                            statements.push(self.statement(&writeback, bindings, result_type)?);
+                        }
+                        Ok(Statement::Sequence(Block { statements }))
+                    })();
+                    for name in temporaries {
+                        self.names.remove(&name);
+                    }
+                    return result;
                 };
                 let existing = self.names.get(object_name).copied();
                 if existing.is_none() {
@@ -4453,7 +4549,7 @@ impl Analyzer<'_> {
                     guard_branch_preserves_binding(then_block, name)
                         && guard_branch_preserves_binding(else_block, name));
                 let union_guard = self.union_guard_projection(condition_ast, allow_mutable)?;
-                if let Some((name, Some(value), _)) = &union_guard { self.value_substitutions.insert(name.clone(), value.clone()); }
+                self.apply_condition_guards(condition_ast, true, allow_mutable)?;
                 if let Some((name, true, value)) = &optional_guard {
                     self.value_substitutions.insert(name.clone(), value.clone());
                 }
@@ -4525,7 +4621,7 @@ impl Analyzer<'_> {
                 self.names.clone_from(&outer_names);
                 self.declarations.clone_from(&outer_declarations);
                 self.value_substitutions.clone_from(&outer_substitutions);
-                if let Some((name, _, Some(value))) = &union_guard { self.value_substitutions.insert(name.clone(), value.clone()); }
+                self.apply_condition_guards(condition_ast, false, allow_mutable)?;
                 if let Some((name, false, value)) = &optional_guard {
                     self.value_substitutions.insert(name.clone(), value.clone());
                 }
@@ -5160,10 +5256,12 @@ impl Analyzer<'_> {
     ) -> Result<Block, Diagnostic> {
         let parent_names = self.names.clone();
         let parent_declarations = std::mem::take(&mut self.declarations);
+        let parent_substitutions = self.value_substitutions.clone();
         self.names = parent_names.child();
         let result = self.block_contents(statements, bindings, result_type);
         self.names = parent_names;
         self.declarations = parent_declarations;
+        self.value_substitutions = parent_substitutions;
         result
     }
 
@@ -6656,22 +6754,37 @@ impl Analyzer<'_> {
             }
             AstExpressionKind::Conditional {
                 value,
-                condition,
+                condition: condition_ast,
                 fallback,
             } => {
-                let condition = self.condition_expression(condition)?;
-                let value = self.expression(value, expected)?;
-                let fallback = self.expression(fallback, Some(value.type_id))?;
-                Ok(Expression {
-                    id: self.next_id(),
-                    type_id: value.type_id,
-                    kind: ExpressionKind::Fallback {
-                        condition: Box::new(condition),
-                        value: Box::new(value),
-                        fallback: Box::new(fallback),
-                    },
-                    span: ast.span,
-                })
+                let condition = self.condition_expression(condition_ast)?;
+                let mut guard_names = BTreeSet::new();
+                collect_expression_names(condition_ast, &mut guard_names);
+                let branches = [value, fallback].map(|expression| AstStatement::Return {
+                    value: Some(expression.as_ref().clone()), span: expression.span,
+                });
+                let allow_mutable = guard_names.iter().all(|name|
+                    guard_branch_preserves_binding(&branches, name));
+                let outer_substitutions = self.value_substitutions.clone();
+                let result = (|| {
+                    self.apply_condition_guards(condition_ast, true, allow_mutable)?;
+                    let value = self.expression(value, expected)?;
+                    self.value_substitutions.clone_from(&outer_substitutions);
+                    self.apply_condition_guards(condition_ast, false, allow_mutable)?;
+                    let fallback = self.expression(fallback, Some(value.type_id))?;
+                    Ok(Expression {
+                        id: self.next_id(),
+                        type_id: value.type_id,
+                        kind: ExpressionKind::Fallback {
+                            condition: Box::new(condition),
+                            value: Box::new(value),
+                            fallback: Box::new(fallback),
+                        },
+                        span: ast.span,
+                    })
+                })();
+                self.value_substitutions = outer_substitutions;
+                result
             }
             AstExpressionKind::Fallback { value, fallback } => {
                 let value = self.expression(value, None)?;
@@ -8276,10 +8389,13 @@ impl Analyzer<'_> {
                     && arguments[0].name.is_none()
                 {
                     let collection = self.expression(&arguments[0].value, None)?;
-                    let Some(element) = self.list_elements.get(&collection.type_id).copied() else {
+                    let element = self.list_elements.get(&collection.type_id).copied()
+                        .or_else(|| self.map_elements.get(&collection.type_id).map(|(key, _)| *key))
+                        .or_else(|| (self.set_type == Some(collection.type_id)).then_some(self.set_element).flatten());
+                    let Some(element) = element else {
                         return Err(Diagnostic::new(
                             "E000206",
-                            "`enumerate` expects a list",
+                            "`enumerate` expects a list, map, or set",
                             Some(ast.span),
                         ));
                     };
@@ -8288,24 +8404,28 @@ impl Analyzer<'_> {
                         .resolve_name("int")
                         .expect("bootstrap defines int");
                     let map_type = self.instantiate_map_type(integer, element);
-                    let values = self.list_storage_expression(collection, ast.span);
+                    let values = self.collection_storage_expression(collection, 0, ast.span);
                     let storage_type = values.type_id;
-                    let keys = self.runtime_call(
-                        "__sev_list_indices",
-                        &[storage_type],
-                        storage_type,
-                        vec![values.clone()],
-                        ast.span,
-                    );
-                    return Ok(Expression {
-                        id: self.next_id(),
-                        type_id: map_type,
-                        kind: ExpressionKind::Aggregate {
-                            class: map_type,
-                            fields: vec![keys, values],
-                        },
-                        span: ast.span,
-                    });
+                    // Both projections must use one evaluation of the producer.
+                    let symbol = format!("__sev_enumerate_{}", element.0);
+                    let definition = self.ensure_runtime_function(&symbol, &[storage_type], map_type);
+                    let helper = self.runtime_functions.iter().find(|function| function.definition == definition).unwrap();
+                    if helper.body.is_none() {
+                        let binding = helper.parameters[0].binding;
+                        let values = Expression {
+                            id: self.next_id(), type_id: storage_type, span: ast.span,
+                            kind: ExpressionKind::Binding(binding),
+                        };
+                        let keys = self.runtime_call("__sev_list_indices", &[storage_type], storage_type, vec![values.clone()], ast.span);
+                        let result = Expression {
+                            id: self.next_id(), type_id: map_type, span: ast.span,
+                            kind: ExpressionKind::Aggregate { class: map_type, fields: vec![keys, values] },
+                        };
+                        let helper = self.runtime_functions.iter_mut().find(|function| function.definition == definition).unwrap();
+                        helper.call_type = CallType::Severian;
+                        helper.body = Some(Block { statements: vec![Statement::Return(Some(result))] });
+                    }
+                    return Ok(self.runtime_call(&symbol, &[storage_type], map_type, vec![values], ast.span));
                 }
                 if callable_path(callee).as_deref() == Some("zip")
                     && arguments.len() == 2
@@ -9768,7 +9888,26 @@ impl Analyzer<'_> {
                     }
                 }
                 if *operator == AstBinaryOperator::Contains {
+                    if matches!(&right.kind, AstExpressionKind::Map(entries) if entries.is_empty()) {
+                        let needle = self.expression(left, None)?;
+                        return Ok(self.static_type_predicate(needle, false, ast.span));
+                    }
                     let haystack = self.expression(right, None)?;
+                    if let Some((key, _)) = self.map_elements.get(&haystack.type_id).copied() {
+                        let needle = self.expression(left, Some(key))?;
+                        let suffix = self.list_runtime_suffix(key, ast.span)?;
+                        let storage = self.collection_storage_expression(haystack, 0, ast.span);
+                        let storage_type = storage.type_id;
+                        let boolean = self.types.resolve_name("bool").unwrap();
+                        let mut call = self.runtime_call(
+                            &format!("__sev_list_contains_{suffix}"), &[storage_type, key],
+                            boolean, vec![storage, needle], ast.span,
+                        );
+                        if let ExpressionKind::Call { evaluation_order, .. } = &mut call.kind {
+                            *evaluation_order = vec![1, 0];
+                        }
+                        return Ok(call);
+                    }
                     if let Some(element) = self.list_elements.get(&haystack.type_id).copied() {
                         let needle = self.expression(left, Some(element))?;
                         let suffix = self.list_runtime_suffix(element, ast.span)?;
@@ -18624,6 +18763,35 @@ impl Analyzer<'_> {
             }
         }
         if let Some((key_type, value_type)) = self.map_elements.get(&object.type_id).copied() {
+            if matches!(name.as_str(), "keys" | "values") {
+                if !arguments.is_empty() {
+                    return Err(Diagnostic::new("E000206", format!("map method `{name}` expects no arguments"), Some(span)));
+                }
+                let (index, element) = if name == "keys" { (0, key_type) } else { (1, value_type) };
+                let list_type = self.instantiate_list_type(element);
+                let storage = self.collection_storage_expression(object, index, span);
+                let storage_type = storage.type_id;
+                // The declared API returns a list; mutating it must not corrupt
+                // the map's parallel key/value storage.
+                let storage = self.runtime_call("__sev_list_copy", &[storage_type], storage_type, vec![storage], span);
+                let result = Expression {
+                    id: self.next_id(), type_id: list_type, span,
+                    kind: ExpressionKind::Aggregate { class: list_type, fields: vec![storage] },
+                };
+                return match expected {
+                    Some(expected) => self.coerce(result, expected, false).map(Some),
+                    None => Ok(Some(result)),
+                };
+            }
+            if name == "contains" && arguments.len() == 1 && arguments[0].name.is_none() {
+                let key = self.expression(&arguments[0].value, Some(key_type))?;
+                let suffix = self.list_runtime_suffix(key_type, span)?;
+                let storage = self.collection_storage_expression(object, 0, span);
+                let storage_type = storage.type_id;
+                let boolean = self.types.resolve_name("bool").unwrap();
+                return Ok(Some(self.runtime_call(&format!("__sev_list_contains_{suffix}"),
+                    &[storage_type, key_type], boolean, vec![storage, key], span)));
+            }
             if matches!(name.as_str(), "get" | "set_default") && arguments.len() == 2 {
                 let key = self.expression(&arguments[0].value, Some(key_type))?;
                 let fallback = self.expression(&arguments[1].value, Some(value_type))?;
@@ -22033,6 +22201,59 @@ mod tests {
         let ast = severian_parser::parse(&tokens).unwrap();
         let hir = analyze(&ast, &context.types).unwrap();
         (hir, context)
+    }
+
+    #[test]
+    fn map_membership_and_views_preserve_declared_types() {
+        for body in [
+            "    found = 1 in values\n",
+            "    keys: list[int] = values.keys()\n",
+            "    items: list[string] = values.values()\n",
+            "    keys = values.keys(1)\n",
+            "    items = values.values(1)\n",
+        ] {
+            let source = SourceFile::virtual_source("map-contract.sev", format!(
+                "def invalid(values: map[string, int]):\n{body}"
+            ));
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            let context = severian_bootstrap::load().unwrap();
+            assert!(analyze(&ast, &context.types).is_err(), "{body}");
+        }
+    }
+
+    #[test]
+    fn indexed_field_assignment_preserves_field_contracts() {
+        for assignment in [
+            "values[0].selected = \"wrong type\"",
+            "values[0].missing = true",
+            "values[0]._secret = true",
+        ] {
+            let source = SourceFile::virtual_source("indexed-fields.sev", format!(
+                "class Candidate:\n    selected: bool\n    _secret: bool\ndef update(values: list[Candidate]):\n    {assignment}\n"
+            ));
+            let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+            let context = severian_bootstrap::load().unwrap();
+            assert!(analyze(&ast, &context.types).is_err(), "{assignment}");
+        }
+    }
+
+    #[test]
+    fn narrowed_loop_local_cannot_be_read_after_its_scope() {
+        let source = SourceFile::virtual_source("scope.sev", "class Diagnostic:\n    note: string\ndef inspect(values: list[int | Diagnostic]) -> int:\n    for value in values:\n        proof = value\n        if proof is Diagnostic:\n            return 0\n    return proof\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let context = severian_bootstrap::load().unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert_eq!(error.code, "E000201");
+        assert!(error.message.contains("unknown binding `proof`"), "{error:?}");
+    }
+
+    #[test]
+    fn conditional_expression_narrowing_does_not_escape_its_branches() {
+        let source = SourceFile::virtual_source("conditional.sev", "class Span:\n    start: int\nclass Context:\n    span: Span | None = None\ndef invalid(context: Context) -> int:\n    location = context.span if context.span != None else Span(0)\n    return context.span.start\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let context = severian_bootstrap::load().unwrap();
+        let error = analyze(&ast, &context.types).unwrap_err();
+        assert!(error.message.contains("field `start`"), "{error:?}");
     }
 
     #[test]
