@@ -1,3 +1,4 @@
+import char from "../primitive/char/char.sev"
 import Y from "../generic/symbol.sev"
 import TokenForm from "../generic/token.sev"
 import SourceFile, Span from "../source.sev"
@@ -13,15 +14,15 @@ def quoted_end(source: SourceFile, start: u32, prefix: string, delimiter: string
     text = source.text
     end = u32(len(source.characters))
     opening = prefix + delimiter
-    if text[start:start + len(opening)] != opening:
+    if text[start:start + u32(len(opening))] != opening:
         return None
-    if len(delimiter) == 1 and text[start + len(prefix):start + len(prefix) + 3] == delimiter + delimiter + delimiter:
+    if len(delimiter) == 1 and text[start + u32(len(prefix)):start + u32(len(prefix)) + 3] == delimiter + delimiter + delimiter:
         return None
     cursor := start + u32(len(opening))
     depth := 0
     while cursor < end:
         value = source.characters[cursor]
-        if depth == 0 and text[cursor:cursor + len(delimiter)] == delimiter:
+        if depth == 0 and text[cursor:cursor + u32(len(delimiter))] == delimiter:
             if character and not char.literal_valid(text[start:cursor + 1]):
                 return LexicalDiagnostic("character literal requires one character or escape", Span(source.source_id, start, cursor + 1), "lexer.tokens")
             return cursor + u32(len(delimiter))

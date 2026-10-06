@@ -72,7 +72,7 @@ class BlockGraph:
         result := ""
         visited: list[BlockAddress] = []
         for unit in range(len(self.units)):
-            label = self.units[unit].module if self.units[unit].module != "" else self.units[unit].key
+            label := self.units[unit].module if self.units[unit].module != "" else self.units[unit].key
             if self.units[unit].submodule != "":
                 label += "/" + self.units[unit].submodule
             result += label + ":\n"

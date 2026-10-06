@@ -16,7 +16,7 @@ WHERE LIABILITY CANNOT LAWFULLY BE EXCLUDED,TIMOTHY PLAYER’S TOTAL AGGREGATE L
 
 Severian, including its compiler, runtime, libraries, source code, documentation, build systems, modifications, and related materials, is proprietary software.
 
-All rights not expressly granted in a written agreement are reserved.
+All rights not expressly granted in a written agreement between explicit parties by Timothy Player are reserved.
 
 Public availability of Severian source code does not place Severian in the public domain and does not grant unrestricted commercial-use rights.
 
@@ -37,6 +37,7 @@ Commercial use includes using Severian in connection with:
 * cost reduction or operational advantage;
 * compiling, generating, transforming, optimizing, executing, or deploying commercial software; or
 * incorporating or distributing Severian or a modified version of Severian.
+* Catchall for something not listed but that can be grey would fall into commercial
 
 ## 3. Covered Product
 
@@ -48,6 +49,7 @@ A **Covered Product** is any product, service, platform, application, system, wo
 * is compiled, generated, transformed, optimized, or executed using Severian;
 * uses Severian during production development or deployment; or
 * receives material commercial benefit from Severian.
+* uses Severian as an example and or learning material for developing similar offerings
 
 Each Covered Product requires a separate commercial license unless otherwise agreed in writing.
 
@@ -276,10 +278,7 @@ Unless otherwise published or agreed in writing, the following rates apply:
 
 | Severian use                                                                       |            Royalty rate |
 | ---------------------------------------------------------------------------------- | ----------------------: |
-| Severian used only as a development or compilation tool                            | 0.5% of Covered Revenue |
-| Severian materially supports a production product or service                       |   1% of Covered Revenue |
-| Severian provides a primary runtime, execution, optimization, or platform function |   2% of Covered Revenue |
-| Severian itself is hosted, resold, sublicensed, or offered as a service            |   3% of Covered Revenue |
+| Severian used / was part of the product                         | 1% of Covered Revenue |
 
 The Licensor determines the applicable category in good faith based on Severian’s role in the Covered Product or Covered Service.
 

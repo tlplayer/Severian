@@ -16,7 +16,7 @@ Superseded by:
 
 ## Goal(s)
 
-## Problem(s)
+## Examples
 
 ## Responsibilities
 
@@ -26,7 +26,7 @@ Superseded by:
 
 ## Structure
 
-## Examples
+## Problem(s)
 
 ## Testing
 

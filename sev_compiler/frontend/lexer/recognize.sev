@@ -45,7 +45,7 @@ def recognize_declared(input: Window, label: Y, prefix: string, suffix: string, 
             return None
         return LexicalMatch(label, lexeme, None, [])
     end := input.end
-    while end >= capture_start + len(suffix):
+    while end >= capture_start + u32(len(suffix)):
         capture_end = end - u32(len(suffix))
         if input.source.text[capture_end:end] == suffix and lexical_boundary(input, end):
             lexeme = Lexeme(input.source.text[capture_start:capture_end], Span(input.source.source_id, capture_start, capture_end))
@@ -53,7 +53,7 @@ def recognize_declared(input: Window, label: Y, prefix: string, suffix: string, 
                 window = SourceWindow(input.source, capture_start, capture_end, capture_start)
                 matched = Lexeme(input.source.text[start:end], Span(input.source.source_id, start, end))
                 return LexicalMatch(label, matched, None, [LexicalCapture(capture, window, terminal=true)])
-        if end == capture_start + len(suffix):
+        if end == capture_start + u32(len(suffix)):
             break
         end -= 1
     return None

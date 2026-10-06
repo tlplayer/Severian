@@ -97,6 +97,14 @@ fn declaration_source(module: &ResolvedModule, span: Span) -> Ex {
     call("DeclarationSource", vec![text(spelling, span), source_span(scalar_span)], span)
 }
 
+fn type_value_name(value: &str, span: Span) -> Ex {
+    match value {
+        "unit" => call("type", vec![expression(K::Literal(Literal::Unit), span)], span),
+        "None" | "absent" => call("type", vec![expression(K::Literal(Literal::None), span)], span),
+        _ => name(value, span),
+    }
+}
+
 fn type_contract(module: &ResolvedModule, value: &ast::TypeAnnotation) -> Ex {
     let span = value.span;
     let kind = match &value.kind {
@@ -138,7 +146,7 @@ fn grammar_contract(module: &ResolvedModule, owner: &GrammarOwner<'_>, grammar: 
     if seen.contains(&false) {
         return Err(Diagnostic::new("E000212", "grammar callable parameter has no capture", Some(span)));
     }
-    let identity = |declaration: u128| call("DefId", vec![number(module.package.0, span), number(module.id.0, span), call("DeclarationId", vec![number(declaration, span)], span)], span);
+    let identity = |declaration: u128| call("DefinitionID", vec![number(module.package.0, span), number(module.id.0, span), call("DeclarationId", vec![number(declaration, span)], span)], span);
     let owner_id = identity(super::stable_hash(&format!("{}:{}", owner.kind, owner.name)));
     let callable_id = identity(super::stable_hash(&format!("grammar:{}:{}:{ordinal}", owner.name, grammar.function.name)));
     let optional_source = |value: &Option<Ex>| value.as_ref().map(|value| declaration_source(module, value.span)).unwrap_or_else(|| expression(K::Literal(Literal::None), span));
@@ -296,7 +304,7 @@ fn lower_trait_lexical(owner: &GrammarOwner<'_>, grammar: &ast::SentenceDeclarat
         functions.extend([Item::Function(accepts_spelling), Item::Function(recognize)]);
     }
     let result = grammar.function.result.simple_name();
-    let result_value = result.map(|result| name(&format!("{}{result}", if matches!(result, "bool" | "int" | "float" | "char" | "string" | "None" | "unit" | "absent") { "" } else { owner_alias }), span)).unwrap_or_else(|| expression(K::Literal(Literal::None), span));
+    let result_value = result.map(|result| type_value_name(&format!("{}{result}", if matches!(result, "bool" | "int" | "float" | "char" | "string" | "None" | "unit" | "absent") { "" } else { owner_alias }), span)).unwrap_or_else(|| expression(K::Literal(Literal::None), span));
     let mut descriptor = call("RegisteredGrammar", vec![label.clone(), result_value, recognizer], span);
     if let K::Call { arguments, .. } = &mut descriptor.kind {
         arguments.push(ast::CallArgument { name: Some("token_form".into()), spread: false, value: boolean(true, span), expected_error: None, span });
@@ -419,13 +427,13 @@ fn lower_sentence(owner: &GrammarOwner<'_>, grammar: &ast::SentenceDeclaration,
         ast::SentenceElement::Capture(index) => call("SentenceField.Capture", vec![text(&grammar.function.parameters[*index].name, span), name("TermRole.Value", span), list([], span)], span),
     });
     let result = grammar.function.result.simple_name();
-    let result_value = result.map(|result| name(&format!("{}{result}", if matches!(result, "bool" | "int" | "float" | "char" | "string" | "None") { "" } else { owner_alias }), span)).unwrap_or_else(|| expression(K::Literal(Literal::None), span));
+    let result_value = result.map(|result| type_value_name(&format!("{}{result}", if matches!(result, "bool" | "int" | "float" | "char" | "string" | "None" | "unit" | "absent") { "" } else { owner_alias }), span)).unwrap_or_else(|| expression(K::Literal(Literal::None), span));
     let capture_types = grammar.function.parameters.iter().map(|parameter| {
         let contract = &parameter.annotation;
         let Some(value) = contract.simple_name() else {
             return Err(Diagnostic::new("E000212", "sentence capture requires specialization before an executable adapter can be generated", Some(contract.span)));
         };
-        Ok(name(&format!("{}{value}", if matches!(value, "bool" | "int" | "float" | "char" | "string" | "None" | "unit" | "absent") { "" } else { owner_alias }), contract.span))
+        Ok(type_value_name(&format!("{}{value}", if matches!(value, "bool" | "int" | "float" | "char" | "string" | "None" | "unit" | "absent") { "" } else { owner_alias }), contract.span))
     }).collect::<Result<Vec<_>, Diagnostic>>()?;
     let descriptor = call("RegisteredGrammar", vec![label.clone(), result_value,
         expression(K::Literal(Literal::None), span), list(fields, span), name(&format!("{owner_alias}{match_name}"), span),
@@ -580,7 +588,7 @@ pub(super) fn lower_registrations(graph: &ModuleGraph) -> Result<ModuleGraph, Di
                     "bool" | "int" | "float" | "char" | "string" | "None" | "absent" | "unit" => result.to_owned(),
                     _ => format!("{owner_alias}{result}"),
                 };
-                let descriptor = call("RegisteredGrammar", vec![label(""), name(&result_name, span), name(&format!("{owner_alias}{recognize_name}"), span), expression(K::List(fields), span), name(&format!("{owner_alias}{match_name}"), span), expression(K::Literal(Literal::Boolean(true)), span)], span);
+                let descriptor = call("RegisteredGrammar", vec![label(""), type_value_name(&result_name, span), name(&format!("{owner_alias}{recognize_name}"), span), expression(K::List(fields), span), name(&format!("{owner_alias}{match_name}"), span), expression(K::Literal(Literal::Boolean(true)), span)], span);
                 let mut entry = expression(K::Tuple(vec![label(""), descriptor]), span);
                 attach_contract(&mut entry, contract);
                 entries.push(entry);

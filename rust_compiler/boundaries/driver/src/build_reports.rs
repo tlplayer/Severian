@@ -192,10 +192,18 @@ impl Reports {
         let mut groups = BTreeMap::new();
         read(&self.root, &mut groups)?;
         let mut output = String::from("Build trace (grouped by source file)\n");
+        let mut samples = Vec::new();
+        let mut error_count = 0usize;
         for (source, mut records) in groups {
             output.push_str(&format!("\n===== {source} =====\n"));
             records.sort_by_key(|(stage, record)| (stage.clone(), record["span"][0].as_u64().unwrap_or(0), record["message"].as_str().unwrap_or("").to_owned()));
             for (stage, record) in records {
+                if stage.ends_with("/error") && record["code"].is_string() {
+                    error_count += 1;
+                    if samples.len() < 5 {
+                        samples.push(record["message"].as_str().unwrap_or("").to_owned());
+                    }
+                }
                 output.push_str(&format!("\n[{stage}]\n{}\n", record["message"].as_str().unwrap_or("")));
                 if let Some(callers) = record["callers"].as_array() {
                     for caller in callers {
@@ -206,7 +214,13 @@ impl Reports {
                 }
             }
         }
-        fs::write(self.root.join("log.txt"), output).map_err(|error| error.to_string())
+        fs::write(self.root.join("log.txt"), output).map_err(|error| error.to_string())?;
+        if error_count > 0 {
+            println!("Build failed: {error_count} diagnostics; showing {}. Full log: {}",
+                samples.len(), self.root.join("log.txt").display());
+            for sample in samples { println!("{sample}"); }
+        }
+        Ok(())
     }
 
     pub fn failure(&self) -> String {

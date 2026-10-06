@@ -58,7 +58,7 @@ def json_string(value: string) -> string:
         elif character == "\"":
             text += "\\\""
         elif number < 32:
-            text += "\\u00" + digits[number / 16] + digits[number % 16]
+            text += "\\u00" + string(digits[number / 16]) + string(digits[number % 16])
         else:
             text += string(character)
     return text + "\""

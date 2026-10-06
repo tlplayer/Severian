@@ -394,7 +394,9 @@ fn analyze_package_impl(
     let mut next_binding = 0u32;
     let mut hir = Program::default();
 
-    for source_module in &module_graph.modules {
+    let analyze_module = |source_module: &severian_modules::ResolvedModule,
+                          mut types: &mut severian_universal::TypeContext|
+     -> Result<severian_hir::Module, Diagnostic> {
         let mut own_instances = Vec::new();
         let mut ast = severian_ast::Module::default();
         for item in &source_module.ast.items {
@@ -474,6 +476,12 @@ fn analyze_package_impl(
         let lexical_class_modules = class_lexical_modules(source_module.id, &package_classes);
         for origin in &lexical_class_modules {
             if *origin != source_module.id {
+                // Keep an unambiguous copy even when the caller shadows a helper.
+                visible.extend(module_function_bindings(*origin, &index, &specializations)
+                    .into_iter().map(|mut binding| {
+                        binding.lookup = format!("__sev_origin_{:032x}.{}", origin.0, binding.lookup);
+                        binding
+                    }));
                 // Origin helpers supplement the caller's scope; they must not
                 // turn an existing local or imported callable into an overload
                 // of an unrelated declaration from another module.
@@ -641,7 +649,7 @@ fn analyze_package_impl(
                 )))
             })
             .collect::<Vec<_>>();
-        let mut analyzed = analyze_with_package_functions(
+        let analyzed = analyze_with_package_functions(
             &ast,
             &mut types,
             AnalysisContext {
@@ -666,6 +674,37 @@ fn analyze_package_impl(
         .modules
         .pop()
         .expect("single-module analysis returns one HIR module");
+
+        Ok(analyzed)
+    };
+
+    for (position, source_module) in module_graph.modules.iter().enumerate() {
+        let mut analyzed = match analyze_module(source_module, &mut types) {
+            Ok(analyzed) => analyzed,
+            Err(first) => {
+                // All declaration interfaces are resolved above. Remaining body
+                // checks need no successful dependency body or shared mutable HIR.
+                // Isolate their type state and keep deterministic source order.
+                let remaining = &module_graph.modules[position + 1..];
+                let workers = std::thread::available_parallelism()
+                    .map_or(1, usize::from).min(4);
+                let mut diagnostics = Vec::new();
+                for batch in remaining.chunks(workers) {
+                    let errors = std::thread::scope(|scope| {
+                        let handles = batch.iter().map(|module| {
+                            let mut local_types = types.clone();
+                            let analyze_module = &analyze_module;
+                            scope.spawn(move || analyze_module(module, &mut local_types).err())
+                        }).collect::<Vec<_>>();
+                        handles.into_iter().filter_map(|handle|
+                            handle.join().expect("semantic diagnostic worker panicked")
+                        ).collect::<Vec<_>>()
+                    });
+                    diagnostics.extend(errors);
+                }
+                return Err(first.with_additional(diagnostics));
+            }
+        };
 
         remap_module_bindings(&mut analyzed, next_binding);
         let mut scoped_bindings = Vec::new();
@@ -805,6 +844,11 @@ fn lower_trait_typed_parameters(module_graph: &ModuleGraph) -> ModuleGraph {
             Item::Function(function) => Some(function),
             _ => None,
         }) {
+            // Generated grammar adapters are stored as function values. Their
+            // trait parameters are erased ABI contracts, not inferred generics.
+            if function.name.starts_with("_grammar_") {
+                continue;
+            }
             let mut used = function
                 .type_parameters
                 .iter()
@@ -1263,29 +1307,32 @@ fn class_lexical_modules(source: ModuleId, classes: &[PackageClass]) -> BTreeSet
             .iter()
             .flat_map(|index| {
                 let owner = &classes[*index];
-                owner.declaration.fields.iter().filter_map(move |field| {
-                    let name = field.annotation.named_parts()?.0;
-                    classes
-                        .iter()
-                        .enumerate()
-                        .find_map(|(candidate_index, candidate)| {
-                            candidate
-                                .lookups
-                                .get(&owner.module)
-                                .is_some_and(|lookups| lookups.iter().any(|lookup| lookup == name))
-                                .then_some(candidate_index)
-                        })
+                let mut names = BTreeSet::new();
+                for field in &owner.declaration.fields {
+                    if let Some((name, _)) = field.annotation.named_parts() {
+                        names.insert(name.to_owned());
+                    }
+                    if let Some(value) = &field.default {
+                        crate::collect_expression_names(value, &mut names);
+                    }
+                }
+                classes.iter().enumerate().filter_map(move |(candidate_index, candidate)| {
+                    candidate.lookups.get(&owner.module)
+                        .is_some_and(|lookups| lookups.iter().any(|lookup| names.contains(lookup)))
+                        .then_some(candidate_index)
                 })
             })
             .collect::<Vec<_>>();
         selected.extend(referenced);
         if selected.len() == previous {
-            // Field-only records need their type layouts, not the defining
-            // module's callable namespace. Importing Metadata must not make
+            // Defaults and methods need the defining callable namespace.
+            // Records without either need only layouts. Importing Metadata must not make
             // unrelated os functions compete with the caller's declarations.
             modules.extend(selected.iter().filter_map(|index| {
                 let class = &classes[*index];
-                (!class.declaration.methods.is_empty()).then_some(class.module)
+                (!class.declaration.methods.is_empty()
+                    || class.declaration.fields.iter().any(|field| field.default.is_some()))
+                    .then_some(class.module)
             }));
             return modules;
         }
@@ -1390,6 +1437,9 @@ fn resolve_package_type(
     }
     if annotation.simple_name() == Some("Any") {
         return Ok(crate::any_type_id());
+    }
+    if annotation.simple_name() == Some("type") {
+        return Ok(crate::type_value_type_id());
     }
     if let TypeAnnotationKind::Function { parameters, result } = &annotation.kind {
         let parameters = parameters
@@ -3194,6 +3244,73 @@ mod declaration_alias_tests {
     }
 
     #[test]
+    fn imported_field_enum_matches_without_importing_its_type_name() {
+        let (root, graph) = graph(&[
+            ("main.sev", "import Envelope from \"values.sev\"\ndef read(value: Envelope) -> int:\n    match value.kind:\n        case Number(number):\n            return number\n        case Empty:\n            return 0\n"),
+            ("values.sev", "enum Kind:\n    Number(value: int)\n    Empty\nclass Envelope:\n    kind: Kind\n"),
+        ]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn type_handles_distinguish_same_spelling_and_preserve_aliases() {
+        let (root, graph) = graph(&[
+            ("main.sev", "import Value as First from \"first.sev\"\nimport Value as Second from \"second.sev\"\nFirst as Alias\ndef first() -> type:\n    return First\ndef second() -> type:\n    return Second\ndef alias() -> type:\n    return Alias\n"),
+            ("first.sev", "class Value:\n    number: int\n"),
+            ("second.sev", "class Value:\n    number: int\n"),
+        ]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        let identity = |name: &str| {
+            let function = typed.hir.modules.iter().flat_map(|module| &module.functions)
+                .find(|function| function.name == name && function.body.is_some()).unwrap();
+            let severian_hir::Statement::Return(Some(value)) = &function.body.as_ref().unwrap().statements[0] else { panic!("type return") };
+            let severian_hir::ExpressionKind::Aggregate { fields, .. } = &value.kind else { panic!("type handle") };
+            let severian_hir::ExpressionKind::Literal(severian_universal::LiteralValue::Integer(identity)) = &fields[0].kind else { panic!("type identity") };
+            identity.clone()
+        };
+        assert_ne!(identity("first"), identity("second"));
+        assert_eq!(identity("first"), identity("alias"));
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn imported_field_default_resolves_helpers_in_its_defining_module() {
+        let (root, graph) = graph(&[
+            ("main.sev", "import Record from \"values.sev\"\ndef helper(value: bool) -> bool:\n    return value\ndef read() -> int:\n    return Record().value\n"),
+            ("values.sev", "def helper(value: int = 7) -> int:\n    return value\nclass Record:\n    value: int = helper()\n"),
+        ]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn nested_default_constructors_retain_their_own_helpers() {
+        let (root, graph) = graph(&[
+            ("main.sev", "import Record from \"values.sev\"\ndef read() -> int:\n    return Record().value\n"),
+            ("values.sev", "import Metadata from \"metadata.sev\"\nclass Record:\n    value: int = Metadata().value\n"),
+            ("metadata.sev", "import scalar from \"helper.sev\"\nclass Metadata:\n    value: int = scalar(7)\n"),
+            ("helper.sev", "def scalar(value: int, extra: int = 1) -> int:\n    return value + extra\n"),
+        ]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generated_grammar_callbacks_keep_their_erased_trait_parameters() {
+        let (root, graph) = graph(&[
+            ("main.sev", "trait Window:\n    value: int\nclass Source: Window\n    value: int\ndef _grammar_probe(input: Window) -> int:\n    return input.value\nclass Adapter:\n    run: ((Window) -> int) | None = _grammar_probe\ndef use() -> int:\n    adapter = Adapter()\n    if adapter.run != None:\n        return adapter.run(Source(7))\n    return 0\n"),
+        ]);
+        let typed = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap();
+        severian_mir::build(&typed.hir).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn declaration_alias_reexports_functions_and_generic_constructors() {
         let (root, graph) = graph(&[
             ("main.sev", "import * from \"facade.sev\" as api\ndef selected() -> int:\n    container = api.Container[int](7)\n    value = container.value\n    return api.apply(value)\n"),
@@ -3309,6 +3426,28 @@ mod declaration_alias_tests {
         let (root, graph) = graph(&[("main.sev", "B as A\nA as B\ndef main():\n    return\n")]);
         let error = import_index(&graph).unwrap_err();
         assert!(error.message.contains("cyclic declaration alias"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod parallel_diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn independent_body_errors_are_reported_in_source_order() {
+        let root = std::env::temp_dir().join(format!("sev-body-errors-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("first.sev"), "def first() -> int:\n    return missing_first\n").unwrap();
+        std::fs::write(root.join("second.sev"), "def second() -> int:\n    return missing_second\n").unwrap();
+        std::fs::write(root.join("main.sev"), "import first from \"first.sev\"\nimport second from \"second.sev\"\nvalue = first() + second()\n").unwrap();
+        let graph = severian_modules::resolve(&root.join("main.sev")).unwrap();
+        let error = analyze_package(&graph, &severian_bootstrap::load().unwrap()).unwrap_err();
+        let messages = std::iter::once(&error).chain(error.additional.iter())
+            .map(|error| error.message.as_str()).collect::<Vec<_>>();
+        assert!(messages.iter().any(|message| message.contains("missing_first")));
+        assert!(messages.iter().any(|message| message.contains("missing_second")));
+        assert!(error.additional.iter().all(|error| error.context.is_some()));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

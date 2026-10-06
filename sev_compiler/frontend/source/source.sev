@@ -1,10 +1,13 @@
 import file
 import Y from "../../syntax/generic/symbol.sev"
-import TokenForm from "../../syntax/generic/token.sev"
+import TokenForm, TokenTerm from "../../syntax/generic/token.sev"
+import Lexeme from "../../syntax/generic/lexeme.sev"
 
 # End boundary has no character payload.
 class EOF: Y
     token_forms: list[TokenForm] = [TokenForm("EOF", "", boundary=true)]
+    lexeme: Lexeme | None = None
+    token: TokenTerm | None = None
 
 
 class Span:

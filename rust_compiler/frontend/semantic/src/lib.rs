@@ -256,6 +256,7 @@ pub(crate) fn analyze_with_package_functions(
         value_substitutions: BTreeMap::new(),
         declarations: BTreeSet::new(),
         active_type_aliases: BTreeMap::new(),
+        method_type_aliases: BTreeMap::new(),
         closed_type_families,
         lossless_conversion,
         functions: BTreeMap::new(),
@@ -389,6 +390,7 @@ pub(crate) fn analyze_with_package_functions(
         package_trait_names,
     )?;
     analyzer.install_package_enums(package_enums, source_module);
+    analyzer.ensure_type_value_layout();
     analyzer.install_enums(ast, true)?;
     for constant in package_constants {
         let value = analyzer.expression(&constant.value, None)?;
@@ -1001,12 +1003,19 @@ pub(crate) fn analyze_with_package_functions(
         let (ast_method, mut function, owner, aliases, constructor) =
             analyzer.pending_methods[next_method].clone();
         next_method += 1;
-        analyzer.active_receiver = if constructor {
+        analyzer.active_receiver = if constructor || function.parameters.first().is_none_or(|parameter| parameter.name != "self") {
             None
         } else {
             Some((function.parameters[0].binding, owner.clone()))
         };
-        analyzer.lower_callable_body(
+        let previous_module = analyzer.type_resolution_module;
+        let origin = analyzer.generic_class_constructors.get(&owner.name)
+            .and_then(|constructor| analyzer.class_defining_modules.get(constructor))
+            .or_else(|| analyzer.class_defining_modules.get(&owner.ty)).copied();
+        let previous_classes = origin.and_then(|origin| analyzer.module_class_scopes.get(&origin).cloned())
+            .map(|scope| std::mem::replace(&mut analyzer.class_instances, scope));
+        if let Some(origin) = origin { analyzer.type_resolution_module = Some(origin); }
+        let lowered = analyzer.lower_callable_body(
             &ast_method,
             &mut function,
             &mut module.bindings,
@@ -1014,7 +1023,10 @@ pub(crate) fn analyze_with_package_functions(
             &global_values,
             aliases,
             constructor.then_some(&owner),
-        )?;
+        );
+        analyzer.type_resolution_module = previous_module;
+        if let Some(classes) = previous_classes { analyzer.class_instances = classes; }
+        lowered?;
         analyzer.active_receiver = None;
         module.functions.push(function);
         analyzer.register_class_destruction()?;
@@ -1604,6 +1616,7 @@ struct Analyzer<'a> {
     /// readable parent bindings, which may be shadowed by this set.
     declarations: BTreeSet<String>,
     active_type_aliases: BTreeMap<String, TypeId>,
+    method_type_aliases: BTreeMap<String, TypeId>,
     closed_type_families: BTreeMap<String, BTreeSet<String>>,
     lossless_conversion: bool,
     next_hir: u32,
@@ -2476,7 +2489,7 @@ impl Analyzer<'_> {
         }
         if let Some(ty) = annotation
             .simple_name()
-            .and_then(|name| self.active_type_aliases.get(name))
+            .and_then(|name| self.active_type_aliases.get(name).or_else(|| self.method_type_aliases.get(name)))
         {
             return Ok(*ty);
         }
@@ -3614,10 +3627,16 @@ impl Analyzer<'_> {
                     }
                     return Ok(Statement::Sequence(sequence));
                 }
+                let string_iteration = self.types.resolve_name("string") == Some(iterable_value.type_id);
                 let slice_element = self.slice_elements.get(&iterable_value.type_id).copied();
                 let destructure_item = second_binding.is_some()
                     && (slice_element.is_some() || self.list_elements.contains_key(&iterable_value.type_id));
-                let item_bindings = if let Some(element_type) = slice_element {
+                let item_bindings = if string_iteration {
+                    if second_binding.is_some() {
+                        return Err(Diagnostic::new("E000211", "string iteration provides one character", Some(*span)));
+                    }
+                    vec![(binding.clone(), self.types.resolve_name("char").unwrap(), 0)]
+                } else if let Some(element_type) = slice_element {
                     vec![(binding.clone(), element_type, 0)]
                 } else if let Some(element_type) =
                     self.list_elements.get(&iterable_value.type_id).copied()
@@ -3695,7 +3714,10 @@ impl Analyzer<'_> {
                     span: iterable.span,
                 };
 
-                let (storage_type, length) = if slice_element.is_some() {
+                let (storage_type, length) = if string_iteration {
+                    (iterable_type, self.runtime_call("__sev_string_length", &[iterable_type],
+                        usize_type, vec![iterable_reference.clone()], *span))
+                } else if slice_element.is_some() {
                     let storage_type = self
                         .class_instances_by_type
                         .get(&iterable_type)
@@ -3754,7 +3776,12 @@ impl Analyzer<'_> {
                         kind: ExpressionKind::Binding(index_id),
                         span: iterable.span,
                     };
-                    let item = if slice_element.is_some() {
+                    let item = if string_iteration {
+                        let integer = self.types.resolve_name("int").unwrap();
+                        let index = self.coerce(body_index_reference, integer, true)?;
+                        self.runtime_call("__sev_string_codepoint", &[iterable_type, integer],
+                            element_type, vec![body_iterable_reference, index], *span)
+                    } else if slice_element.is_some() {
                         let memory = Expression {
                             id: self.next_id(),
                             type_id: storage_type,
@@ -4430,11 +4457,13 @@ impl Analyzer<'_> {
                     .expect("bootstrap defines unit");
                 let value = match value {
                     Some(value) if result_type == unit => {
-                        return Err(Diagnostic::new(
-                            "E000210",
-                            "a unit function cannot return a value",
-                            Some(*span),
-                        ))
+                        let value = self.expression(value, None)?;
+                        if value.type_id != unit {
+                            return Err(Diagnostic::new("E000210", "a unit function cannot return a value", Some(*span)));
+                        }
+                        return Ok(Statement::Sequence(Block { statements: vec![
+                            Statement::Expression(value), Statement::Return(None),
+                        ] }));
                     }
                     Some(value) => {
                         if let Some(fallible) = self.fallible_types.get(&result_type).copied() {
@@ -4529,8 +4558,8 @@ impl Analyzer<'_> {
                 else_block,
                 ..
             } => {
-                let then_returns = block_flow(then_block) == ControlFlow::Returns;
-                let else_returns = block_flow(else_block) == ControlFlow::Returns;
+                let then_returns = block_exits_branch(then_block);
+                let else_returns = block_exits_branch(else_block);
                 let condition = self.condition_expression(condition_ast)?;
                 if let Some(selected) = self.static_type_condition(&condition) {
                     let selected = if selected { then_block } else { else_block };
@@ -4629,6 +4658,9 @@ impl Analyzer<'_> {
                 self.names = outer_names;
                 self.declarations = outer_declarations;
                 self.value_substitutions = outer_substitutions;
+                if then_returns != else_returns {
+                    self.apply_condition_guards(condition_ast, !then_returns, false)?;
+                }
                 if let Some((name, yes, no)) = union_guard {
                     let surviving = if then_returns && !else_returns { no } else if else_returns && !then_returns { yes } else { None };
                     let mutable = self.names.get(&name).is_some_and(|(_, variable, _)| self.mutable_variables.contains(variable));
@@ -4928,6 +4960,7 @@ impl Analyzer<'_> {
         if self
             .enums
             .values()
+            .chain(self.module_enum_scopes.values().flat_map(|scope| scope.iter().map(|(_, instance)| instance)))
             .any(|instance| instance.ty == subject_type)
         {
             // Freeze the scrutinee once. Its tag and payload must come from
@@ -4950,7 +4983,7 @@ impl Analyzer<'_> {
         let mut catch_all = false;
         let mut arms = Vec::new();
         for case in cases {
-            if !case.variant_patterns.is_empty() {
+            if !case.variant_patterns.is_empty() || case.payload_bindings.is_some() {
                 return Err(Diagnostic::new(
                     "E000215",
                     "enum variant patterns require an enum matched expression",
@@ -5038,6 +5071,7 @@ impl Analyzer<'_> {
         let instance = self
             .enums
             .values()
+            .chain(self.module_enum_scopes.values().flat_map(|scope| scope.iter().map(|(_, instance)| instance)))
             .find(|instance| instance.ty == subject.type_id)
             .cloned()
             .expect("caller selected an enum subject");
@@ -5134,6 +5168,7 @@ impl Analyzer<'_> {
                 pattern == variant.name || pattern == format!("{}.{}", instance.name, variant.name)
                     || qualified_variant == Some(variant.name.as_str())
             });
+            let mut payload_statements = Vec::new();
             let (condition, selected) = if let Some((ordinal, variant)) = variant {
                 if !handled.insert(ordinal) {
                     return Err(Diagnostic::new(
@@ -5142,22 +5177,37 @@ impl Analyzer<'_> {
                         Some(case.span),
                     ));
                 }
+                if let Some(names) = &case.payload_bindings {
+                    if names.len() != variant.fields.len() {
+                        return Err(Diagnostic::new("E000215", format!("variant `{}` requires {} payload patterns, received {}", variant.name, variant.fields.len(), names.len()), Some(case.span)));
+                    }
+                    let mut unique = BTreeSet::new();
+                    for name in names.iter().filter(|name| name.as_str() != "_") {
+                        if !unique.insert(name) {
+                            return Err(Diagnostic::new("E000203", format!("duplicate payload binding `{name}`"), Some(case.span)));
+                        }
+                    }
+                }
                 for (payload_ordinal, payload) in variant.fields.iter().enumerate() {
+                    let name = case.payload_bindings.as_ref().map_or(payload.name.as_str(), |names| names[payload_ordinal].as_str());
+                    if name == "_" { continue; }
+                    self.names.remove(name);
+                    self.declarations.remove(name);
                     let index = enum_payload_index(&instance.variants, ordinal, payload_ordinal);
                     let field = &instance.fields[index];
-                    let id = self.next_id();
-                    self.value_substitutions.insert(
-                        payload.name.clone(),
-                        Expression {
-                            id,
-                            type_id: field.ty,
-                            kind: ExpressionKind::Field {
-                                object: Box::new(subject.clone()),
-                                index: index as u32,
-                            },
-                            span: case.span,
-                        },
-                    );
+                    let value = Expression {
+                        id: self.next_id(), type_id: field.ty,
+                        kind: ExpressionKind::Field { object: Box::new(subject.clone()), index: index as u32 },
+                        span: case.span,
+                    };
+                    let id = self.new_binding_id();
+                    let variable = severian_hir::VariableId(id.0);
+                    self.value_substitutions.remove(name);
+                    self.names.insert(name.to_owned(), (id, variable, field.ty));
+                    self.declarations.insert(name.to_owned());
+                    bindings.push(Binding { id, variable, type_id: field.ty, value,
+                        mutable: false, preserve_error: true, span: case.span });
+                    payload_statements.push(Statement::Binding(id));
                 }
                 let tag = Expression {
                     id: self.next_id(),
@@ -5192,7 +5242,9 @@ impl Analyzer<'_> {
                 ));
             };
             debug_assert!(selected);
-            lowered.push((condition, self.block(&case.body, bindings, result_type)?));
+            let mut body = self.block(&case.body, bindings, result_type)?;
+            payload_statements.append(&mut body.statements);
+            lowered.push((condition, Block { statements: payload_statements }));
         }
         self.names = outer_names;
         self.declarations = outer_declarations;
@@ -6464,6 +6516,31 @@ impl Analyzer<'_> {
         ast: &AstExpression,
         expected: Option<TypeId>,
     ) -> Result<Expression, Diagnostic> {
+        // A declaration in value position denotes a type handle. Ordinary
+        // bindings still shadow declarations, including applied/qualified ones.
+        if let Some(annotation) = enum_type_argument(ast) {
+            let root = annotation.named_parts().map(|(name, _)| name.split('.').next().unwrap_or(name));
+            if root.is_some_and(|name| !self.names.contains_key(name)
+                && !self.value_substitutions.contains_key(name)
+                && !matches!(name, "unit" | "absent")) {
+                if let Ok(target) = self.resolve_source_type(&annotation) {
+                    return Ok(self.type_value(target, ast.span));
+                }
+            }
+        }
+        if let Some(operand) = type_query_operand(ast) {
+            if !self.names.contains_key("type") && !self.functions.contains_key("type") {
+                let value = self.expression(operand, None)?;
+                let parameter = value.type_id;
+                let result = self.type_value(parameter, ast.span);
+                let symbol = format!("__sev_type_of_{}", parameter.0);
+                let definition = self.ensure_runtime_function(&symbol, &[parameter], type_value_type_id());
+                let function = self.runtime_functions.iter_mut().find(|function| function.definition == definition).unwrap();
+                function.call_type = CallType::Severian;
+                function.body = Some(Block { statements: vec![Statement::Return(Some(result))] });
+                return Ok(self.runtime_call(&symbol, &[parameter], type_value_type_id(), vec![value], ast.span));
+            }
+        }
         if let (Some(index), Some(module), AstExpressionKind::Call { callee, arguments }) = (self.package_index, self.type_resolution_module, &ast.kind) {
             let application = class_application(callee).map(|(name, arguments)| (name, arguments.to_vec()))
                 .or_else(|| callable_path(callee).map(|name| (name, Vec::new())));
@@ -6768,10 +6845,26 @@ impl Analyzer<'_> {
                 let outer_substitutions = self.value_substitutions.clone();
                 let result = (|| {
                     self.apply_condition_guards(condition_ast, true, allow_mutable)?;
-                    let value = self.expression(value, expected)?;
+                    let mut value = self.expression(value, expected)?;
                     self.value_substitutions.clone_from(&outer_substitutions);
                     self.apply_condition_guards(condition_ast, false, allow_mutable)?;
-                    let fallback = self.expression(fallback, Some(value.type_id))?;
+                    let fallback_expected = expected.or_else(|| match &fallback.kind {
+                        AstExpressionKind::List(values) | AstExpressionKind::Set(values) if values.is_empty() => Some(value.type_id),
+                        AstExpressionKind::Map(entries) if entries.is_empty() => Some(value.type_id),
+                        _ => None,
+                    });
+                    let mut fallback = self.expression(fallback, fallback_expected)?;
+                    let result_type = if value.type_id == fallback.type_id || self.accepts_expression_type(fallback.type_id, value.type_id) {
+                        value.type_id
+                    } else if self.accepts_expression_type(value.type_id, fallback.type_id) {
+                        fallback.type_id
+                    } else {
+                        let mut members = self.union_types.get(&value.type_id).cloned().unwrap_or_else(|| vec![value.type_id]);
+                        members.extend(self.union_types.get(&fallback.type_id).cloned().unwrap_or_else(|| vec![fallback.type_id]));
+                        self.instantiate_union_type(&members)
+                    };
+                    value = self.coerce(value, result_type, false)?;
+                    fallback = self.coerce(fallback, result_type, false)?;
                     Ok(Expression {
                         id: self.next_id(),
                         type_id: value.type_id,
@@ -7094,7 +7187,7 @@ impl Analyzer<'_> {
                         "E000201",
                         format!("unknown binding `{name}`"),
                         Some(ast.span),
-                    ));
+                    ).with_note(format!("while checking callable `{}`", self.active_function_name.as_deref().unwrap_or("<module>"))));
                 };
                 let value = Expression {
                     id: self.next_id(),
@@ -7294,12 +7387,6 @@ impl Analyzer<'_> {
                     ));
                 };
                 let field_type = field.ty;
-                if expected.is_some_and(|expected| !self.accepts_expression_type(field_type, expected)) {
-                    return Err(semantic_error(
-                        "field type does not satisfy the expected type".into(),
-                        ast.span,
-                    ));
-                }
                 Ok(Expression {
                     id: self.next_id(),
                     type_id: field_type,
@@ -7370,9 +7457,9 @@ impl Analyzer<'_> {
                         .expect("bootstrap defines int");
                     let index = self.expression(index, Some(integer))?;
                     return Ok(self.runtime_call(
-                        "__sev_string_index",
+                        "__sev_string_codepoint",
                         &[string, integer],
-                        string,
+                        self.types.resolve_name("char").expect("bootstrap defines char"),
                         vec![object, index],
                         ast.span,
                     ));
@@ -7769,6 +7856,9 @@ impl Analyzer<'_> {
                 ))
             }
             AstExpressionKind::Call { callee, arguments } => {
+                if matches!(callee.kind, AstExpressionKind::Member { .. }) {
+                    if let Some(call) = self.closure_call(callee, arguments, expected, ast.span)? { return Ok(call); }
+                }
                 if let Some(call) = self.dynamic_method_call(callee, arguments, expected, ast.span)? { return Ok(call); }
                 if matches!(&callee.kind, AstExpressionKind::Name(name) if name != "self" && self.names.contains_key(name)) {
                     if let Some(call) = self.closure_call(callee, arguments, expected, ast.span)? { return Ok(call); }
@@ -9161,7 +9251,7 @@ impl Analyzer<'_> {
                 }
                 let mut incompatible_results = Vec::new();
                 let mut matches = Vec::new();
-                for function in candidates {
+                for function in candidates.iter().copied() {
                     if let Some(explicit) = &explicit_type_arguments {
                         let substitution = &self.function_substitutions[&function];
                         if substitution.0.len() != explicit.len()
@@ -9236,11 +9326,34 @@ impl Analyzer<'_> {
                     {
                         return self.render_print(arguments, ast.span);
                     }
-                    return Err(Diagnostic::new(
+                    let mut diagnostic = Diagnostic::new(
                         "E000206",
                         format!("no declaration of `{name}` accepts these argument types"),
                         Some(ast.span),
-                    ));
+                    );
+                    let mut distinct = candidates.clone();
+                    distinct.sort();
+                    distinct.dedup();
+                    if distinct.is_empty() {
+                        diagnostic = diagnostic.with_note("no callable declaration is visible in this lexical scope");
+                    }
+                    for function in distinct.iter().take(3) {
+                        let signature = self.signatures[function].clone();
+                        let parameters = signature.parameters.iter().map(|parameter| format!("{}: {}{}", parameter.name,
+                            self.constructor_argument_type_name(parameter.type_id), if parameter.default.is_some() { " = default" } else { "" })).collect::<Vec<_>>().join(", ");
+                        diagnostic = diagnostic.with_note(format!("candidate: {name}({parameters})"));
+                        if arguments.iter().all(|argument| argument.name.is_none() && !argument.spread) && arguments.len() <= signature.parameters.len() {
+                            for (index, parameter) in signature.parameters.iter().enumerate() {
+                                if let Some(value) = arguments.get(index).map(|argument| &argument.value).or(parameter.default.as_ref()) {
+                                    if let Err(error) = self.expression(value, Some(parameter.type_id)) {
+                                        diagnostic = diagnostic.with_note(format!("parameter `{}`: {}", parameter.name, error.message));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return Err(diagnostic);
                 }
                 let [(_, _, function, result, arguments, evaluation_order)] = best.as_slice()
                 else {
@@ -9536,7 +9649,7 @@ impl Analyzer<'_> {
                                 _ => None,
                             })
                         });
-                    if let Some((operand, type_name)) = comparison {
+                    if let Some((operand, type_name)) = comparison.filter(|(_, name)| !self.names.contains_key(*name)) {
                         let operand = self.expression(operand, None)?;
                         let target = self.resolve_source_type(&TypeAnnotation::named(
                             type_name,
@@ -9544,22 +9657,8 @@ impl Analyzer<'_> {
                             ast.span,
                         ))?;
                         let equal = operand.type_id == target;
-                        let boolean = self
-                            .types
-                            .resolve_name("bool")
-                            .expect("bootstrap defines bool");
-                        return Ok(Expression {
-                            id: self.next_id(),
-                            type_id: boolean,
-                            kind: ExpressionKind::Literal(LiteralValue::Boolean(
-                                if *operator == AstBinaryOperator::Equal {
-                                    equal
-                                } else {
-                                    !equal
-                                },
-                            )),
-                            span: ast.span,
-                        });
+                        return Ok(self.static_type_predicate(operand,
+                            if *operator == AstBinaryOperator::Equal { equal } else { !equal }, ast.span));
                     }
                 }
                 if *operator == AstBinaryOperator::Identity {
@@ -9667,7 +9766,7 @@ impl Analyzer<'_> {
                                     && !implementation.type_parameters.is_empty()
                             })
                         });
-                    if source_short_circuit {
+                    if source_short_circuit || self.types.resolve_name("bool") == Some(left_value.type_id) {
                         let boolean = self
                             .types
                             .resolve_name("bool")
@@ -9694,7 +9793,13 @@ impl Analyzer<'_> {
                             }
                             return self.expression(right, expected);
                         }
-                        let right_value = self.expression(right, None)?;
+                        let previous = self.value_substitutions.clone();
+                        let lowered = (|| {
+                            self.apply_condition_guards(left, *operator == AstBinaryOperator::And, true)?;
+                            self.expression(right, None)
+                        })();
+                        self.value_substitutions = previous;
+                        let right_value = lowered?;
                         let result = if left_value.type_id == right_value.type_id {
                             left_value.type_id
                         } else {
@@ -9805,15 +9910,13 @@ impl Analyzer<'_> {
                     }
                 }
                 if *operator == AstBinaryOperator::Identity {
-                    if let Some(type_name) = callable_path(right) {
-                        if !self.active_type_aliases.contains_key(&type_name) && self.trait_names.contains(&type_name) {
+                    if let Some(annotation) = enum_type_argument(right) {
+                        let type_name = annotation.named_parts().map(|(name, _)| name).unwrap_or("").to_owned();
+                        if annotation.simple_name().is_some() && !self.active_type_aliases.contains_key(&type_name) && self.trait_names.contains(&type_name) {
                             let value = self.expression(left, None)?;
                             return self.trait_membership(value, &type_name, ast.span);
                         }
-                        let target = self.active_type_aliases.get(&type_name).copied()
-                            .or_else(|| self.class_instances.get(&(type_name.clone(), Vec::new())).map(|instance| instance.ty))
-                            .or_else(|| self.types.resolve_name(&type_name))
-                            .or_else(|| self.resolve_source_type(&TypeAnnotation::named(&type_name, Vec::new(), right.span)).ok());
+                        let target = self.resolve_source_type(&annotation).ok();
                         if let Some(target) = target {
                             let left = self.expression(left, None)?;
                             if left.type_id == target {
@@ -9874,9 +9977,7 @@ impl Analyzer<'_> {
                                     span: ast.span,
                                 });
                             }
-                            if (self.types.primitive(target).is_some() || self.class_instances_by_type.contains_key(&target))
-                                && !self.union_types.contains_key(&left.type_id)
-                            {
+                            if !self.union_types.contains_key(&left.type_id) {
                                 if self.is_trait_object(left.type_id) || left.type_id == any_type_id() {
                                     let storage = self.trait_object_storage(left);
                                     return Ok(self.erased_record_is(storage, target, ast.span));
@@ -10033,6 +10134,16 @@ impl Analyzer<'_> {
                                 });
                             }
                         }
+                    }
+                    if (matches!(right.kind, AstExpressionKind::Literal(AstLiteral::None))
+                        || matches!(&right.kind, AstExpressionKind::Name(name) if name == "absent"))
+                        && !self.union_types.contains_key(&resolved_left.type_id)
+                        && !self.is_trait_object(resolved_left.type_id)
+                        && resolved_left.type_id != any_type_id()
+                    {
+                        let absent = self.types.resolve_name("None") == Some(resolved_left.type_id);
+                        return Ok(self.static_type_predicate(resolved_left,
+                            if *operator == AstBinaryOperator::NotEqual { !absent } else { absent }, ast.span));
                     }
                     if matches!(
                         *operator,
@@ -10497,13 +10608,20 @@ impl Analyzer<'_> {
                 let right = self.prepare(right)?;
                 let left_constraint = left.constraint();
                 let right_constraint = right.constraint();
+                let operator_expected = expected.and_then(|expected| {
+                    let Some(members) = self.union_types.get(&expected) else { return Some(expected); };
+                    let candidates = members.iter().filter_map(|member| self.types.resolve_binary_with_policy(
+                        operator, left_constraint, right_constraint, Some(*member), self.conversion_policy(),
+                    ).ok().map(|resolved| resolved.result)).collect::<BTreeSet<_>>();
+                    (candidates.len() == 1).then(|| *candidates.first().unwrap())
+                });
                 let resolved = self
                     .types
                     .resolve_binary_with_policy(
                         operator,
                         left_constraint,
                         right_constraint,
-                        expected,
+                        operator_expected,
                         self.conversion_policy(),
                     )
                     .map_err(|error| {
@@ -11581,6 +11699,19 @@ impl Analyzer<'_> {
             return self.expression(value, Some(expected));
         };
         let previous = std::mem::replace(&mut self.class_instances, scope);
+        let previous_module = self.type_resolution_module;
+        let previous_functions = self.functions.clone();
+        let mut scoped_function_names = Vec::new();
+        if let Some(module) = self.class_defining_modules.get(&class) {
+            self.type_resolution_module = Some(*module);
+            let prefix = format!("__sev_origin_{:032x}.", module.0);
+            for (name, functions) in &previous_functions {
+                if let Some(name) = name.strip_prefix(&prefix) {
+                    scoped_function_names.push(name.to_owned());
+                    self.functions.insert(name.to_owned(), functions.clone());
+                }
+            }
+        }
         let previous_enums = std::mem::take(&mut self.enums);
         let previous_variants = std::mem::take(&mut self.enum_variants);
         if let Some(scope) = self.class_defining_modules.get(&class)
@@ -11593,6 +11724,14 @@ impl Analyzer<'_> {
             }
         }
         let result = self.expression(value, Some(expected));
+        for name in scoped_function_names {
+            if let Some(functions) = previous_functions.get(&name) {
+                self.functions.insert(name, functions.clone());
+            } else {
+                self.functions.remove(&name);
+            }
+        }
+        self.type_resolution_module = previous_module;
         self.class_instances = previous;
         self.enums = previous_enums;
         self.enum_variants = previous_variants;
@@ -12399,6 +12538,32 @@ impl Analyzer<'_> {
         });
         self.any_type = Some(ty);
         ty
+    }
+
+    fn ensure_type_value_layout(&mut self) {
+        let ty = type_value_type_id();
+        if self.class_instances_by_type.contains_key(&ty) { return; }
+        let fields = vec![HirClassFieldDeclaration {
+            name: "__identity".into(),
+            ty: self.types.resolve_name("u64").expect("bootstrap defines u64"),
+        }];
+        self.class_instances_by_type.insert(ty, ClassInstance {
+            ty, name: "type".into(), arguments: Vec::new(), fields: fields.clone(),
+            source_fields: Vec::new(), constructors: Vec::new(), methods: Vec::new(), operators: Vec::new(),
+        });
+        self.lowered_classes.push(HirClassDeclaration {
+            id: ty, name: "type".into(), fields, variants: Vec::new(),
+        });
+    }
+
+    fn type_value(&mut self, target: TypeId, span: severian_source::Span) -> Expression {
+        self.ensure_type_value_layout();
+        let integer = self.types.resolve_name("u64").expect("bootstrap defines u64");
+        // This is a compilation-local handle, like source TypeId, not a
+        // serialized declaration identity or a comparison of printed names.
+        let identity = self.integer_expression(&target.0.to_string(), integer, span);
+        Expression { id: self.next_id(), type_id: type_value_type_id(),
+            kind: ExpressionKind::Aggregate { class: type_value_type_id(), fields: vec![identity] }, span }
     }
 
     fn instantiate_pointer_type(&mut self, element: TypeId) -> TypeId {
@@ -16464,7 +16629,7 @@ impl Analyzer<'_> {
                         .iter()
                         .zip(&signature.parameters)
                         .all(|(left, right)| left.type_id == *right)
-                    && candidate.result == signature.result
+                    && self.accepts_expression_type(candidate.result, signature.result)
             })
             .copied()
             .collect::<Vec<_>>();
@@ -16576,7 +16741,7 @@ impl Analyzer<'_> {
         let result = match callable.value {
             CallableValue::Direct(function) => Expression {
                 id: self.next_id(),
-                type_id: callable.signature.result,
+                type_id: self.signatures[&function].result,
                 kind: ExpressionKind::Call {
                     evaluation_order: Vec::new(),
                     callee: severian_hir::Callee::Direct {
@@ -16636,7 +16801,7 @@ impl Analyzer<'_> {
                 result?
             }
         };
-        Ok(Some(result))
+        self.coerce(result, callable.signature.result, false).map(Some)
     }
 
     fn resolve_signature_arguments(
@@ -16808,7 +16973,10 @@ impl Analyzer<'_> {
         argument: &AstExpression,
         expected: TypeId,
     ) -> Option<(Expression, ConversionRank)> {
-        if self.function_types.contains_key(&expected) {
+        if self.function_types.contains_key(&expected)
+            || self.union_types.get(&expected).is_some_and(|members|
+                members.iter().any(|member| self.function_types.contains_key(member)))
+        {
             return self.expression(argument, Some(expected)).ok().map(|value| (value, ConversionRank::Exact));
         }
         if expected == any_type_id() {
@@ -18053,69 +18221,19 @@ impl Analyzer<'_> {
             }
         }
         if let AstExpressionKind::Name(class_name) = &object.kind {
-            let instance = self
-                .class_instances
-                .get(&(class_name.clone(), Vec::new()))
-                .cloned()
-                .or_else(|| {
-                    self.generic_class_constructors
-                        .get(class_name)
-                        .and_then(|ty| self.class_instances_by_type.get(ty))
-                        .cloned()
-                });
-            if let Some(instance) = instance {
-                if let Some(method) = instance
-                    .methods
-                    .iter()
-                    .find(|method| method.name == *name)
-                    .cloned()
-                {
-                    if arguments.len() != method.parameters.len() {
-                        return Err(Diagnostic::new(
-                            "E000206",
-                            format!(
-                                "static method `{}.{name}` expects {} argument(s), received {}",
-                                instance.name,
-                                method.parameters.len(),
-                                arguments.len()
-                            ),
-                            Some(span),
-                        ));
+            if !self.names.contains_key(class_name) {
+                let mut instance = self.class_instances.get(&(class_name.clone(), Vec::new())).cloned();
+                if instance.is_none() && self.classes.get(class_name).is_some_and(|class|
+                    class.methods.iter().any(|method| method.name == *name)) {
+                    instance = Some(self.instantiate_class(class_name, &[], span)?);
+                }
+                if let Some(instance) = instance {
+                    if let Some(method) = instance.methods.iter().find(|method| method.name == *name).cloned() {
+                        if method.parameters.iter().any(|parameter| parameter.name == "self") {
+                            return Err(Diagnostic::new("E000206", "an instance method requires a receiver", Some(span)));
+                        }
+                        return self.lower_member_callable(&instance, &method, None, arguments, expected, span).map(Some);
                     }
-                    let self_substitution = BTreeMap::from([("Self".to_owned(), instance.ty)]);
-                    let result_type =
-                        self.resolve_instantiated_type(&method.result, &self_substitution)?;
-                    if expected
-                        .is_some_and(|expected| !self.types.assignable(result_type, expected))
-                    {
-                        return Err(semantic_error(
-                            "static method result does not satisfy the expected type".into(),
-                            span,
-                        ));
-                    }
-                    let previous = self.value_substitutions.clone();
-                    for (parameter, argument) in method.parameters.iter().zip(arguments) {
-                        let parameter_type = self
-                            .resolve_instantiated_type(&parameter.annotation, &self_substitution)?;
-                        let value = self.expression(&argument.value, Some(parameter_type))?;
-                        self.value_substitutions
-                            .insert(parameter.name.clone(), value);
-                    }
-                    let lowered = match method.body.as_deref() {
-                        Some([AstStatement::Return {
-                            value: Some(value), ..
-                        }]) => self.expression(value, Some(result_type)),
-                        _ => Err(Diagnostic::new(
-                            "E000211",
-                            format!(
-                                "static method `{}.{name}` must currently be a single return expression",
-                                instance.name
-                            ),
-                            Some(method.span),
-                        )),
-                    };
-                    self.value_substitutions = previous;
-                    return lowered.map(Some);
                 }
             }
         }
@@ -19593,6 +19711,10 @@ pub(crate) fn list_type_id(element: TypeId) -> TypeId {
 
 pub(crate) const fn any_type_id() -> TypeId {
     TypeId(0x07ff_fffd)
+}
+
+pub(crate) const fn type_value_type_id() -> TypeId {
+    TypeId(0x07ff_fffc)
 }
 
 pub(crate) const fn set_type_id() -> TypeId {
@@ -21288,6 +21410,9 @@ fn resolve_type_annotation(
     types: &TypeContext,
     annotation: &TypeAnnotation,
 ) -> Result<TypeId, Diagnostic> {
+    if annotation.simple_name() == Some("type") {
+        return Ok(type_value_type_id());
+    }
     if annotation.simple_name() == Some("pointer") {
         return Ok(pointer_type_id(types.resolve_name("u8").expect("bootstrap defines u8")));
     }
@@ -21766,6 +21891,16 @@ fn guard_branch_preserves_binding(statements: &[AstStatement], name: &str) -> bo
             && guard_branch_preserves_binding(then_block, name) && guard_branch_preserves_binding(else_block, name),
         AstStatement::Unsafe { body, .. } | AstStatement::Placement { body, .. } => guard_branch_preserves_binding(body, name),
         AstStatement::Break { .. } | AstStatement::Continue { .. } => true,
+        _ => false,
+    })
+}
+
+fn block_exits_branch(statements: &[AstStatement]) -> bool {
+    statements.iter().any(|statement| match statement {
+        AstStatement::Return { .. } | AstStatement::Break { .. } | AstStatement::Continue { .. } => true,
+        AstStatement::Expression(AstExpression { kind: AstExpressionKind::Throw { .. }, .. }) => true,
+        AstStatement::If { then_block, else_block, .. } =>
+            block_exits_branch(then_block) && block_exits_branch(else_block),
         _ => false,
     })
 }
@@ -24627,6 +24762,87 @@ def interpolate(text: string) -> string:
         assert!(symbols.contains(&"__sev_any_from_bool"));
         assert!(symbols.contains(&"__sev_any_from_int"));
         assert!(symbols.contains(&"__sev_any_from_string"));
+        severian_mir::build(&program).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod bootstrap_frontend_regressions {
+    use super::*;
+    use severian_source::SourceFile;
+
+    fn checked(text: &str) -> Program {
+        let source = SourceFile::virtual_source("bootstrap-regression.sev", text);
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let context = severian_bootstrap::load().unwrap();
+        analyze(&ast, &context.types).unwrap()
+    }
+
+    #[test]
+    fn short_circuit_guards_narrow_only_the_evaluated_operand() {
+        let program = checked("class Value:\n    index: int\ndef yes(input: Value | None) -> bool:\n    return input != None and input.index > 0\ndef no(input: Value | None) -> bool:\n    return input == None or input.index > 0\n");
+        severian_mir::build(&program).unwrap();
+        let source = SourceFile::virtual_source("invalid.sev", "class Value:\n    index: int\ndef invalid(input: Value | None) -> int:\n    guarded = input != None and input.index > 0\n    return input.index\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        assert!(analyze(&ast, &severian_bootstrap::load().unwrap().types).is_err());
+    }
+
+    #[test]
+    fn type_handles_preserve_primitives_applied_types_and_trait_identity() {
+        let program = checked("trait Block:\n    value: int\nclass Other:\n    value: int\ndef selected(required: type | None) -> list[type]:\n    entries: list[type] = [int, string, list[int], Block, Other]\n    result: list[type] = []\n    for entry in entries:\n        if required == None or entry == required:\n            result.append(entry)\n    return result\ndef use() -> list[type]:\n    return selected(Block)\ndef shadow() -> int:\n    string = 7\n    return string\ndef query(value: int) -> type:\n    return type(value)\n");
+        severian_mir::build(&program).unwrap();
+        assert!(program.modules.iter().flat_map(|module| &module.classes).any(|class| class.id == type_value_type_id()));
+        let source = SourceFile::virtual_source("wrong-type-value.sev", "def wrong() -> type:\n    return 7\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        assert!(analyze(&ast, &severian_bootstrap::load().unwrap().types).is_err());
+    }
+
+    #[test]
+    fn static_methods_use_defaults_and_lower_control_flow_without_constructing_receivers() {
+        let program = checked("class Validator[T = int]:\n    required: T\n    def valid(value: T, minimum: T = 0) -> bool:\n        if value < minimum:\n            return false\n        return true\ndef use() -> bool:\n    return Validator.valid(4)\n");
+        let method = program.modules.iter().flat_map(|module| &module.functions).find(|function| function.name == "Validator.valid").unwrap();
+        assert!(method.parameters.iter().all(|parameter| parameter.name != "self"));
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn conditional_call_results_and_numeric_results_join_their_union_contracts() {
+        let program = checked("enum Proof:\n    Yes\n    No\nclass Problem:\n    message: string\nclass Callback:\n    check: (() -> Proof | Problem) | None = None\ndef probe(callback: Callback) -> Proof | Problem:\n    result = Proof.Yes if callback.check == None else callback.check()\n    return result\ndef advance(offset: u32, count: u32) -> u32 | None | Problem:\n    return offset + count\ndef character(text: string) -> bool:\n    return text[0] == 'λ'\n");
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn conditional_empty_collection_keeps_the_other_branch_element_contract() {
+        let program = checked("def size(selected: bool) -> int:\n    components = [1, 2] if selected else []\n    return len(components)\n");
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn applied_union_member_can_be_tested_and_projected() {
+        let program = checked("def read(input: list[int] | None) -> int:\n    if input is list[int]:\n        return input[0]\n    return 0\n");
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn explicit_payload_patterns_bind_by_position_and_do_not_escape() {
+        let program = checked("enum Kind:\n    Named(name: string, count: int)\n    Empty\ndef read(value: Kind) -> int:\n    match value:\n        case Named(_, size):\n            return size\n        case Empty:\n            return 0\n");
+        severian_mir::build(&program).unwrap();
+        let source = SourceFile::virtual_source("arity.sev", "enum Kind:\n    Named(name: string, count: int)\ndef invalid(value: Kind) -> int:\n    match value:\n        case Named(name):\n            return 0\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        assert!(analyze(&ast, &severian_bootstrap::load().unwrap().types).is_err());
+    }
+
+    #[test]
+    fn numeric_field_bounds_and_explicit_unit_returns_keep_their_types() {
+        let program = checked("class Bounds:\n    start: u32\n    end: u32\ndef read(text: string, bounds: Bounds) -> string:\n    return text[bounds.start:bounds.end]\ndef done() -> unit:\n    return unit\n");
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn string_iteration_yields_unicode_characters() {
+        let program = checked("def count(text: string) -> int:\n    count := 0\n    for character in text:\n        if character == 'λ':\n            count += 1\n    return count\n");
+        assert!(program.modules.iter().flat_map(|module| &module.functions)
+            .any(|function| function.name == "__sev_string_codepoint"));
         severian_mir::build(&program).unwrap();
     }
 }

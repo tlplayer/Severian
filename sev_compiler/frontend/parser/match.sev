@@ -18,7 +18,7 @@ import context_receiver, context_receiver_state, select_grammar from "sequence.s
 
 # The token already carries declaration identity and the original lexeme.
 # Construction runs only after the parser selects a unique grammar.
-def match_declared_token(input: list[TokenTerm], label: string, construct: (Lexeme) -> LiteralValue, prefix: string = "", suffix: string = "", captured: bool = false) -> GrammarMatch | None | Diagnostic:
+def match_declared_token(input: list[TokenTerm], label: string, construct: (Lexeme) -> LiteralValue | Diagnostic, prefix: string = "", suffix: string = "", captured: bool = false) -> GrammarMatch | None | Diagnostic:
     if len(input) == 0:
         return None
     token = input[0]
@@ -36,8 +36,10 @@ def match_declared_token(input: list[TokenTerm], label: string, construct: (Lexe
     return GrammarMatch(1, lambda: finish_declared_token(construct, spelling, token.span, label), identity=label + ":" + string(token.span.start) + ":" + string(token.span.end))
 
 
-def finish_declared_token(construct: (Lexeme) -> LiteralValue, spelling: Lexeme, span: Span, label: string) -> GrammarResolution | Diagnostic:
+def finish_declared_token(construct: (Lexeme) -> LiteralValue | Diagnostic, spelling: Lexeme, span: Span, label: string) -> GrammarResolution | Diagnostic:
     value = construct(spelling)
+    if value is Diagnostic:
+        return value
     node = ResolvedGrammarNode(value, span, label)
     return GrammarResolution(nodes=[node])
 

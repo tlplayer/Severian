@@ -1,6 +1,15 @@
 import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../contract.sev"
 
+'''
+A `unit` is a unit of measurement. bytes, seconds, minutes, frequency, watts, voltage etc. 
+It's a primitive because byte consumes it have byte as the currency of allocate/deallocate and free 
+the `units` library is used to define things like watts, voltage, etc.
+prelude units: byte, seconds, frequency, are very useful for a programming language to think about. 
+if bytes(T) > 2MB and timer < 4s: 
+    panic("Bytes are over 2MB in less than 4s")
 
+This gives very good reasoning over space/time complexity which is core to all programs/functions
+'''
 class UnitPrimitive: Primitive
     mlir: MlirTypeBinding = MlirTypeBinding("", value=false)
     identity: PrimitiveId = PrimitiveId(DeclarationId(2))

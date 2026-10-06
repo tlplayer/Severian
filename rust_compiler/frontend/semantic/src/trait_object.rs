@@ -125,6 +125,7 @@ impl Analyzer<'_> {
         for (parameter, ty) in method.type_parameters.iter().zip(types) {
             let name = format!("__sev_method_type_{}", ty.0);
             self.active_type_aliases.insert(name.clone(), *ty);
+            self.method_type_aliases.insert(name.clone(), *ty);
             substitution.insert_type(parameter.clone(), name);
         }
         let mut method = package::generic::specialize_function(method, &substitution);
@@ -300,14 +301,17 @@ impl Analyzer<'_> {
                 };
                 let implementation = self.specialize_dynamic_method(implementation, &types)?;
                 let receiver = self.erased_record_read(storage.clone(), owner.ty, span);
-                let value = self.lower_method_callable(
+                self.preserve_error_depth += 1;
+                let lowered = self.lower_method_callable(
                     &owner,
                     &implementation,
                     receiver,
                     &call_arguments,
                     None,
                     span,
-                )?;
+                );
+                self.preserve_error_depth -= 1;
+                let value = lowered?;
                 let value = self.coerce(value, signature.result, false)?;
                 let condition = self.erased_record_is(storage.clone(), owner.ty, span);
                 selected = Expression {
@@ -334,7 +338,12 @@ impl Analyzer<'_> {
         }
         let mut arguments = vec![object];
         arguments.extend(values);
-        let value = self.runtime_call(&symbol, &parameters, signature.result, arguments, span);
+        let mut value = self.runtime_call(&symbol, &parameters, signature.result, arguments, span);
+        if self.preserve_error_depth == 0 {
+            if let Some(fallible) = self.fallible_types.get(&signature.result).copied() {
+                value = self.unwrap_fallible_expression(value, fallible, span);
+            }
+        }
         if let Some(expected) = expected {
             return self.coerce(value, expected, false).map(Some);
         }
@@ -458,10 +467,10 @@ impl Analyzer<'_> {
         let target = if is_none {
             self.types.resolve_name("None").unwrap()
         } else {
-            let Some(target) = callable_path(right) else {
+            let Some(annotation) = enum_type_argument(right) else {
                 return Ok(None);
             };
-            self.resolve_source_type(&TypeAnnotation::named(target, Vec::new(), right.span))?
+            self.resolve_source_type(&annotation)?
         };
         let value = self.expression(left, None)?;
         if self.is_trait_object(value.type_id) || value.type_id == any_type_id() {
@@ -1129,6 +1138,28 @@ mod tests {
             .unwrap()
             .path
             .starts_with(PREFIX));
+        severian_mir::build(&program).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod bootstrap_trait_regressions {
+    use super::*;
+    use severian_source::SourceFile;
+
+    #[test]
+    fn generic_method_type_checks_accept_structural_target_types() {
+        let source = SourceFile::virtual_source("generic-type-check.sev", "class Holder[T]:\n    value: T\n    def read[R](fallback: R) -> R:\n        if self.value is R:\n            return self.value\n        return fallback\ndef read() -> list[int]:\n    holder = Holder[int](7)\n    return holder.read[list[int]]([])\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let program = analyze(&ast, &severian_bootstrap::load().unwrap().types).unwrap();
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn fallible_trait_dispatch_preserves_the_implementation_error_envelope() {
+        let source = SourceFile::virtual_source("action.sev", "trait Action:\n    def execute() -> unit | Error\nclass Failure: Action\n    def execute() -> unit | Error:\n        throw Error(\"failed\")\ndef run(action: Action) -> int:\n    try:\n        action.execute()\n        return 0\n    catch failure: Error:\n        return 1\nvalue = run(Failure())\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let program = analyze(&ast, &severian_bootstrap::load().unwrap().types).unwrap();
         severian_mir::build(&program).unwrap();
     }
 }

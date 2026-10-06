@@ -39,6 +39,7 @@ class SourceWindow: Window
         if count > self.end - self.cursor:
             return LexicalDiagnostic("cursor would escape source window", self.span(), "lexer.window")
         self.cursor += count
+        return unit
 
     def finished() -> bool:
         return self.cursor == self.end

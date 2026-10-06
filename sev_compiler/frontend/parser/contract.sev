@@ -37,9 +37,10 @@ class GrammarMatch:
         if resolving:
             throw Error("cyclic grammar construction")
         resolving = true
-        cached = construct()
+        resolved = construct()
+        cached = resolved
         resolving = false
-        return cached
+        return resolved
 
 
 ((list[TokenTerm]) -> GrammarMatch | None | Diagnostic) as GrammarMatcher

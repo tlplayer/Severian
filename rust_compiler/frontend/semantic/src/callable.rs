@@ -109,6 +109,7 @@ impl Analyzer<'_> {
         self.active_function_name = Some(ast_function.name.clone());
         self.declarations.clear();
         self.active_type_aliases = aliases;
+        self.active_type_aliases.extend(self.method_type_aliases.clone());
         for (index, name) in ast_function.type_parameters.iter().enumerate() {
             if let Some(ty) = function
                 .substitution
@@ -328,6 +329,11 @@ impl Analyzer<'_> {
                     .enumerate()
                     .find(|(_, field)| field.name == name)
                 {
+                    if let Some(value) = self.value_substitutions.get(name).cloned() {
+                        return expected.map_or(Ok(Some(value.clone())), |expected| {
+                            self.coerce(value, expected, false).map(Some)
+                        });
+                    }
                     if expected.is_some_and(|expected| !self.types.assignable(field.ty, expected)) {
                         return Err(semantic_error(
                             "field does not satisfy the expected type".into(),
@@ -399,6 +405,18 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
         span: severian_source::Span,
     ) -> Result<Expression, Diagnostic> {
+        self.lower_member_callable(owner, method, Some(receiver), arguments, expected, span)
+    }
+
+    pub(super) fn lower_member_callable(
+        &mut self,
+        owner: &ClassInstance,
+        method: &severian_ast::FunctionDeclaration,
+        receiver: Option<Expression>,
+        arguments: &[severian_ast::CallArgument],
+        expected: Option<TypeId>,
+        span: severian_source::Span,
+    ) -> Result<Expression, Diagnostic> {
         if method.body.is_none() {
             return Err(Diagnostic::new(
                 "E000211",
@@ -419,6 +437,7 @@ impl Analyzer<'_> {
             })
             .unwrap_or_default();
         aliases.insert("Self".into(), owner.ty);
+        aliases.extend(self.method_type_aliases.clone());
         aliases.extend(self.active_type_aliases.iter().filter(|(name, _)| name.starts_with("__sev_method_type_")).map(|(name, ty)| (name.clone(), *ty)));
         let parameters = method
             .parameters
@@ -458,21 +477,25 @@ impl Analyzer<'_> {
                 Some(span),
             ));
         };
-        let key = (owner.ty, method.name.clone(), method.span.start as usize);
+        let receiver_count = usize::from(receiver.is_some());
+        let member_name = if receiver.is_some() { method.name.clone() } else { format!("static.{}", method.name) };
+        let key = (owner.ty, member_name.clone(), method.span.start as usize);
         let id = if let Some(id) = self.method_instances.get(&key) {
             *id
         } else {
             let definition = synthetic_extension_definition(
-                &format!("{}.{}", owner.name, method.name),
+                &format!("{}.{member_name}", owner.name),
                 method.span,
                 &[owner.ty],
             );
             let id = FunctionId(definition.declaration.0);
-            let mut hir_parameters = vec![FunctionParameter {
-                binding: self.new_binding_id(),
-                name: "self".into(),
-                contract: universal_boundary(owner.ty),
-            }];
+            let mut hir_parameters = Vec::new();
+            if receiver.is_some() {
+                hir_parameters.push(FunctionParameter {
+                    binding: self.new_binding_id(), name: "self".into(),
+                    contract: universal_boundary(owner.ty),
+                });
+            }
             for parameter in &signature.parameters {
                 hir_parameters.push(FunctionParameter {
                     binding: self.new_binding_id(),
@@ -505,15 +528,15 @@ impl Analyzer<'_> {
         };
         let arguments = self.apply_parameter_effects(
             id,
-            std::iter::once(receiver).chain(resolved).collect(),
+            receiver.into_iter().chain(resolved).collect(),
             span,
         );
         let call = Expression {
             id: self.next_id(),
             type_id: result,
             kind: ExpressionKind::Call {
-                evaluation_order: std::iter::once(0)
-                    .chain(evaluation_order.into_iter().map(|index| index + 1))
+                evaluation_order: (0..receiver_count)
+                    .chain(evaluation_order.into_iter().map(|index| index + receiver_count))
                     .collect(),
                 callee: severian_hir::Callee::Direct {
                     instance: Some(id),
@@ -706,5 +729,27 @@ fn visit_block(block: &mut Block, visit: &mut impl FnMut(&mut Expression)) {
             | Statement::Break { .. }
             | Statement::Continue { .. } => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod field_guard_tests {
+    #[test]
+    fn bare_receiver_field_uses_guarded_union_type() {
+        let source = severian_source::SourceFile::virtual_source("cached.sev",
+            "class Value:\n    count: int\nclass Cached:\n    value: Value | int | None\n    def read() -> Value | int:\n        if value != None:\n            return value\n        return 0\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let context = severian_bootstrap::load().unwrap();
+        let program = crate::analyze(&ast, &context.types).unwrap();
+        severian_mir::build(&program).unwrap();
+    }
+
+    #[test]
+    fn reassigned_receiver_field_cannot_use_stale_guard() {
+        let source = severian_source::SourceFile::virtual_source("cached.sev",
+            "class Cached:\n    value: int | None\n    def read() -> int:\n        if value != None:\n            value = None\n            return value\n        return 0\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let context = severian_bootstrap::load().unwrap();
+        assert!(crate::analyze(&ast, &context.types).is_err());
     }
 }

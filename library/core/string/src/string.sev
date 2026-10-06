@@ -152,76 +152,7 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
     # Decode a complete quoted spelling. Character grammar uses the same
     # escape rules, then requires exactly one Unicode scalar.
     def literal_value(spelling: string, delimiter: string) -> string | None:
-        width = len(delimiter)
-        length = len(spelling)
-        if width == 0 or length < width * 2:
-            return None
-        if not spelling.starts_with(delimiter) or not spelling.ends_with(delimiter):
-            return None
-        end = length - width
-        offset := width
-        value := ""
-        while offset < end:
-            if spelling[offset:offset + width] == delimiter:
-                return None
-            current = spelling[offset]
-            if width == 1 and (current == '\n' or current == '\r'):
-                return None
-            if current != '\\':
-                value += string(current)
-                offset += 1
-                continue
-            offset += 1
-            if offset == end:
-                return None
-            escaped = spelling[offset]
-            if escaped == 'n':
-                value += "\n"
-            elif escaped == 'r':
-                value += "\r"
-            elif escaped == 't':
-                value += "\t"
-            elif escaped == '0':
-                value += "\0"
-            elif escaped == '\\' or escaped == '\'' or escaped == '"':
-                value += string(escaped)
-            elif escaped == 'x' or escaped == 'u' or escaped == 'U':
-                count := 2 if escaped == 'x' else (4 if escaped == 'u' else 8)
-                start := offset + 1
-                braced = escaped == 'u' and start < end and spelling[start] == '{'
-                if braced:
-                    start += 1
-                    stop := start
-                    while stop < end and spelling[stop] != '}':
-                        stop += 1
-                    count = stop - start
-                    if stop == end or count == 0 or count > 6:
-                        return None
-                if start + count > end:
-                    return None
-                scalar: u32 = 0
-                for digit in spelling[start:start + count]:
-                    number: u32
-                    if digit >= '0' and digit <= '9':
-                        number = u32(digit) - u32('0')
-                    elif digit >= 'a' and digit <= 'f':
-                        number = u32(digit) - u32('a') + 10
-                    elif digit >= 'A' and digit <= 'F':
-                        number = u32(digit) - u32('A') + 10
-                    else:
-                        return None
-                    scalar = scalar * 16 + number
-                if scalar > 0x10ffff or (scalar >= 0xd800 and scalar <= 0xdfff):
-                    return None
-                value += string(char(scalar))
-                offset = start + count
-                if braced:
-                    offset += 1
-                continue
-            else:
-                return None
-            offset += 1
-        return value
+        return encoding.literal_value(spelling, delimiter)
 
     def string():
         storage = vector[char[T], N]()

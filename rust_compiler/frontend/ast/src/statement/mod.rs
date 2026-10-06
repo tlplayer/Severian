@@ -24,6 +24,8 @@ pub struct MatchCase {
     pub annotation: Option<TypeAnnotation>,
     /// Bare enum alternatives share one body and introduce no payload bindings.
     pub variant_patterns: Vec<String>,
+    /// Explicit positional payload bindings; `_` ignores a payload.
+    pub payload_bindings: Option<Vec<String>>,
     pub body: Vec<Statement>,
     pub span: Span,
 }

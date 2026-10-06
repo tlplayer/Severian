@@ -12,7 +12,6 @@ import SourceWindow, Window from "../frontend/lexer/window.sev"
 import LexicalMatch, recognize_declared from "../frontend/lexer/recognize.sev"
 import Lexeme from "generic/lexeme.sev"
 import Span from "../frontend/source/source.sev"
-import T from "generic/type.sev"
 import SentenceField, TermRole from "sentence/sentence.sev"
 import GrammarMatcher, GrammarMatch from "../frontend/parser/contract.sev"
 import TokenTerm from "generic/token.sev"
@@ -85,12 +84,12 @@ import EnumKeyword from "block/enum.sev"
 # Registration retains the owner's arrangement, recognition, and type contract.
 class RegisteredGrammar:
     syntax: Y
-    result: T | None
+    result: type | None
     recognize: ((Window) -> LexicalMatch | None | Diagnostic) | None
     sequence: list[SentenceField] = []
     match_tokens: GrammarMatcher | None = None
     token_form: bool = false
-    capture_types: list[T] = []
+    capture_types: list[type] = []
     repetitions: list[int] = []
     accepts: ((list[CapturedGrammar], GrammarContext) -> ProofResult | Diagnostic) | None = None
     construct: ((list[CapturedGrammar], GrammarContext) -> LiteralValue | Diagnostic) | None = None
@@ -180,7 +179,7 @@ def registered_grammars() -> list[(Y, RegisteredGrammar)]:
 
 
 @compiler_grammar_registry
-def registry(result: T | None = None) -> list[(Y, RegisteredGrammar)]:
+def registry(result: type | None = None) -> list[(Y, RegisteredGrammar)]:
     entries: list[(Y, RegisteredGrammar)] = []
     for label, sequence in registered_grammars():
         # Optional exact lookup is retained for legacy adapters. Discovery uses

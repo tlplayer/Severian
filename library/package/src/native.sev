@@ -16,7 +16,7 @@ def compiler_build_info() -> string
 # Capture provenance while linking, so moving the executable or changing the
 # checkout never changes its version report. Missing Git data is explicit.
 def native_build_info(root: string, symbol: string) -> string | Error:
-    if symbol == "" or symbol[0] in "0123456789":
+    if symbol == "" or string(symbol[0]) in "0123456789":
         throw Error("invalid build-info C symbol")
     for character in symbol.characters():
         if character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_":

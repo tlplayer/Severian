@@ -147,9 +147,10 @@ impl Analyzer<'_> {
                 })
                 .collect::<Vec<_>>();
             let result = if let Some(function) = direct {
-                Expression {
+                let result = self.signatures[&function].result;
+                let call = Expression {
                     id: self.next_id(),
-                    type_id: signature.result,
+                    type_id: result,
                     span,
                     kind: ExpressionKind::Call {
                         callee: severian_hir::Callee::Direct {
@@ -160,7 +161,8 @@ impl Analyzer<'_> {
                         arguments: values[1..].to_vec(),
                         evaluation_order: Vec::new(),
                     },
-                }
+                };
+                self.coerce(call, signature.result, false)?
             } else {
                 let previous_names = std::mem::take(&mut self.names);
                 let previous_values = std::mem::take(&mut self.value_substitutions);
@@ -369,6 +371,20 @@ mod tests {
         let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
         let context = severian_bootstrap::load().unwrap();
         let program = analyze(&ast, &context.types).unwrap();
+        severian_mir::build(&program).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod bootstrap_callable_regressions {
+    use super::*;
+    use severian_source::SourceFile;
+
+    #[test]
+    fn optional_callable_field_accepts_a_narrower_result_and_calls_after_guard() {
+        let source = SourceFile::virtual_source("callback.sev", "def recognize(value: int) -> int:\n    return value\nclass Rule:\n    recognize: ((int) -> int | None) | None = recognize\ndef read(rule: Rule) -> int | None:\n    if rule.recognize == None:\n        return None\n    return rule.recognize(7)\nvalue = read(Rule())\n");
+        let ast = severian_parser::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let program = analyze(&ast, &severian_bootstrap::load().unwrap().types).unwrap();
         severian_mir::build(&program).unwrap();
     }
 }

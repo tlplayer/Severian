@@ -16,7 +16,7 @@ class CompilerStageAction: PipelineAction
 def frontend_file(input: string, package_name: string, module: string, output: string) -> int | Error:
     state = FrontendState(load(input), package_name, module)
     steps: list[Step] = []
-    previous: list[string] = []
+    previous: list[string] := []
     for stage in stages():
         steps.append(Step(stage.name, [], ".", dependencies=previous[:], stage=stage.name, action=CompilerStageAction(stage, state), provider=stage.provider))
         previous = [stage.name]

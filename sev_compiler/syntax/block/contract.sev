@@ -30,12 +30,12 @@ def block_contract(declaration: RecordDeclaration) -> BlockContract | Error:
         if field.name in ["sentences", "subblocks"]:
             expected = "BlockSentence" if field.name == "sentences" else "SourceBlockId"
             match field.annotation.kind:
-                case Named:
+                case Named(name, arguments):
                     if name != "list" or len(arguments) != 1:
                         throw Error("block " + field.name + " requires list[" + expected + "]")
                     if simple_type_name(arguments[0]) != expected:
                         throw Error("block " + field.name + " has an invalid element contract")
-                case _:
+                case Union | Function | DimensionConstant | DimensionRuntime | ShapeSpread:
                     throw Error("block " + field.name + " requires a list contract")
         if field.name == "context":
             if simple_type_name(field.annotation) != "BlockContext":
@@ -57,7 +57,7 @@ def block_contract(declaration: RecordDeclaration) -> BlockContract | Error:
             index := 0
             for field in grammar.fields:
                 match field:
-                    case Capture:
+                    case Capture(name, role, constraints):
                         if name in captures:
                             throw Error("duplicate block capture " + name)
                         captures.append(name)

@@ -85,6 +85,9 @@ fn run(reports: &Path, stage: &str, command: &mut Command) -> Result<()> {
     match status {
         Ok(status) if status.success() => Ok(()),
         other => {
+            // The child build prints a bounded diagnostic sample; forward it
+            // to the invoking terminal as well as retaining its full transcript.
+            print!("{text}");
             let message = format!("{description}\n{text}\nresult: {other:?}");
             record(reports, stage, "error", &message)?;
             Err(format!("{stage} failed; see {}", reports.join("log.txt").display()).into())
@@ -127,7 +130,8 @@ fn update(options: Options) -> Result<()> {
     lock.try_lock().map_err(|_| "another compiler update is running")?;
     let reports = cache.join("debug/build");
     if reports.exists() {
-        let previous = cache.join(format!("debug/build-before-update-{}", std::process::id()));
+        let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+        let previous = cache.join(format!("debug/build-before-update-{}-{timestamp}", std::process::id()));
         fs::rename(&reports, previous)?;
     }
     fs::create_dir_all(&reports)?;

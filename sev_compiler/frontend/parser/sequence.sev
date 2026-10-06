@@ -3,7 +3,6 @@ import GrammarMatch, GrammarResolution, LiteralValue from "contract.sev"
 import TokenTerm from "../../syntax/generic/token.sev"
 import B from "../../syntax/generic/block.sev"
 import Block from "../../syntax/block/block.sev"
-import T from "../../syntax/generic/type.sev"
 import Span from "../source/source.sev"
 import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import ParserDiagnostic from "diagnostic.sev"
@@ -149,7 +148,7 @@ def construct_sequence(grammar: syntax.RegisteredGrammar, captures: list[Capture
 import ResolvedGrammarNode from "../../syntax/grammar/resolution.sev"
 
 
-def match_contract(input: list[TokenTerm], required: T | None, context: GrammarContext, active: list[string] = []) -> list[GrammarMatch] | Diagnostic:
+def match_contract(input: list[TokenTerm], required: type | None, context: GrammarContext, active: list[string] = []) -> list[GrammarMatch] | Diagnostic:
     matches: list[GrammarMatch] = []
     for label, grammar in syntax.registry(required):
         if grammar.match_context != None:

@@ -1,0 +1,49 @@
+# Dimensioned literal constructors and arithmetic are ordinary source declarations.
+# Canonical amounts use bits, nanoseconds, Celsius, hertz, volts, and watts.
+
+
+import byte from "../byte/byte.sev"
+
+
+class Duration:
+    amount: float
+
+
+    operator ==[G:Equal](other: Self) -> bool:
+        return self.amount == other.amount
+
+
+    operator <[G:Less](other: Self) -> bool:
+        return self.amount < other.amount
+
+
+    operator +[G:Add](other: Self) -> Self:
+        return Duration(self.amount + other.amount)
+
+
+    operator /[G:Divide](other: Self) -> float:
+        return self.amount / other.amount
+
+
+class Frequency:
+    amount: float
+
+
+    operator ==[G:Equal](other: Self) -> bool:
+        return self.amount == other.amount
+
+
+    operator <[G:Less](other: Self) -> bool:
+        return self.amount < other.amount
+
+
+    operator +[G:Add](other: Self) -> Self:
+        return Frequency(self.amount + other.amount)
+
+
+    operator /[G:Divide](other: Self) -> float:
+        return self.amount / other.amount
+
+operator /[G:Divide](self: int, other: Duration) -> Frequency:
+    return Frequency(float(self) * 1000000000.0 / other.amount)
+

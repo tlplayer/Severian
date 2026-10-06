@@ -1,3 +1,4 @@
+import literal_value from "utf8.sev"
 import CharPrimitive from "declarations.sev"
 import LiteralSyntax, MlirTypeBinding, PrimitiveAlias, PrimitiveId, Type, TypeId from "../contract.sev"
 import "../primitive.sev" as _dependency_primitive
@@ -95,13 +96,13 @@ class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]:
         return ' '
 
     grammar literal[spelling: Lexeme]() -> char with char.literal_valid(spelling.text):
-        value = string.literal_value(spelling.text, "'")
+        value = literal_value(spelling.text, "'")
         if value is None:
             throw TypeConversionError("invalid character literal")
         return value[0]
 
     def literal_valid(spelling: string) -> bool:
-        value = string.literal_value(spelling, "'")
+        value = literal_value(spelling, "'")
         if value is None:
             return false
         return len(value) == 1

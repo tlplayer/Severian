@@ -61,7 +61,8 @@ def parser(input: TokenStream, package: string = "", module: string = "") -> Blo
     file = BlockFile(input.source.path, input.source.source_id, [root])
     graph = BlockGraph()
     root_providers: list[syntax.RegisteredGrammar] = []
-    root_context = GrammarContext(body=root)
+    root_span = Span(input.source.source_id, 0, u32(len(input.source.characters)))
+    root_context = GrammarContext(body=root, span=root_span)
     for label, grammar in syntax.registry(B):
         if len(grammar.sequence) == 0 and grammar.construct != None:
             proof = ProofResult.Proven if grammar.accepts == None else grammar.accepts([], root_context)
@@ -70,15 +71,18 @@ def parser(input: TokenStream, package: string = "", module: string = "") -> Blo
             if proof == ProofResult.Proven:
                 root_providers.append(grammar)
     if len(root_providers) > 1:
-        return [ParserDiagnostic("multiple grammars provide the global block", root.span, "parser.block")]
+        return [ParserDiagnostic("multiple grammars provide the global block", root_span, "parser.block")]
     provider: B := root
     if len(root_providers) == 1:
-        constructed = root_providers[0].construct([], root_context)
+        construct ?= root_providers[0].construct
+        if construct == None:
+            return [ParserDiagnostic("global grammar has no construction implementation", root_span, "parser.block")]
+        constructed = construct([], root_context)
         if constructed is Diagnostic:
             return [constructed]
         block = constructed.block()
         if block == None:
-            return [ParserDiagnostic("global grammar did not construct a block", root.span, "parser.block")]
+            return [ParserDiagnostic("global grammar did not construct a block", root_span, "parser.block")]
         provider = block
         provider.context = root.context
         provider.span = root.span
@@ -113,7 +117,7 @@ def parser(input: TokenStream, package: string = "", module: string = "") -> Blo
                 file.blocks[ancestor].span = location
                 providers[ancestor].span = location
         body = Block()
-        context = GrammarContext(parent, body, previous[parent_index] if parent_index in previous else None)
+        context = GrammarContext(parent, body, previous[parent_index] if parent_index in previous else None, span=line.tokens[0].span)
         candidates = match_contract(line.tokens, None, context)
         if candidates is Diagnostic:
             return [candidates]

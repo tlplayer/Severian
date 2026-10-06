@@ -1608,6 +1608,7 @@ impl Parser<'_> {
             let pattern_start = self.cursor;
             let (first, _) = self.identifier("expected a case binding, `_`, or type")?;
             let mut variant_patterns = Vec::new();
+            let mut payload_bindings = None;
             let (binding, annotation) = if self.at(&TokenKind::Colon) {
                 self.next();
                 let binding = (first != "_").then_some(first);
@@ -1627,7 +1628,18 @@ impl Parser<'_> {
             } else {
                 self.cursor = pattern_start;
                 let annotation = self.type_annotation()?;
-                if self.take(&TokenKind::Colon).is_some() {
+                if self.take(&TokenKind::LeftParen).is_some() {
+                    let variant = annotation.simple_name().ok_or_else(|| self.error("expected an enum variant before payload bindings"))?.to_owned();
+                    let mut names = Vec::new();
+                    while !self.at(&TokenKind::RightParen) {
+                        names.push(self.identifier("expected a payload binding or `_`")?.0);
+                        if self.take(&TokenKind::Comma).is_none() { break; }
+                    }
+                    self.expect(&TokenKind::RightParen, "expected `)` after payload bindings")?;
+                    self.expect(&TokenKind::Colon, "expected `:` after case pattern")?;
+                    payload_bindings = Some(names);
+                    (Some(variant), None)
+                } else if self.take(&TokenKind::Colon).is_some() {
                     let alternatives = match annotation.kind {
                         TypeAnnotationKind::Union(members) => members,
                         _ => vec![annotation],
@@ -1658,6 +1670,7 @@ impl Parser<'_> {
                 binding,
                 annotation,
                 variant_patterns,
+                payload_bindings,
                 body,
                 span: Span::new(case_start.source, case_start.start, end),
             });
@@ -5503,5 +5516,18 @@ mod grouped_case_tests {
         assert!(cases[1].variant_patterns.is_empty());
         assert_eq!(cases[1].binding.as_deref(), Some("text"));
         assert_eq!(cases[1].annotation.as_ref().unwrap().simple_name(), Some("string"));
+    }
+}
+
+#[cfg(test)]
+mod payload_pattern_tests {
+    #[test]
+    fn explicit_payload_patterns_preserve_renamed_and_ignored_bindings() {
+        let source = severian_source::SourceFile::virtual_source("pattern.sev", "def read(value: int):\n    match value:\n        case Named(label, _):\n            return label\n");
+        let ast = crate::parse(&severian_lexer::scan(&source).unwrap()).unwrap();
+        let severian_ast::Item::Function(function) = &ast.items[0] else { panic!("function"); };
+        let severian_ast::Statement::Match { cases, .. } = &function.body.as_ref().unwrap()[0] else { panic!("match"); };
+        assert_eq!(cases[0].binding.as_deref(), Some("Named"));
+        assert_eq!(cases[0].payload_bindings.as_deref(), Some(["label".to_owned(), "_".to_owned()].as_slice()));
     }
 }
