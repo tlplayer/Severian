@@ -29,7 +29,7 @@ class FlowBlock[V]:
 
 class FlowBuilder[V, B]: ControlFlow[V, B]
     condition_value: (bool) -> V
-    lower_body: (B) -> unit
+    lower_body: (B) -> absent
     blocks: list[FlowBlock[V]] = []
     current: int = -1
 

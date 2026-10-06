@@ -1,11 +1,33 @@
 """B: syntax providers own recognition, attachment, declarations and execution."""
 
 
-class BlockProvider:
+from py_compiler.syntax.generic.grammar import Grammar, Match
+
+
+class BlockProvider(Grammar):
+    role = "B.header"
+
+    def grammars(self):
+        return (self,)
+
+    def recognize(self, window):
+        if not window.tokens or window.tokens[0].text != self.spelling:
+            return None
+        return Match(self, window, window.end, {"header": window.tokens})
+
+    def construct(self, match):
+        return self.parse_header(match.captures["header"])
+
+    def expand(self, header, syntax):
+        return syntax, ()
+
     spelling = ""
     attachment = None
     continuation = False
     indentation_unit = "    "
+
+    def has_body(self, node):
+        return True
 
     def parse_header(self, items):
         if items[-1].text != ":":
@@ -23,7 +45,7 @@ class BlockProvider:
         return len(prefix)
 
     def declare(self, node, context):
-        return None
+        context.declare_nodes(node.children, (*context.scope, node.identity))
 
     def declare_member(self, node, context, owner):
         raise ValueError(f"{self.spelling} does not provide member declaration behavior")

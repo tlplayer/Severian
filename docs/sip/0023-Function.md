@@ -65,16 +65,16 @@ you also can catch things like calling a constant F in a loop and flag that the 
 trait Bar:
     def foobar(a:T) with 
     {
-        conditions...
+        conditions...,
     }
 
 
 
 def foobar(a:int) -> int | Error with
 {
-    fix 0 <= a <= 100 
-    F.complexity.space := BigO.constant
-    F.complexity.time := BigO.constant
+    fix 0 <= a <= 100,
+    foobar.complexity.space := BigO.constant,
+    foobar.complexity.time := BigO.constant,
 }:
     return a
 

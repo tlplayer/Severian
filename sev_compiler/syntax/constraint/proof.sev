@@ -38,7 +38,7 @@ def prove_interval(actual: IntegerInterval, required: IntegerInterval) -> ProofR
     return ProofResult.Proven if lower_proven and upper_proven else ProofResult.Unknown
 
 
-def require_static(result: ProofResult) -> unit | Error:
+def require_static(result: ProofResult) -> absent | Error:
     if result == ProofResult.Refuted:
         throw Error("static constraint is false")
     if result == ProofResult.Unknown:

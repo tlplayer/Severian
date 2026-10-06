@@ -17,9 +17,13 @@ class TypeDeclaration:
     span: object
     source: str = ""
     defaults: tuple = ()
+    methods: tuple = ()
 
 
 class RecordProvider(DeclarationProvider):
+    def declare_member(self, node, context, owner):
+        context.declare_nodes([node], (*context.scope, owner.declaration.identity))
+
     def parse_header(self, items):
         header = super().parse_header(items)
         if len(header) != 1 or header[0].kind != "IDENTIFIER":

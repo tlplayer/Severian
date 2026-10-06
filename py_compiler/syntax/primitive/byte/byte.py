@@ -1,4 +1,4 @@
-from py_compiler.syntax.primitive.contract import Primitive
+from py_compiler.syntax.primitive.numeric.types import Byte
 
 # A storage quantity retains its own semantic identity, distinct from u8 and int.
-BYTE = Primitive("byte", "byte", "i64", 64, True)
+BYTE = Byte("byte", "byte", "i64", 64, True)

@@ -12,7 +12,7 @@ IIF you are building rust can you run the rust compiler to validate the change. 
 Only after after rust/sev implementation is COMPLETE 100%! not partial, can you run tests and builds in severian
 
 ```
-sev_py # Rust compiler
+sev_py # python backup compiler
 sev # sev_compiler 
 sev update # Updates to latest version  
 

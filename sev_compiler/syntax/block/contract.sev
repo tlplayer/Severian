@@ -86,8 +86,8 @@ def block_contract(declaration: RecordDeclaration) -> BlockContract | Error:
             if simple_type_name(method.parameters[0].annotation) != "BlockLowering":
                 throw Error("block lower requires BlockLowering context")
             result ?= method.result
-            if result != None and simple_type_name(result) != "unit":
-                throw Error("block lower must return unit")
+            if result != None and simple_type_name(result) != "absent":
+                throw Error("block lower must return absent")
             contract.lowering = method
     for implemented in declaration.traits:
         if simple_type_name(implemented) == "ExecutableBlock":

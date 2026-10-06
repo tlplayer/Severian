@@ -49,6 +49,8 @@ class Body:
     bindings: list = field(default_factory=list)
     declaration: str = ""
     storage: list = field(default_factory=list)
+    complexity: dict = field(default_factory=dict)
+    test: dict | None = None
 
     def verify(self):
         if not self.blocks:

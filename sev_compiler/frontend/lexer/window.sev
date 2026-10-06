@@ -13,7 +13,7 @@ trait Window:
 
     # Return None when the requested character is outside this window.
     def peek(distance: u32 = 0) -> string | None
-    def advance(count: u32) -> unit | Diagnostic
+    def advance(count: u32) -> absent | Diagnostic
     def finished() -> bool
 
     # Capture a child within this window without copying or modifying source.
@@ -35,11 +35,11 @@ class SourceWindow: Window
             return None
         return self.source.characters[self.cursor + distance]
 
-    def advance(count: u32) -> unit | Diagnostic:
+    def advance(count: u32) -> absent | Diagnostic:
         if count > self.end - self.cursor:
             return LexicalDiagnostic("cursor would escape source window", self.span(), "lexer.window")
         self.cursor += count
-        return unit
+        return absent
 
     def finished() -> bool:
         return self.cursor == self.end

@@ -8,12 +8,15 @@ from py_compiler.syntax.recognition import Syntax
 class Lexeme:
     text: str
     span: Span
+    source: object = None
 
 
 @dataclass(frozen=True)
 class Token:
     kind: str
     lexeme: Lexeme
+    grammar: object = None
+    syntax: object = None
 
     @property
     def text(self):
@@ -25,29 +28,19 @@ class Token:
 
 
 def lex(source, syntax):
+    from py_compiler.syntax.generic.grammar import SourceWindow
     text, cursor, tokens = source.text, 0, []
+    registry = syntax.registry
     while cursor < len(text):
         start = cursor
-        if text[cursor] in " \t":
-            while cursor < len(text) and text[cursor] in " \t":
-                cursor += 1
-            if start == 0 or text[start - 1] in "\r\n":
-                tokens.append(Token("INDENT", Lexeme(text[start:cursor], source.span(start, cursor))))
-            continue
-        if text[cursor] == "#":
-            while cursor < len(text) and text[cursor] not in "\r\n":
-                cursor += 1
-            continue
-        if text[cursor] in "\r\n":
-            cursor += 2 if text.startswith("\r\n", cursor) else 1
-            kind = "NEWLINE"
-        else:
-            try:
-                kind, cursor = syntax.recognize(text, cursor)
-            except ValueError as failure:
-                raise Diagnostic("lexer", str(failure), source, source.span(start, start + 1)) from failure
-        tokens.append(Token(kind, Lexeme(text[start:cursor], source.span(start, cursor))))
-    tokens.append(Token("EOF", Lexeme("", source.span(cursor, cursor))))
+        try:
+            match = registry.recognize('Y', SourceWindow(source, cursor, len(text)))
+            kind, cursor = match.provider.construct(match)
+        except ValueError as failure:
+            raise Diagnostic('lexer', str(failure), source, source.span(start, start + 1)) from failure
+        if kind != 'TRIVIA':
+            tokens.append(Token(kind, Lexeme(text[start:cursor], source.span(start, cursor), source), match.provider, syntax))
+    tokens.append(Token('EOF', Lexeme('', source.span(cursor, cursor), source)))
     return tokens
 
 

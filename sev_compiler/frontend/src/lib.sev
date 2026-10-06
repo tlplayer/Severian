@@ -23,18 +23,18 @@ class FrontendState:
 trait FrontendStage:
     name: string
     provider: string
-    def apply(state: FrontendState) -> unit | Error
+    def apply(state: FrontendState) -> absent | Error
 
 class MlirStage: FrontendStage
     name: string = "mlir"
     provider: string = "sev-compiler-mlir"
-    def apply(state: FrontendState) -> unit | Error:
+    def apply(state: FrontendState) -> absent | Error:
         state.types = DeclaredTypeMapping()
 
 class SyntaxStage: FrontendStage
     name: string = "syntax"
     provider: string = "sev-compiler-syntax"
-    def apply(state: FrontendState) -> unit | Error:
+    def apply(state: FrontendState) -> absent | Error:
         types ?= state.types
         if types == None:
             throw Error("syntax requires MLIR type mapping")
@@ -46,7 +46,7 @@ class SyntaxStage: FrontendStage
 class LexerStage: FrontendStage
     name: string = "lexer"
     provider: string = "sev-compiler-lexer"
-    def apply(state: FrontendState) -> unit | Error:
+    def apply(state: FrontendState) -> absent | Error:
         result = RegistryLexer().lex(state.source)
         if result is list[Diagnostic]:
             state.diagnostics = result
@@ -56,7 +56,7 @@ class LexerStage: FrontendStage
 class ParserStage: FrontendStage
     name: string = "parser"
     provider: string = "sev-compiler-parser"
-    def apply(state: FrontendState) -> unit | Error:
+    def apply(state: FrontendState) -> absent | Error:
         tokens ?= state.tokens
         if tokens == None:
             throw Error("parser requires lexer output")
@@ -69,7 +69,7 @@ class ParserStage: FrontendStage
 class HirStage: FrontendStage
     name: string = "hir"
     provider: string = "sev-compiler-hir"
-    def apply(state: FrontendState) -> unit | Error:
+    def apply(state: FrontendState) -> absent | Error:
         graph ?= state.graph
         if graph == None:
             throw Error("HIR requires parser output")

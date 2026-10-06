@@ -33,53 +33,23 @@ class Program:
 
 
 def resolve_literal(literal, syntax):
+    from py_compiler.frontend.source.source import SourceFile
+    from py_compiler.syntax.generic.grammar import SourceWindow
     spelling = literal.spelling
-    types = syntax.types
+    unsigned = spelling[1:] if spelling.startswith(('+', '-')) else spelling
+    source = SourceFile('<literal>', unsigned)
+    if not unsigned:
+        raise ValueError('empty literal')
+    match = syntax.registry.recognize('Y', SourceWindow(source, 0, len(unsigned)))
+    owner = getattr(match.provider, 'owner', None)
+    if match.end != len(unsigned) or owner is None or not hasattr(owner, 'decode'):
+        raise ValueError('no type declares this literal')
     expected = literal.expected_type
-    if expected and expected not in types:
-        raise ValueError(f"unknown primitive type {expected!r}")
-    kind, value = "", None
-    if literal.lexical_kind == "CHAR":
-        kind, value = "char", ord(decode_quoted(spelling))
-    elif literal.lexical_kind == "STRING":
-        kind, value = "string", decode_quoted(spelling)
-    elif spelling in ("true", "false"):
-        kind, value = "bool", spelling == "true"
-    elif spelling in ("None", "absent", "unit"):
-        kind = spelling
-    else:
-        number = spelling.replace("_", "")
-        if number.endswith("B") and not number.lstrip("+-").lower().startswith("0x"):
-            kind, number = "byte", number[:-1]
-        base = number.lstrip("+-").lower()
-        if base.startswith(("0x", "0o", "0b")):
-            value = int(number, 0)
-            kind = kind or "i64"
-        elif any(c in number for c in ".eE"):
-            if kind == "byte":
-                raise ValueError("byte quantities require an integral amount")
-            kind, value = "f64", Decimal(number)
-        else:
-            kind, value = kind or "i64", int(number, 10)
-    target = types[expected] if expected else types[kind]
-    family = target.family
-    if family == "integer" and kind == "i64":
-        low = -(1 << (target.bits - 1)) if target.signed else 0
-        high = (1 << (target.bits - int(target.signed))) - 1
-        if not low <= value <= high:
-            raise ValueError(f"literal {value} is outside {target.name} range [{low}, {high}]")
-    elif family == "float" and kind in ("i64", "f64"):
-        value = Decimal(value)
-        if not value.is_finite():
-            raise ValueError("non-finite numeric literals require an explicit provider")
-    elif target.name == "pointer" and kind == "i64" and expected:
-        if not 0 <= value < (1 << target.bits):
-            raise ValueError("pointer address outside target width")
-    elif target.name != kind:
-        raise ValueError(f"{kind} literal does not satisfy {target.name}")
-    if kind == "byte" and not -(1 << 63) <= value < (1 << 63):
-        raise ValueError("byte quantity exceeds its signed 64-bit representation")
-    return target, value
+    if expected and expected not in syntax.types:
+        raise ValueError(f'unknown primitive type {expected!r}')
+    target = syntax.types[expected] if expected else owner
+    value = owner.decode(spelling)
+    return target, target.accept_literal(owner, value)
 
 
 def partition(source, graph, syntax):

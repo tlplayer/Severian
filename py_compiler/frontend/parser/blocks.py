@@ -15,65 +15,19 @@ class Node:
     children: list = field(default_factory=list)
     header: tuple = ()
     provider: object = None
+    syntax: object = None
+    imports: tuple = ()
 
 
 def parse_blocks(source, tokens, syntax=None):
     from py_compiler.syntax.recognition import Syntax
+    from py_compiler.syntax.generic.grammar import SourceWindow
     syntax = syntax or Syntax()
-    providers = syntax.block_providers
-    root = Node(source.identity + ":root", "global", source.span(0, len(source.text)), (), "")
-    root.provider = import_module("py_compiler.syntax.block.global").Global()
-    lines, current, errors = [], [], []
-    for token in tokens:
-        if token.kind in ("NEWLINE", "EOF"):
-            if current and any(t.kind != "INDENT" for t in current):
-                lines.append(current)
-            current = []
-        else:
-            current.append(token)
-    stack = [(0, root)]
-    pending = None
-    for line in lines:
-        indentation = line[0].text if line[0].kind == "INDENT" else ""
-        items = line[1:] if indentation else line
-        try:
-            depth = stack[-1][1].provider.indentation(indentation)
-            if pending:
-                if depth <= stack[-1][0]:
-                    errors.append(Diagnostic("parser", "block requires an indented body", source, pending.span))
-                else:
-                    if depth != stack[-1][0] + len(pending.provider.indentation_unit):
-                        raise ValueError("body must start one declared indentation unit below its parent")
-                    stack.append((depth, pending))
-                pending = None
-            while depth < stack[-1][0]:
-                stack.pop()
-            if depth != stack[-1][0]:
-                raise ValueError("indentation does not match an enclosing block")
-            parent = stack[-1][1]
-            first = items[0]
-            provider = providers.get(first.text)
-            kind = first.text if provider else "sentence"
-            header = ()
-            if provider:
-                header = provider.parse_header(items)
-                provider.attach(parent.children[-1] if parent.children else None, parent)
-            node = Node(source.identity + ":" + str(first.span.start), kind,
-                        source.span(first.span.start, items[-1].span.end), tuple(items), parent.identity, header=header, provider=provider)
-            parent.children.append(node)
-            if provider:
-                pending = node
-        except ValueError as failure:
-            errors.append(Diagnostic("parser", str(failure), source, items[0].span))
-    if pending:
-        errors.append(Diagnostic("parser", "block requires an indented body", source, pending.span))
-    def extend(node):
-        for child in node.children:
-            extend(child)
-        if node.children:
-            node.span = source.span(node.span.start, max(node.span.end, node.children[-1].span.end))
-    extend(root)
-    return root, errors
+    # An empty source has an empty module without attempting a zero-width match.
+    if not source.text:
+        from py_compiler.syntax.grammar.blocks import recognize_blocks
+        return recognize_blocks(source, tokens, syntax)
+    return syntax.registry.construct('B.source', SourceWindow(source, 0, len(source.text), tuple(tokens)))
 
 
 import unittest

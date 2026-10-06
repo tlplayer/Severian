@@ -7,7 +7,6 @@ import I128Primitive, I16Primitive, I32Primitive, I64Primitive, I8Primitive, Ind
 import NoneValuePrimitive, none_type_id from "../../symbol/none.sev"
 import PointerPrimitive, pointer_type_id from "declarations.sev"
 import StringPrimitive, string_type_id from "../string/declarations.sev"
-import UnitPrimitive, unit_type_id from "../unit/declarations.sev"
 import array_mlir, byte_view_mlir, index_mlir, memref_mlir, ranked_memref_storage, scalar_mlir, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir from "../mlir.sev"
 import "../../../../library/core/memory/src/raw_intrinsics.sev" as _dependency_raw_intrinsics
 

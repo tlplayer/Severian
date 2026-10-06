@@ -1,5 +1,4 @@
 import LiteralValue, LiteralValueOf from "../grammar/resolution.sev"
-import scalar_mlir from "../primitive/mlir.sev"
 import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../primitive/contract.sev"
 
 
@@ -7,15 +6,15 @@ class AbsentPrimitive: Primitive
     grammar literal["absent"]() -> absent:
         return absent
 
-    mlir: MlirTypeBinding = scalar_mlir("!llvm.ptr", "pointer")
+    mlir: MlirTypeBinding = MlirTypeBinding("", value=false)
     identity: PrimitiveId = PrimitiveId(DeclarationId(7))
     id: TypeId = TypeId(7)
     name: string = "absent"
-    size: Size = Size.Pointer
-    alignment: Size = Size.Pointer
+    size: Size = Size.Fixed(0)
+    alignment: Size = Size.Fixed(1)
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Absence
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.PointerBits(64)
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.RecordAggregate
     token_kind: string = "Identifier"
     literal_family: string = ""
     literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Identifier", "absent", LiteralValueOf[absent](absent))]

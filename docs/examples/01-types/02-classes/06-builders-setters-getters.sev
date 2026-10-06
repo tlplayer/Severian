@@ -46,8 +46,8 @@ def calculate(value: int) -> int:
 
 def main():
     user := User()
-        .set(name, "Alice")
-        .set(age, 36)
+        .set("name", "Alice")
+        .set("age", 36)
 
     print(user.name)
     print(user.age)

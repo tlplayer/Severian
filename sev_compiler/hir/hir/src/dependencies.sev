@@ -234,13 +234,13 @@ def retain_block_scope(graph: BlockGraph, selection: BlockSelection, address: Bl
 
 
 trait BlockResolver:
-    def resolve(graph: BlockGraph, address: BlockAddress) -> unit
+    def resolve(graph: BlockGraph, address: BlockAddress) -> absent
 
 
 # Already-indexed HIR uses need no further body loading.
 class IndexedBlockResolver: BlockResolver
-    def resolve(graph: BlockGraph, address: BlockAddress) -> unit:
-        return unit
+    def resolve(graph: BlockGraph, address: BlockAddress) -> absent:
+        return absent
 
 
 # Edges come from HIR name/primitive/call resolution, not a scan of identifier

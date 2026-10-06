@@ -32,9 +32,9 @@ class MlirProgram:
                 raise ValueError("duplicate MLIR symbol")
             symbols.add(function.symbol)
             c = function.constant
-            if c.type.family not in {"integer", "float", "bool", "char", "string", "pointer", "absence", "unit", "byte"}:
+            if not callable(getattr(c.type, "render_constant", None)):
                 raise ValueError(f"missing MLIR provider for {c.type.name}")
-            if c.type.family != "unit" and not c.type.mlir:
+            if not c.type.mlir and not c.type.no_result:
                 raise ValueError("value has no MLIR representation")
         for body in self.bodies:
             if body.name in symbols:
@@ -59,31 +59,9 @@ def render(program):
     globals_.extend("  " + place.declaration() for place in declarations.values())
     for function in program.functions:
         c, symbol = function.constant, function.symbol
-        type_, family = c.type.mlir, c.type.family
-        body = []
-        if family == "string":
-            data = list(c.value.encode("utf-8"))
-            static = f"memref<{len(data)}xi8>"
-            global_name = symbol + "_bytes"
-            # memref.global visibility is a string attribute, unlike func.func's keyword.
-            globals_.append(f'  memref.global "private" constant @{global_name} : {static} = dense<{json.dumps(data)}>')
-            body += [f"%storage = memref.get_global @{global_name} : {static}",
-                     f"%value = memref.cast %storage : {static} to {type_}"]
-        elif family == "absence" or (family == "pointer" and c.value == 0):
-            body.append(f"%value = llvm.mlir.zero : {type_}")
-        elif family == "pointer":
-            body += [f"%address = arith.constant {c.value} : i{c.type.bits}",
-                     f"%value = llvm.inttoptr %address : i{c.type.bits} to {type_}"]
-        elif family != "unit":
-            if family == "float":
-                # Preserve decimal precision until MLIR/APFloat selects target rounding.
-                value = str(c.value)
-                if "." not in value:
-                    parts = value.upper().split("E")
-                    value = parts[0] + ".0" + ("E" + parts[1] if len(parts) == 2 else "")
-            else:
-                value = str(int(c.value))
-            body.append(f"%value = arith.constant {value} : {type_}")
+        type_ = c.type.mlir
+        definitions, body = c.type.render_constant(c.value, symbol)
+        globals_.extend('  ' + line for line in definitions)
         body.append(f"func.return %value : {type_}" if type_ else "func.return")
         result = f" -> {type_}" if type_ else ""
         attributes = f" attributes {{sev.type = {quoted(c.type.name)}, sev.source = {quoted(c.source)}, sev.scalar_start = {c.span.start} : i64, sev.scalar_end = {c.span.end} : i64}}"
@@ -133,7 +111,7 @@ class MlirTests(unittest.TestCase):
         import shutil
         if not shutil.which(verifier_path()):
             self.skipTest("install mlir-opt to verify emitted dialect contracts")
-        values = {"string": "😀", "bool": True, "char": 955, "absence": None, "unit": None,
+        values = {"string": "😀", "bool": True, "char": 955, "absence": None,
                   "pointer": 0, "integer": 1, "float": Decimal("1.5"), "byte": 4}
         types = {t.name: t for t in primitives().values()}
         constants = tuple(Constant(t.name, t.name, t, values[t.family], Span("s", 0, 1), "x.sev", "=")

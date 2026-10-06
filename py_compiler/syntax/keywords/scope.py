@@ -14,4 +14,4 @@ class Namespace:
         return cfg.namespaces.get(self.name, {})
 
 
-SCOPES = {"local": Local(), "global": Namespace("global"), "self": Namespace("self")}
+SCOPES = {"local": Local(), "module": Namespace("module"), "self": Namespace("self")}

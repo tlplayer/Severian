@@ -18,6 +18,15 @@ Created: 2026-09-22
 Severian should organize source semantics using:
 
 ```text
+Program: main.sev
+Library: lib.sev
+  └─ Module: mod.sev
+      └─ Submodule: HIR collections of blocks
+          └─ Block
+              └─ Sentence
+                  └─ Symbol / Operator / Operation
+              └─ Block
+                  └─ ...
 Library
   └─ Module
       └─ Submodule

@@ -1,6 +1,8 @@
 from dataclasses import replace
 from py_compiler.syntax.sentence.syntax import expression, OWNERSHIP
 from py_compiler.mir.ownership.flow import Binding
+from py_compiler.syntax.generic.owned import select
+from py_compiler.syntax.type.storage import BindingPlace, AddressPlace
 
 
 class Assignment:
@@ -9,6 +11,32 @@ class Assignment:
 
     def lower(self, node, cfg, env, local_names):
         items = list(node.tokens)
+        from py_compiler.syntax.catalog import grammars
+        assignments = {"=", ":="} | {g.spelling for g in grammars(cfg.syntax) if g.role == "O.assignment"}
+        # Object stores go through the class storage provider.
+        assignment = next((i for i, t in enumerate(items) if t.text in assignments), None)
+        if assignment is not None and any(t.text == '.' for t in items[:assignment]) and items[0].text not in cfg.syntax.scope_providers:
+            left = expression(items[:assignment])
+            if left.kind != 'member':
+                raise ValueError('assignment target is not a field')
+            subject = left.operands[0]
+            owner = cfg.lookup(subject, env) if subject.kind in ('name', 'reference') else None
+            if owner and owner.ownership == 'view':
+                raise ValueError('cannot mutate a field through a view; use borrow or copy')
+            receiver = cfg.expr(subject, env)
+            provider = cfg.context.provider_by_name.get(receiver.type.name)
+            if not hasattr(provider, 'field_place'):
+                raise ValueError('receiver has no field storage provider')
+            place = provider.field_place(receiver, left.token.text, cfg, node.span, write=True)
+            operator = items[assignment].text
+            if operator == ':=':
+                raise ValueError('a field is already declared; use = to update it')
+            value = cfg.expr(expression(items[assignment + 1:]), env, place.type)
+            if operator != '=':
+                select(place.type, 'O.assignment', operator).expand(cfg, AddressPlace(place, owner), value, node.span)
+            else:
+                place.write(cfg, value, node.span)
+            return
         destination = env
         qualified = None
         if len(items) > 2 and items[0].text in cfg.syntax.scope_providers and items[1].text == ".":
@@ -29,7 +57,7 @@ class Assignment:
             if len(items) < 5 or items[2].text not in cfg.syntax.types:
                 raise ValueError("binding requires a resolved primitive annotation and initializer")
             annotation, position = cfg.syntax.types[items[2].text], 3
-        if position >= len(items) or items[position].text not in ("=", ":=", "+=", "-=", "*="):
+        if position >= len(items) or items[position].text not in assignments:
             raise ValueError("expected a binding or assignment")
         operator = items[position].text
         rhs = expression(items[position + 1:])
@@ -37,18 +65,32 @@ class Assignment:
         core = rhs.operands[0] if mode else rhs
         owner = cfg.lookup(core, env) if core.kind in ("name", "reference") else None
         existing = destination.get(first.text)
+        if not existing and qualified is None and first.text in cfg.namespaces.get("self", {}):
+            destination = cfg.namespaces["self"]
+            existing = destination[first.text]
+            qualified = "self"
         if not qualified and existing and first.text not in local_names and (operator == ":=" or annotation):
             existing = None
+        if existing and qualified == "self" and existing.identity in cfg.uninitialized_fields and operator == ":=":
+            operator = "="
         if operator == ":=" and existing:
             raise ValueError(f"binding {first.text!r} already exists in this scope")
-        if operator in ("+=", "-=", "*="):
+        if operator not in ("=", ":="):
             if not existing:
                 raise ValueError("compound assignment requires an existing binding")
             cfg.flow.read(existing)
         expected = annotation or (existing.type if existing else None)
         value = cfg.expr(core, env, expected)
+        if value is None:
+            raise ValueError("a no-result call cannot initialize a binding")
         if expected and value.type != expected:
             raise ValueError(f"initializer {value.type.name} does not satisfy {expected.name}")
+        if value is None:
+            raise ValueError("a no-result call cannot initialize a binding")
+        if mode == "copy":
+            provider = cfg.context.provider_by_name.get(value.type.name) if cfg.context else None
+            if hasattr(provider, "copy_value"):
+                value = provider.copy_value(value, cfg, node.span)
         ownership = mode or ("copy" if value.type.binding_ownership == "copy" else ("view" if owner else "own"))
         # String bytes are immutable here: copy captures a value, never a binding.
         # A future mutable string provider must supply allocation/COW behavior.
@@ -62,15 +104,13 @@ class Assignment:
                 owner = next((b for b in env.values() if b.identity == viewed), None)
                 if owner is None:
                     raise ValueError("moved view has no live source binding")
+        if existing and operator not in ('=', ':='):
+            select(existing.type, 'O.assignment', operator).expand(cfg, BindingPlace(existing), value, node.span)
+            return
         if existing:
-            previous_value = cfg.read_binding(existing, node.span) if operator in ("+=", "-=", "*=") else None
             cfg.flow.replace(existing)
             if existing.type != value.type:
                 raise ValueError("assignment changes the binding's type")
-            if operator in ("+=", "-=", "*="):
-                if value.type.family not in ("integer", "float", "byte"):
-                    raise ValueError("compound assignment requires numeric operands")
-                value = cfg.emit("binary", value.type, (previous_value, value), operator[0], node.span)
             binding = replace(existing, ownership=ownership)
             destination[first.text] = binding
             if qualified is None or qualified == "local":
@@ -89,6 +129,7 @@ class Assignment:
                 place.declaration()
                 cfg.storage[binding.identity] = place
                 cfg.body.storage.append(place)
+        cfg.uninitialized_fields.discard(binding.identity)
         cfg.values[binding.identity] = value
         if binding.identity in cfg.storage:
             cfg.storage[binding.identity].write(cfg, value, node.span)

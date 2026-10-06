@@ -32,23 +32,6 @@ def render_body(body):
             if operation.kind == "constant":
                 symbol = "__sev_constant_" + sha256(operation.payload.identity.encode()).hexdigest()
                 lines.append(prefix + f"func.call @{symbol}() : () -> {value.type.mlir}")
-            elif operation.kind == "not":
-                lines.append(f"    %not_true_{value.identity} = arith.constant true")
-                lines.append(prefix + f"arith.xori {name(operands[0])}, %not_true_{value.identity} : i1")
-            elif operation.kind == "binary":
-                left, right = operands
-                operator = operation.payload
-                floating = left.type.family == "float"
-                if operator in ("+", "-", "*"):
-                    opcode = {"+": "add", "-": "sub", "*": "mul"}[operator] + ("f" if floating else "i")
-                    lines.append(prefix + f"arith.{opcode} {name(left)}, {name(right)} : {left.type.mlir}")
-                else:
-                    if floating:
-                        predicate = {"==": "oeq", "!=": "une", "<": "olt", "<=": "ole", ">": "ogt", ">=": "oge"}[operator]
-                    else:
-                        suffix = {"==": "eq", "!=": "ne", "<": "lt", "<=": "le", ">": "gt", ">=": "ge"}[operator]
-                        predicate = suffix if operator in ("==", "!=") else ("s" if left.type.signed else "u") + suffix
-                    lines.append(prefix + f"arith.cmp{'f' if floating else 'i'} {predicate}, {name(left)}, {name(right)} : {left.type.mlir}")
             else:
                 raise ValueError(f"missing MLIR operation provider {operation.kind}")
         terminator = block.terminator

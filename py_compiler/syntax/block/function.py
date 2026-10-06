@@ -1,69 +1,87 @@
-from hashlib import sha256
 from py_compiler.syntax.generic.block import DeclarationProvider
+from py_compiler.syntax.function.contracts import signature, pure_predicate
 from py_compiler.mir.ownership.flow import Binding
 
 
 class Function(DeclarationProvider):
     spelling = "def"
 
+    def parse_header(self, items):
+        return tuple(items[1:-1] if items[-1].text == ":" else items[1:])
+
+    def has_body(self, node):
+        return node.tokens[-1].text == ":"
+
     def declare(self, node, context):
-        context.defer(lambda: self.compile(node, context))
+        self.register(node, context)
 
     def declare_member(self, node, context, receiver):
-        self.compile(node, context, receiver)
+        self.register(node, context, receiver)
 
-    def compile(self, node, context, receiver=None):
-        source, syntax = context.source, context.syntax
-        header = list(node.header)
-        if len(header) < 3 or header[0].kind != "IDENTIFIER" or header[1].text != "(":
-            raise ValueError("expected def name(parameters) -> Type:")
-        closing = next((i for i, t in enumerate(header) if t.text == ")"), -1)
-        if closing < 2:
-            raise ValueError("function parameter list is incomplete")
-        result = None
-        suffix = header[closing + 1:]
-        if suffix:
-            if len(suffix) != 2 or suffix[0].text != "->" or suffix[1].text not in syntax.types:
-                raise ValueError("function result must name a primitive type")
-            result = syntax.types[suffix[1].text]
-        name = (receiver.name + "." if receiver else "") + header[0].text
-        if name in context.callables:
-            raise ValueError(f"duplicate callable {name!r}")
-        context.callables.add(name)
-        builder = context.builder(source, syntax, node.identity, "__sev_fn_" + sha256(node.identity.encode()).hexdigest(), result)
-        builder.body.declaration = name
+    def register(self, node, context, receiver=None):
+        entry = signature(node, receiver.name if receiver else ".".join(context.scope))
+        entry.scope = context.scope
+        entry.receiver = receiver
+        imported = []
+        active = node.syntax
+        while hasattr(active, "parent"):
+            imported[0:0] = active.imports
+            active = active.parent
+        entry.imports = tuple(imported)
+        if not self.has_body(node):
+            raise ValueError("a non-trait callable requires a body; use unimplemented for a stub")
+        for guard in entry.guards:
+            pure_predicate(guard, {name for name, _ in entry.parameters})
+        context.add_callable(entry, self)
+        context.declare_nodes(node.children, (*context.scope, node.identity))
+        return entry
+
+    def compile(self, entry, context):
+        source, syntax, node = context.source, context.bound_syntax, entry.node
+        result = context.type(entry.result) if entry.result else None
+        builder = context.builder(source, syntax, entry.symbol, entry.symbol, result)
+        builder.imported = {name: value for imported in entry.imports for name, value in imported.exports}
+        builder.context = context
+        builder.declaration_scope = (*entry.scope, node.identity)
+        builder.body.declaration = entry.name
         builder.declared_nodes = context.declared_nodes
-        builder.namespaces["global"] = context.global_bindings
+        builder.namespaces["module"] = context.global_bindings
         builder.storage = dict(context.global_storage)
         builder.flow = context.initial_flow.fork()
         builder.fallback_scopes = [context.global_bindings]
-        env, parameters, position = {}, [], 2
-        if receiver:
-            receiver.configure(builder, node, parameters)
-        while position < closing:
-            parameter = header[position]
-            if parameter.kind != "IDENTIFIER" or parameter.text in env:
-                raise ValueError("parameter name is invalid or duplicate")
-            position += 1
-            type_ = None
-            if position < closing and header[position].text == ":":
-                if position + 1 >= closing or header[position + 1].text not in syntax.types:
-                    raise ValueError("parameter annotation requires a resolved type")
-                type_ = syntax.types[header[position + 1].text]
-                position += 2
-                if not type_.mlir:
-                    raise ValueError("parameter has no value representation")
-            binding = Binding(node.identity + ":" + parameter.text, parameter.text, type_, False, "own", parameter.span)
+        env, parameters = {}, []
+        if entry.receiver:
+            entry.receiver.configure(builder, node, parameters)
+            builder.receiver = entry.receiver
+            builder.receiver_value = parameters[0]
+        builder.constructor = bool(entry.receiver and entry.name.rsplit(".", 1)[-1] == entry.receiver.name.rsplit(".", 1)[-1])
+        builder.uninitialized_fields = {b.identity for b in builder.namespaces.get("self", {}).values()} if builder.constructor else set()
+        for parameter, annotation in entry.parameters:
+            type_ = context.type(annotation) if annotation else None
+            if type_ and not type_.mlir:
+                raise ValueError("parameter has no value representation")
+            binding = Binding(node.identity + ":" + parameter, parameter, type_, False, "own", node.span)
             value = builder.value(type_)
             env[binding.name], builder.values[binding.identity] = binding, value
             builder.body.bindings.append(binding)
             parameters.append(value)
-            if position < closing:
-                if header[position].text != ",":
-                    raise ValueError("expected comma between parameters")
-                position += 1
         builder.current.parameters = tuple(parameters)
+        context.scope = builder.declaration_scope
+        from py_compiler.syntax.block.phases import ContractPhases
+        builder.phases = ContractPhases(entry, builder, env)
+        builder.phases.enter()
         builder.scope(node.children, env, local_names=set(env))
+        if builder.current.terminator is None:
+            builder.phases.leave()
         if any(value.type is None for value in builder.body.blocks[0].parameters):
             raise ValueError("unused/unconstrained parameter requires a type annotation")
-        context.bodies.append(builder.finish())
+        if builder.uninitialized_fields and (builder.current.terminator is None or builder.current.terminator.kind != "panic"):
+            raise ValueError("constructor must initialize every field")
+        entry.body = builder.finish()
+        entry.body.complexity = {key: {"name": value.name, "rank": int(value)} for key, value in entry.complexity.items()}
+        entry.result = entry.body.result_type.name
+        offset = 1 if entry.receiver else 0
+        entry.parameters = tuple((name, value.type.name) for (name, _), value in
+                                 zip(entry.parameters, entry.body.blocks[0].parameters[offset:]))
+        context.bodies.append(entry.body)
+        return entry.body

@@ -8,6 +8,7 @@ from py_compiler.frontend.parser.contract import Literal
 from py_compiler.hir.hir.src.program import Constant, resolve_literal
 from py_compiler.mir.cfg.cfg import Body, ExecutionBlock, Value, Operation, Edge, Terminator
 from py_compiler.mir.ownership.flow import Binding, FlowState
+from py_compiler.syntax.generic.block import DeclarationProvider
 
 
 def located(method):
@@ -36,6 +37,15 @@ class Builder:
         self.storage = {}
         self.storage_factory = None
         self.declared_nodes = set()
+        self.context = None
+        self.stack_values = set()
+        self.receiver = None
+        self.receiver_value = None
+        self.declaration_scope = ()
+        self.uninitialized_fields = set()
+        self.constructor = False
+        self.phases = None
+        self.imported = {}
 
     def value(self, type_):
         value = Value(self.next_value, type_)
@@ -48,8 +58,14 @@ class Builder:
         return block
 
     def emit(self, kind, type_, operands, payload, span):
+        if kind == 'binary' and isinstance(payload, str):
+            from py_compiler.syntax.generic.owned import select
+            payload = select(operands[0].type, 'F.operator', payload)
+            kind = 'scalar'
         result = self.value(type_)
         self.current.operations.append(Operation(kind, result, tuple(operands), payload, span))
+        if type_ and type_.family in ("record", "trait", "union") and any(v.identity in self.stack_values for v in operands):
+            self.stack_values.add(result.identity)
         return result
 
     def effect(self, kind, operands, payload, span):
@@ -66,6 +82,8 @@ class Builder:
 
     def read_binding(self, binding, span):
         identity = self.flow.resolve(binding.identity)
+        if identity in self.uninitialized_fields:
+            raise ValueError("constructor reads a field before initialization")
         if identity in self.storage:
             return self.storage[identity].read(self, span)
         return self.values[identity]
@@ -93,6 +111,13 @@ class Builder:
     @located
     def expr(self, node, env, expected=None):
         token = node.token
+        if expected and expected.family == "union":
+            from py_compiler.syntax.function.calls import coerce
+            return coerce(self.expr(node, env), expected, self, token.span)
+        if node.kind in ("call", "member"):
+            from py_compiler.syntax.function.calls import lower_expression
+            value = lower_expression(node, self, env, expected)
+            return value
         if node.kind == "construct":
             type_ = self.syntax.types.get(token.text)
             if type_ is None:
@@ -105,7 +130,7 @@ class Builder:
             spelling = (token.text if node.kind == "unary" else "") + literal_token.text
             type_, value = resolve_literal(Literal("", token.span, spelling, literal_token.kind, expected.name if expected else None), self.syntax)
             if not type_.mlir:
-                raise ValueError("unit is a no-result contract, not a stored runtime value")
+                return None
             identity = self.body.identity + ":literal:" + str(self.next_value)
             constant = Constant(identity, None, type_, value, token.span, self.source.path, None)
             return self.emit("constant", type_, (), constant, token.span)
@@ -116,43 +141,37 @@ class Builder:
             if binding.type is None:
                 binding = self.infer(binding, expected, env)
             self.flow.read(binding)
+            value = self.read_binding(binding, token.span)
             if expected and binding.type != expected:
-                raise ValueError(f"{binding.type.name} does not satisfy {expected.name}")
-            return self.read_binding(binding, token.span)
+                from py_compiler.syntax.function.calls import coerce
+                return coerce(value, expected, self, token.span)
+            return value
         if node.kind == "unary":
             if token.text in OWNERSHIP:
                 raise ValueError("ownership modifiers must apply to the entire binding initializer")
             operand = self.expr(node.operands[0], env, expected)
-            if token.text == "not" and operand.type.name == "bool":
-                return self.emit("not", operand.type, (operand,), None, token.span)
-            raise ValueError(f"unary {token.text!r} lacks a provider for {operand.type.name}")
+            from py_compiler.syntax.generic.owned import select
+            return select(operand.type, "F.unary", token.text).expand(self, operand, token.span)
+        if node.kind == "chain":
+            left = self.expr(node.operands[0], env)
+            join = self.block((self.syntax.types['bool'],))
+            for index in range(1, len(node.operands), 2):
+                operator, term = node.operands[index:index + 2]
+                right = self.expr(term, env, left.type)
+                condition = self.emit('binary', self.syntax.types['bool'], (left, right), operator.text, operator.span)
+                if index + 2 < len(node.operands):
+                    following = self.block()
+                    self.current.terminator = Terminator('conditional', (Edge(following.identity), Edge(join.identity, (condition,))), condition)
+                    self.current = following
+                else:
+                    self.current.terminator = Terminator('jump', (Edge(join.identity, (condition,)),))
+                left = right
+            self.current = join
+            return join.parameters[0]
         if node.kind == "binary":
-            operator = token.text
-            if operator in ("and", "or"):
-                return self.short_circuit(node, env)
-            comparison = operator in ("==", "!=", "<", "<=", ">", ">=")
-            left = self.expr(node.operands[0], env, None if comparison else expected)
-            right = self.expr(node.operands[1], env, left.type)
-            if left.type != right.type or left.type.family not in ("integer", "float", "bool", "char", "byte"):
-                raise ValueError("operator requires matching scalar providers")
-            comparison = operator in ("==", "!=", "<", "<=", ">", ">=")
-            if not comparison and left.type.family in ("bool", "char"):
-                raise ValueError("arithmetic is not defined by this scalar provider")
-            result = self.syntax.types["bool"] if comparison else left.type
-            return self.emit("binary", result, (left, right), operator, token.span)
+            from py_compiler.syntax.function.operations import binary
+            return binary(self, node, env, expected)
         raise ValueError("unresolved expression")
-
-    def short_circuit(self, node, env):
-        left = self.expr(node.operands[0], env, self.syntax.types["bool"])
-        rhs, join = self.block(), self.block((left.type,))
-        direct = Edge(join.identity, (left,))
-        edges = (Edge(rhs.identity), direct) if node.token.text == "and" else (direct, Edge(rhs.identity))
-        self.current.terminator = Terminator("conditional", edges, left)
-        self.current = rhs
-        right = self.expr(node.operands[1], env, left.type)
-        self.current.terminator = Terminator("jump", (Edge(join.identity, (right,)),))
-        self.current = join
-        return join.parameters[0]
 
     @located
     def sentence(self, node, env, local_names):
@@ -163,6 +182,11 @@ class Builder:
 
     def scope(self, nodes, env, declarations=False, local_names=None):
         local_names = set() if local_names is None else local_names
+        previous_scope = self.declaration_scope
+        if nodes and nodes[0].parent:
+            parent = nodes[0].parent
+            if self.context and parent not in self.declaration_scope and parent != self.body.identity and not parent.endswith(":root"):
+                self.declaration_scope = (*self.declaration_scope, parent)
         previous = self.local_names
         self.local_names = local_names
         index = 0
@@ -173,15 +197,22 @@ class Builder:
                     raise ValueError("unreachable sentence after a terminating operation")
                 if node.provider is None:
                     self.sentence(node, env, local_names)
+                    if self.phases and self.current.terminator is None:
+                        self.phases.during()
                     index += 1
                 else:
+                    if self.constructor and self.uninitialized_fields and not isinstance(node.provider, DeclarationProvider):
+                        raise ValueError("initialize constructor fields before control-flow blocks")
                     index += node.provider.lower(node, self, env, nodes, index)
+                    if self.phases and self.current.terminator is None:
+                        self.phases.during()
         finally:
             self.local_names = previous
+            self.declaration_scope = previous_scope
 
     def finish(self):
         if self.body.result_type is None:
-            self.body.result_type = self.syntax.types["unit"]
+            self.body.result_type = self.syntax.types["absent"]
         if self.current.terminator is None:
             if self.body.result_type.mlir:
                 raise ValueError("not every path returns the declared result")
@@ -191,14 +222,18 @@ class Builder:
 
 
 def prepare(source, root, syntax):
-    from py_compiler.hir.hir.src.declarations import DeclarationContext
-    context = DeclarationContext(source, syntax, Builder)
-    context.declared_nodes = {node.identity for node in root.children if node.provider}
-    for node in root.children:
-        if node.provider:
-            context.active_provider = node.provider
-            node.provider.declare(node, context)
-    initializer = Builder(source, syntax, root.identity, "__sev_init_" + source.identity, syntax.types["unit"])
+    from py_compiler.hir.hir.src.modules import resolve
+    return lower_module(resolve(source, root, syntax, Builder))
+
+
+def lower_module(module):
+    source, root, context = module.source, module.root, module.context
+    syntax = context.syntax
+    from py_compiler.mir.ownership.flow import FlowState
+    context.initial_flow = FlowState()
+    context.resolve_contracts()
+    initializer = Builder(source, context.bound_syntax, root.identity, "__sev_init_" + source.identity, syntax.types["absent"])
+    initializer.context = context
     initializer.declared_nodes = context.declared_nodes
     root.provider.configure(initializer, context)
     initializer.scope(root.children, context.global_bindings)
@@ -212,7 +247,7 @@ import unittest
 
 class LoweringTests(unittest.TestCase):
     def test_qualified_scopes_and_inferred_method_parameter(self):
-        result = self.compile('x = 0\nclass foo:\n    x = 1\n    def add(a):\n        local.x: local int = 2 + self.x\n        return local.x + a\n    def outer() -> int:\n        return global.x\n')
+        result = self.compile('x = 0\nclass foo:\n    x = 1\n    def add(a):\n        local.x: local int = 2 + self.x\n        return local.x + a\n    def outer() -> int:\n        return module.x\n')
         self.assertFalse(result.diagnostics, "\n".join(map(str, result.diagnostics)))
         add = next(body for body in result.program.bodies if body.declaration == "foo.add")
         self.assertEqual([v.type.name for v in add.blocks[0].parameters], ["pointer", "i64"])
@@ -228,7 +263,7 @@ class LoweringTests(unittest.TestCase):
         self.assertIn("unknown binding", str(result.diagnostics[0]))
 
     def test_scope_qualifiers_are_not_block_keywords(self):
-        for spelling in ("global", "local", "block"):
+        for spelling in ("module", "local", "block"):
             result = self.compile(f"{spelling}:\n    unimplemented\n")
             self.assertTrue(result.diagnostics)
 
@@ -334,6 +369,6 @@ class LoweringTests(unittest.TestCase):
         from py_compiler.mlir.src.lib import verifier_path, verify_native, render, lower
         if not shutil.which(verifier_path()):
             self.skipTest("install mlir-opt for native dialect verification")
-        result = self.compile('x = 0\nclass foo:\n    x = 1\n    def add(a):\n        local.x: local int = 2 + self.x\n        return local.x + a\n    def outer() -> int:\n        return global.x\n    def pending() -> int:\n        unimplemented\n')
+        result = self.compile('x = 0\nclass foo:\n    x = 1\n    def add(a):\n        local.x: local int = 2 + self.x\n        return local.x + a\n    def outer() -> int:\n        return module.x\n    def pending() -> int:\n        unimplemented\n')
         self.assertFalse(result.diagnostics, "\n".join(map(str, result.diagnostics)))
         verify_native(render(lower(result.program)))

@@ -9,7 +9,8 @@ import subprocess
 import tempfile
 from py_compiler.frontend.src.lib import compile_source
 from py_compiler.hir.hir.src.program import Program
-from py_compiler.mlir.src.lib import lower, render, verify_native, verifier_path
+from py_compiler.mlir.src.lib import verify_native, verifier_path
+from py_compiler.lir.src.lib import lower, compile_object
 from py_compiler.syntax.recognition import Syntax
 
 
@@ -89,10 +90,12 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
                       tuple(s for r in results for s in r.program.submodules),
                       tuple(b for r in results for b in r.program.bodies),
                       tuple(d for r in results for d in r.program.declarations))
-    target_program = lower(program)
-    ir = render(target_program)
+    lir = lower(program, target, pointer_bits)
+    target_program = lir.mlir
+    ir = lir.text()
     # Publishing an artifact requires the actual dialect verifier, not only our structural checks.
     verify_native(ir, mlir_opt)
+    native = compile_object(lir, mlir_opt)
     compiler_root = Path(__file__).parent
     compiler_id = digest(encode([(p.relative_to(compiler_root).as_posix(), p.read_text())
                                 for p in sorted(compiler_root.rglob("*.py"))]))
@@ -101,6 +104,9 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
     abi_id = digest(encode([target, pointer_bits, "py-primitive-abi-v1"]))
     identity = {"name": package["name"], "version": package["version"], "content-id": content_id}
     ir_path = f"artifacts/{target}/{build_id}/ir/package.mlir"
+    object_path = f"artifacts/{target}/{build_id}/object/package.o"
+    llvm_path = f"artifacts/{target}/{build_id}/ir/package.ll"
+    lowered_path = f"artifacts/{target}/{build_id}/ir/package.llvm.mlir"
     interface_path = f"package.pkgi/severian/{build_id}/lib.sevi"
     realization_path = f"metadata/realizations/{build_id}.json"
     declarations, symbols = [], []
@@ -126,8 +132,10 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
                                    for binding in body.bindings[:len(body.blocks[0].parameters)])
             declarations.append({"name": f"{body.source}::{body.declaration}", "symbol-id": body.identity,
                                  "source": "source/" + body.source,
-                                 "contract": f"def {body.declaration}({parameters}) -> {body.result_type.name}"})
+                                 "contract": f"def {body.declaration}({parameters}) -> {body.result_type.name}",
+                                 "complexity": body.complexity, "test": body.test})
         symbols.append({"id": body.identity, "name": body.name, "kind": "execution-body", "entry": body.name,
+                        "complexity": body.complexity, "test": body.test,
                         "bindings": [{"id": b.identity, "name": b.name, "type": b.type.name,
                                       "constant": b.constant, "ownership": b.ownership} for b in body.bindings]})
     semantic_id = digest(encode(declarations))
@@ -136,26 +144,35 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
                  "declarations": declarations}
     interface_text = encode(interface)
     realization = {"format": "py_compiler.realization", "version": 1, "package": identity,
-                   "build-id": build_id, "state": "verified-mlir", "compiler": compiler_id,
+                   "build-id": build_id, "state": "compiled-object", "compiler": compiler_id,
                    "target": target, "abi": abi_id, "pointer-bits": pointer_bits,
                    "interface": {"path": interface_path, "checksum": digest(interface_text)},
                    "artifacts": [{"path": ir_path, "kind": "mlir", "checksum": digest(ir)}],
-                   "dependencies": [], "native-artifacts": []}
+                   "dependencies": [], "native-artifacts": [{"path": object_path, "kind": "object", "checksum": sha256(native.object_bytes).hexdigest()}]}
+    realization["artifacts"].extend([{"path": llvm_path, "kind": "llvm-ir", "checksum": digest(native.llvm_ir)},
+                                     {"path": lowered_path, "kind": "llvm-dialect", "checksum": digest(native.llvm_dialect)},
+                                     *realization["native-artifacts"]])
     realization["initializers"] = [body.name for body in program.bodies if not body.declaration]
     # No native layout is claimed before target data-layout conversion.
     layouts = {"abi": abi_id, "state": "representation-only", "native-layouts": [],
                "representations": [{"type": t.name, "mlir": t.mlir, "bits": t.bits}
                                    for t in {t.name: t for t in syntax.types.values()}.values()]}
-    pending = {ir_path: ir, interface_path: interface_text, realization_path: encode(realization),
+    pending = {ir_path: ir, llvm_path: native.llvm_ir, lowered_path: native.llvm_dialect, interface_path: interface_text, realization_path: encode(realization),
                f"metadata/symbols/{build_id}.json": encode(symbols),
-               f"metadata/dependencies/{build_id}.json": encode([]),
+               f"metadata/dependencies/{build_id}.json": encode([{"submodule": sub.identity, "declarations": sub.declarations, "dependencies": sub.dependencies} for sub in program.submodules]),
                f"metadata/layouts/{abi_id}.json": encode(layouts),
                f"build/{build_id}/{target}/artifacts.json": encode(realization["artifacts"]),
                "source/package.json": manifest_text, "source/package.lock": lock}
     pending.update({"source/" + path: text for path, text in snapshots})
     for path, text in pending.items():
         write_atomic(output / path, text)
-    # Optional interop/native/container/profile outputs are absent until produced.
+    object_destination = output / object_path
+    object_destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=object_destination.parent, delete=False) as stream:
+        stream.write(native.object_bytes)
+        temporary = stream.name
+    os.replace(temporary, object_destination)
+    # Publish the interface index only after every artifact has been written.
     index_path = output / "package.pkgi/index.json"
     index = json.loads(index_path.read_text()) if index_path.exists() else {"interfaces": [], "binding-sets": []}
     if not isinstance(index.get("interfaces"), list):
@@ -165,7 +182,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
     index["interfaces"] = entries
     write_atomic(index_path, encode(index))
     report(f"Built {len(snapshots)} source files; {len(program.constants)} primitive values\nMLIR: {ir_path}\n")
-    return {"success": True, "build-id": build_id, "ir": str(output / ir_path),
+    return {"success": True, "build-id": build_id, "ir": str(output / ir_path), "object": str(output / object_path),
             "log": str(output / "debug/build/log.txt")}
 
 

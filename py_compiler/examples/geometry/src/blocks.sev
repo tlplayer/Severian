@@ -46,7 +46,105 @@ class foo:
         #You cannot pass x into a function besides the constructor that would cause a a compiler error
         x = _x
     def global_value() -> int:
-        return global.x
+        return module.x
 
     def pending() -> int:
         unimplemented
+
+trait Measured:
+    def measure() -> int
+
+class Meter: Measured:
+    value: int = 1
+    def measure() -> int:
+        return self.value
+    def increment():
+        self.value += 1
+
+# Calls through a trait retain the receiver and check the implementation tag.
+def measure(item: Measured) -> int:
+    return item.measure()
+
+test "class mutation and trait dispatch":
+    item = Meter(4)
+    item.increment()
+    assert(measure(item) == 5)
+
+test with integ "integration category retains a separate test entry":
+    item = Meter(7)
+    assert(measure(item) == 7)
+
+def bounded(a: int) -> int | Error with
+{
+    fix 0 <= a <= 100,
+    bounded.complexity.space := BigO.constant,
+    bounded.complexity.time := BigO.constant,
+}:
+    return a
+
+test with compiler "nested function and class visibility":
+    accept:
+        def outer() -> int:
+            class Inner:
+                value: int = 3
+            def inner() -> int:
+                return 2
+            item = Inner()
+            return inner() + item.value
+    reject:
+        def outer() -> int:
+            def inner() -> int:
+                return 2
+            return inner()
+        def outside() -> int:
+            return inner()
+    reject:
+        accept:
+            x = 1
+
+test "complexity enum order":
+    assert(BigO.constant < BigO.linear)
+    assert(BigO.linear < BigO.quadratic)
+
+def nested_scope() -> int:
+    def nearby() -> int:
+        return 3
+    test "a test can use declarations in its enclosing scope":
+        assert(nearby() == 3)
+    return nearby()
+
+# Prefix -> entry, fix -> entry/statement boundaries/exit, suffix -> normal exit.
+def contract_phases(a: int) -> int with
+{
+    prefix a >= 0,
+    fix a <= 100,
+    suffix a < 10,
+}:
+    a += 1
+    return a
+
+test "contract phase order":
+    assert(contract_phases(3) == 4)
+
+test with compiler "imported fixture grammar stays within its body":
+    accept:
+        test with compiler "nested expansion":
+            accept:
+                value: int = 1
+    reject:
+        test "no compiler expansion":
+            reject:
+                value: int = 1
+
+test "compound grammar borrows storage through a fixed borrow binding":
+    value = 2
+    slot := borrow value
+    slot += 3
+    assert(value == 5)
+
+test with compiler "compound grammar rejects a view receiver":
+    reject:
+        def invalid():
+            value = 2
+            slot := view value
+            slot += 3

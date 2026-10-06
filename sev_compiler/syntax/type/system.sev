@@ -139,11 +139,11 @@ class InferenceContext:
                 index += 1
         return type
 
-    def constrain_equal(interner: TyInterner, left: TypeId, right: TypeId) -> unit | UnifyError:
+    def constrain_equal(interner: TyInterner, left: TypeId, right: TypeId) -> absent | UnifyError:
         constraints.append(Constraint.Equal(left, right))
         unify(interner, left, right)
 
-    def bind(interner: TyInterner, variable: InferVarId, type: TypeId) -> unit | UnifyError:
+    def bind(interner: TyInterner, variable: InferVarId, type: TypeId) -> absent | UnifyError:
         if occurs(interner, variable, type):
             throw UnifyError("recursive inference binding", type, type)
         variables.append(variable)
@@ -159,7 +159,7 @@ class InferenceContext:
                 return true
         return false
 
-    def unify(interner: TyInterner, left: TypeId, right: TypeId) -> unit | UnifyError:
+    def unify(interner: TyInterner, left: TypeId, right: TypeId) -> absent | UnifyError:
         lhs = resolve(interner, left)
         rhs = resolve(interner, right)
         if lhs.index == rhs.index:

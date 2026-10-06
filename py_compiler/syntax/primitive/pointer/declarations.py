@@ -1,5 +1,20 @@
 from py_compiler.syntax.primitive.contract import Primitive
 
 
+class Pointer(Primitive):
+    def render_constant(self, value, symbol):
+        if value == 0:
+            return [], [f'%value = llvm.mlir.zero : {self.mlir}']
+        return [], [f'%address = arith.constant {value} : i{self.bits}',
+                    f'%value = llvm.inttoptr %address : i{self.bits} to {self.mlir}']
+
+    def accept_literal(self, owner, value):
+        if owner.family != 'integer':
+            return super().accept_literal(owner, value)
+        if not 0 <= value < (1 << self.bits):
+            raise ValueError('pointer address outside target width')
+        return value
+
+
 def declaration(pointer_bits):
-    return Primitive("pointer", "pointer", "!llvm.ptr", pointer_bits)
+    return Pointer('pointer', 'pointer', '!llvm.ptr', pointer_bits)

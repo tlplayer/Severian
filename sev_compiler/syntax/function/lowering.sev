@@ -170,7 +170,7 @@ class CanonicalRewrite:
 
 trait OperationInterface:
     def infer_types(operands: list[TypeId], attributes: map[AttributeId, AttrValue]) -> list[TypeId] | OperationDiagnostic
-    def verify(operation: RegisteredOperation, context: IrContext) -> unit | OperationDiagnostic
+    def verify(operation: RegisteredOperation, context: IrContext) -> absent | OperationDiagnostic
     def effects(operation: RegisteredOperation) -> EffectSet
     def canonicalize(operation: RegisteredOperation) -> CanonicalRewrite | None
     def lowering_capabilities() -> list[LoweringCapability]
@@ -182,11 +182,11 @@ class OperationRegistry:
     def OperationRegistry():
         interfaces = {}
 
-    def register(id: OpId, interface: OperationInterface) -> unit | OperationDiagnostic:
+    def register(id: OpId, interface: OperationInterface) -> absent | OperationDiagnostic:
         if interfaces.contains(id):
             return error(OperationDiagnostic(id, "operation interface is already registered"))
         interfaces[id] = interface
-        return unit
+        return absent
 
     def interface(id: OpId) -> OperationInterface | None:
         return interfaces.get(id)

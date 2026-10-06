@@ -55,6 +55,9 @@ class Conditional(BlockProvider):
         join = cfg.block(tuple(b.type for b in outer))
         for block, values, _ in exits:
             block.terminator = Terminator("jump", (Edge(join.identity, tuple(values[b.identity] for b in outer)),))
+        for binding, value in zip(outer, join.parameters):
+            if any(values[binding.identity].identity in cfg.stack_values for _, values, _ in exits):
+                cfg.stack_values.add(value.identity)
         cfg.current = join
         cfg.values = dict(initial_values)
         cfg.values.update({b.identity: value for b, value in zip(outer, join.parameters)})

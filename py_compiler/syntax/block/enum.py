@@ -13,5 +13,5 @@ class Enum(RecordProvider):
             if name in variants:
                 raise ValueError("duplicate enum variant")
             variants.append(name)
-        context.register(TypeDeclaration(node.identity, node.header[0].text, self.spelling,
+        context.register(TypeDeclaration(node.identity, ".".join((*context.scope, node.header[0].text)), self.spelling,
                                          (), tuple(variants), (), node.span, context.source.path))

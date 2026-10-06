@@ -20,20 +20,27 @@ def compile_source(path, text, syntax):
     except Diagnostic as failure:
         return FrontendResult(source, Program((), ()), (failure,))
     from py_compiler.frontend.parser.blocks import parse_blocks
-    from py_compiler.mir.lowering import prepare
+    from py_compiler.mir.lowering import Builder, lower_module
+    from py_compiler.hir.hir.src.modules import resolve
     root, block_errors = parse_blocks(source, tokens, syntax)
-    graph, parse_errors = parse(source, tokens, syntax)
-    # Preserve primitive materializer interfaces for the original literal-only milestone.
-    if not parse_errors and all(n.kind == "sentence" for n in root.children):
-        program, hir_errors = partition(source, graph, syntax)
-        return FrontendResult(source, program, tuple(block_errors + hir_errors))
+    from py_compiler.syntax.generic.grammar import SourceWindow
     if block_errors:
+        # Recovery retains independently recognized literal declarations for diagnostics.
+        graph, _ = parse(source, tokens, syntax)
         program, hir_errors = partition(source, graph, syntax)
         return FrontendResult(source, program, tuple(block_errors + hir_errors))
+    if not text:
+        return FrontendResult(source, Program((), ()), ())
+    literal_match = syntax.registry.recognize('X.literal-module', SourceWindow(source, 0, len(text), tuple(tokens)), optional=True)
+    if literal_match is not None:
+        graph, errors = literal_match.provider.construct(literal_match)
+        program, hir_errors = partition(source, graph, syntax)
+        return FrontendResult(source, program, tuple(errors + hir_errors))
     try:
-        bodies, declarations = prepare(source, root, syntax)
+        module = resolve(source, root, syntax, Builder)
+        bodies, declarations = lower_module(module)
         constants = tuple(o.payload for b in bodies for block in b.blocks for o in block.operations if o.kind == "constant")
-        return FrontendResult(source, Program(constants, (), bodies, declarations), ())
+        return FrontendResult(source, Program(constants, module.submodules, bodies, declarations), ())
     except Diagnostic as failure:
         return FrontendResult(source, Program((), ()), (failure,))
     except ValueError as failure:
