@@ -1,0 +1,16 @@
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import SourceFile from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+import Expression from "../function/function.sev"
+import AttachmentRole, WithAttachment from "../constraint/model.sev"
+
+def recognize_prefix(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "prefix")
+
+
+class PrefixSyntax: Y
+    token_forms: list[TokenForm] = [TokenForm("PREFIX", "prefix", recognize=recognize_prefix)]
+
+    sentence attachment["prefix", condition: Expression]() -> WithAttachment:
+        return WithAttachment(AttachmentRole.Entry, condition)

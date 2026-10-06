@@ -103,7 +103,7 @@ class RegisteredGrammar:
 # Discovery constructs declaration metadata on demand, after imports resolve.
 # The compiler appends declaration-generated entries to this return value.
 def registered_grammars() -> list[(Y, RegisteredGrammar)]:
-    return [
+    entries: list[(Y, RegisteredGrammar)] = [
         (ForKeyword(), RegisteredGrammar(ForKeyword(), None, None, token_form=true)),
         (ThrowKeyword(), RegisteredGrammar(ThrowKeyword(), None, None, token_form=true)),
         (NotKeyword(), RegisteredGrammar(NotKeyword(), None, None, token_form=true)),
@@ -176,6 +176,10 @@ def registered_grammars() -> list[(Y, RegisteredGrammar)]:
         (EndOfFile(), RegisteredGrammar(EndOfFile(), None, None, token_form=true)),
         (Identifier(), RegisteredGrammar(Identifier(), None, None, token_form=true)),
     ]
+    for owner in prelude_token_owners():
+        entries.append((owner, RegisteredGrammar(owner, None, None, token_form=true)))
+    return entries
+
 
 
 @compiler_grammar_registry
@@ -197,106 +201,13 @@ def grammar_declaration(definition: DefinitionID) -> GrammarDeclarationContract 
     return None
 
 
-# A reference to a syntax declaration, not an instance of the declared form.
-# Paths are relative to the syntax package root, independent of the input file.
-# Recognition reads the referenced declaration's grammar and captures.
-class SyntaxDeclaration: Y
-    path: string
-    name: string
+import SyntaxDeclaration from "generic/declaration.sev"
+import syntax_prelude, prelude_token_owners from "prelude.sev"
 
-#TODO: one trait + with dispatch is working e2e replace this with that implementable interface on lexer
+
 def recognition_order() -> list[SyntaxDeclaration]:
-    # Stopgap master list. Preserve this order when visiting candidates within
-    # each source window; recursively recognize the declaration's captures.
-    # The global declaration applies once to the complete source window.
-    # Spellings, boundaries, constraints and construction stay in each provider.
-    return [
-        SyntaxDeclaration("block/global.sev", "global"),
-        SyntaxDeclaration("block/main.sev", "main"),
-        SyntaxDeclaration("block/function.sev", "function"),
-        SyntaxDeclaration("block/class.sev", "class"),
-        SyntaxDeclaration("block/trait.sev", "trait"),
-        SyntaxDeclaration("block/enum.sev", "enum"),
-        SyntaxDeclaration("block/if.sev", "if"),
-        SyntaxDeclaration("block/elif.sev", "elif"),
-        SyntaxDeclaration("block/else.sev", "else"),
-        SyntaxDeclaration("block/try.sev", "try"),
-        SyntaxDeclaration("block/catch.sev", "catch"),
-        SyntaxDeclaration("block/match.sev", "match"),
-        SyntaxDeclaration("block/case.sev", "case"),
-        SyntaxDeclaration("block/for.sev", "For"),
-        SyntaxDeclaration("block/while.sev", "While"),
+    return syntax_prelude()
 
-        SyntaxDeclaration("grammar/contracts.sev", "Return"),
-        SyntaxDeclaration("keywords/throw.sev", "Throw"),
-        SyntaxDeclaration("grammar/contracts.sev", "Break"),
-        SyntaxDeclaration("grammar/contracts.sev", "Continue"),
-        SyntaxDeclaration("grammar/contracts.sev", "Conditional"),
-        SyntaxDeclaration("grammar/contracts.sev", "AddAssign"),
-        SyntaxDeclaration("grammar/contracts.sev", "SubtractAssign"),
-        SyntaxDeclaration("grammar/contracts.sev", "MultiplyAssign"),
-        SyntaxDeclaration("grammar/contracts.sev", "DivideAssign"),
-        SyntaxDeclaration("grammar/contracts.sev", "RemainderAssign"),
-        SyntaxDeclaration("grammar/contracts.sev", "Assign"),
-        SyntaxDeclaration("grammar/contracts.sev", "List"),
-        SyntaxDeclaration("grammar/contracts.sev", "Slice"),
-        SyntaxDeclaration("grammar/contracts.sev", "Index"),
-
-        # Quoted forms retain their contents as captures of their own grammar.
-        SyntaxDeclaration("../../library/core/string/src/string.sev", "string"),
-        SyntaxDeclaration("primitive/char/char.sev", "char"),
-
-        SyntaxDeclaration("function/syntax.sev", "Power"),
-        SyntaxDeclaration("function/syntax.sev", "FloorDivide"),
-        SyntaxDeclaration("function/syntax.sev", "LeftShift"),
-        SyntaxDeclaration("function/syntax.sev", "RightShift"),
-        SyntaxDeclaration("function/syntax.sev", "LessEqual"),
-        SyntaxDeclaration("function/syntax.sev", "GreaterEqual"),
-        SyntaxDeclaration("function/syntax.sev", "NotEqual"),
-        SyntaxDeclaration("function/syntax.sev", "Equal"),
-        SyntaxDeclaration("function/syntax.sev", "Less"),
-        SyntaxDeclaration("function/syntax.sev", "Greater"),
-        SyntaxDeclaration("function/syntax.sev", "Add"),
-        SyntaxDeclaration("function/syntax.sev", "Subtract"),
-        SyntaxDeclaration("function/syntax.sev", "Multiply"),
-        SyntaxDeclaration("function/syntax.sev", "Divide"),
-        SyntaxDeclaration("function/syntax.sev", "Remainder"),
-        SyntaxDeclaration("function/syntax.sev", "Positive"),
-        SyntaxDeclaration("function/syntax.sev", "Negative"),
-        SyntaxDeclaration("function/syntax.sev", "Not"),
-        SyntaxDeclaration("function/syntax.sev", "Move"),
-        SyntaxDeclaration("function/syntax.sev", "BitwiseAnd"),
-        SyntaxDeclaration("function/syntax.sev", "BitwiseOr"),
-        SyntaxDeclaration("function/syntax.sev", "BitwiseXor"),
-        SyntaxDeclaration("function/syntax.sev", "Contains"),
-        SyntaxDeclaration("function/syntax.sev", "LogicalAnd"),
-        SyntaxDeclaration("function/syntax.sev", "LogicalOr"),
-
-        # Primitive declarations own both type names and literal contracts.
-        SyntaxDeclaration("primitive/bool/bool.sev", "bool"),
-        SyntaxDeclaration("primitive/float/float.sev", "float"),
-        SyntaxDeclaration("primitive/float/declarations.sev", "F32Primitive"),
-        SyntaxDeclaration("primitive/float/declarations.sev", "F16Primitive"),
-        SyntaxDeclaration("primitive/float/declarations.sev", "F128Primitive"),
-        SyntaxDeclaration("primitive/float/declarations.sev", "BF16Primitive"),
-        SyntaxDeclaration("primitive/float/declarations.sev", "F8E4M3FnPrimitive"),
-        SyntaxDeclaration("primitive/float/declarations.sev", "F8E5M2Primitive"),
-        SyntaxDeclaration("primitive/int/int.sev", "int"),
-        SyntaxDeclaration("primitive/int/declarations.sev", "I8Primitive"),
-        SyntaxDeclaration("primitive/int/declarations.sev", "I16Primitive"),
-        SyntaxDeclaration("primitive/int/declarations.sev", "I32Primitive"),
-        SyntaxDeclaration("primitive/int/declarations.sev", "I128Primitive"),
-        SyntaxDeclaration("primitive/int/declarations.sev", "U8Primitive"),
-        SyntaxDeclaration("primitive/int/declarations.sev", "U16Primitive"),
-        SyntaxDeclaration("primitive/int/declarations.sev", "U32Primitive"),
-        SyntaxDeclaration("primitive/int/declarations.sev", "U64Primitive"),
-        SyntaxDeclaration("primitive/int/declarations.sev", "U128Primitive"),
-        SyntaxDeclaration("primitive/int/declarations.sev", "IndexPrimitive"),
-        SyntaxDeclaration("primitive/pointer/declarations.sev", "PointerPrimitive"),
-        SyntaxDeclaration("symbol/none.sev", "NoneValuePrimitive"),
-        SyntaxDeclaration("symbol/absent.sev", "AbsentPrimitive"),
-        SyntaxDeclaration("symbol/symbol.sev", "Symbol"),
-    ]
 
 
 import F from "generic/terms.sev"

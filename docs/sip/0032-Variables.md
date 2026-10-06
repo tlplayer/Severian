@@ -63,6 +63,15 @@ a = 1
 # The int class will match the grammar of assignment and emit an atom to the compiler's LIR that is directly lowerable
 ```
 
+```
+type is the wrapper around types
+
+type(0) -> int
+type(0.0) -> float
+type('c') -> char
+type("") -> string
+```
+
 ## Responsibilities
 
 ## Data Models

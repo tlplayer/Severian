@@ -1,0 +1,29 @@
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import SourceFile, Span from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+import TypeAnnotation from "../type/annotation.sev"
+import Expression, FunctionParameter from "../function/function.sev"
+import Symbol from "../symbol/symbol.sev"
+
+
+def recognize_with(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "with")
+
+
+class WithBlock: Y + B
+    token_forms: list[TokenForm] = [TokenForm("WITH", "with", recognize=recognize_with)]
+    context: BlockContext = BlockContext()
+    span: Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B | None = None
+    clauses: list[Expression] = []
+
+    sentence empty["with", ":"]() -> B:
+        return self
+
+    sentence attached["with", clauses...: Expression, ":"]() -> B with len(clauses) > 0:
+        self.clauses = clauses
+        return self

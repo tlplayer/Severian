@@ -1,0 +1,17 @@
+import Expression from "function.sev"
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import SourceFile from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+
+
+def recognize_async(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "async")
+
+
+class AsyncSyntax: Y
+    token_forms: list[TokenForm] = [TokenForm("ASYNC", "async", recognize=recognize_async)]
+    operation: Expression | None = None
+
+    grammar call["async", operation: Expression]() -> AsyncSyntax:
+        return AsyncSyntax(operation=operation)

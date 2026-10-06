@@ -1,0 +1,16 @@
+import Y from "../generic/symbol.sev"
+import TypeId, RegionId, GenericParamId from "../symbol/symbol.sev"
+import TypeKind, Signature from "system.sev"
+
+
+class ReferenceType: Y
+    target: TypeId | None = None
+    mutable: bool = false
+    lifetime: RegionId | None = None
+
+    def structural_kind() -> TypeKind | Error:
+        target ?= self.target
+        lifetime ?= self.lifetime
+        if target == None or lifetime == None:
+            throw Error("reference type requires a target and lifetime")
+        return TypeKind.Reference(target, self.mutable, lifetime)

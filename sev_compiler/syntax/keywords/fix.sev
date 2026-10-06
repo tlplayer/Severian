@@ -1,0 +1,16 @@
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import SourceFile from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+import Expression from "../function/function.sev"
+import AttachmentRole, WithAttachment from "../constraint/model.sev"
+
+def recognize_fix(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "fix")
+
+
+class FixSyntax: Y
+    token_forms: list[TokenForm] = [TokenForm("FIX", "fix", recognize=recognize_fix)]
+
+    sentence attachment["fix", condition: Expression]() -> WithAttachment:
+        return WithAttachment(AttachmentRole.Fix, condition)

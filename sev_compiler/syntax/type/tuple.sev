@@ -1,0 +1,10 @@
+import Y from "../generic/symbol.sev"
+import TypeId, RegionId, GenericParamId from "../symbol/symbol.sev"
+import TypeKind, Signature from "system.sev"
+
+
+class TupleType: Y
+    elements: list[TypeId] = []
+
+    def structural_kind() -> TypeKind | Error:
+        return TypeKind.Tuple(self.elements)

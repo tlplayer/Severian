@@ -147,8 +147,12 @@ def standard_block_syntax() -> list[BlockSyntax]:
         BlockSyntax("catch", ["catch"], follows=["try", "catch"]),
         BlockSyntax("match", ["match"]),
         BlockSyntax("switch", ["switch"]),
-        BlockSyntax("case", ["case"], parents=["match", "switch"]),
+        BlockSyntax("case", ["case"], parents=["match", "switch", "select"]),
         BlockSyntax("with", ["with"]),
+        BlockSyntax("unsafe", ["unsafe"]),
+        BlockSyntax("accept", ["accept"]),
+        BlockSyntax("reject", ["reject"]),
+        BlockSyntax("select", ["select"]),
     ]
 
 

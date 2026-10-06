@@ -9,9 +9,67 @@ For pointer[u32], p[4B] and p[1] therefore address the same location.
 The compiler fix must preserve that distinction by resolving the existing byte primitive
  and its unit conversions. Treating byte as an alias for u8 or plain int would lose the semantics you intended.
 '''
-class byte:
+import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../contract.sev"
+import scalar_mlir from "../mlir.sev"
+import Lexeme from "../../generic/lexeme.sev"
+import TokenForm from "../../generic/token.sev"
+import SourceFile from "../../source.sev"
+
+
+def recognize_byte(source: SourceFile, start: u32) -> u32 | None:
+    end := start
+    length = u32(len(source.characters))
+    while end < length and ((source.characters[end] >= '0' and source.characters[end] <= '9') or source.characters[end] == '_'):
+        end += 1
+    if end == start or end >= length or source.characters[end] != 'B':
+        return None
+    end += 1
+    if end < length and (source.characters[end].is_alphanumeric() or source.characters[end] == '_'):
+        return None
+    if not byte.literal_valid(source.text[start:end]):
+        return None
+    return end
+
+
+class byte: Primitive
     # Integer number of bytes.
-    amount: int
+    amount: int = 0
+    identity: PrimitiveId = PrimitiveId(DeclarationId(9))
+    id: TypeId = TypeId(9)
+    name: string = "byte"
+    size: Size = Size.Fixed(8)
+    alignment: Size = Size.Fixed(8)
+    constructors: list[Constructor] = []
+    category: PrimitiveCategory = PrimitiveCategory.Bytes
+    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
+    mlir: MlirTypeBinding = scalar_mlir("i64", "integer", 64, true)
+    token_kind: string = "Byte"
+    token_forms: list[TokenForm] = [TokenForm("Byte", recognize=recognize_byte)]
+    literal_family: string = "byte"
+    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Byte")]
+    default_literal: bool = true
+
+    def literal_valid(spelling: string) -> bool:
+        if len(spelling) < 2 or spelling[-1] != 'B':
+            return false
+        previous_digit := false
+        for current in spelling[:-1]:
+            if current == '_':
+                if not previous_digit:
+                    return false
+                previous_digit = false
+            elif current >= '0' and current <= '9':
+                previous_digit = true
+            else:
+                return false
+        return previous_digit
+
+    grammar literal[spelling: Lexeme]() -> byte with byte.literal_valid(spelling.text):
+        digits := ""
+        for current in spelling.text[:-1]:
+            if current != '_':
+                digits += string(current)
+        return byte(amount=digits.parse_integer[int](base=10))
 
     operator <=>(self) -> string:
         return string(self.amount) + "B"
@@ -31,3 +89,14 @@ class byte:
 
     operator /[G:Divide](other: Self) -> int:
         return self.amount / other.amount
+
+
+def byte_type_id() -> TypeId:
+    return TypeId(9)
+
+
+test "byte spelling is a storage quantity, not an integer prefix":
+    assert(byte.literal_valid("1B"))
+    assert(byte.literal_valid("1_024B"))
+    for invalid in ["B", "_1B", "1_B", "1__0B", "1.5B", "1", "1Bytes"]:
+        assert(not byte.literal_valid(invalid))

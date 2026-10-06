@@ -1,0 +1,21 @@
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import SourceFile from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+import Expression, ExpressionKind from "function.sev"
+import Symbol from "../symbol/symbol.sev"
+import Span from "../source.sev"
+
+def recognize_lambda(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "lambda")
+
+
+class LambdaSyntax: Y
+    token_forms: list[TokenForm] = [TokenForm("LAMBDA", "lambda", recognize=recognize_lambda)]
+    span: Span | None = None
+
+    grammar expression["lambda", parameters...: Symbol, ":", body: Expression]() -> Expression:
+        names: list[string] = []
+        for parameter in parameters:
+            names.append(parameter.name.value)
+        return Expression(ExpressionKind.Lambda(names, body), body.span)

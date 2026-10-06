@@ -1,0 +1,14 @@
+import Y from "../generic/symbol.sev"
+import TypeId, RegionId, GenericParamId from "../symbol/symbol.sev"
+import TypeKind, Signature from "system.sev"
+
+
+class FunctionType: Y
+    parameters: list[TypeId] = []
+    result: TypeId | None = None
+
+    def structural_kind() -> TypeKind | Error:
+        result ?= self.result
+        if result == None:
+            throw Error("function type requires a resolved result")
+        return TypeKind.Function(Signature(self.parameters, result))

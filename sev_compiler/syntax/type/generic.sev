@@ -1,0 +1,13 @@
+import Y from "../generic/symbol.sev"
+import TypeId, RegionId, GenericParamId from "../symbol/symbol.sev"
+import TypeKind, Signature from "system.sev"
+
+
+class GenericType: Y
+    parameter: GenericParamId | None = None
+
+    def structural_kind() -> TypeKind | Error:
+        parameter ?= self.parameter
+        if parameter == None:
+            throw Error("generic type requires a resolved parameter identity")
+        return TypeKind.Parameter(parameter)

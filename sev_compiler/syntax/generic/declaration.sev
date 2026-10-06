@@ -1,0 +1,9 @@
+import Y from "symbol.sev"
+
+# A reference to a syntax declaration, not an instance of the declared form.
+# Paths are relative to the syntax package root, independent of the input file.
+# Recognition reads the referenced declaration's grammar and captures.
+class SyntaxDeclaration: Y
+    path: string
+    name: string
+

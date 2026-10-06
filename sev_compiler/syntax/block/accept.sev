@@ -1,0 +1,24 @@
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import SourceFile, Span from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+import TypeAnnotation from "../type/annotation.sev"
+import Expression, FunctionParameter from "../function/function.sev"
+import Symbol from "../symbol/symbol.sev"
+
+
+def recognize_accept(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "accept")
+
+
+class AcceptBlock: Y + B
+    token_forms: list[TokenForm] = [TokenForm("ACCEPT", "accept", recognize=recognize_accept)]
+    context: BlockContext = BlockContext()
+    span: Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B | None = None
+
+    sentence region["accept", ":"]() -> B:
+        return self

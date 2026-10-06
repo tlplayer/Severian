@@ -1,0 +1,210 @@
+import Y from "generic/symbol.sev"
+import SyntaxDeclaration from "generic/declaration.sev"
+import YieldSyntax from "keywords/yield.sev"
+import DeferSyntax from "keywords/defer.sev"
+import StaticSyntax from "keywords/static.sev"
+import AtomicSyntax from "keywords/atomic.sev"
+import PrefixSyntax from "keywords/prefix.sev"
+import FixSyntax from "keywords/fix.sev"
+import SuffixSyntax from "keywords/suffix.sev"
+import LambdaSyntax from "function/lambda.sev"
+import AsyncSyntax from "function/async.sev"
+import AwaitSyntax from "function/await.sev"
+import SelectSyntax from "function/select.sev"
+import OperatorBlock from "block/operator.sev"
+import ExtendBlock from "block/extend.sev"
+import TestBlock from "block/test.sev"
+import WithBlock from "block/with.sev"
+import UnsafeBlock from "block/unsafe.sev"
+import AcceptBlock from "block/accept.sev"
+import RejectBlock from "block/reject.sev"
+import DynamicType from "type/dynamic.sev"
+import AnyType from "type/any.sev"
+import NumericType from "type/numeric.sev"
+import UnionType from "type/union.sev"
+import TupleType from "type/tuple.sev"
+import FunctionType from "type/function.sev"
+import ReferenceType from "type/reference.sev"
+import GenericType from "type/generic.sev"
+import IteratorType from "primitive/iterator/iterator.sev"
+import byte from "primitive/byte/byte.sev"
+import "block/global.sev" as _block_global
+import "block/main.sev" as _block_main
+import "block/function.sev" as _block_function
+import "block/class.sev" as _block_class
+import "block/trait.sev" as _block_trait
+import "block/enum.sev" as _block_enum
+import "block/if.sev" as _block_if
+import "block/elif.sev" as _block_elif
+import "block/else.sev" as _block_else
+import "block/try.sev" as _block_try
+import "block/catch.sev" as _block_catch
+import "block/match.sev" as _block_match
+import "block/case.sev" as _block_case
+import "block/for.sev" as _block_for
+import "block/while.sev" as _block_while
+import "grammar/contracts.sev" as _grammar_contracts
+import "keywords/throw.sev" as _keywords_throw
+import "../../library/core/string/src/string.sev" as _library_core_string_src_string
+import "primitive/char/char.sev" as _primitive_char_char
+import "function/syntax.sev" as _function_syntax
+import "primitive/bool/bool.sev" as _primitive_bool_bool
+import "primitive/float/float.sev" as _primitive_float_float
+import "primitive/float/declarations.sev" as _primitive_float_declarations
+import "primitive/int/int.sev" as _primitive_int_int
+import "primitive/int/declarations.sev" as _primitive_int_declarations
+import "primitive/pointer/declarations.sev" as _primitive_pointer_declarations
+import "symbol/none.sev" as _symbol_none
+import "symbol/absent.sev" as _symbol_absent
+import "symbol/symbol.sev" as _symbol_symbol
+
+
+def syntax_prelude() -> list[SyntaxDeclaration]:
+    # Stopgap master list. Preserve this order when visiting candidates within
+    # each source window; recursively recognize the declaration's captures.
+    # The global declaration applies once to the complete source window.
+    # Spellings, boundaries, constraints and construction stay in each provider.
+    return [
+        SyntaxDeclaration("block/global.sev", "global"),
+        SyntaxDeclaration("block/main.sev", "main"),
+        SyntaxDeclaration("block/function.sev", "function"),
+        SyntaxDeclaration("block/class.sev", "class"),
+        SyntaxDeclaration("block/trait.sev", "trait"),
+        SyntaxDeclaration("block/enum.sev", "enum"),
+        SyntaxDeclaration("block/if.sev", "if"),
+        SyntaxDeclaration("block/elif.sev", "elif"),
+        SyntaxDeclaration("block/else.sev", "else"),
+        SyntaxDeclaration("block/try.sev", "try"),
+        SyntaxDeclaration("block/catch.sev", "catch"),
+        SyntaxDeclaration("block/match.sev", "match"),
+        SyntaxDeclaration("block/case.sev", "case"),
+        SyntaxDeclaration("block/for.sev", "For"),
+        SyntaxDeclaration("block/while.sev", "While"),
+
+        SyntaxDeclaration("grammar/contracts.sev", "Return"),
+        SyntaxDeclaration("keywords/throw.sev", "Throw"),
+        SyntaxDeclaration("grammar/contracts.sev", "Break"),
+        SyntaxDeclaration("grammar/contracts.sev", "Continue"),
+        SyntaxDeclaration("grammar/contracts.sev", "Conditional"),
+        SyntaxDeclaration("grammar/contracts.sev", "AddAssign"),
+        SyntaxDeclaration("grammar/contracts.sev", "SubtractAssign"),
+        SyntaxDeclaration("grammar/contracts.sev", "MultiplyAssign"),
+        SyntaxDeclaration("grammar/contracts.sev", "DivideAssign"),
+        SyntaxDeclaration("grammar/contracts.sev", "RemainderAssign"),
+        SyntaxDeclaration("grammar/contracts.sev", "Assign"),
+        SyntaxDeclaration("grammar/contracts.sev", "List"),
+        SyntaxDeclaration("grammar/contracts.sev", "Slice"),
+        SyntaxDeclaration("grammar/contracts.sev", "Index"),
+
+        # Quoted forms retain their contents as captures of their own grammar.
+        SyntaxDeclaration("../../library/core/string/src/string.sev", "string"),
+        SyntaxDeclaration("primitive/char/char.sev", "char"),
+
+        SyntaxDeclaration("function/syntax.sev", "Power"),
+        SyntaxDeclaration("function/syntax.sev", "FloorDivide"),
+        SyntaxDeclaration("function/syntax.sev", "LeftShift"),
+        SyntaxDeclaration("function/syntax.sev", "RightShift"),
+        SyntaxDeclaration("function/syntax.sev", "LessEqual"),
+        SyntaxDeclaration("function/syntax.sev", "GreaterEqual"),
+        SyntaxDeclaration("function/syntax.sev", "NotEqual"),
+        SyntaxDeclaration("function/syntax.sev", "Equal"),
+        SyntaxDeclaration("function/syntax.sev", "Less"),
+        SyntaxDeclaration("function/syntax.sev", "Greater"),
+        SyntaxDeclaration("function/syntax.sev", "Add"),
+        SyntaxDeclaration("function/syntax.sev", "Subtract"),
+        SyntaxDeclaration("function/syntax.sev", "Multiply"),
+        SyntaxDeclaration("function/syntax.sev", "Divide"),
+        SyntaxDeclaration("function/syntax.sev", "Remainder"),
+        SyntaxDeclaration("function/syntax.sev", "Positive"),
+        SyntaxDeclaration("function/syntax.sev", "Negative"),
+        SyntaxDeclaration("function/syntax.sev", "Not"),
+        SyntaxDeclaration("function/syntax.sev", "Move"),
+        SyntaxDeclaration("function/syntax.sev", "BitwiseAnd"),
+        SyntaxDeclaration("function/syntax.sev", "BitwiseOr"),
+        SyntaxDeclaration("function/syntax.sev", "BitwiseXor"),
+        SyntaxDeclaration("function/syntax.sev", "Contains"),
+        SyntaxDeclaration("function/syntax.sev", "LogicalAnd"),
+        SyntaxDeclaration("function/syntax.sev", "LogicalOr"),
+
+        # Primitive declarations own both type names and literal contracts.
+        SyntaxDeclaration("primitive/bool/bool.sev", "bool"),
+        SyntaxDeclaration("primitive/float/float.sev", "float"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "F32Primitive"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "F16Primitive"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "F128Primitive"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "BF16Primitive"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "F8E4M3FnPrimitive"),
+        SyntaxDeclaration("primitive/float/declarations.sev", "F8E5M2Primitive"),
+        SyntaxDeclaration("primitive/int/int.sev", "int"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "I8Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "I16Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "I32Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "I128Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "U8Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "U16Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "U32Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "U64Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "U128Primitive"),
+        SyntaxDeclaration("primitive/int/declarations.sev", "IndexPrimitive"),
+        SyntaxDeclaration("primitive/pointer/declarations.sev", "PointerPrimitive"),
+        SyntaxDeclaration("symbol/none.sev", "NoneValuePrimitive"),
+        SyntaxDeclaration("symbol/absent.sev", "AbsentPrimitive"),
+        SyntaxDeclaration("symbol/symbol.sev", "Symbol"),
+        SyntaxDeclaration("keywords/yield.sev", "YieldSyntax"),
+        SyntaxDeclaration("keywords/defer.sev", "DeferSyntax"),
+        SyntaxDeclaration("keywords/static.sev", "StaticSyntax"),
+        SyntaxDeclaration("keywords/atomic.sev", "AtomicSyntax"),
+        SyntaxDeclaration("keywords/prefix.sev", "PrefixSyntax"),
+        SyntaxDeclaration("keywords/fix.sev", "FixSyntax"),
+        SyntaxDeclaration("keywords/suffix.sev", "SuffixSyntax"),
+        SyntaxDeclaration("function/lambda.sev", "LambdaSyntax"),
+        SyntaxDeclaration("function/async.sev", "AsyncSyntax"),
+        SyntaxDeclaration("function/await.sev", "AwaitSyntax"),
+        SyntaxDeclaration("function/select.sev", "SelectSyntax"),
+        SyntaxDeclaration("block/operator.sev", "OperatorBlock"),
+        SyntaxDeclaration("block/extend.sev", "ExtendBlock"),
+        SyntaxDeclaration("block/test.sev", "TestBlock"),
+        SyntaxDeclaration("block/with.sev", "WithBlock"),
+        SyntaxDeclaration("block/unsafe.sev", "UnsafeBlock"),
+        SyntaxDeclaration("block/accept.sev", "AcceptBlock"),
+        SyntaxDeclaration("block/reject.sev", "RejectBlock"),
+        SyntaxDeclaration("type/dynamic.sev", "DynamicType"),
+        SyntaxDeclaration("type/any.sev", "AnyType"),
+        SyntaxDeclaration("type/numeric.sev", "NumericType"),
+        SyntaxDeclaration("type/union.sev", "UnionType"),
+        SyntaxDeclaration("type/tuple.sev", "TupleType"),
+        SyntaxDeclaration("type/function.sev", "FunctionType"),
+        SyntaxDeclaration("type/reference.sev", "ReferenceType"),
+        SyntaxDeclaration("type/generic.sev", "GenericType"),
+        SyntaxDeclaration("primitive/iterator/iterator.sev", "IteratorType"),
+        SyntaxDeclaration("primitive/byte/byte.sev", "byte"),
+    ]
+
+
+def prelude_token_owners() -> list[Y]:
+    return [YieldSyntax(), DeferSyntax(), StaticSyntax(), AtomicSyntax(), PrefixSyntax(), FixSyntax(), SuffixSyntax(), LambdaSyntax(), AsyncSyntax(), AwaitSyntax(), SelectSyntax(), OperatorBlock(), ExtendBlock(), TestBlock(), WithBlock(), UnsafeBlock(), AcceptBlock(), RejectBlock(), DynamicType(), AnyType(), NumericType(), byte()]
+
+
+import virtual_source from "source.sev"
+
+
+test "syntax prelude retains one locator per defining object":
+    seen: list[string] = []
+    declarations = syntax_prelude()
+    assert(declarations[0].path == "block/global.sev")
+    for declaration in declarations:
+        identity = declaration.path + ":" + declaration.name
+        assert(identity not in seen)
+        seen.append(identity)
+    for required in ["primitive/byte/byte.sev:byte", "block/match.sev:match", "block/unsafe.sev:UnsafeBlock", "function/async.sev:AsyncSyntax", "type/reference.sev:ReferenceType", "primitive/iterator/iterator.sev:IteratorType"]:
+        assert(required in seen)
+
+
+test "prelude keyword owners preserve identifier boundaries":
+    for owner in prelude_token_owners():
+        for form in owner.token_forms:
+            spelling ?= form.spelling
+            recognize ?= form.recognize
+            if spelling != None and recognize != None:
+                assert(recognize(virtual_source("keyword.sev", spelling + ":"), 0) == len(spelling))
+                assert(recognize(virtual_source("identifier.sev", spelling + "_value"), 0) == None)

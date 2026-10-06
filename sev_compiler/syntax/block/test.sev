@@ -1,0 +1,29 @@
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import SourceFile, Span from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+import TypeAnnotation from "../type/annotation.sev"
+import Expression, FunctionParameter from "../function/function.sev"
+import Symbol from "../symbol/symbol.sev"
+
+
+def recognize_test(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "test")
+
+
+class TestBlock: Y + B
+    token_forms: list[TokenForm] = [TokenForm("TEST", "test", recognize=recognize_test)]
+    context: BlockContext = BlockContext()
+    span: Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B | None = None
+    name: string | None = None
+
+    sentence unnamed["test", ":"]() -> B:
+        return self
+
+    sentence named["test", name: string, ":"]() -> B:
+        self.name = name
+        return self

@@ -1,3 +1,4 @@
+import byte, byte_type_id from "../../byte/byte.sev"
 import Diagnostic, DiagnosticType, ErrorType from "../../error/diagnostic.sev"
 import AbsentPrimitive, absent_type_id from "../../../symbol/absent.sev"
 import BF16Primitive, F128Primitive, F16Primitive, F32Primitive, F64Primitive, F8E4M3FnPrimitive, F8E5M2Primitive, bf16_type_id, f128_type_id, f16_type_id, f32_type_id, f64_type_id, f8e4m3fn_type_id, f8e5m2_type_id from "../../float/declarations.sev"

@@ -1,0 +1,26 @@
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import SourceFile, Span from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+import TypeAnnotation from "../type/annotation.sev"
+import Expression, FunctionParameter from "../function/function.sev"
+import Symbol from "../symbol/symbol.sev"
+
+
+def recognize_extend(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "extend")
+
+
+class ExtendBlock: Y + B
+    token_forms: list[TokenForm] = [TokenForm("EXTEND", "extend", recognize=recognize_extend)]
+    context: BlockContext = BlockContext()
+    span: Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B | None = None
+    target: TypeAnnotation | None = None
+
+    sentence declaration["extend", target: TypeAnnotation, ":"]() -> B:
+        self.target = target
+        return self

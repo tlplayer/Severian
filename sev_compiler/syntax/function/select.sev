@@ -1,0 +1,23 @@
+import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import Span from "../source.sev"
+import Expression from "function.sev"
+import Y from "../generic/symbol.sev"
+import TokenForm from "../generic/token.sev"
+import SourceFile from "../source.sev"
+import recognize_keyword from "../keywords/keyword.sev"
+
+
+def recognize_select(source: SourceFile, start: u32) -> u32 | None:
+    return recognize_keyword(source, start, "select")
+
+
+class SelectSyntax: Y + B
+    token_forms: list[TokenForm] = [TokenForm("SELECT", "select", recognize=recognize_select)]
+    context: BlockContext = BlockContext()
+    span: Span | None = None
+    sentences: list[BlockSentence] = []
+    subblocks: list[SourceBlockId] = []
+    parent: B | None = None
+
+    sentence region["select", ":"]() -> B:
+        return self

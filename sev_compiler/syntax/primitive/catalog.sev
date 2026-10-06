@@ -10,6 +10,8 @@ import PointerPrimitive from "pointer/declarations.sev"
 import StringPrimitive from "string/declarations.sev"
 import array_mlir, byte_view_mlir, index_mlir, memref_mlir, ranked_memref_storage, scalar_mlir, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir from "mlir.sev"
 
+import byte from "byte/byte.sev"
+
 class PrimitiveDescriptor: Primitive
     identity: PrimitiveId
     id: TypeId
@@ -36,6 +38,7 @@ PrimitiveCatalog: list[PrimitiveDescriptor] = []
 def primitive_descriptors() -> list[PrimitiveDescriptor]:
     if len(PrimitiveCatalog) == 0:
         PrimitiveCatalog.append(describe_primitive(BoolPrimitive()))
+        PrimitiveCatalog.append(describe_primitive(byte()))
         PrimitiveCatalog.append(describe_primitive(StringPrimitive()))
         PrimitiveCatalog.append(describe_primitive(IndexPrimitive()))
         PrimitiveCatalog.append(describe_primitive(PointerPrimitive()))
@@ -224,3 +227,16 @@ test "primitive descriptor preserves custom token kinds without an enum":
     descriptor = describe_primitive(primitive)
     assert(descriptor.token_kind == "WholeNumber")
     assert(describe_primitive(PointerPrimitive()).token_kind == "Identifier")
+
+
+test "byte has a distinct primitive identity and storage unit family":
+    descriptor ?= primitive_descriptor(byte().id)
+    assert(descriptor != None)
+    assert(descriptor.name == "byte")
+    assert(descriptor.category == PrimitiveCategory.Bytes)
+    assert(descriptor.literal_family == "byte")
+    assert(descriptor.id != i64_type_id())
+    identities: list[u32] = []
+    for primitive in primitive_descriptors():
+        assert(primitive.id.index not in identities)
+        identities.append(primitive.id.index)
