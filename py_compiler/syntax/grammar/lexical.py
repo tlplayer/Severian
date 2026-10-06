@@ -1,15 +1,15 @@
-"""Atomic syntax providers. The lexer supplies source windows, not spelling rules."""
+"""LexicalTermic syntax providers. The lexer supplies source windows, not spelling rules."""
 from py_compiler.syntax.generic.grammar import Grammar, Match
 
 
-class Atom(Grammar):
+class LexicalTerm(Grammar):
     role = 'Y'
 
     def construct(self, match):
         return match.captures['kind'], match.end
 
 
-class Whitespace(Atom):
+class Whitespace(LexicalTerm):
     def recognize(self, window):
         text, start = window.source.text, window.start
         if text[start] not in ' \t':
@@ -21,7 +21,7 @@ class Whitespace(Atom):
         return Match(self, window, end, {'kind': kind})
 
 
-class Newline(Atom):
+class Newline(LexicalTerm):
     def recognize(self, window):
         text, start = window.source.text, window.start
         if text[start] not in '\r\n':
@@ -29,7 +29,7 @@ class Newline(Atom):
         return Match(self, window, start + (2 if text.startswith('\r\n', start) else 1), {'kind': 'NEWLINE'})
 
 
-class Comment(Atom):
+class Comment(LexicalTerm):
     def recognize(self, window):
         if window.source.text[window.start] != '#':
             return None
@@ -39,7 +39,7 @@ class Comment(Atom):
         return Match(self, window, end, {'kind': 'TRIVIA'})
 
 
-class Word(Atom):
+class Word(LexicalTerm):
     def __init__(self, keywords):
         self.keywords = keywords
 

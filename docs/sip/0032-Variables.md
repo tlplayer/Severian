@@ -10,7 +10,8 @@ Superseded by:
 
 ## Appendix
 
-primtives:    int | char | float | bool | byte | pointer | type
+primtives:    int | char | float | bool | byte | pointer | type | None| none | absent | atom
+unit:         unit | duration | frequency | memory (byte) 
 complex:      class | trait | generics | enum | union | iterator | with
 generic:      T | V | K | F | B | G | Y | N | C | W | L | E | R | M
 collections:  list | map | dict | stack | heap | queue | chain 
@@ -54,6 +55,13 @@ y: File := view file.open("file.txt")
 
 ```
 
+```
+#An atom is the smallest compilable unit that the compiler needs to get to. It's the boundary of Severian and IR/binary .o/.so files. For example
+
+a = 1
+
+# The int class will match the grammar of assignment and emit an atom to the compiler's LIR that is directly lowerable
+```
 
 ## Responsibilities
 

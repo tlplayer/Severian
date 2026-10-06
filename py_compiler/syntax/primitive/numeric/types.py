@@ -11,7 +11,7 @@ class Integer(Primitive):
         return f'memref.global "private" @{symbol} : memref<{self.mlir}> = dense<0>'
 
     def grammars(self):
-        return (*super().grammars(), *((NumericLiteral(self),) if self.name == 'i64' else ()), *scalar_grammars(self))
+        return (*super().grammars(), *((NumericLiteral(self, "integer"),) if self.name == 'i64' else ()), *scalar_grammars(self))
 
     def decode(self, spelling):
         text = spelling.replace('_', '')
@@ -39,7 +39,7 @@ class Float(Primitive):
         return f'memref.global "private" @{symbol} : memref<{self.mlir}> = dense<0.0>'
 
     def grammars(self):
-        return (*super().grammars(), *((NumericLiteral(self),) if self.name == 'f64' else ()), *scalar_grammars(self))
+        return (*super().grammars(), *((NumericLiteral(self, "float"),) if self.name == 'f64' else ()), *scalar_grammars(self, floating=True))
 
     def decode(self, spelling):
         return Decimal(spelling.replace('_', ''))
@@ -55,7 +55,7 @@ class Float(Primitive):
 
 class Byte(Integer):
     def grammars(self):
-        return (*Primitive.grammars(self), NumericLiteral(self), *scalar_grammars(self))
+        return (*Primitive.grammars(self), NumericLiteral(self, "byte"), *scalar_grammars(self))
 
     def decode(self, spelling):
         text = spelling[:-1].replace('_', '')

@@ -139,13 +139,10 @@ def lower_expression(node, cfg, env, expected=None):
     context, span = cfg.context, node.token.span
     if node.kind == 'member':
         subject = node.operands[0]
-        if subject.kind == 'name' and subject.token.text == 'BigO':
-            from py_compiler.syntax.function.contracts import BigO
-            try:
-                rank = BigO[node.token.text]
-            except KeyError:
-                raise ValueError('unknown BigO variant') from None
-            return coerce(literal_value(int(rank), context.type('BigO'), cfg, span), expected, cfg, span)
+        if subject.kind == 'name':
+            declared = context.types.get(context.declaration_name(subject.token.text, cfg.declaration_scope))
+            if callable(getattr(declared, 'variant', None)):
+                return coerce(literal_value(declared.variant(node.token.text), declared, cfg, span), expected, cfg, span)
         receiver = cfg.expr(node.operands[0], env)
         provider = context.provider_by_name.get(receiver.type.name)
         if not hasattr(provider, 'field_place'):

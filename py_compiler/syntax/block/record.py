@@ -19,6 +19,16 @@ class TypeDeclaration:
     defaults: tuple = ()
     methods: tuple = ()
 
+    @property
+    def binding_ownership(self):
+        return "view"
+
+    def grammars(self):
+        # Record declarations explicitly expose their type name; they have no literal syntax.
+        from py_compiler.syntax.generic.owned import WordGrammar
+        return (WordGrammar(self, self.name, "IDENTIFIER"),)
+
+
 
 class RecordProvider(DeclarationProvider):
     def declare_member(self, node, context, owner):

@@ -38,7 +38,7 @@ class WordGrammar(OwnedGrammar):
 
 
 def select(owner, role, spelling):
-    matches = [g for g in owner.grammars() if g.role == role and g.spelling == spelling]
+    matches = [g for g in owner.grammars() if g.role == role and getattr(g, 'spelling', None) == spelling]
     if len(matches) != 1:
         raise ValueError(f'{owner.name} requires exactly one {role} grammar for {spelling!r}; found {len(matches)}')
     return matches[0]

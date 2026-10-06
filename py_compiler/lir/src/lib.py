@@ -12,6 +12,7 @@ class Lir:
     mlir: object
     target: str
     pointer_bits: int
+    dependencies: tuple = ()
 
     def text(self):
         return render(self.mlir)
@@ -22,12 +23,23 @@ class ObjectArtifact:
     llvm_dialect: str
     llvm_ir: str
     object_bytes: bytes
+    dependencies: tuple = ()
 
 
 def lower(program, target, pointer_bits):
     for body in program.bodies:
         body.verify()
-    return Lir(lower_mlir(program), target, pointer_bits)
+    from py_compiler.syntax.generic.atom import ExternalSymbol
+    dependencies = set()
+    for body in program.bodies:
+        for block in body.blocks:
+            for operation in block.operations:
+                if operation.atom is None:
+                    raise ValueError(f"unresolved operation at LIR boundary: {operation.kind}")
+                implementation = operation.atom.implementation
+                if isinstance(implementation, ExternalSymbol):
+                    dependencies.update(implementation.dependencies)
+    return Lir(lower_mlir(program), target, pointer_bits, tuple(sorted(dependencies)))
 
 
 def companion(name, optimizer):
@@ -63,4 +75,4 @@ def compile_object(lir, optimizer=None):
         object_bytes = destination.read_bytes()
         if not object_bytes:
             raise ValueError('object compiler produced an empty artifact')
-    return ObjectArtifact(dialect, llvm_ir, object_bytes)
+    return ObjectArtifact(dialect, llvm_ir, object_bytes, lir.dependencies)

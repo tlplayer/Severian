@@ -16,6 +16,16 @@ class Constant:
     source: str
     binding_operator: str | None
 
+    def atom(self, operation):
+        from py_compiler.syntax.generic.atom import Atom
+        return Atom(self.type, (), self.type, (), (), self)
+
+    def render_operation(self, operation):
+        from hashlib import sha256
+        from py_compiler.mlir.src.cfg import name
+        symbol = "__sev_constant_" + sha256(self.identity.encode()).hexdigest()
+        return [f"{name(operation.result)} = func.call @{symbol}() : () -> {self.type.mlir}"]
+
 
 @dataclass(frozen=True)
 class Submodule:

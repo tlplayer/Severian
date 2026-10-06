@@ -26,6 +26,9 @@ def render_body(body):
             value = operation.result
             operands = operation.operands
             prefix = f"    {name(value)} = " if value is not None else "    "
+            if operation.atom is not None:
+                lines.extend("    " + line for line in operation.atom.render_operation(operation))
+                continue
             if hasattr(operation.payload, "render_operation"):
                 lines.extend("    " + line for line in operation.payload.render_operation(operation))
                 continue

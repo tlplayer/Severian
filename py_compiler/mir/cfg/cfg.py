@@ -15,6 +15,7 @@ class Operation:
     operands: tuple
     payload: object
     span: object
+    atom: object = None
 
 
 @dataclass(frozen=True)
@@ -98,18 +99,45 @@ class Body:
                 new = {b} | set.intersection(*(dominators[p] for p in incoming))
                 if new != dominators[b]:
                     dominators[b], changed = new, True
+        moved_in = {b: set() for b in reachable}
+        moved_out = {b: set() for b in reachable}
+        changed = True
+        while changed:
+            changed = False
+            for b in sorted(reachable):
+                incoming = set().union(*(moved_out[p] for p in predecessors[b] & reachable))
+                outgoing = set(incoming)
+                for operation in self.blocks[b].operations:
+                    if operation.result:
+                        outgoing.discard(operation.result.identity)
+                    if operation.atom:
+                        outgoing.update(v.identity for v, mode in zip(operation.operands, operation.atom.ownership) if mode == 'move')
+                if incoming != moved_in[b] or outgoing != moved_out[b]:
+                    moved_in[b], moved_out[b], changed = incoming, outgoing, True
         for b in reachable:
+            moved = set(moved_in[b])
             available = {v.identity for v in self.blocks[b].parameters}
             def check(value):
+                if value.identity in moved:
+                    raise ValueError("atom uses a value moved on a control-flow path")
                 owner = definitions.get(value.identity)
                 if owner is None or owner[1] != value.type or owner[0] not in dominators[b]:
                     raise ValueError("SSA use lacks a dominating typed definition")
                 if owner[0] == b and value.identity not in available:
                     raise ValueError("SSA use before definition")
             for operation in self.blocks[b].operations:
+                if operation.atom is not None:
+                    operation.atom.verify(operation)
                 for operand in operation.operands:
                     check(operand)
+                if operation.atom:
+                    for operand, mode in zip(operation.operands, operation.atom.ownership):
+                        if mode == 'move':
+                            if operand.identity in moved:
+                                raise ValueError("atom moves the same value twice")
+                            moved.add(operand.identity)
                 if operation.result is not None:
+                    moved.discard(operation.result.identity)
                     available.add(operation.result.identity)
             term = self.blocks[b].terminator
             if term.value:

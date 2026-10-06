@@ -16,7 +16,7 @@ class Trait(RecordProvider):
         context.register(TypeDeclaration(node.identity, ".".join((*context.scope, node.header[0].text)), self.spelling,
                                          fields, (), (), node.span, context.source.path, defaults, methods))
         name = ".".join((*context.scope, node.header[0].text))
-        context.types[name] = ObjectType(name, "trait", "!llvm.struct<(!llvm.ptr, i32)>")
+        context.types[name] = ObjectType(name, "trait", "!llvm.struct<(!llvm.ptr, i32)>", declaration=context.by_name[name])
 
     def satisfy(self, target, implementation):
         for field in target.fields:

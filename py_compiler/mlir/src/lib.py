@@ -68,6 +68,23 @@ def render(program):
         functions.append(f"  func.func @{symbol}(){result}{attributes} {{\n" +
                          "\n".join("    " + line for line in body) + "\n  }")
     from py_compiler.mlir.src.cfg import render_body
+    from py_compiler.syntax.generic.atom import ExternalSymbol
+    external = {}
+    defined = {body.name for body in program.bodies} | {f.symbol for f in program.functions}
+    for body in program.bodies:
+        for block in body.blocks:
+            for operation in block.operations:
+                implementation = operation.atom.implementation if operation.atom else None
+                if isinstance(implementation, ExternalSymbol):
+                    signature = (tuple(t.mlir for t in operation.atom.inputs), operation.atom.result.mlir if operation.atom.result else "")
+                    if implementation.symbol in defined:
+                        raise ValueError("external symbol conflicts with a local definition")
+                    if implementation.symbol in external and external[implementation.symbol] != signature:
+                        raise ValueError("conflicting external atom signatures")
+                    external[implementation.symbol] = signature
+    for symbol, (inputs, result) in sorted(external.items()):
+        suffix = " -> " + result if result else ""
+        functions.append(f"  func.func private @{symbol}({', '.join(inputs)}){suffix}")
     functions.extend(render_body(body) for body in program.bodies)
     contracts = [{"name": d.name, "kind": d.kind, "fields": d.fields, "variants": d.variants, "traits": d.traits}
                  for d in program.declarations]

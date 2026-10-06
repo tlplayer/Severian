@@ -5,8 +5,9 @@ from py_compiler.syntax.symbol.forms import NUMBER
 
 
 class NumericLiteral(OwnedGrammar):
-    def __init__(self, owner):
+    def __init__(self, owner, literal_kind):
         super().__init__(owner, 'Y', ('numeric-literal',))
+        self.literal_kind = literal_kind
 
     def recognize(self, window):
         found = NUMBER.match(window.source.text, window.start, window.end)
@@ -17,7 +18,7 @@ class NumericLiteral(OwnedGrammar):
             raise ValueError('invalid numeric literal or unsupported suffix')
         based = spelling.startswith(('0x', '0o', '0b'))
         family = 'byte' if spelling.endswith('b') and not based else ('float' if not based and any(c in spelling for c in '.e') else 'integer')
-        if family != self.owner.family:
+        if family != self.literal_kind:
             return None
         return Match(self, window, end, {'kind': 'NUMBER', 'type': self.owner})
 
@@ -28,10 +29,11 @@ class NumericLiteral(OwnedGrammar):
 class ScalarOperation(OwnedGrammar):
     associativity = 'left'
 
-    def __init__(self, owner, spelling, precedence, comparison=False):
+    def __init__(self, owner, spelling, precedence, comparison=False, floating=False):
         super().__init__(owner, 'F.operator', (Capture('self', owner), spelling, Capture('value', owner)),
                          (Capture('self', owner), Capture('value', owner, 'copy')))
         self.spelling, self.precedence, self.comparison = spelling, precedence, comparison
+        self.floating = floating
 
     def recognize(self, window):
         if len(window.tokens) == 1 and window.tokens[0].text == self.spelling:
@@ -44,10 +46,17 @@ class ScalarOperation(OwnedGrammar):
         result = cfg.syntax.types['bool'] if self.comparison else self.owner
         return cfg.emit('scalar', result, (left, right), self, span)
 
+    def atom(self, operation):
+        from py_compiler.syntax.generic.atom import Atom
+        from importlib import import_module
+        BOOL = import_module("py_compiler.syntax.primitive.bool.declarations").BOOL
+        return Atom(self.owner, (self.owner, self.owner), BOOL if self.comparison else self.owner,
+                    tuple(c.ownership for c in self.captures), (), self)
+
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name
         left, right = operation.operands
-        floating = self.owner.family == 'float'
+        floating = self.floating
         if not self.comparison:
             opcode = {'+': 'add', '-': 'sub', '*': 'mul'}[self.spelling] + ('f' if floating else 'i')
         elif floating:
@@ -81,13 +90,13 @@ class CompoundAssignment(OwnedGrammar):
         return result
 
 
-def scalar_grammars(owner, arithmetic=True):
-    rules = [ScalarOperation(owner, op, 3, True) for op in ('==', '!=', '<', '<=', '>', '>=')]
+def scalar_grammars(owner, arithmetic=True, floating=False):
+    rules = [ScalarOperation(owner, op, 3, True, floating) for op in ('==', '!=', '<', '<=', '>', '>=')]
     if arithmetic:
-        rules.extend(ScalarOperation(owner, op, precedence) for op, precedence in (('+', 4), ('-', 4), ('*', 5)))
+        rules.extend(ScalarOperation(owner, op, precedence, floating=floating) for op, precedence in (('+', 4), ('-', 4), ('*', 5)))
         rules.extend(CompoundAssignment(owner, op) for op in ('+', '-', '*'))
         rules.append(UnaryOperation(owner, "+"))
-        if owner.signed or owner.family == "float":
+        if owner.signed or floating:
             rules.append(UnaryOperation(owner, "-"))
     return tuple(rules)
 
@@ -112,6 +121,10 @@ class UnaryOperation(OwnedGrammar):
             zero = literal_value(0, self.owner, cfg, span)
             return select(self.owner, 'F.operator', '-').expand(cfg, zero, operand, span)
         return cfg.emit('unary', self.owner, (operand,), self, span)
+
+    def atom(self, operation):
+        from py_compiler.syntax.generic.atom import Atom
+        return Atom(self.owner, (self.owner,), self.owner, ('view',), (), self)
 
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name

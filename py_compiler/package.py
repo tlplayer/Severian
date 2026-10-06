@@ -148,7 +148,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
                    "target": target, "abi": abi_id, "pointer-bits": pointer_bits,
                    "interface": {"path": interface_path, "checksum": digest(interface_text)},
                    "artifacts": [{"path": ir_path, "kind": "mlir", "checksum": digest(ir)}],
-                   "dependencies": [], "native-artifacts": [{"path": object_path, "kind": "object", "checksum": sha256(native.object_bytes).hexdigest()}]}
+                   "dependencies": list(native.dependencies), "native-artifacts": [{"path": object_path, "kind": "object", "checksum": sha256(native.object_bytes).hexdigest()}]}
     realization["artifacts"].extend([{"path": llvm_path, "kind": "llvm-ir", "checksum": digest(native.llvm_ir)},
                                      {"path": lowered_path, "kind": "llvm-dialect", "checksum": digest(native.llvm_dialect)},
                                      *realization["native-artifacts"]])

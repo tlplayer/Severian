@@ -63,13 +63,23 @@ class Builder:
             payload = select(operands[0].type, 'F.operator', payload)
             kind = 'scalar'
         result = self.value(type_)
-        self.current.operations.append(Operation(kind, result, tuple(operands), payload, span))
+        operation = Operation(kind, result, tuple(operands), payload, span)
+        if not callable(getattr(payload, 'atom', None)):
+            raise ValueError(f'{kind} has no object-supplied atom implementation')
+        operation = replace(operation, atom=payload.atom(operation))
+        operation.atom.verify(operation)
+        self.current.operations.append(operation)
         if type_ and type_.family in ("record", "trait", "union") and any(v.identity in self.stack_values for v in operands):
             self.stack_values.add(result.identity)
         return result
 
     def effect(self, kind, operands, payload, span):
-        self.current.operations.append(Operation(kind, None, tuple(operands), payload, span))
+        operation = Operation(kind, None, tuple(operands), payload, span)
+        if not callable(getattr(payload, 'atom', None)):
+            raise ValueError(f'{kind} has no object-supplied atom implementation')
+        operation = replace(operation, atom=payload.atom(operation))
+        operation.atom.verify(operation)
+        self.current.operations.append(operation)
 
     def lookup(self, node, env):
         if node.kind == "reference":
@@ -372,3 +382,29 @@ class LoweringTests(unittest.TestCase):
         result = self.compile('x = 0\nclass foo:\n    x = 1\n    def add(a):\n        local.x: local int = 2 + self.x\n        return local.x + a\n    def outer() -> int:\n        return module.x\n    def pending() -> int:\n        unimplemented\n')
         self.assertFalse(result.diagnostics, "\n".join(map(str, result.diagnostics)))
         verify_native(render(lower(result.program)))
+
+
+class AtomPipelineTests(unittest.TestCase):
+    def compile(self, text):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source("atoms.sev", text, Syntax())
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        return result.program
+
+    def test_compound_assignment_reaches_typed_atoms(self):
+        program = self.compile("def example() -> int:\n    a = 1\n    a += 2\n    return a\n")
+        operations = [o for body in program.bodies for block in body.blocks for o in block.operations]
+        self.assertTrue(operations)
+        self.assertTrue(all(o.atom is not None for o in operations))
+        from py_compiler.lir.src.lib import lower
+        self.assertIn("arith.addi", lower(program, "x86_64-unknown-linux-gnu", 64).text())
+
+    def test_enum_owns_ordering_without_integer_family(self):
+        program = self.compile("def example() -> bool:\n    return BigO.constant < BigO.linear\n")
+        operation = next(o for body in program.bodies for block in body.blocks for o in block.operations if o.kind == "scalar")
+        self.assertEqual(operation.atom.owner.family, "enum")
+        self.assertEqual(operation.atom.ownership, ("view", "copy"))
+
+    def test_user_enum_uses_its_own_variants(self):
+        self.compile("enum Colour:\n    Red\n    Blue\ndef example() -> bool:\n    return Colour.Red < Colour.Blue\n")

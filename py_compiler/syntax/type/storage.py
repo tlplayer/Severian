@@ -21,6 +21,12 @@ class GlobalPlace:
     def write(self, cfg, value, span):
         cfg.effect("write", (value,), self, span)
 
+    def atom(self, operation):
+        from py_compiler.syntax.generic.atom import Atom
+        if operation.result is not None:
+            return Atom(self, (), self.type, (), ('read',), self)
+        return Atom(self, (self.type,), None, ('copy',), ('mutation',), self)
+
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name
         suffix = str(operation.result.identity) if operation.result else f"store_{operation.span.start}_{operation.operands[-1].identity}"
@@ -45,6 +51,12 @@ class FieldPlace:
 
     def write(self, cfg, value, span):
         cfg.effect("write", (self.receiver, value), self, span)
+
+    def atom(self, operation):
+        from py_compiler.syntax.generic.atom import Atom
+        if operation.result is not None:
+            return Atom(self, (self.receiver.type,), self.type, ('view',), ('read',), self)
+        return Atom(self, (self.receiver.type, self.type), None, ('borrow', 'copy'), ('mutation',), self)
 
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name

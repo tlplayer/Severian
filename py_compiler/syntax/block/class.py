@@ -19,7 +19,7 @@ class Class(RecordProvider):
         declaration = TypeDeclaration(node.identity, ".".join((*context.scope, node.header[0].text)), self.spelling,
                                       fields, (), traits, node.span, context.source.path, defaults)
         context.register(declaration)
-        context.types[declaration.name] = ObjectType(declaration.name, "record", "!llvm.ptr")
+        context.types[declaration.name] = ObjectType(declaration.name, "record", "!llvm.ptr", declaration=declaration)
         context.tags[declaration.name] = len(context.tags) + 1
         for trait_name in traits:
             context.require(trait_name, lambda provider, target: provider.satisfy(target, declaration))
