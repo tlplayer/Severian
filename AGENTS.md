@@ -3,7 +3,6 @@ DO
 2. Only after 1 can you build to make sure it builds
 DONT RUN TESTS, give me the test to run
 NEVER NEVER NEVER UNDO if you do something wrong. I CAN DO THAT. YOU DO WHAT I SAY.
-DONT add python scripts that just test, add tests and have the rust compiler run them in severian
 PUT TESTS in the same file they test against with test blocks following the code. NOT A NEW FILE.
 NO TASK SHOULD TAKE LONGER THAN 10 MINUTES if builds hold it back that's a problem of not implementing and handing off the build to the human. Humans build/run/create regression tests not agents. 
 Dont touch MD files, they just glob/pollute the namespace and you make bad decisions vs me. 
@@ -13,7 +12,7 @@ IIF you are building rust can you run the rust compiler to validate the change. 
 Only after after rust/sev implementation is COMPLETE 100%! not partial, can you run tests and builds in severian
 
 ```
-sev_rust # Rust compiler
+sev_py # Rust compiler
 sev # sev_compiler 
 sev update # Updates to latest version  
 

@@ -1,0 +1,10 @@
+{
+  "package": {"name": "py_compiler", "version": "0.1.0", "edition": "2026"},
+  "metadata": {
+    "implementation": "python",
+    "entry": "python3 -m py_compiler",
+    "requires-python": ">=3.10",
+    "milestone": "primitive-values-and-keyword-recognition",
+    "verification": "mlir-opt"
+  }
+}
