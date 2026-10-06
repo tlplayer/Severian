@@ -1,11 +1,11 @@
 
-CONSTANT_VARIABLE = "Hello"
+CONSTANT_VARIABLE = view 1
 
-def main():
-    mutable_variable := ","
-    mutable_variable += " World!"
-    print(CONSTANT_VARIABLE+mutable_variable)
 
-test with integ:
-    main()
-    assert("Hello, World!" in stdout)
+    
+
+test:
+    mutable = CONSTANT_VARIABLE
+    constant_binding := mutable
+    mutable += 1
+    assert()
