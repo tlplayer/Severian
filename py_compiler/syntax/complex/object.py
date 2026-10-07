@@ -12,6 +12,10 @@ class ObjectType:
     declaration: object = None
 
     @property
+    def parameter_ownership(self):
+        return getattr(self.declaration, 'parameter_ownership', 'view')
+
+    @property
     def binding_ownership(self):
         if self.declaration is None:
             raise ValueError(f"{self.name} has no defining ownership contract")
@@ -54,11 +58,12 @@ class Allocate:
 class Invoke:
     symbol: str
     result_type: object
+    ownership: tuple = ()
 
     def atom(self, operation):
         from py_compiler.syntax.generic.atom import Atom
         return Atom(self, tuple(v.type for v in operation.operands), self.result_type if self.result_type.mlir else None,
-                    tuple('view' for _ in operation.operands), ('call',), self)
+                    self.ownership or tuple('view' for _ in operation.operands), ('call',), self)
 
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name

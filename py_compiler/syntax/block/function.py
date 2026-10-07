@@ -60,7 +60,8 @@ class Function(DeclarationProvider):
             type_ = context.type(annotation) if annotation else None
             if type_ and not type_.mlir:
                 raise ValueError("parameter has no value representation")
-            binding = Binding(node.identity + ":" + parameter, parameter, type_, False, "own", node.span)
+            mode = entry.parameter_ownership.get(parameter, getattr(type_, 'parameter_ownership', 'view'))
+            binding = Binding(node.identity + ":" + parameter, parameter, type_, False, mode, node.span)
             value = builder.value(type_)
             env[binding.name], builder.values[binding.identity] = binding, value
             builder.body.bindings.append(binding)

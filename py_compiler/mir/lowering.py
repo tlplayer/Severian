@@ -47,6 +47,7 @@ class Builder:
         self.phases = None
         self.imported = {}
         self.unsafe_depth = 0
+        self.active_scopes = []
 
     def value(self, type_):
         value = Value(self.next_value, type_)
@@ -97,7 +98,10 @@ class Builder:
             raise ValueError("constructor reads a field before initialization")
         if identity in self.storage:
             return self.storage[identity].read(self, span)
-        return self.values[identity]
+        value = self.values[identity]
+        if binding.type != value.type and callable(getattr(binding.type, 'from_value', None)):
+            return binding.type.from_value(value, self, span)
+        return value
 
     def infer(self, binding, type_, env):
         previous = self.values[binding.identity].type
@@ -107,7 +111,7 @@ class Builder:
             type_ = previous
         if type_ is None:
             raise ValueError(f"type of {binding.name!r} requires an annotation or expected type")
-        updated = replace(binding, type=type_)
+        updated = replace(binding, type=type_, ownership=getattr(type_, 'parameter_ownership', binding.ownership))
         value = self.values[binding.identity]
         value = Value(value.identity, type_)
         self.values[binding.identity] = value
@@ -137,6 +141,10 @@ class Builder:
         if expected and expected.family == "union":
             from py_compiler.syntax.function.calls import coerce
             return coerce(self.expr(node, env), expected, self, token.span)
+        if node.kind == "index":
+            receiver = self.expr(node.operands[0], env)
+            place = receiver.type.element_place(receiver, node.operands[1], self, env, token.span)
+            return place.read(self, token.span)
         if node.kind in ("call", "member"):
             from py_compiler.syntax.function.calls import lower_expression
             value = lower_expression(node, self, env, expected)
@@ -203,6 +211,18 @@ class Builder:
                 return provider.lower(node, self, env, local_names)
         raise ValueError("sentence has no registered syntax provider")
 
+    def cleanup_memory(self, bindings, span):
+        seen = set()
+        for binding in reversed(list(bindings)):
+            if binding.identity in seen or binding.identity in self.flow.moved:
+                continue
+            seen.add(binding.identity)
+            release = getattr(binding.type, 'release', None)
+            if release is not None and binding.ownership in ('own', 'move', 'copy', 'mirror'):
+                value = self.read_binding(binding, span)
+                self.flow.drop(binding)
+                release(value, self, span)
+
     def scope(self, nodes, env, declarations=False, local_names=None):
         local_names = set() if local_names is None else local_names
         previous_scope = self.declaration_scope
@@ -213,6 +233,7 @@ class Builder:
         previous = self.local_names
         self.local_names = local_names
         index = 0
+        self.active_scopes.append(env)
         try:
             while index < len(nodes):
                 node = nodes[index]
@@ -229,7 +250,10 @@ class Builder:
                     index += node.provider.lower(node, self, env, nodes, index)
                     if self.phases and self.current.terminator is None:
                         self.phases.during()
+            if nodes and self.current.terminator is None:
+                self.cleanup_memory((env[n] for n in local_names if n in env), nodes[-1].span)
         finally:
+            self.active_scopes.pop()
             self.local_names = previous
             self.declaration_scope = previous_scope
 

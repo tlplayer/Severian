@@ -25,6 +25,14 @@ def expression(tokens):
     return syntax.registry.construct('F', window)
 
 
+def type_spelling(node):
+    if node.kind == 'name':
+        return node.token.text
+    if node.kind == 'index':
+        return type_spelling(node.operands[0]) + '[' + type_spelling(node.operands[1]) + ']'
+    raise ValueError('expected a concrete type argument')
+
+
 def parse_expression(tokens, syntax):
     from py_compiler.syntax.function.grammar import operators
     bindings = {grammar.spelling: grammar for grammar in operators(syntax)}
@@ -54,7 +62,16 @@ def parse_expression(tokens, syntax):
             left = Expression("name", token)
         else:
             raise ValueError(f"unsupported expression keyword {token.text!r}")
-        while cursor[0] < len(tokens) and tokens[cursor[0]].text in ("(", "."):
+        while cursor[0] < len(tokens) and tokens[cursor[0]].text in ("(", ".", "["):
+            if tokens[cursor[0]].text == "[":
+                bracket = tokens[cursor[0]]
+                cursor[0] += 1
+                index = parse()
+                if cursor[0] == len(tokens) or tokens[cursor[0]].text != "]":
+                    raise ValueError("expected closing index bracket")
+                cursor[0] += 1
+                left = Expression("index", bracket, (left, index))
+                continue
             if tokens[cursor[0]].text == ".":
                 cursor[0] += 1
                 if cursor[0] == len(tokens) or tokens[cursor[0]].kind != "IDENTIFIER":

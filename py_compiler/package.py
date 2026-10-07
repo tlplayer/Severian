@@ -154,9 +154,14 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
                                      *realization["native-artifacts"]])
     realization["initializers"] = [body.name for body in program.bodies if not body.declaration]
     # No native layout is claimed before target data-layout conversion.
+    represented = {constant.type.name: constant.type for constant in program.constants}
+    for body in program.bodies:
+        for block in body.blocks:
+            for value in (*block.parameters, *(o.result for o in block.operations if o.result is not None)):
+                represented[value.type.name] = value.type
     layouts = {"abi": abi_id, "state": "representation-only", "native-layouts": [],
-               "representations": [{"type": t.name, "mlir": t.mlir, "bits": t.bits}
-                                   for t in {t.name: t for t in syntax.types.values()}.values()]}
+               "representations": [{"type": t.name, "mlir": t.mlir, "bits": getattr(t, 'bits', 0)}
+                                   for t in represented.values()]}
     pending = {ir_path: ir, llvm_path: native.llvm_ir, lowered_path: native.llvm_dialect, interface_path: interface_text, realization_path: encode(realization),
                f"metadata/symbols/{build_id}.json": encode(symbols),
                f"metadata/dependencies/{build_id}.json": encode([{"submodule": sub.identity, "declarations": sub.declarations, "dependencies": sub.dependencies} for sub in program.submodules]),

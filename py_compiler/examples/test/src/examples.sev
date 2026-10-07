@@ -2,3 +2,21 @@ version := 1
 
 test "example package":
     assert(version == 1)
+
+
+def fill_integer_memory(values: borrow array[int]):
+    values[0] = 42
+
+
+def read_integer_memory(values: array[int]) -> int:
+    return values[0]
+
+
+test "integer array allocation and pointer view":
+    unsafe:
+        values: array[int] = allocate[int](128)
+        fill_integer_memory(values)
+        address: pointer[int] = view values
+        assert(address[0] == 42)
+        assert(read_integer_memory(values) == 42)
+        deallocate[int](values)

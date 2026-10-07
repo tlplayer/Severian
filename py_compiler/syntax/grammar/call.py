@@ -18,7 +18,9 @@ class Call:
         term = expression(node.tokens)
         if term.kind != 'call':
             raise ValueError('expression statement requires a call')
-        cfg.expr(term, env)
+        value = cfg.expr(term, env)
+        if value and callable(getattr(value.type, 'release', None)):
+            raise ValueError('owning memory result must be bound or returned')
 
 
 import unittest

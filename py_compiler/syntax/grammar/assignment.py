@@ -37,6 +37,25 @@ class Assignment:
             else:
                 place.write(cfg, value, node.span)
             return
+        if assignment is not None and any(t.text == '[' for t in items[:assignment]) and not any(t.text == ':' for t in items[:assignment]):
+            left = expression(items[:assignment])
+            if left.kind != 'index':
+                raise ValueError('assignment target is not an indexed place')
+            subject, index = left.operands
+            owner = cfg.lookup(subject, env) if subject.kind in ('name', 'reference') else None
+            if owner is None or owner.ownership == 'view':
+                raise ValueError('indexed mutation requires an owner or borrow parameter')
+            receiver = cfg.expr(subject, env)
+            place = receiver.type.element_place(receiver, index, cfg, env, node.span)
+            value = cfg.expr(expression(items[assignment + 1:]), env, place.type)
+            operator = items[assignment].text
+            if operator == '=':
+                place.write(cfg, value, node.span)
+            elif operator == ':=':
+                raise ValueError('indexed storage is already declared')
+            else:
+                select(place.type, 'O.assignment', operator).expand(cfg, AddressPlace(place, owner), value, node.span)
+            return
         destination = env
         qualified = None
         if len(items) > 2 and items[0].text in cfg.syntax.scope_providers and items[1].text == ".":
@@ -54,9 +73,8 @@ class Assignment:
                 qualified = items[2].text
                 destination = cfg.syntax.scope_providers[qualified].bindings(cfg, env)
                 items = items[:2] + items[3:]
-            if len(items) < 5 or items[2].text not in cfg.syntax.types:
-                raise ValueError("binding requires a resolved primitive annotation and initializer")
-            annotation, position = cfg.syntax.types[items[2].text], 3
+            position = next((i for i in range(2, len(items)) if items[i].text in assignments), len(items))
+            annotation = cfg.context.type(''.join(t.text for t in items[2:position]))
         if position >= len(items) or items[position].text not in assignments:
             raise ValueError("expected a binding or assignment")
         operator = items[position].text
@@ -64,6 +82,11 @@ class Assignment:
         mode = rhs.token.text if rhs.kind == "unary" and rhs.token.text in OWNERSHIP else None
         core = rhs.operands[0] if mode else rhs
         owner = cfg.lookup(core, env) if core.kind in ("name", "reference") else None
+        if core.kind == 'call' and core.operands[0].kind == 'index' and core.operands[0].operands[0].token.text == 'pointer':
+            source = core.operands[1] if len(core.operands) == 2 else None
+            owner = cfg.lookup(source, env) if source and source.kind in ('name', 'reference') else None
+            if owner is None:
+                raise ValueError('pointer conversion requires a live array binding')
         existing = destination.get(first.text)
         if not existing and qualified is None and first.text in cfg.namespaces.get("self", {}):
             destination = cfg.namespaces["self"]
@@ -87,7 +110,11 @@ class Assignment:
             raise ValueError(f"initializer {value.type.name} does not satisfy {expected.name}")
         if value is None:
             raise ValueError("a no-result call cannot initialize a binding")
-        if mode == "copy":
+        if owner and callable(getattr(owner.type, 'release', None)) and not callable(getattr(value.type, 'release', None)) and mode in ('move', 'copy', 'mirror'):
+            raise ValueError('address conversion cannot transfer array allocation ownership; use view or borrow')
+        if mode in ("copy", "mirror") and callable(getattr(value.type, 'copy_value', None)):
+            value = value.type.copy_value(value, cfg, node.span)
+        elif mode == "copy":
             provider = cfg.context.provider_by_name.get(value.type.name) if cfg.context else None
             if hasattr(provider, "copy_value"):
                 value = provider.copy_value(value, cfg, node.span)
@@ -108,6 +135,8 @@ class Assignment:
             select(existing.type, 'O.assignment', operator).expand(cfg, BindingPlace(existing), value, node.span)
             return
         if existing:
+            if callable(getattr(existing.type, 'release', None)):
+                raise ValueError('memory rebinding requires a new binding; release the previous owner explicitly')
             cfg.flow.replace(existing)
             if existing.type != value.type:
                 raise ValueError("assignment changes the binding's type")

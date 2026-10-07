@@ -8,5 +8,5 @@ class Ownership(PrefixOperator):
         return Expression('unary', token, (parse(6),))
 
 
-OPERATORS = tuple(Ownership(name) for name in ('copy', 'view', 'borrow', 'move'))
+OPERATORS = tuple(Ownership(name) for name in ('copy', 'view', 'borrow', 'move', 'mirror'))
 OWNERSHIP = frozenset(owner.name for owner in OPERATORS)

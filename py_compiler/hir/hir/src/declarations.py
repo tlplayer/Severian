@@ -64,6 +64,14 @@ class DeclarationContext:
             self.scope = previous
 
     def type(self, name):
+        name = name.replace(" ", "")
+        if "[" in name and name.endswith("]"):
+            base, argument = name[:-1].split("[", 1)
+            definition = self.types.get(base)
+            specialize = getattr(definition, "specialize", None)
+            if specialize is None:
+                raise ValueError(f"{base} has no generic type provider")
+            return specialize(self.type(argument))
         if '|' in name:
             from py_compiler.syntax.block.union import Union
             union = Union().resolve(self.type(part.strip()) for part in name.split('|'))

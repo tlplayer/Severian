@@ -2,6 +2,7 @@
 
 
 class Collection:
+    parameter_ownership = 'view'
     @property
     def binding_ownership(self):
         return 'view'

@@ -44,8 +44,16 @@ def type_definitions(pointer_bits):
     from py_compiler.syntax.complex.string import STRING
     result = primitives(pointer_bits)
     result[STRING.name] = STRING
+    from py_compiler.syntax.complex.array import Array
+    result['array'] = Array()
     result.update((owner.name, owner) for owner in instantiate(TYPES))
     return result
+
+
+def builtin_call_providers():
+    from py_compiler.syntax.function.allocate import Allocate
+    from py_compiler.syntax.function.deallocate import Deallocate
+    return {'allocate': Allocate(), 'deallocate': Deallocate()}
 
 
 def context_type_definitions():

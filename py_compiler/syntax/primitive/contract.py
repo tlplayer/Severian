@@ -11,6 +11,10 @@ class Primitive:
     conversion_sources = frozenset()
 
     @property
+    def parameter_ownership(self):
+        return 'copy'
+
+    @property
     def no_result(self):
         return False
 

@@ -19,6 +19,7 @@ class Callable:
     obligations: tuple = ()
     suffix: tuple = ()
     imports: tuple = ()
+    parameter_ownership: dict = field(default_factory=dict)
 
     @property
     def symbol(self):
@@ -33,6 +34,7 @@ def signature(node, owner=""):
     if end < 2:
         raise ValueError("missing parameter-list delimiter")
     parameters, cursor = [], 2
+    parameter_ownership = {}
     while cursor < end:
         name = items[cursor].text
         if items[cursor].kind != "IDENTIFIER" or any(p[0] == name for p in parameters):
@@ -43,8 +45,19 @@ def signature(node, owner=""):
             cursor += 1
             if cursor == end:
                 raise ValueError("parameter annotation is missing")
-            type_name = items[cursor].text
-            cursor += 1
+            if items[cursor].text in ('view', 'move', 'borrow', 'copy', 'mirror'):
+                parameter_ownership[name] = items[cursor].text
+                cursor += 1
+            start, depth = cursor, 0
+            while cursor < end:
+                word = items[cursor].text
+                if word == ',' and depth == 0:
+                    break
+                depth += (word == '[') - (word == ']')
+                cursor += 1
+            type_name = ''.join(t.text for t in items[start:cursor])
+            if not type_name or depth:
+                raise ValueError('invalid parameter type')
         parameters.append((name, type_name))
         if cursor < end:
             if items[cursor].text != ",":
@@ -55,12 +68,11 @@ def signature(node, owner=""):
     if cursor < len(items) and items[cursor].text == "->":
         if cursor + 1 == len(items):
             raise ValueError("missing result annotation")
-        result, cursor = items[cursor + 1].text, cursor + 2
-        while cursor < len(items) and items[cursor].text == "|":
-            if cursor + 1 >= len(items):
-                raise ValueError("missing union variant")
-            result += " | " + items[cursor + 1].text
-            cursor += 2
+        cursor += 1
+        start = cursor
+        while cursor < len(items) and items[cursor].text != 'with':
+            cursor += 1
+        result = ''.join(t.text for t in items[start:cursor])
     if cursor < len(items):
         if items[cursor].text != "with" or cursor + 2 >= len(items) or items[cursor + 1].text != "{" or items[-1].text != "}":
             raise ValueError("with requires a braced acceptance contract")
@@ -79,7 +91,7 @@ def signature(node, owner=""):
         if token.text == "complexity" and index >= 2 and items[index - 1].text == "." and items[index - 2].text not in (items[0].text, "F"):
             raise ValueError("complexity contract must name its declaring function")
     return Callable(node, (owner + "." if owner else "") + items[0].text,
-                    tuple(parameters), result, tuple(guards), complexity=complexity, obligations=tuple(obligations), suffix=tuple(suffix))
+                    tuple(parameters), result, tuple(guards), complexity=complexity, obligations=tuple(obligations), suffix=tuple(suffix), parameter_ownership=parameter_ownership)
 
 
 def pure_predicate(node, parameters):

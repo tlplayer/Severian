@@ -52,6 +52,12 @@ class Conditional(BlockProvider):
             exits.append((cfg.current, initial_values, initial_flow))
         if not exits:
             return
+        for binding in outer:
+            if callable(getattr(binding.type, 'release', None)):
+                moved = {binding.identity in flow.moved for _, _, flow in exits}
+                if len(moved) != 1:
+                    raise ValueError('memory ownership must agree across continuing branches')
+        outer = tuple(b for b in outer if not (callable(getattr(b.type, 'release', None)) and b.identity in exits[0][2].moved))
         join = cfg.block(tuple(b.type for b in outer))
         for block, values, _ in exits:
             block.terminator = Terminator("jump", (Edge(join.identity, tuple(values[b.identity] for b in outer)),))

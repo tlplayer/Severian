@@ -13,6 +13,9 @@ def literal_value(value, type_, cfg, span):
 def coerce(value, expected, cfg, span):
     if value is None:
         raise ValueError('a no-result call cannot initialize a value')
+    conversion = getattr(expected, 'from_value', None)
+    if conversion is not None and value.type != expected:
+        return conversion(value, cfg, span)
     if expected is None or value.type == expected:
         return value
     if expected.family == "union" and value.type in expected.variants:
@@ -51,7 +54,36 @@ def select(entries, arguments, cfg, env):
         raise ValueError('no callable matches the argument types')
     if len(candidates) != 1:
         raise ValueError('ambiguous callable overload; use an explicit argument type')
-    return candidates[0], tuple(values)
+    entry = candidates[0]
+    loans = []
+    consumed = set()
+    for index, (argument, value, (parameter, _)) in enumerate(zip(arguments, values, entry.parameters)):
+        mode = entry.parameter_ownership.get(parameter, getattr(value.type, 'parameter_ownership', 'view'))
+        binding = cfg.lookup(argument, env) if argument.kind in ('name', 'reference') else None
+        if binding is None and mode in ('view', 'borrow') and callable(getattr(value.type, 'release', None)):
+            raise ValueError('memory arguments passed by view or borrow require a live binding')
+        if mode == 'move' and binding:
+            if binding.ownership in ('view', 'borrow'):
+                raise ValueError('cannot move owned storage from a view or borrow')
+            identity = cfg.flow.resolve(binding.identity)
+            if identity in consumed or any(owner == identity for _, owner in loans):
+                raise ValueError('call arguments alias moved storage')
+            consumed.add(identity)
+            cfg.flow.move(binding)
+        elif mode in ('copy', 'mirror'):
+            copy_value = getattr(value.type, 'copy_value', None)
+            if copy_value:
+                values[index] = copy_value(value, cfg, argument.token.span)
+            elif value.type.binding_ownership != 'copy':
+                raise ValueError(f'{value.type.name} has no {mode} passing implementation')
+        elif binding:
+            identity = cfg.flow.resolve(binding.identity)
+            if identity in consumed or any(owner == identity and (mode == 'borrow' or previous == 'borrow') for previous, owner in loans):
+                raise ValueError('call arguments have conflicting ownership')
+            if mode == 'borrow' and binding.ownership == 'view':
+                raise ValueError('cannot pass a view as a mutable borrow')
+            loans.append((mode, identity))
+    return entry, tuple(values)
 
 
 def invoke(entry, values, cfg, span, receiver=None):
@@ -62,7 +94,11 @@ def invoke(entry, values, cfg, span, receiver=None):
             raise ValueError('method call requires a receiver')
         operands = (receiver, *operands)
     result = cfg.context.type(entry.result or 'absent')
-    operation = Invoke(entry.symbol, result)
+    modes = tuple(entry.parameter_ownership.get(parameter, getattr(value.type, 'parameter_ownership', 'view'))
+                  for value, (parameter, _) in zip(values, entry.parameters))
+    modes = tuple('move' if mode in ('copy', 'mirror') and callable(getattr(value.type, 'release', None)) else ('copy' if mode == 'mirror' else mode)
+                  for mode, value in zip(modes, values))
+    operation = Invoke(entry.symbol, result, (('view',) if entry.receiver else ()) + modes)
     if not result.mlir:
         cfg.effect('call', operands, operation, span)
         return None
@@ -149,6 +185,19 @@ def lower_expression(node, cfg, env, expected=None):
             raise ValueError('type has no field access provider')
         return coerce(provider.field_place(receiver, node.token.text, cfg, span).read(cfg, span), expected, cfg, span)
     callee, *arguments = node.operands
+    from py_compiler.syntax.prelude import builtin_call_providers
+    base, argument = (callee.operands if callee.kind == 'index' else (callee, None))
+    builtin = builtin_call_providers().get(base.token.text) if base.kind == 'name' else None
+    if builtin is not None:
+        from py_compiler.syntax.grammar.expression import type_spelling
+        type_argument = context.type(type_spelling(argument)) if argument is not None else None
+        return coerce(builtin.call(type_argument, arguments, cfg, env, span), expected, cfg, span) if expected else builtin.call(type_argument, arguments, cfg, env, span)
+    if callee.kind == 'index' and base.kind == 'name' and base.token.text == 'pointer':
+        if len(arguments) != 1:
+            raise ValueError('pointer[T] expects one array')
+        from py_compiler.syntax.grammar.expression import type_spelling
+        target = context.type('pointer[' + type_spelling(argument) + ']')
+        return target.from_value(cfg.expr(arguments[0], env), cfg, span)
     receiver = None
     receiver_binding = None
     if callee.kind == 'name':
