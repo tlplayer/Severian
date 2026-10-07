@@ -1,2 +1,0 @@
-# Core facade. Primitive declarations are compiler-owned axioms; this library
-# builds higher-level behavior on top of them.
