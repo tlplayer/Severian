@@ -12,7 +12,7 @@ Superseded by:
 
 | Block |
 |---|
-| `global` |
+| `module` |
 | `main` |
 | `def` |
 | `operator` |
@@ -27,8 +27,8 @@ Superseded by:
 | `for` |
 | `while` |
 | `match` |
-| `switch` |
 | `case` |
+| `grammar` |
 | `try` |
 | `catch` |
 | `with` |

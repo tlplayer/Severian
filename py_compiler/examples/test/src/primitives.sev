@@ -1,4 +1,4 @@
-# Primitive literal materializers. Blocks and operators are later milestones.
+# Primitive literal and representation fixtures.
 signed8: i8 = -128
 signed16: i16 = -32768
 signed32: i32 = -2147483648
@@ -20,7 +20,7 @@ enabled: bool = true
 disabled: bool = false
 letter: char = 'λ'
 emoji: char = '\u{1f600}'
-label: string = "geometry λ"
+label: string = "test λ"
 address: pointer = pointer(0)
 missing = None
 unavailable = absent

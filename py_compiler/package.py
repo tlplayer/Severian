@@ -209,7 +209,7 @@ class PackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "src").mkdir()
-            (root / "package.json").write_text(encode({"package": {"name": "geometry", "version": "0.1.0"}}))
+            (root / "package.json").write_text(encode({"package": {"name": "test", "version": "0.1.0"}}))
             (root / "src/constants.sev").write_text("size: i32 = 42\ntext = \"λ\"\n")
             first, second = build(root), build(root)
             self.assertEqual(first["build-id"], second["build-id"])
