@@ -28,6 +28,7 @@ It's very useful to avoid desyncing and retyping it also allows backwards compat
 | `import "file.sev" as functions` | Bind the imported namespace as `functions` |
 | `import foo as bar from "file.sev"` | Introduce `bar` into this scope |
 | `defer as suffix` | Add `suffix` as another spelling of `defer`; retain both |
+| `with profile as:\nimport * from time\n import * from memory` | Import packs of packages on test functions |
 ```
 class X:
     def yards(feet):
@@ -40,6 +41,14 @@ defer foo()
 suffix foo()
 # Both select the same grammar and operation.
 # Both defer execution. 
+
+with pack as:
+    import * from x
+    import * from y
+    import * from z
+
+test with pack "importing multiple things at once for tests":
+    assert(x.value+y.value+z.value == 0)
 ```
 ## Testing
 
