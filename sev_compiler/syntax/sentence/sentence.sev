@@ -65,7 +65,7 @@ class SentenceMatch:
     source: u32 | None = None
 
 # Type/shape filtering precedes every value predicate, as required by SIP-0000.
-# A nested sentence is one classified term with children in the parser's arena.
+# A nested grammar is one classified term with children in the parser's arena.
 def accepts_shape(grammar: Grammar, terms: list[Term]) -> bool:
     # Repeated captures require the window matcher; fixed-arity matching must
     # not silently reinterpret them as single captures during migration.
@@ -84,7 +84,7 @@ def accepts_shape(grammar: Grammar, terms: list[Term]) -> bool:
                     return false
     return true
 
-def match_sentence(definitions: list[SentenceDefinition], terms: list[Term], satisfies: (Term, string) -> bool) -> SentenceMatch | Error:
+def match_grammar(definitions: list[SentenceDefinition], terms: list[Term], satisfies: (Term, string) -> bool) -> SentenceMatch | Error:
     candidates: list[SentenceDefinition] = []
     for definition in definitions:
         if accepts_shape(definition.grammar, terms):
@@ -106,24 +106,24 @@ def match_sentence(definitions: list[SentenceDefinition], terms: list[Term], sat
                         break
                     for previous in captures:
                         if previous.name == name:
-                            throw Error("duplicate sentence capture: " + name)
+                            throw Error("duplicate grammar capture: " + name)
                     captures.append(Capture(name, terms[index]))
         if accepted:
             matches.append(SentenceMatch(definition, captures, terms[0].start if len(terms) > 0 else 0, terms[-1].end if len(terms) > 0 else 0, terms[0].source if len(terms) > 0 else None))
     if len(matches) == 0:
-        throw Error("no sentence matches the supplied terms and constraints")
+        throw Error("no grammar matches the supplied terms and constraints")
     if len(matches) != 1:
         names: list[string] = []
         for candidate in matches:
             names.append(candidate.definition.package + "." + candidate.definition.name)
-        throw Error("ambiguous sentence dispatch: " + names.join(", "))
+        throw Error("ambiguous grammar dispatch: " + names.join(", "))
     return matches[0]
 
-def resolve_sentence(selected: SentenceMatch) -> SemanticObject:
+def resolve_grammar(selected: SentenceMatch) -> SemanticObject:
     return SemanticObject(selected.definition.semantic_interface, selected.captures, selected.start, selected.end, selected.source)
 
 # Package-provided declarations converge on the same semantic interface.
-def iteration_sentences() -> list[SentenceDefinition]:
+def iteration_grammars() -> list[SentenceDefinition]:
     basic: list[SentenceField] = [SentenceField.Literal("for"), SentenceField.Capture("item", TermRole.Pattern, []), SentenceField.Literal("in"), SentenceField.Capture("source", TermRole.Container, ["Iterable"])]
     extended = basic[:]
     extended.append(SentenceField.Literal("with"))
@@ -157,7 +157,7 @@ class MatchArm:
     pattern: Expression | None = None
 
 
-# Parsed sentence operations retain their existing variant/constructor names.
+# Parsed grammar operations retain their existing variant/constructor names.
 enum Statement:
     Defer(value: Expression, span: source.Span)
     Unsafe(body: Block, span: source.Span)

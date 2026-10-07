@@ -1,5 +1,5 @@
 
-# This should use sentences because tuples are (...)
+# This should use grammars because tuples are (...)
 trait TupleSyntax: G
     symbol: Y = "("
     form: GrammarForm = GrammarForm.Delimited

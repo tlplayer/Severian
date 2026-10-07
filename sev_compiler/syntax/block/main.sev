@@ -9,18 +9,18 @@ class main: Y + B
     declaration_name: string = "main"
     context: BlockContext = BlockContext()
     span: source.Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: global
     body: B
     parameters: list[FunctionParameter] = []
     result: TypeAnnotation | None = None
 
-    sentence main["def", "main", "(", parameters...: FunctionParameter, ")", ":"]() -> B:
+    grammar main["def", "main", "(", parameters...: FunctionParameter, ")", ":"]() -> B:
         self.parameters = parameters
         return self
 
-    sentence typed_main["def", "main", "(", parameters...: FunctionParameter, ")", "->", result: TypeAnnotation, ":"]() -> B:
+    grammar typed_main["def", "main", "(", parameters...: FunctionParameter, ")", "->", result: TypeAnnotation, ":"]() -> B:
         self.parameters = parameters
         self.result = result
         return self

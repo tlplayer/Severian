@@ -201,8 +201,8 @@ import "../../syntax/block/if.sev" as _if_grammar
 import "../../syntax/primitive/bool/bool.sev" as _bool_grammar
 import "../../syntax/primitive/char/char.sev" as _character_grammar
 import "../../syntax/block/main.sev" as _main_grammar
-import "../../syntax/sentence/return.sev" as _return_grammar
-import Statement from "../../syntax/sentence/sentence.sev"
+import "../../syntax/grammar/return.sev" as _return_grammar
+import Statement from "../../syntax/grammar/grammar.sev"
 
 
 test "main with an integer return retains its body and type-owned capture":

@@ -12,5 +12,5 @@ def recognize_suffix(source: SourceFile, start: u32) -> u32 | None:
 class SuffixSyntax: Y
     token_forms: list[TokenForm] = [TokenForm("SUFFIX", "suffix", recognize=recognize_suffix)]
 
-    sentence attachment["suffix", condition: Expression]() -> WithAttachment:
+    grammar attachment["suffix", condition: Expression]() -> WithAttachment:
         return WithAttachment(AttachmentRole.Exit, condition)

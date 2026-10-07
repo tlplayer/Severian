@@ -5,7 +5,7 @@ import TypeAnnotation from "../type/annotation.sev"
 import LiteralSyntax from "../primitive/contract.sev"
 import Block from "../block/block.sev"
 import CompileRoute, Expression, ExpressionKind, FunctionDeclaration from "function.sev"
-import SentenceField from "../sentence/sentence.sev"
+import SentenceField from "../grammar/grammar.sev"
 import "lowering.sev" as _dependency_lowering
 
 # Source declaration and operator forms select callable implementations.

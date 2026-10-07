@@ -12,5 +12,5 @@ def recognize_fix(source: SourceFile, start: u32) -> u32 | None:
 class FixSyntax: Y
     token_forms: list[TokenForm] = [TokenForm("FIX", "fix", recognize=recognize_fix)]
 
-    sentence attachment["fix", condition: Expression]() -> WithAttachment:
+    grammar attachment["fix", condition: Expression]() -> WithAttachment:
         return WithAttachment(AttachmentRole.Fix, condition)

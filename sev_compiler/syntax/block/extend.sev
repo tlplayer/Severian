@@ -16,11 +16,11 @@ class ExtendBlock: Y + B
     token_forms: list[TokenForm] = [TokenForm("EXTEND", "extend", recognize=recognize_extend)]
     context: BlockContext = BlockContext()
     span: Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: B | None = None
     target: TypeAnnotation | None = None
 
-    sentence declaration["extend", target: TypeAnnotation, ":"]() -> B:
+    grammar declaration["extend", target: TypeAnnotation, ":"]() -> B:
         self.target = target
         return self

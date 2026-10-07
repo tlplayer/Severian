@@ -7,11 +7,11 @@ import elif from "elif.sev"
 class else: Y + B
     context: BlockContext = BlockContext()
     span: source.Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: B
     previous: if | elif
     body: B
 
-    sentence else["else", ":"]() -> B with self.previous.parent == self.parent:
+    grammar else["else", ":"]() -> B with self.previous.parent == self.parent:
         return self

@@ -171,7 +171,7 @@ def match_contract(input: list[TokenTerm], required: type | None, context: Gramm
     return matches
 
 
-def match_declared_sentence(input: list[TokenTerm], label: string) -> GrammarMatch | None | Diagnostic:
+def match_declared_grammar(input: list[TokenTerm], label: string) -> GrammarMatch | None | Diagnostic:
     for declaration, grammar in syntax.registry():
         if declaration is SyntaxDeclaration:
             if declaration.name == label:

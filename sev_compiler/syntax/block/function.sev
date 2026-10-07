@@ -9,7 +9,7 @@ import TypeAnnotation from "../type/annotation.sev"
 class function: Y + B
     context: BlockContext = BlockContext()
     span: source.Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: B
     body: B
@@ -19,18 +19,18 @@ class function: Y + B
     result: TypeAnnotation | None = None
 
     # A method named main remains an ordinary function in its owning scope.
-    sentence function["def", name: Symbol, "(", parameters...: FunctionParameter, ")", ":"]() -> B with name.name.value != "main" or not (self.parent is global):
+    grammar function["def", name: Symbol, "(", parameters...: FunctionParameter, ")", ":"]() -> B with name.name.value != "main" or not (self.parent is global):
         self.name = name
         self.parameters = parameters
         return self
 
-    sentence typed_function["def", name: Symbol, "(", parameters...: FunctionParameter, ")", "->", result: TypeAnnotation, ":"]() -> B with name.name.value != "main" or not (self.parent is global):
+    grammar typed_function["def", name: Symbol, "(", parameters...: FunctionParameter, ")", "->", result: TypeAnnotation, ":"]() -> B with name.name.value != "main" or not (self.parent is global):
         self.name = name
         self.parameters = parameters
         self.result = result
         return self
 
-    sentence generic_function["def", name: Symbol, "[", types...: TypeAnnotation, "]", "(", parameters...: FunctionParameter, ")", ":"]() -> B with {
+    grammar generic_function["def", name: Symbol, "[", types...: TypeAnnotation, "]", "(", parameters...: FunctionParameter, ")", ":"]() -> B with {
         name.name.value != "main" or not (self.parent is global),
         len(types) > 0,
     }:
@@ -39,7 +39,7 @@ class function: Y + B
         self.parameters = parameters
         return self
 
-    sentence generic_typed_function["def", name: Symbol, "[", types...: TypeAnnotation, "]", "(", parameters...: FunctionParameter, ")", "->", result: TypeAnnotation, ":"]() -> B with {
+    grammar generic_typed_function["def", name: Symbol, "[", types...: TypeAnnotation, "]", "(", parameters...: FunctionParameter, ")", "->", result: TypeAnnotation, ":"]() -> B with {
         name.name.value != "main" or not (self.parent is global),
         len(types) > 0,
     }:

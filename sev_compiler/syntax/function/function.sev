@@ -13,7 +13,7 @@ import AbiId, ArtifactId, BindingId, CompilerId, DeclarationId, DefinitionID, Ff
 import TypeAnnotation, TypeAnnotationKind, named_type, simple_type_name from "../type/annotation.sev"
 import LoweredFloatFormat, LoweredType from "../lowered.sev"
 import Associativity, BinaryOperator, Decorator, DecoratorValue, GenericConstraint, OperatorDeclaration, OperatorSyntax, TestMode, operator_syntax from "syntax.sev"
-import Grammar, MatchArm from "../sentence/sentence.sev"
+import Grammar, MatchArm from "../grammar/grammar.sev"
 import AttachmentRole, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, DispatchCandidate, DispatchFamily, ProofResult, WithAttachment from "../constraint/model.sev"
 import LiteralSyntax, LiteralConstruction, PrimitiveAlias, PrimitiveCategory, PrimitiveRepresentation from "../primitive/contract.sev"
 import LiteralValue, LiteralValueOf from "../grammar/resolution.sev"
@@ -117,7 +117,7 @@ class FunctionDeclaration:
     dispatch_predicates: list[Expression] = []
     # Artifact location only; declaration identity remains definition/semantic_key.
     lazy_body: string = ""
-    sentence: Grammar | None = None
+    grammar: Grammar | None = None
 
 
 def resolved_function(
@@ -169,7 +169,7 @@ class RecordDeclaration:
     source_name: string = ""
     extension_target: TypeAnnotation | None = None
     decorators: list[Decorator] = []
-    sentences: list[FunctionDeclaration] = []
+    grammars: list[FunctionDeclaration] = []
     mlir: MlirTypeBinding | None = None
     mlir_parameters: list[MlirTypeParameter] = []
     mlir_arguments: list[tuple[string, TypeId]] = []
@@ -305,7 +305,7 @@ enum Operation:
 
 
 # Functions use @mlir for operation identity; type declarations use it for a
-# type spelling. Both preserve the same parsed decorator/sentence data.
+# type spelling. Both preserve the same parsed decorator/grammar data.
 def declared_mlir_binding(decorators: list[Decorator], owner: string) -> MlirTypeBinding | None:
     selected: MlirTypeBinding | None := None
     for decorator in decorators:

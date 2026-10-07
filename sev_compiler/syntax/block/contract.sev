@@ -17,7 +17,7 @@ class BlockContract:
 
 
 def block_contract(declaration: RecordDeclaration) -> BlockContract | Error:
-    required = ["context", "span", "sentences", "subblocks"]
+    required = ["context", "span", "grammars", "subblocks"]
     for name in required:
         found := false
         for field in declaration.fields:
@@ -27,8 +27,8 @@ def block_contract(declaration: RecordDeclaration) -> BlockContract | Error:
             throw Error("block " + declaration.name + " must declare " + name)
     context := false
     for field in declaration.fields:
-        if field.name in ["sentences", "subblocks"]:
-            expected = "BlockSentence" if field.name == "sentences" else "SourceBlockId"
+        if field.name in ["grammars", "subblocks"]:
+            expected = "BlockSentence" if field.name == "grammars" else "SourceBlockId"
             match field.annotation.kind:
                 case Named(name, arguments):
                     if name != "list" or len(arguments) != 1:
@@ -43,15 +43,15 @@ def block_contract(declaration: RecordDeclaration) -> BlockContract | Error:
             context = true
     if not context:
         throw Error("block " + declaration.name + " must declare context: BlockContext")
-    if len(declaration.sentences) == 0:
-        throw Error("block " + declaration.name + " must declare a construction sentence")
-    for sentence in declaration.sentences:
-        grammar ?= sentence.sentence
-        result ?= sentence.result
-        if grammar == None or sentence.body == None or result == None:
-            throw Error("block sentence requires grammar, result and construction body")
+    if len(declaration.grammars) == 0:
+        throw Error("block " + declaration.name + " must declare a construction grammar")
+    for grammar in declaration.grammars:
+        grammar ?= grammar.grammar
+        result ?= grammar.result
+        if grammar == None or grammar.body == None or result == None:
+            throw Error("block grammar requires grammar, result and construction body")
         if result != None and simple_type_name(result) != "B":
-            throw Error("block construction sentence must return B")
+            throw Error("block construction grammar must return B")
         if grammar != None:
             captures: list[string] = []
             index := 0
@@ -62,7 +62,7 @@ def block_contract(declaration: RecordDeclaration) -> BlockContract | Error:
                             throw Error("duplicate block capture " + name)
                         captures.append(name)
                         found := false
-                        for parameter in sentence.parameters:
+                        for parameter in grammar.parameters:
                             if parameter.name == name:
                                 found = true
                                 if parameter.variadic != (index in grammar.repetitions):
@@ -76,8 +76,8 @@ def block_contract(declaration: RecordDeclaration) -> BlockContract | Error:
             for repetition in grammar.repetitions:
                 if repetition < 0 or repetition >= len(grammar.fields):
                     throw Error("block repetition is outside its grammar")
-            if len(captures) != len(sentence.parameters):
-                throw Error("block parameters must correspond to sentence captures")
+            if len(captures) != len(grammar.parameters):
+                throw Error("block parameters must correspond to grammar captures")
     contract = BlockContract(declaration)
     for method in declaration.methods:
         if method.name == "lower":

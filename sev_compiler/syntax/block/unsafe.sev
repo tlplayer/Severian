@@ -16,9 +16,9 @@ class UnsafeBlock: Y + B
     token_forms: list[TokenForm] = [TokenForm("UNSAFE", "unsafe", recognize=recognize_unsafe)]
     context: BlockContext = BlockContext()
     span: Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: B | None = None
 
-    sentence region["unsafe", ":"]() -> B:
+    grammar region["unsafe", ":"]() -> B:
         return self

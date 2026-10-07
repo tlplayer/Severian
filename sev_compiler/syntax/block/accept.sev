@@ -16,9 +16,9 @@ class AcceptBlock: Y + B
     token_forms: list[TokenForm] = [TokenForm("ACCEPT", "accept", recognize=recognize_accept)]
     context: BlockContext = BlockContext()
     span: Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: B | None = None
 
-    sentence region["accept", ":"]() -> B:
+    grammar region["accept", ":"]() -> B:
         return self

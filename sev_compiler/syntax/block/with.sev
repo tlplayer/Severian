@@ -16,14 +16,14 @@ class WithBlock: Y + B
     token_forms: list[TokenForm] = [TokenForm("WITH", "with", recognize=recognize_with)]
     context: BlockContext = BlockContext()
     span: Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: B | None = None
     clauses: list[Expression] = []
 
-    sentence empty["with", ":"]() -> B:
+    grammar empty["with", ":"]() -> B:
         return self
 
-    sentence attached["with", clauses...: Expression, ":"]() -> B with len(clauses) > 0:
+    grammar attached["with", clauses...: Expression, ":"]() -> B with len(clauses) > 0:
         self.clauses = clauses
         return self

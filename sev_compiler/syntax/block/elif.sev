@@ -7,14 +7,14 @@ import if from "if.sev"
 class elif: Y + B
     context: BlockContext = BlockContext()
     span: source.Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: B
     previous: if | elif
     body: B
     conditions: list[bool] = []
 
-    sentence elif["elif", conditions...: bool, ":"]() -> B with {
+    grammar elif["elif", conditions...: bool, ":"]() -> B with {
         self.previous.parent == self.parent,
         len(conditions) > 0,
     }:

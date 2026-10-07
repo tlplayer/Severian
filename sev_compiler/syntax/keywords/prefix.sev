@@ -12,5 +12,5 @@ def recognize_prefix(source: SourceFile, start: u32) -> u32 | None:
 class PrefixSyntax: Y
     token_forms: list[TokenForm] = [TokenForm("PREFIX", "prefix", recognize=recognize_prefix)]
 
-    sentence attachment["prefix", condition: Expression]() -> WithAttachment:
+    grammar attachment["prefix", condition: Expression]() -> WithAttachment:
         return WithAttachment(AttachmentRole.Entry, condition)

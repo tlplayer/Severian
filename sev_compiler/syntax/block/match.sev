@@ -6,12 +6,12 @@ import Expression from "../function/function.sev"
 class match: Y + B
     context: BlockContext = BlockContext()
     span: source.Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: B
     body: B
     subject: Expression | None = None
 
-    sentence match["match", subject: Expression, ":"]() -> B:
+    grammar match["match", subject: Expression, ":"]() -> B:
         self.subject = subject
         return self

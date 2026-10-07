@@ -8,11 +8,11 @@ import require_resolved_block from "contract.sev"
 class global: Y + B
     context: BlockContext = BlockContext()
     span: source.Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: B | None = None
 
-    sentence global[]() -> B with self.parent == None:
+    grammar global[]() -> B with self.parent == None:
         return self
 
 

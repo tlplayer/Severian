@@ -1,16 +1,16 @@
-import Statement from "sentence.sev"
+import Statement from "grammar.sev"
 import Expression, ExpressionKind from "../function/function.sev"
 import LiteralValueOf from "../grammar/resolution.sev"
 import Span from "../../frontend/source/source.sev"
 import "../primitive/int/int.sev" as _integer_grammar
 
 
-# Construct a return operation; parsing this sentence never returns from or
+# Construct a return operation; parsing this grammar never returns from or
 # executes the source function. Integer spelling is handled by int.literal.
 class ReturnSyntax:
     span: Span
 
-    sentence integer_return["return", value: int]() -> Statement:
+    grammar integer_return["return", value: int]() -> Statement:
         expression = Expression(ExpressionKind.LiteralValue(LiteralValueOf[int](value)), self.span)
         return Statement.Return(expression, self.span)
 

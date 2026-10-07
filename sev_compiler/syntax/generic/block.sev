@@ -1,6 +1,6 @@
 import source
 import DefinitionID, ScopeId, ValueId from "../symbol/symbol.sev"
-import Capture from "../sentence/sentence.sev"
+import Capture from "../grammar/grammar.sev"
 import Expression, FunctionParameter, FunctionDeclaration, RecordDeclaration from "../function/function.sev"
 import TypeAnnotation from "../type/annotation.sev"
 import Lexeme from "lexeme.sev"
@@ -83,7 +83,7 @@ trait B:
     declaration_name: string = ""
     context: BlockContext
     span: source.Span | None
-    sentences: list[BlockSentence]
+    grammars: list[BlockSentence]
     subblocks: list[SourceBlockId]
     indentation_unit: string = "    "
 
@@ -120,7 +120,7 @@ trait ExecutableBlock: B
 class IndentedBlock: B
     context: BlockContext = BlockContext()
     span: source.Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
 
     def prefix(text: string) -> Lexeme:

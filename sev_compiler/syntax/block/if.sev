@@ -18,18 +18,18 @@ class IfKeyword: Y
     token_forms: list[TokenForm] = [TokenForm("IF", "if", recognize=recognize_if)]
 
 
-# The sentence belongs to the implementing block, including its CFG behavior.
+# The grammar belongs to the implementing block, including its CFG behavior.
 class if: Y + B + ExecutableBlock
     context: BlockContext = BlockContext()
     span: source.Span | None = None
-    sentences: list[BlockSentence] = []
+    grammars: list[BlockSentence] = []
     subblocks: list[SourceBlockId] = []
     parent: B
     body: B
 
     conditions: list[bool] = []
 
-    sentence if["if", conditions...: bool, ":"]() -> B:
+    grammar if["if", conditions...: bool, ":"]() -> B:
         self.conditions = conditions
         return self
 
