@@ -1,7 +1,7 @@
 """Shared field contract tools used by record-like syntax providers."""
 from dataclasses import dataclass
 from py_compiler.syntax.generic.block import DeclarationProvider
-from py_compiler.syntax.sentence.syntax import expression
+from py_compiler.syntax.grammar.expression import expression
 from py_compiler.frontend.parser.contract import Literal
 from py_compiler.hir.hir.src.program import resolve_literal
 

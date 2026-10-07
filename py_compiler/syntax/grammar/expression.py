@@ -9,7 +9,7 @@ class Expression:
     operands: tuple = ()
 
 
-OWNERSHIP = frozenset(("copy", "view", "borrow", "move"))
+from py_compiler.syntax.operator.ownership import OWNERSHIP
 
 
 def expression(tokens):
@@ -38,7 +38,7 @@ def parse_expression(tokens, syntax):
         owner = syntax.expression_providers.get(token.text)
         if owner is not None:
             left = owner.parse_prefix(token, parse, tokens, cursor)
-        elif token.text in OWNERSHIP or token.text in ("not", "+", "-", "~"):
+        elif token.text in ("not", "+", "-", "~"):
             left = Expression("unary", token, (parse(6),))
         elif token.text == "(":
             left = parse()

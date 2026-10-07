@@ -7,5 +7,5 @@ class Prefix(Keyword):
         super().__init__("prefix")
 
     def attach(self, tokens, guards, obligations, suffix):
-        from py_compiler.syntax.sentence.syntax import expression
+        from py_compiler.syntax.grammar.expression import expression
         guards.append(expression(tokens))

@@ -22,3 +22,9 @@ test with compiler "compound grammar rejects a view receiver":
             value = 2
             slot := view value
             slot += 3
+
+
+test "move and drop are prefix operators":
+    item = 3
+    moved := move item
+    drop moved

@@ -10,6 +10,7 @@ class Literal:
     spelling: str
     lexical_kind: str
     expected_type: str | None
+    explicit_constructor: bool = False
 
 
 @dataclass(frozen=True)

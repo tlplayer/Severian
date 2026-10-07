@@ -1,13 +1,13 @@
 """async callable owns prefix capture and its runtime lowering boundary."""
-from py_compiler.syntax.keywords.keyword import Keyword
+from py_compiler.syntax.operator.operation import PrefixOperator
 
 
-class Async(Keyword):
+class Async(PrefixOperator):
     def __init__(self):
         super().__init__("async")
 
     def parse_prefix(self, token, parse, tokens, cursor):
-        from py_compiler.syntax.sentence.syntax import Expression
+        from py_compiler.syntax.grammar.expression import Expression
         operation = parse(6)
         owner = None
         if cursor[0] < len(tokens) and tokens[cursor[0]].text == 'with':

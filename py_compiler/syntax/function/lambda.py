@@ -7,7 +7,7 @@ class Lambda(Keyword):
         super().__init__('lambda')
 
     def parse_prefix(self, token, parse, tokens, cursor):
-        from py_compiler.syntax.sentence.syntax import Expression
+        from py_compiler.syntax.grammar.expression import Expression
         names = []
         while cursor[0] < len(tokens) and tokens[cursor[0]].text != ':':
             name = tokens[cursor[0]]

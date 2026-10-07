@@ -1,1 +1,11 @@
 storage: byte = 4B
+
+def ratio(left: byte, right: byte) -> int:
+    return left / right
+
+test "byte quantities retain units":
+    assert(ratio(12B, 4B) == 3)
+    assert(12B // 5B == 2)
+    assert(12B % 5B == 2B)
+    assert(byte(8) == 8B)
+    assert(int(8B) == 8)

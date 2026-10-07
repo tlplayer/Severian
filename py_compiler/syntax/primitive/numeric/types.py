@@ -4,6 +4,7 @@ from py_compiler.syntax.primitive.numeric.grammar import NumericLiteral, scalar_
 
 
 class Integer(Primitive):
+    conversion_sources = frozenset(('integer', 'float', 'bool', 'char', 'byte', 'pointer'))
     def render_constant(self, value, symbol):
         return [], [f'%value = arith.constant {int(value)} : {self.mlir}']
 
@@ -32,6 +33,7 @@ class Integer(Primitive):
 
 
 class Float(Primitive):
+    conversion_sources = frozenset(('integer', 'float', 'bool'))
     def render_constant(self, value, symbol):
         spelling = str(value)
         if '.' not in spelling:

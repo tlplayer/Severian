@@ -2,6 +2,12 @@ from py_compiler.syntax.primitive.contract import Primitive
 
 
 class Pointer(Primitive):
+    conversion_sources = frozenset(('integer', 'pointer'))
+
+    def grammars(self):
+        from py_compiler.syntax.primitive.pointer.operations import grammars
+        return (*super().grammars(), *grammars(self))
+
     def require_context(self, context):
         if not getattr(context, 'unsafe_depth', 0):
             raise ValueError('pointer values require an unsafe block')

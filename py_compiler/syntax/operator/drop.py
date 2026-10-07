@@ -1,4 +1,10 @@
-class Drop:
+from py_compiler.syntax.operator.operation import PrefixOperator
+
+
+class Drop(PrefixOperator):
+    def __init__(self):
+        super().__init__("drop")
+
     def matches(self, node):
         return node.tokens[0].text == "drop"
 

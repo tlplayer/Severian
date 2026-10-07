@@ -29,8 +29,12 @@ class ByteLiteral(OwnedGrammar):
 
 
 class Byte(Integer):
+    conversion_sources = frozenset(('integer', 'byte'))
     def grammars(self):
-        return (*Primitive.grammars(self), ByteLiteral(self), *scalar_grammars(self))
+        from py_compiler.syntax.primitive.numeric.grammar import CompoundAssignment
+        return (*Primitive.grammars(self), ByteLiteral(self), *scalar_grammars(self),
+                ByteRatio(self, '/', 5), ByteRatio(self, '//', 5),
+                IntegerOperation(self, '%', 5), CompoundAssignment(self, '%'))
 
     def decode(self, spelling):
         text = spelling[:-1].replace('_', '')
@@ -46,6 +50,20 @@ class Byte(Integer):
 
 
 BYTE = Byte("byte", "byte", "i64", 64, True)
+
+
+from py_compiler.syntax.primitive.int.operations import IntegerOperation
+
+
+class ByteRatio(IntegerOperation):
+    def expand(self, cfg, left, right, span):
+        if left.type != self.owner or right.type != self.owner:
+            raise ValueError('byte ratio requires two byte quantities')
+        return cfg.emit('scalar', cfg.syntax.types['int'], (left, right), self, span)
+
+    def atom(self, operation):
+        from dataclasses import replace
+        return replace(super().atom(operation), result=operation.result.type)
 
 
 import unittest
@@ -68,3 +86,15 @@ class ByteTests(unittest.TestCase):
         for text in ('size: int = 1B\n', 'size = 1.5B\n'):
             result = compile_source('byte.sev', text, Syntax())
             self.assertTrue(result.diagnostics)
+
+
+    def test_byte_division_produces_an_integer_ratio(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.mlir.src.lib import lower, render
+        result = compile_source('ratio.sev', 'def ratio(a: byte, b: byte) -> int:\n    return a / b\n', Syntax())
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        operations = [op for body in result.program.bodies for block in body.blocks for op in block.operations if op.kind == 'scalar']
+        self.assertEqual(operations[0].result.type.name, 'i64')
+        self.assertEqual(operations[0].atom.owner, BYTE)
+        self.assertIn('arith.divsi', render(lower(result.program)))

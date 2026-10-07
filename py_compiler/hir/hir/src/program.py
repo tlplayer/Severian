@@ -2,7 +2,6 @@
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from py_compiler.frontend.source.source import Diagnostic, Span
-from py_compiler.syntax.primitive.catalog import Primitive
 from py_compiler.syntax.symbol.forms import decode_quoted
 
 
@@ -10,7 +9,7 @@ from py_compiler.syntax.symbol.forms import decode_quoted
 class Constant:
     identity: str
     name: str | None
-    type: Primitive
+    type: object
     value: int | str | Decimal | bool | None
     span: Span
     source: str
@@ -62,6 +61,9 @@ def resolve_literal(literal, syntax, context=None):
     if require_context is not None:
         require_context(context)
     value = owner.decode(spelling)
+    if literal.explicit_constructor and getattr(target, 'conversion_sources', ()):
+        from py_compiler.syntax.primitive.numeric.conversion import literal_conversion
+        return target, literal_conversion(target, owner, value)
     return target, target.accept_literal(owner, value)
 
 

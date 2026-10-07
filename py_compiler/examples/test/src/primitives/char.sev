@@ -1,2 +1,14 @@
 letter: char = 'λ'
 emoji: char = '\u{1f600}'
+
+test "Unicode scalar constructors and ordering":
+    scalar: u32 = 128512
+    assert(char(scalar) == '\u{1f600}')
+    assert(u32('λ') == 955)
+    assert('a' < 'λ')
+
+test with compiler "invalid Unicode scalars":
+    reject:
+        value = char(55296)
+    reject:
+        value = char(1114112)

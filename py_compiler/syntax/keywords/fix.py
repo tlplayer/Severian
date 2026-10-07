@@ -7,5 +7,5 @@ class Fix(Keyword):
         super().__init__("fix")
 
     def attach(self, tokens, guards, obligations, suffix):
-        from py_compiler.syntax.sentence.syntax import expression
+        from py_compiler.syntax.grammar.expression import expression
         obligations.append(expression(tokens))

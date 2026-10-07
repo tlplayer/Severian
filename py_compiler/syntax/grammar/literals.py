@@ -30,12 +30,14 @@ def recognize_literals(source, tokens, syntax):
                 fail("expected = or := followed by a primitive literal")
             binding, position = items[position].text, position + 1
         values = items[position:]
+        explicit_constructor = False
         # Explicit primitive construction supplies the expected type; no Python eval.
         if len(values) >= 3 and values[0].text in syntax.types and values[1].text == "(" and values[-1].text == ")":
             constructed = values[0].text
             if annotation and syntax.types.get(annotation) != syntax.types[constructed]:
                 fail("constructor and annotation require different types", values[0])
             annotation, values = constructed, values[2:-1]
+            explicit_constructor = True
         sign = ""
         if values and values[0].text in ("+", "-"):
             sign, values = values[0].text, values[1:]
@@ -48,7 +50,7 @@ def recognize_literals(source, tokens, syntax):
             fail("a numeric sign requires a numeric literal", value)
         identity = source.identity + ":" + str(first.span.start)
         term_id = identity + ":literal"
-        graph.terms[term_id] = Literal(term_id, source.span(items[position].span.start, items[-1].span.end), sign + value.text, value.kind, annotation)
+        graph.terms[term_id] = Literal(term_id, source.span(items[position].span.start, items[-1].span.end), sign + value.text, value.kind, annotation, explicit_constructor)
         span = source.span(first.span.start, items[-1].span.end)
         graph.sentences[identity] = Sentence(identity, root, span, term_id, name, binding)
         graph.blocks[root].contents.append(identity)

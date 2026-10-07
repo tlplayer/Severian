@@ -1,7 +1,7 @@
 """Callable declarations retain parameter, result and acceptance contracts."""
 from dataclasses import dataclass, field
 from hashlib import sha256
-from py_compiler.syntax.sentence.syntax import expression
+from py_compiler.syntax.grammar.expression import expression
 
 
 @dataclass

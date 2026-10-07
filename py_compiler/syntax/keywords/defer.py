@@ -7,5 +7,5 @@ class Defer(Keyword):
         super().__init__("defer")
 
     def attach(self, tokens, guards, obligations, suffix):
-        from py_compiler.syntax.sentence.syntax import expression
+        from py_compiler.syntax.grammar.expression import expression
         suffix.append(expression(tokens))

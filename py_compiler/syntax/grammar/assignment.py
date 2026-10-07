@@ -1,5 +1,5 @@
 from dataclasses import replace
-from py_compiler.syntax.sentence.syntax import expression, OWNERSHIP
+from py_compiler.syntax.grammar.expression import expression, OWNERSHIP
 from py_compiler.mir.ownership.flow import Binding
 from py_compiler.syntax.generic.owned import select
 from py_compiler.syntax.generic.storage import BindingPlace, AddressPlace

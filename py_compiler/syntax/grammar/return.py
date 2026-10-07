@@ -1,4 +1,4 @@
-from py_compiler.syntax.sentence.syntax import expression
+from py_compiler.syntax.grammar.expression import expression
 from py_compiler.mir.cfg.cfg import Terminator
 
 

@@ -1,7 +1,7 @@
 """Indentation groups blocks before sentence resolution; no evaluation in parsing."""
 from dataclasses import dataclass, field
 from importlib import import_module
-from py_compiler.syntax.sentence.syntax import expression
+from py_compiler.syntax.grammar.expression import expression
 from py_compiler.frontend.source.source import Diagnostic
 
 

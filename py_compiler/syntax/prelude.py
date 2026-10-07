@@ -12,7 +12,7 @@ BLOCKS = (
 CLAUSES = (('keywords.prefix', 'Prefix'), ('keywords.fix', 'Fix'),
            ('keywords.suffix', 'Suffix'), ('keywords.defer', 'Defer'))
 STATEMENTS = (('keywords.yield', 'Yield'), ('keywords.static', 'Static'), ('keywords.atomic', 'Atomic'))
-CALLABLES = (('function.async', 'Async'), ('function.await', 'Await'), ('function.lambda', 'Lambda'))
+CALLABLES = (('operator.async', 'Async'), ('operator.await', 'Await'), ('function.lambda', 'Lambda'))
 DYNAMIC_TYPES = (('dynamic.dynamic', 'DynamicType'), ('dynamic.any', 'AnyType'),
                  ('dynamic.numeric', 'NumericType'))
 COMPLEX_TYPES = (('complex.type', 'Type'), ('block.union', 'Union'), ('complex.tuple', 'TupleType'),
@@ -35,12 +35,15 @@ def clause_providers():
 
 
 def expression_providers():
-    return {owner.name: owner for owner in instantiate(CALLABLES)}
+    from py_compiler.syntax.operator.ownership import OPERATORS
+    return {owner.name: owner for owner in (*instantiate(CALLABLES), *OPERATORS)}
 
 
 def type_definitions(pointer_bits):
     from py_compiler.syntax.primitive.catalog import primitives
+    from py_compiler.syntax.complex.string import STRING
     result = primitives(pointer_bits)
+    result[STRING.name] = STRING
     result.update((owner.name, owner) for owner in instantiate(TYPES))
     return result
 
@@ -58,9 +61,9 @@ def compiler_fixtures():
 
 
 def sentence_providers():
-    entries = (('sentence.unimplemented', 'Unimplemented'), ('keywords.drop', 'Drop'))
-    tail = (('sentence.call', 'Call'), ('sentence.assignment', 'Assignment'))
-    return (*instantiate(entries), import_module('py_compiler.syntax.sentence.return').Return(),
+    entries = (('operator.unimplemented', 'Unimplemented'), ('operator.drop', 'Drop'))
+    tail = (('grammar.call', 'Call'), ('grammar.assignment', 'Assignment'))
+    return (*instantiate(entries), import_module('py_compiler.syntax.grammar.return').Return(),
             *instantiate(STATEMENTS), *instantiate(tail))
 
 
@@ -68,7 +71,9 @@ def definitions(syntax):
     from py_compiler.syntax.generic.owned import WordGrammar
     from py_compiler.syntax.keywords.keyword import Keyword
     types = tuple({t.name: t for t in syntax.types.values()}.values())
-    owners = (*types, *instantiate(CLAUSES), *instantiate(STATEMENTS), *instantiate(CALLABLES),
+    from py_compiler.syntax.operator.ownership import OPERATORS
+    from py_compiler.syntax.operator.drop import Drop
+    owners = (*types, *OPERATORS, Drop(), *instantiate(CLAUSES), *instantiate(STATEMENTS), *instantiate(CALLABLES),
               *syntax.block_providers.values())
     words = set()
     for owner in owners:

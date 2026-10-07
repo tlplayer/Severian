@@ -1,2 +1,14 @@
 enabled: bool = true
 disabled: bool = false
+
+test "Boolean scalar operators and constructors":
+    value = true
+    value &= false
+    assert(value == false)
+    value |= true
+    value ^= true
+    assert(not value)
+    assert(false < true)
+    assert(bool(0) == false)
+    assert(bool(2) == true)
+    assert(int(true) == 1)

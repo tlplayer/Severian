@@ -3,7 +3,7 @@ from hashlib import sha256
 from dataclasses import replace
 from functools import wraps
 from py_compiler.frontend.source.source import Diagnostic
-from py_compiler.syntax.sentence.syntax import expression, OWNERSHIP
+from py_compiler.syntax.grammar.expression import expression, OWNERSHIP
 from py_compiler.frontend.parser.contract import Literal
 from py_compiler.hir.hir.src.program import Constant, resolve_literal
 from py_compiler.mir.cfg.cfg import Body, ExecutionBlock, Value, Operation, Edge, Terminator

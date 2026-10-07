@@ -14,3 +14,12 @@ test with compiler "pointer construction requires unsafe":
     accept:
         unsafe:
             address: pointer = pointer(0)
+
+test "raw pointer scalar comparisons and address conversion":
+    unsafe:
+        address: usize = 4096
+        raw = pointer(address)
+        assert(usize(raw) == address)
+        assert(raw == pointer(4096))
+        assert(raw != pointer(0))
+        assert(raw > pointer(0))

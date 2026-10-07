@@ -109,12 +109,12 @@ def verify_native(text, executable=None):
 
 import unittest
 from py_compiler.frontend.source.source import Span
-from py_compiler.syntax.primitive.catalog import primitives
+from py_compiler.syntax.prelude import type_definitions
 
 
 class MlirTests(unittest.TestCase):
     def test_render_is_pure_and_retains_semantic_types(self):
-        types = primitives()
+        types = type_definitions(64)
         constants = tuple(Constant(name, name, types[name], value, Span("s", 0, 1), "x.sev", "=")
                           for name, value in (("u8", 255), ("char", 128512), ("byte", 4), ("string", "λ")))
         target = lower(Program(constants, ()))
@@ -130,7 +130,7 @@ class MlirTests(unittest.TestCase):
             self.skipTest("install mlir-opt to verify emitted dialect contracts")
         values = {"string": "😀", "bool": True, "char": 955, "absence": None,
                   "pointer": 0, "integer": 1, "float": Decimal("1.5"), "byte": 4}
-        types = {t.name: t for t in primitives().values()}
+        types = {t.name: t for t in type_definitions(64).values() if t.family in values}
         constants = tuple(Constant(t.name, t.name, t, values[t.family], Span("s", 0, 1), "x.sev", "=")
                           for t in types.values())
         verify_native(render(lower(Program(constants, ()))))
@@ -138,7 +138,7 @@ class MlirTests(unittest.TestCase):
     def test_empty_string_and_nonzero_pointer_with_native_verifier(self):
         if not shutil.which(verifier_path()):
             self.skipTest("install mlir-opt to verify emitted dialect contracts")
-        types = primitives()
+        types = type_definitions(64)
         constants = (Constant("empty", "empty", types["string"], "", Span("s", 0, 2), "x.sev", "="),
                      Constant("address", "address", types["pointer"], 4096, Span("s", 3, 7), "x.sev", "="))
         verify_native(render(lower(Program(constants, ()))))

@@ -14,7 +14,7 @@ class ExpressionGrammar(Grammar):
         return Match(self, window, window.end, {'terms': window.tokens})
 
     def construct(self, match):
-        from py_compiler.syntax.sentence.syntax import parse_expression
+        from py_compiler.syntax.grammar.expression import parse_expression
         return parse_expression(match.captures['terms'], self.syntax)
 
 
