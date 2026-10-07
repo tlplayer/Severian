@@ -216,3 +216,12 @@ class PackageTests(unittest.TestCase):
             index = json.loads((root / "package.pkg/package.pkgi/index.json").read_text())
             self.assertEqual(len(index["interfaces"]), 1)
             self.assertTrue(Path(first["ir"]).is_file())
+
+
+class ModularFixtureTests(unittest.TestCase):
+    def test_fixture_sources_compile_independently(self):
+        root = Path(__file__).parent / 'examples/test/src'
+        for path in sorted(root.rglob('*.sev')):
+            with self.subTest(source=path.relative_to(root)):
+                result = compile_source(str(path), path.read_text(), Syntax())
+                self.assertFalse(result.diagnostics, '\n'.join(map(str, result.diagnostics)))

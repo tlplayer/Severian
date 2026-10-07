@@ -1,0 +1,46 @@
+trait Named:
+    name: string
+
+class Label: Named:
+    name: string
+
+# Scope qualifiers select distinct bindings. The receiver is passed by reference.
+x = 0
+class foo:
+    x = 1
+    def add(a):
+        local.x: local int = 2 + self.x
+        return local.x + a
+
+    def foo(_x):
+        #x defaults to self.x since it's the closest scope. This avoids ambiguity from self.x and x. 
+        #You cannot pass x into a function besides the constructor that would cause a a compiler error
+        x = _x
+    def global_value() -> int:
+        return module.x
+
+    def pending() -> int:
+        unimplemented
+
+trait Measured:
+    def measure() -> int
+
+class Meter: Measured:
+    value: int = 1
+    def measure() -> int:
+        return self.value
+    def increment():
+        self.value += 1
+
+# Calls through a trait retain the receiver and check the implementation tag.
+def measure(item: Measured) -> int:
+    return item.measure()
+
+test "class mutation and trait dispatch":
+    item = Meter(4)
+    item.increment()
+    assert(measure(item) == 5)
+
+test with integ "integration category retains a separate test entry":
+    item = Meter(7)
+    assert(measure(item) == 7)

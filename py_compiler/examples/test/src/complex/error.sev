@@ -1,0 +1,7 @@
+def bounded(a: int) -> int | Error with
+{
+    fix 0 <= a <= 100,
+    bounded.complexity.space := BigO.constant,
+    bounded.complexity.time := BigO.constant,
+}:
+    return a

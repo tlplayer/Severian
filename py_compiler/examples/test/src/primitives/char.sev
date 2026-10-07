@@ -1,0 +1,2 @@
+letter: char = 'λ'
+emoji: char = '\u{1f600}'

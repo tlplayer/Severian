@@ -1,0 +1,9 @@
+def choose(flag: bool) -> int:
+    value = 1
+    if flag:
+        value = 2
+    elif not flag:
+        value = 3
+    else:
+        value = 4
+    return value

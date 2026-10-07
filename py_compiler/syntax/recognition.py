@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from py_compiler.syntax.keywords.keyword import KEYWORDS
-from py_compiler.syntax.symbol.forms import SYMBOLS
+from py_compiler.syntax.symbol.catalog import SYMBOLS
 
 
 @dataclass(frozen=True)

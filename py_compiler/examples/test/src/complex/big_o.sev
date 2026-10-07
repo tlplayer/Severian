@@ -1,0 +1,3 @@
+test "complexity enum order":
+    assert(BigO.constant < BigO.linear)
+    assert(BigO.linear < BigO.quadratic)

@@ -62,7 +62,7 @@ def compile_object(lir, optimizer=None):
         if result.returncode:
             raise ValueError(f'{Path(arguments[0]).name} failed:\n{result.stderr}')
         return result.stdout
-    dialect = run([optimizer, '--expand-strided-metadata', '--convert-scf-to-cf',
+    dialect = run([optimizer, '--expand-strided-metadata', '--arith-expand', '--convert-math-to-llvm', '--convert-scf-to-cf',
                    '--convert-arith-to-llvm', f'--convert-index-to-llvm=index-bitwidth={lir.pointer_bits}',
                    '--convert-cf-to-llvm', f'--finalize-memref-to-llvm=index-bitwidth={lir.pointer_bits}',
                    f'--convert-func-to-llvm=index-bitwidth={lir.pointer_bits}',

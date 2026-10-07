@@ -1,0 +1,12 @@
+# Prefix -> entry, fix -> entry/statement boundaries/exit, suffix -> normal exit.
+def contract_phases(a: int) -> int with
+{
+    prefix a >= 0,
+    fix a <= 100,
+    suffix a < 10,
+}:
+    a += 1
+    return a
+
+test "contract phase order":
+    assert(contract_phases(3) == 4)

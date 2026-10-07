@@ -1,0 +1,26 @@
+test with compiler "nested function and class visibility":
+    accept:
+        def outer() -> int:
+            class Inner:
+                value: int = 3
+            def inner() -> int:
+                return 2
+            item = Inner()
+            return inner() + item.value
+    reject:
+        def outer() -> int:
+            def inner() -> int:
+                return 2
+            return inner()
+        def outside() -> int:
+            return inner()
+    reject:
+        accept:
+            x = 1
+
+def nested_scope() -> int:
+    def nearby() -> int:
+        return 3
+    test "a test can use declarations in its enclosing scope":
+        assert(nearby() == 3)
+    return nearby()

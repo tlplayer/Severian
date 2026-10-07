@@ -1,0 +1,9 @@
+test with compiler "imported fixture grammar stays within its body":
+    accept:
+        test with compiler "nested expansion":
+            accept:
+                value: int = 1
+    reject:
+        test "no compiler expansion":
+            reject:
+                value: int = 1

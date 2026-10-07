@@ -11,8 +11,8 @@ class Assignment:
 
     def lower(self, node, cfg, env, local_names):
         items = list(node.tokens)
-        from py_compiler.syntax.catalog import grammars
-        assignments = {"=", ":="} | {g.spelling for g in grammars(cfg.syntax) if g.role == "O.assignment"}
+        from py_compiler.syntax.catalog import assignment_spellings
+        assignments = assignment_spellings(cfg.syntax)
         # Object stores go through the class storage provider.
         assignment = next((i for i, t in enumerate(items) if t.text in assignments), None)
         if assignment is not None and any(t.text == '.' for t in items[:assignment]) and items[0].text not in cfg.syntax.scope_providers:

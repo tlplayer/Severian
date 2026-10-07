@@ -57,7 +57,7 @@ class RecordProvider(DeclarationProvider):
             term = expression(items[position + 1:])
             if term.kind != "literal":
                 raise ValueError("field initializer requires a literal provider in this milestone")
-            type_, default = resolve_literal(Literal(child.identity, term.token.span, term.token.text, term.token.kind, annotation), context.syntax)
+            type_, default = resolve_literal(Literal(child.identity, term.token.span, term.token.text, term.token.kind, annotation), context.syntax, context)
             annotation = type_.name
         if annotation is None:
             raise ValueError("field requires a type or initializer")

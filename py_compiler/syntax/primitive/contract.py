@@ -31,6 +31,9 @@ class Primitive:
             raise ValueError(f'{owner.name} literal does not satisfy {self.name}')
         return value
 
+    def require_context(self, context):
+        pass
+
 
 from py_compiler.syntax.generic.owned import OwnedGrammar, Capture
 from py_compiler.syntax.generic.grammar import Match

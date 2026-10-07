@@ -8,6 +8,11 @@ def grammars(syntax):
     return tuple(grammar for owner in definitions(syntax) for grammar in owner.grammars())
 
 
+def assignment_spellings(syntax):
+    return {'=', ':='} | {grammar.spelling for grammar in grammars(syntax)
+                         if grammar.role == 'O.assignment'}
+
+
 def operator_bindings(syntax):
     result = {}
     for grammar in grammars(syntax):

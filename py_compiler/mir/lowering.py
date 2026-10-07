@@ -46,6 +46,7 @@ class Builder:
         self.constructor = False
         self.phases = None
         self.imported = {}
+        self.unsafe_depth = 0
 
     def value(self, type_):
         value = Value(self.next_value, type_)
@@ -120,6 +121,16 @@ class Builder:
 
     @located
     def expr(self, node, env, expected=None):
+        require_context = getattr(expected, 'require_context', None)
+        if require_context is not None:
+            require_context(self)
+        value = self.expression_value(node, env, expected)
+        require_context = getattr(value.type, 'require_context', None) if value is not None else None
+        if require_context is not None:
+            require_context(self)
+        return value
+
+    def expression_value(self, node, env, expected=None):
         token = node.token
         if node.kind == 'owned':
             return node.operands[0].lower_expression(node, self, env, expected)
@@ -140,7 +151,7 @@ class Builder:
         if node.kind == "literal" or (node.kind == "unary" and token.text in ("-", "+") and node.operands[0].kind == "literal"):
             literal_token = node.operands[0].token if node.kind == "unary" else token
             spelling = (token.text if node.kind == "unary" else "") + literal_token.text
-            type_, value = resolve_literal(Literal("", token.span, spelling, literal_token.kind, expected.name if expected else None), self.syntax)
+            type_, value = resolve_literal(Literal("", token.span, spelling, literal_token.kind, expected.name if expected else None), self.syntax, self)
             if not type_.mlir:
                 return None
             identity = self.body.identity + ":literal:" + str(self.next_value)

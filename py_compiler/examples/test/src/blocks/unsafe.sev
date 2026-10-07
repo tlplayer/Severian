@@ -1,0 +1,25 @@
+def scoped_update() -> int:
+    value = 1
+    unsafe:
+        address = pointer(0)
+        unsafe:
+            other = pointer(4096)
+        value += 2
+    return value
+
+test "unsafe preserves outer mutation":
+    assert(scoped_update() == 3)
+
+test with compiler "unsafe scope boundaries":
+    reject:
+        unsafe:
+            address = pointer(0)
+        leaked = address
+    reject:
+        unsafe:
+            address = pointer(0)
+        other = pointer(1)
+    reject:
+        unsafe:
+            def work():
+                address = pointer(0)

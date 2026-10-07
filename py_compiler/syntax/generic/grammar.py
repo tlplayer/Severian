@@ -53,6 +53,11 @@ class Registry:
             if optional:
                 return None
             raise ValueError(f'no grammar satisfies {role}')
+        if role == 'Y':
+            # Lexical recognition consumes the longest active token form.
+            # Equal-length competing declarations remain ambiguous.
+            end = max(match.end for match in matches)
+            matches = [match for match in matches if match.end == end]
         if len(matches) != 1:
             raise ValueError(f'ambiguous {role} grammar: ' + ', '.join(type(m.provider).__name__ for m in matches))
         return matches[0]

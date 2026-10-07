@@ -2,6 +2,10 @@ from py_compiler.syntax.primitive.contract import Primitive
 
 
 class Pointer(Primitive):
+    def require_context(self, context):
+        if not getattr(context, 'unsafe_depth', 0):
+            raise ValueError('pointer values require an unsafe block')
+
     def render_constant(self, value, symbol):
         if value == 0:
             return [], [f'%value = llvm.mlir.zero : {self.mlir}']

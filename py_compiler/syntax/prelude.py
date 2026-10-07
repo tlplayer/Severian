@@ -67,7 +67,6 @@ def sentence_providers():
 def definitions(syntax):
     from py_compiler.syntax.generic.owned import WordGrammar
     from py_compiler.syntax.keywords.keyword import Keyword
-    from py_compiler.syntax.symbol.symbol import Symbol
     types = tuple({t.name: t for t in syntax.types.values()}.values())
     owners = (*types, *instantiate(CLAUSES), *instantiate(STATEMENTS), *instantiate(CALLABLES),
               *syntax.block_providers.values())
@@ -77,8 +76,7 @@ def definitions(syntax):
             raise ValueError(f'{owner.name} has no defining object supplying grammar')
         words.update(g.spelling for g in owner.grammars() if isinstance(g, WordGrammar))
     keywords = tuple(Keyword(word) for word in sorted(syntax.keywords - words))
-    symbols = tuple(Symbol(word, tuple(other for other in syntax.symbols if len(other) > len(word) and other.startswith(word))) for word in syntax.symbols)
-    return (*owners, *keywords, *symbols)
+    return (*owners, *keywords, *syntax.symbols)
 
 
 import unittest
@@ -121,7 +119,6 @@ class PreludeTests(unittest.TestCase):
 
     def test_missing_lowering_is_an_owner_diagnostic(self):
         for text, expected in (
-            ('unsafe:\n    x = 1\n', 'unsafe block has no declared'),
             ('def work():\n    pending = async work() with self\n', 'async callable has no declared'),
             ('def work():\n    fn = lambda x: x + 1\n', 'lambda has no declared'),
             ('value: dynamic = 1\n', 'dynamic has no declared'),

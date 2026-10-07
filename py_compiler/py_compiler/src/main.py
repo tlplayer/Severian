@@ -25,10 +25,11 @@ def main(argv=None):
     try:
         if args.command == "test":
             import unittest
-            modules = ["frontend.source.source", "syntax.primitive.catalog", "syntax.symbol.forms", "syntax.symbol.absent",
+            modules = ["frontend.source.source", "syntax.primitive.catalog", "syntax.symbol.forms", "syntax.symbol.symbol", "syntax.symbol.absent",
                        "frontend.lexer.lexer", "frontend.parser.parser", "hir.hir.src.program",
                        "frontend.src.lib", "frontend.parser.blocks", "mir.cfg.cfg", "mir.ownership.flow",
-                       "mir.lowering", "mlir.src.lib", "package"]
+                       "mir.lowering", "syntax.primitive.int.operations", "syntax.primitive.float.operations",
+                       "syntax.sentence.syntax", "syntax.sentence.call", "syntax.block.unsafe", "syntax.prelude", "mlir.src.lib", "package"]
             suite = unittest.defaultTestLoader.loadTestsFromNames(["py_compiler." + m for m in modules])
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
         if args.command == "tokens":

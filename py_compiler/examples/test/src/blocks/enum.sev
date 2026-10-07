@@ -1,0 +1,7 @@
+enum Colour:
+    Red
+    Green
+    Blue
+
+test "enum order":
+    assert(Colour.Red < Colour.Blue)

@@ -26,6 +26,14 @@ class Token:
     def span(self):
         return self.lexeme.span
 
+    @property
+    def form(self):
+        return getattr(self.grammar, 'form', None)
+
+    @property
+    def symbol(self):
+        return self.grammar.owner if self.form is not None else None
+
 
 def lex(source, syntax):
     from py_compiler.syntax.generic.grammar import SourceWindow
@@ -51,12 +59,18 @@ class LexerTests(unittest.TestCase):
     def test_keyword_boundaries_and_longest_symbol(self):
         tokens = lex(SourceFile("x.sev", "if iffy <= 1..2 # comment\n"), Syntax())
         self.assertEqual([(t.kind, t.text) for t in tokens[:6]],
-                         [("KEYWORD", "if"), ("IDENTIFIER", "iffy"), ("SYMBOL", "<="),
-                          ("NUMBER", "1"), ("SYMBOL", ".."), ("NUMBER", "2")])
+                         [("KEYWORD", "if"), ("IDENTIFIER", "iffy"), ("LESS_EQUAL", "<="),
+                          ("NUMBER", "1"), ("RANGE", ".."), ("NUMBER", "2")])
 
     def test_every_keyword_and_unicode(self):
         syntax = Syntax()
+        # Prelude type owners supply these token kinds instead of the fallback
+        # Keyword declaration. Their names remain usable in type expressions.
+        type_words = {'dynamic', 'union'}
         for spelling in syntax.keywords:
-            self.assertEqual(lex(SourceFile("x", spelling), syntax)[0].kind, "KEYWORD")
-            self.assertEqual(lex(SourceFile("x", spelling + "_x"), syntax)[0].kind, "IDENTIFIER")
+            with self.subTest(spelling=spelling):
+                token = lex(SourceFile("x", spelling), syntax)[0]
+                self.assertEqual(token.kind, 'IDENTIFIER' if spelling in type_words else 'KEYWORD')
+                self.assertEqual(token.grammar.spelling, spelling)
+                self.assertEqual(lex(SourceFile("x", spelling + "_x"), syntax)[0].kind, "IDENTIFIER")
         self.assertEqual(lex(SourceFile("x", "'😀'"), syntax)[0].span.end, 3)

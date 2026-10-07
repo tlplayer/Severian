@@ -35,6 +35,7 @@ class DeclarationContext:
         self.tags = {}
         self.scope = ()
         self.tests = []
+        self.unsafe_depth = 0
 
     def declaration_name(self, name, scope):
         for length in range(len(scope), -1, -1):

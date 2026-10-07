@@ -1,0 +1,16 @@
+unsafe:
+    address: pointer = pointer(0)
+
+test "pointer construction stays within unsafe":
+    unsafe:
+        address: pointer = pointer(4096)
+        copied = address
+
+test with compiler "pointer construction requires unsafe":
+    reject:
+        address: pointer = pointer(0)
+    reject:
+        address: pointer = 0
+    accept:
+        unsafe:
+            address: pointer = pointer(0)

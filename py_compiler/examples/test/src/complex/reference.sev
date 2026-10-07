@@ -1,0 +1,24 @@
+def following_view() -> string:
+    text = "old"
+    alias := text
+    text = "new"
+    return alias
+
+def copied_value() -> string:
+    text = "old"
+    snapshot := copy text
+    text = "new"
+    return snapshot
+
+test "compound grammar borrows storage through a fixed borrow binding":
+    value = 2
+    slot := borrow value
+    slot += 3
+    assert(value == 5)
+
+test with compiler "compound grammar rejects a view receiver":
+    reject:
+        def invalid():
+            value = 2
+            slot := view value
+            slot += 3

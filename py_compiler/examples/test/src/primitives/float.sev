@@ -1,0 +1,48 @@
+half: f16 = 1.5
+single: f32 = 1.5
+double: f64 = 1.5
+quad: f128 = 1.00000000000000000001
+brain: bf16 = 1.5
+tiny: f8e4m3fn = 1.5
+tiny_exp: f8e5m2 = 1.5
+
+
+def divide(a: float, b: float) -> float:
+    return a / b
+
+def floor_divide(a: float, b: float) -> float:
+    return a // b
+
+def modulo(a: float, b: float) -> float:
+    return a % b
+
+def power(a: float, b: float) -> float:
+    return a ** b
+
+test "float arithmetic and floor modulo":
+    assert(divide(7.5, 2.0) == 3.75)
+    assert(floor_divide(-7.0, 2.0) == -4.0)
+    assert(modulo(-7.0, 2.0) == 1.0)
+    assert(modulo(7.0, -2.0) == -1.0)
+    assert(power(2.0, -2.0) == 0.25)
+    assert(2.0 ** 3.0 ** 2.0 == 512.0)
+    assert(f32(7.0) / f32(2.0) == f32(3.5))
+
+test "float compound operators":
+    value = 7.0
+    value /= 2.0
+    assert(value == 3.5)
+    value //= 2.0
+    assert(value == 1.0)
+    value += 2.0
+    value **= 2.0
+    value %= 4.0
+    assert(value == 1.0)
+
+test with compiler "float has no integer bit operations":
+    reject:
+        value = 1.0 << 2.0
+    reject:
+        value = 1.0 & 2.0
+    reject:
+        value = ~1.0

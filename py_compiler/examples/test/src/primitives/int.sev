@@ -1,0 +1,65 @@
+signed8: i8 = -128
+signed16: i16 = -32768
+signed32: i32 = -2147483648
+signed64: i64 = -9223372036854775808
+signed128: i128 = -170141183460469231731687303715884105728
+unsigned8: u8 = 255
+unsigned16: u16 = 65535
+unsigned32: u32 = 4294967295
+unsigned64: u64 = 18446744073709551615
+unsigned128: u128 = 340282366920938463463374607431768211455
+position: index = 3
+signed_size: isize = -1
+unsigned_size: usize = 1
+
+
+def divide(a: int, b: int) -> int:
+    return a / b
+
+def floor_divide(a: int, b: int) -> int:
+    return a // b
+
+def remainder(a: int, b: int) -> int:
+    return a % b
+
+def power(a: int, b: int) -> int:
+    return a ** b
+
+test "integer division and remainder":
+    assert(divide(-7, 2) == -3)
+    assert(floor_divide(-7, 2) == -4)
+    assert(remainder(-7, 2) == -1)
+    assert(u64(18446744073709551615) / u64(3) == u64(6148914691236517205))
+
+test "integer powers and precedence":
+    assert(power(3, 5) == 243)
+    assert(power(0, 0) == 1)
+    assert(2 ** 3 ** 2 == 512)
+    assert(-2 ** 2 == -4)
+    assert((-2) ** 2 == 4)
+    assert(1 << 2 + 1 == 8)
+    assert(1 | 2 & 4 == 1)
+
+test "integer bits and shifts":
+    assert(6 & 3 == 2)
+    assert(6 | 3 == 7)
+    assert(6 ^ 3 == 5)
+    assert(~0 == -1)
+    assert(-8 >> 2 == -2)
+    assert(u8(128) >> u8(2) == u8(32))
+    assert(3 << 2 == 12)
+
+test "integer compound operators":
+    value = 20
+    value /= 3
+    assert(value == 6)
+    value //= 4
+    assert(value == 1)
+    value **= 5
+    value <<= 4
+    value >>= 1
+    value |= 3
+    value &= 7
+    value ^= 6
+    value %= 3
+    assert(value == 2)

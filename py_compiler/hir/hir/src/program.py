@@ -42,7 +42,7 @@ class Program:
     declarations: tuple = ()
 
 
-def resolve_literal(literal, syntax):
+def resolve_literal(literal, syntax, context=None):
     from py_compiler.frontend.source.source import SourceFile
     from py_compiler.syntax.generic.grammar import SourceWindow
     spelling = literal.spelling
@@ -58,6 +58,9 @@ def resolve_literal(literal, syntax):
     if expected and expected not in syntax.types:
         raise ValueError(f'unknown primitive type {expected!r}')
     target = syntax.types[expected] if expected else owner
+    require_context = getattr(target, 'require_context', None)
+    if require_context is not None:
+        require_context(context)
     value = owner.decode(spelling)
     return target, target.accept_literal(owner, value)
 

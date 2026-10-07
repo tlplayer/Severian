@@ -27,9 +27,10 @@ def expression(tokens):
 
 def parse_expression(tokens, syntax):
     from py_compiler.syntax.function.grammar import operators
-    precedence = {grammar.spelling: grammar.precedence for grammar in operators(syntax)}
+    bindings = {grammar.spelling: grammar for grammar in operators(syntax)}
+    precedence = {spelling: grammar.precedence for spelling, grammar in bindings.items()}
     cursor = [0]
-    def parse(minimum=0):
+    def parse(minimum=0, strict=False):
         if cursor[0] == len(tokens):
             raise ValueError("expected an expression")
         token = tokens[cursor[0]]
@@ -37,7 +38,7 @@ def parse_expression(tokens, syntax):
         owner = syntax.expression_providers.get(token.text)
         if owner is not None:
             left = owner.parse_prefix(token, parse, tokens, cursor)
-        elif token.text in OWNERSHIP or token.text in ("not", "+", "-"):
+        elif token.text in OWNERSHIP or token.text in ("not", "+", "-", "~"):
             left = Expression("unary", token, (parse(6),))
         elif token.text == "(":
             left = parse()
@@ -73,10 +74,14 @@ def parse_expression(tokens, syntax):
                 raise ValueError("expected closing call parenthesis")
             cursor[0] += 1
             left = Expression("call", left.token, (left, *arguments))
-        while cursor[0] < len(tokens) and precedence.get(tokens[cursor[0]].text, -1) >= minimum:
+        while cursor[0] < len(tokens):
+            level = precedence.get(tokens[cursor[0]].text, -1)
+            if level < minimum or (strict and level == minimum):
+                break
             operator = tokens[cursor[0]]
             cursor[0] += 1
-            right = parse(precedence[operator.text] + 1)
+            binding = bindings[operator.text]
+            right = parse(binding.precedence, strict=binding.associativity != 'right')
             comparisons = ('==', '!=', '<', '<=', '>', '>=')
             if operator.text in comparisons and left.kind == 'binary' and left.token.text in comparisons:
                 left = Expression('chain', operator, (left.operands[0], left.token, left.operands[1], operator, right))
@@ -89,3 +94,31 @@ def parse_expression(tokens, syntax):
     if cursor[0] != len(tokens):
         raise ValueError(f"unsupported expression suffix {tokens[cursor[0]].text!r}")
     return result
+
+
+import unittest
+
+
+class OperatorBindingTests(unittest.TestCase):
+    def parse(self, text):
+        from py_compiler.frontend.lexer.lexer import lex
+        from py_compiler.frontend.source.source import SourceFile
+        from py_compiler.syntax.recognition import Syntax
+        syntax = Syntax()
+        tokens = [t for t in lex(SourceFile('operators.sev', text), syntax)
+                  if t.kind not in ('NEWLINE', 'EOF', 'INDENT', 'DEDENT')]
+        return parse_expression(tokens, syntax)
+
+    def test_power_is_right_associative_and_binds_before_unary(self):
+        tree = self.parse('2 ** 3 ** 2')
+        self.assertEqual(tree.operands[1].token.text, '**')
+        tree = self.parse('-2 ** 2')
+        self.assertEqual((tree.kind, tree.operands[0].token.text), ('unary', '**'))
+
+    def test_bitwise_precedence_and_left_associative_division(self):
+        tree = self.parse('1 | 2 ^ 3 & 4 << 1 + 2 * 3')
+        for operator in ('|', '^', '&', '<<', '+', '*'):
+            self.assertEqual(tree.token.text, operator)
+            tree = tree.operands[1]
+        tree = self.parse('8 / 2 / 2')
+        self.assertEqual(tree.operands[0].token.text, '/')
