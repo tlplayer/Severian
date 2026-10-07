@@ -1,6 +1,6 @@
 from py_compiler.syntax.block.record import RecordProvider, TypeDeclaration
 from py_compiler.syntax.function.contracts import signature
-from py_compiler.syntax.type.objects import ObjectType
+from py_compiler.syntax.complex.object import ObjectType
 
 
 class Trait(RecordProvider):

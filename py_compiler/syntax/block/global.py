@@ -7,7 +7,7 @@ class Global(BlockProvider):
         raise ValueError("module is a scope qualifier; use module.name, not module:")
 
     def configure(self, cfg, context):
-        from py_compiler.syntax.type.storage import GlobalPlace
+        from py_compiler.syntax.generic.storage import GlobalPlace
         cfg.namespaces["module"] = context.global_bindings
         cfg.storage = context.global_storage
         cfg.storage_factory = lambda binding: GlobalPlace(binding.identity, binding.type)

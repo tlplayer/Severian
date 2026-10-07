@@ -1,7 +1,7 @@
 from py_compiler.syntax.primitive.contract import Primitive
 from py_compiler.syntax.primitive.literal import QuotedLiteral
 from py_compiler.syntax.symbol.forms import decode_quoted
-from py_compiler.syntax.collection.collection import Collection
+from py_compiler.syntax.complex.collection import Collection
 
 
 class String(Collection, Primitive):

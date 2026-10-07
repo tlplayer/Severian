@@ -1,6 +1,5 @@
+"""Enum owns its declaration block, variant identity, ordering and representation."""
 from py_compiler.syntax.block.record import RecordProvider, TypeDeclaration
-
-
 from dataclasses import dataclass
 from py_compiler.syntax.primitive.numeric.types import Integer
 from py_compiler.syntax.primitive.numeric.grammar import scalar_grammars

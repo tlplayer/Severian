@@ -66,9 +66,9 @@ def expand(syntax, names):
 
 
 def compiler():
-    from py_compiler.syntax.block.test import Fixture, Reject
+    from py_compiler.syntax.prelude import compiler_fixtures
     from py_compiler.frontend.src.lib import compile_source
-    return GrammarImport('compiler', (Fixture(), Reject()), (('compile_source', compile_source),))
+    return GrammarImport('compiler', compiler_fixtures(), (('compile_source', compile_source),))
 
 
 def integration():

@@ -8,7 +8,8 @@ class BlockProvider(Grammar):
     role = "B.header"
 
     def grammars(self):
-        return (self,)
+        from py_compiler.syntax.generic.owned import WordGrammar
+        return (self, WordGrammar(self, self.spelling)) if self.spelling else (self,)
 
     def recognize(self, window):
         if not window.tokens or window.tokens[0].text != self.spelling:

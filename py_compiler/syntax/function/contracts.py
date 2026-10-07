@@ -101,28 +101,15 @@ def pure_predicate(node, parameters):
     raise ValueError("dispatch predicate lacks a pure, terminating, stable-read provider")
 
 
-from enum import IntEnum
-
-
-class BigO(IntEnum):
-    constant = 0
-    linear = 1
-    quadratic = 2
-    undefined = 3
-    exponential = 4
-    combinatorial = 5
+from py_compiler.syntax.complex.big_o import BigO
 
 
 def add_clause(tokens, guards, obligations, complexity, suffix):
     words = [t.text for t in tokens]
-    if words[0] in ('suffix', 'defer'):
-        suffix.append(expression(tokens[1:]))
-        return
-    if words[0] == 'prefix':
-        guards.append(expression(tokens[1:]))
-        return
-    if words[0] == 'fix':
-        obligations.append(expression(tokens[1:]))
+    from py_compiler.syntax.prelude import clause_providers
+    provider = clause_providers().get(words[0])
+    if provider is not None:
+        provider.attach(tokens[1:], guards, obligations, suffix)
         return
     if ':=' in words:
         if len(words) != 9 or words[1:4] != ['.', 'complexity', '.'] or words[4] not in ('time', 'space') or words[5:8] != [':=', 'BigO', '.']:

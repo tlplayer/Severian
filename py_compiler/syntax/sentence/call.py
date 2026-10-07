@@ -1,5 +1,5 @@
 from py_compiler.syntax.sentence.syntax import expression
-from py_compiler.syntax.type.objects import Assert
+from py_compiler.syntax.complex.object import Assert
 
 
 class Call:

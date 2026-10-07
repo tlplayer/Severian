@@ -142,20 +142,4 @@ class CountBoolean:
         return [f'{name(operation.result)} = arith.extui {name(operation.operands[0])} : i1 to i32']
 
 
-@dataclass(frozen=True)
-class UnionBox:
-    variant: int
-
-    def atom(self, operation):
-        from py_compiler.syntax.generic.atom import Atom
-        result = operation.result.type
-        return Atom(self, (result.variants[self.variant],), result, ('view',), (), self)
-
-    def render_operation(self, operation):
-        from py_compiler.mlir.src.cfg import name
-        value = operation.result
-        type_ = value.type.mlir
-        return [f'%union_{value.identity} = llvm.mlir.zero : {type_}',
-                f'%union_tag_{value.identity} = arith.constant {self.variant} : i32',
-                f'%union_value_{value.identity} = llvm.insertvalue {name(operation.operands[0])}, %union_{value.identity}[{self.variant + 1}] : {type_}',
-                f'{name(value)} = llvm.insertvalue %union_tag_{value.identity}, %union_value_{value.identity}[0] : {type_}']
+from py_compiler.syntax.block.union import UnionBox

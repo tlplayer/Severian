@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from py_compiler.syntax.keywords.keyword import KEYWORDS
-from py_compiler.syntax.primitive.catalog import primitives
 from py_compiler.syntax.symbol.forms import SYMBOLS
 
 
@@ -12,17 +11,18 @@ class Syntax:
 
     @property
     def block_providers(self):
-        from py_compiler.syntax.block.block import providers
-        return providers()
+        from py_compiler.syntax.prelude import block_providers
+        return block_providers()
 
     @property
     def sentence_providers(self):
-        from importlib import import_module
-        from py_compiler.syntax.sentence.unimplemented import Unimplemented
-        from py_compiler.syntax.keywords.drop import Drop
-        from py_compiler.syntax.sentence.assignment import Assignment
-        from py_compiler.syntax.sentence.call import Call
-        return (Unimplemented(), import_module("py_compiler.syntax.sentence.return").Return(), Drop(), Call(), Assignment())
+        from py_compiler.syntax.prelude import sentence_providers
+        return sentence_providers()
+
+    @property
+    def expression_providers(self):
+        from py_compiler.syntax.prelude import expression_providers
+        return expression_providers()
 
     @property
     def scope_providers(self):
@@ -48,7 +48,8 @@ class Syntax:
 
     @property
     def types(self):
-        return primitives(self.pointer_bits)
+        from py_compiler.syntax.prelude import type_definitions
+        return type_definitions(self.pointer_bits)
 
     def recognize(self, text, cursor):
         from py_compiler.frontend.source.source import SourceFile

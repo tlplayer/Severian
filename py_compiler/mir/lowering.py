@@ -121,6 +121,8 @@ class Builder:
     @located
     def expr(self, node, env, expected=None):
         token = node.token
+        if node.kind == 'owned':
+            return node.operands[0].lower_expression(node, self, env, expected)
         if expected and expected.family == "union":
             from py_compiler.syntax.function.calls import coerce
             return coerce(self.expr(node, env), expected, self, token.span)
@@ -262,7 +264,7 @@ class LoweringTests(unittest.TestCase):
         add = next(body for body in result.program.bodies if body.declaration == "foo.add")
         self.assertEqual([v.type.name for v in add.blocks[0].parameters], ["pointer", "i64"])
         self.assertEqual(add.result_type.name, "i64")
-        from py_compiler.syntax.type.storage import FieldPlace, GlobalPlace
+        from py_compiler.syntax.generic.storage import FieldPlace, GlobalPlace
         self.assertTrue(any(isinstance(o.payload, FieldPlace) for b in add.blocks for o in b.operations))
         outer = next(body for body in result.program.bodies if body.declaration == "foo.outer")
         self.assertTrue(any(isinstance(o.payload, GlobalPlace) for b in outer.blocks for o in b.operations))

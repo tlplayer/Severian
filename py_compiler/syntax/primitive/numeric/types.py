@@ -51,20 +51,3 @@ class Float(Primitive):
         if not result.is_finite():
             raise ValueError('non-finite numeric literals require an explicit provider')
         return result
-
-
-class Byte(Integer):
-    def grammars(self):
-        return (*Primitive.grammars(self), NumericLiteral(self, "byte"), *scalar_grammars(self))
-
-    def decode(self, spelling):
-        text = spelling[:-1].replace('_', '')
-        if any(c in text.lower() for c in '.e'):
-            raise ValueError('byte quantities require an integral amount')
-        value = int(text, 10)
-        if not -(1 << 63) <= value < (1 << 63):
-            raise ValueError('byte quantity exceeds its signed 64-bit representation')
-        return value
-
-    def accept_literal(self, owner, value):
-        return Primitive.accept_literal(self, owner, value)

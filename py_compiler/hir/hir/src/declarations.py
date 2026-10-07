@@ -29,11 +29,8 @@ class DeclarationContext:
         self.callables, self.functions, self.compilers = [], {}, {}
         self.global_bindings, self.global_storage = {}, {}
         self.types = dict(syntax.types)
-        from py_compiler.syntax.type.objects import ObjectType, NamedDefinition
-        from py_compiler.syntax.block.enum import EnumType
-        from py_compiler.syntax.function.contracts import BigO
-        self.types["BigO"] = EnumType("BigO", "enum", "i32", 32, False, tuple(BigO.__members__))
-        self.types["Error"] = ObjectType("Error", "error", "!llvm.ptr", declaration=NamedDefinition("Error"))
+        from py_compiler.syntax.prelude import context_type_definitions
+        self.types.update(context_type_definitions())
         self.bound_syntax = BoundSyntax(self)
         self.tags = {}
         self.scope = ()
@@ -67,14 +64,11 @@ class DeclarationContext:
 
     def type(self, name):
         if '|' in name:
-            from py_compiler.syntax.type.objects import ObjectType, NamedDefinition
-            variants = tuple(self.type(part.strip()) for part in name.split('|'))
-            if any(not t.mlir or t.mlir.startswith('memref') for t in variants):
-                raise ValueError('union variant has no LLVM value representation')
-            canonical = ' | '.join(t.name for t in variants)
-            if canonical not in self.types:
-                self.types[canonical] = ObjectType(canonical, 'union', '!llvm.struct<(i32, ' + ', '.join(t.mlir for t in variants) + ')>', variants=variants, declaration=NamedDefinition(canonical))
-            return self.types[canonical]
+            from py_compiler.syntax.block.union import Union
+            union = Union().resolve(self.type(part.strip()) for part in name.split('|'))
+            if union.name not in self.types:
+                self.types[union.name] = union
+            return self.types[union.name]
         for length in range(len(self.scope), -1, -1):
             candidate = ".".join((*self.scope[:length], name))
             if candidate in self.types:

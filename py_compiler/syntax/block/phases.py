@@ -1,5 +1,5 @@
 """With contract phases, applied by the owning block's semantic provider."""
-from py_compiler.syntax.type.objects import Assert
+from py_compiler.syntax.complex.object import Assert
 
 
 class ContractPhases:

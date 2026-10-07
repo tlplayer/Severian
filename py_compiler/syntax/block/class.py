@@ -1,5 +1,5 @@
 from py_compiler.syntax.block.record import RecordProvider, TypeDeclaration
-from py_compiler.syntax.type.objects import ObjectType
+from py_compiler.syntax.complex.object import ObjectType
 
 
 class Class(RecordProvider):
@@ -33,7 +33,7 @@ class Class(RecordProvider):
         return "!llvm.struct<(" + ", ".join(t.mlir for t in types) + ")>"
 
     def field_place(self, value, field, cfg, span, write=False):
-        from py_compiler.syntax.type.storage import FieldPlace
+        from py_compiler.syntax.generic.storage import FieldPlace
         declaration = cfg.context.by_name[value.type.name]
         if field.startswith("__") or (write and field.startswith("_")):
             raise ValueError(f"field {field!r} is not externally {'writable' if write else 'readable'}")
@@ -43,8 +43,8 @@ class Class(RecordProvider):
         raise ValueError(f"{declaration.name} has no field {field!r}")
 
     def instantiate(self, declaration, arguments, cfg, env, span):
-        from py_compiler.syntax.type.objects import Allocate
-        from py_compiler.syntax.type.storage import FieldPlace
+        from py_compiler.syntax.complex.object import Allocate
+        from py_compiler.syntax.generic.storage import FieldPlace
         from py_compiler.syntax.function.calls import invoke, literal_value, select
         layout = self.layout(declaration, cfg.context)
         value = cfg.emit("allocate", cfg.context.type(declaration.name), (), Allocate(layout), span)
@@ -68,8 +68,8 @@ class Class(RecordProvider):
         return value
 
     def copy_value(self, value, cfg, span):
-        from py_compiler.syntax.type.objects import Allocate
-        from py_compiler.syntax.type.storage import FieldPlace
+        from py_compiler.syntax.complex.object import Allocate
+        from py_compiler.syntax.generic.storage import FieldPlace
         declaration = cfg.context.by_name[value.type.name]
         layout = self.layout(declaration, cfg.context)
         result = cfg.emit("allocate", value.type, (), Allocate(layout), span)
@@ -89,7 +89,7 @@ class Receiver:
 
     def configure(self, builder, node, parameters):
         from py_compiler.mir.ownership.flow import Binding
-        from py_compiler.syntax.type.storage import FieldPlace
+        from py_compiler.syntax.generic.storage import FieldPlace
         syntax = builder.syntax
         self_value = builder.value(syntax.types["pointer"])
         parameters.append(self_value)

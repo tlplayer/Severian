@@ -1,5 +1,5 @@
 """Callable resolution and exact-one trait dispatch, owned by function syntax."""
-from py_compiler.syntax.type.objects import Invoke, TraitBox, Extract, Assert
+from py_compiler.syntax.complex.object import Invoke, TraitBox, Extract, Assert
 from py_compiler.hir.hir.src.program import Constant
 from py_compiler.mir.cfg.cfg import Edge, Terminator
 from py_compiler.mir.ownership.flow import Binding
@@ -16,7 +16,7 @@ def coerce(value, expected, cfg, span):
     if expected is None or value.type == expected:
         return value
     if expected.family == "union" and value.type in expected.variants:
-        from py_compiler.syntax.type.objects import UnionBox
+        from py_compiler.syntax.complex.object import UnionBox
         return cfg.emit("union", expected, (value,), UnionBox(expected.variants.index(value.type)), span)
     if value.type.family == 'record' and expected.family == 'trait':
         declaration = cfg.context.by_name[value.type.name]
@@ -102,10 +102,10 @@ def dispatch(receiver, method, arguments, cfg, env, span, contract_name=None):
             cfg.values[binding.identity] = value
         for guard in entry.guards:
             condition = cfg.expr(guard, guard_env, context.type('bool'))
-            from py_compiler.syntax.type.objects import BooleanAnd
+            from py_compiler.syntax.complex.object import BooleanAnd
             flag = cfg.emit('and', context.type('bool'), (flag, condition), BooleanAnd(), span)
         flags.append(flag)
-    from py_compiler.syntax.type.objects import CountBoolean
+    from py_compiler.syntax.complex.object import CountBoolean
     count = literal_value(0, context.type('i32'), cfg, span)
     for flag in flags:
         count_value = cfg.emit('count', context.type('i32'), (flag,), CountBoolean(), span)
@@ -189,7 +189,7 @@ def lower_expression(node, cfg, env, expected=None):
     entry, values = select(entries, arguments, cfg, env)
     if receiver_binding and receiver_binding.ownership == 'view':
         body = context.compile(entry)
-        from py_compiler.syntax.type.storage import FieldPlace
+        from py_compiler.syntax.generic.storage import FieldPlace
         if body is None or any(o.kind == 'write' and isinstance(o.payload, FieldPlace) for b in body.blocks for o in b.operations):
             raise ValueError('cannot call a mutating method through a view')
     value = invoke(entry, values, cfg, span, receiver)
