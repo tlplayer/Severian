@@ -1,6 +1,5 @@
 """Callable declarations retain parameter, result and acceptance contracts."""
 from dataclasses import dataclass, field
-from hashlib import sha256
 from py_compiler.syntax.grammar.expression import expression
 
 
@@ -20,14 +19,43 @@ class Callable:
     suffix: tuple = ()
     imports: tuple = ()
     parameter_ownership: dict = field(default_factory=dict)
+    templates: tuple = ()
+    type_arguments: dict = field(default_factory=dict)
+    callable_arguments: dict = field(default_factory=dict)
+    realization_key: tuple = ()
+
+    declaration_signature: tuple | None = None
+
+    def __post_init__(self):
+        # Inference rewrites parameters after compilation; names must stay stable
+        # between recursive calls, body creation and later references.
+        if self.declaration_signature is None:
+            self.declaration_signature = tuple(annotation or '?' for _, annotation in self.parameters)
 
     @property
     def symbol(self):
-        return "__sev_fn_" + sha256((self.node.identity + self.name).encode()).hexdigest()
+        source = self.node.tokens[0].lexeme.source
+        line, column = source.position(self.node.span.start)
+        # Nested lexical scopes currently contain source snapshot identities.
+        # Expose their offsets without putting the snapshot hash in the name.
+        def readable(value):
+            return str(value).replace(source.identity + ':', 'scope_')
+        if self.realization_key:
+            arguments = [readable(value) if kind == 'type' else
+                         parameter + '=' + readable(value).removeprefix('__sev_fn_')
+                         for parameter, kind, value in self.realization_key]
+        elif self.templates:
+            arguments = [parameter.name for parameter in self.templates]
+        else:
+            arguments = [readable(annotation) for annotation in self.declaration_signature]
+        # The source qualifier distinguishes overload declarations and files.
+        # It deliberately avoids '@', which ELF linkers use for symbol versions.
+        return f"__sev_fn_{readable(self.name)}[{','.join(arguments)}]::{source.path}:{line}:{column}"
 
 
 def signature(node, owner=""):
-    items = list(node.header)
+    from py_compiler.syntax.complex.generic import template_header
+    templates, items = template_header(list(node.header))
     if len(items) < 3 or items[0].kind != "IDENTIFIER" or items[1].text != "(":
         raise ValueError("expected def name(parameters) -> Type")
     end = next((i for i, item in enumerate(items) if item.text == ")"), -1)
@@ -91,7 +119,7 @@ def signature(node, owner=""):
         if token.text == "complexity" and index >= 2 and items[index - 1].text == "." and items[index - 2].text not in (items[0].text, "F"):
             raise ValueError("complexity contract must name its declaring function")
     return Callable(node, (owner + "." if owner else "") + items[0].text,
-                    tuple(parameters), result, tuple(guards), complexity=complexity, obligations=tuple(obligations), suffix=tuple(suffix), parameter_ownership=parameter_ownership)
+                    tuple(parameters), result, tuple(guards), complexity=complexity, obligations=tuple(obligations), suffix=tuple(suffix), parameter_ownership=parameter_ownership, templates=templates)
 
 
 def pure_predicate(node, parameters):
@@ -135,3 +163,40 @@ def add_clause(tokens, guards, obligations, complexity, suffix):
         complexity[words[4]] = value
         return
     guards.append(expression(tokens))
+
+
+import unittest
+
+
+class CallableSymbolTests(unittest.TestCase):
+    def declaration(self, path, text):
+        from py_compiler.frontend.source.source import SourceFile
+        from py_compiler.frontend.lexer.lexer import lex
+        from py_compiler.frontend.parser.blocks import parse_blocks
+        from py_compiler.syntax.recognition import Syntax
+        source, syntax = SourceFile(path, text), Syntax()
+        root, errors = parse_blocks(source, lex(source, syntax), syntax)
+        self.assertFalse(errors, str(errors))
+        return signature(root.children[0])
+
+    def test_readable_declaration_name_is_stable_after_inference(self):
+        entry = self.declaration('src/example.sev', 'def identity(value):\n    return value\n')
+        original = entry.symbol
+        self.assertEqual(original, '__sev_fn_identity[?]::src/example.sev:1:1')
+        entry.parameters = (('value', 'i32'),)
+        self.assertEqual(entry.symbol, original)
+
+    def test_types_callable_arguments_and_source_files_are_distinct(self):
+        from dataclasses import replace
+        source = 'def identity[T](value: T) -> T:\n    return value\n'
+        template = self.declaration('src/one.sev', source)
+        integer = replace(template, templates=(), realization_key=(('T', 'type', 'i32'),))
+        string = replace(template, templates=(), realization_key=(('T', 'type', 'string'),))
+        self.assertTrue(integer.symbol.startswith('__sev_fn_identity[i32]::'))
+        self.assertTrue(string.symbol.startswith('__sev_fn_identity[string]::'))
+        other = replace(self.declaration('src/two.sev', source), templates=(), realization_key=integer.realization_key)
+        self.assertEqual(len({integer.symbol, string.symbol, other.symbol}), 3)
+        left = replace(integer, realization_key=(*integer.realization_key, ('F', 'callable', '__sev_fn_left[int]::ops.sev:1:1')))
+        right = replace(integer, realization_key=(*integer.realization_key, ('F', 'callable', '__sev_fn_right[int]::ops.sev:3:1')))
+        self.assertNotEqual(left.symbol, right.symbol)
+        self.assertIn('F=left[int]', left.symbol)

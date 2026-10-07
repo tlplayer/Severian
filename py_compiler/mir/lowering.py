@@ -48,6 +48,9 @@ class Builder:
         self.imported = {}
         self.unsafe_depth = 0
         self.active_scopes = []
+        self.value_sources = {}
+        self.call_result_owners = {}
+        self.parameter_bindings = {}
 
     def value(self, type_):
         value = Value(self.next_value, type_)
@@ -71,7 +74,9 @@ class Builder:
         operation = replace(operation, atom=payload.atom(operation))
         operation.atom.verify(operation)
         self.current.operations.append(operation)
-        if type_ and type_.family in ("record", "trait", "union") and any(v.identity in self.stack_values for v in operands):
+        if type_ and type_.binding_ownership != 'copy':
+            self.value_sources[result.identity] = set().union(*(self.value_sources.get(v.identity, set()) for v in operands))
+        if type_ and type_.family in ("record", "trait", "union", "dynamic") and any(v.identity in self.stack_values for v in operands):
             self.stack_values.add(result.identity)
         return result
 
@@ -138,6 +143,8 @@ class Builder:
         token = node.token
         if node.kind == 'owned':
             return node.operands[0].lower_expression(node, self, env, expected)
+        if expected and expected.family == 'dynamic':
+            return expected.from_value(self.expr(node, env), self, token.span)
         if expected and expected.family == "union":
             from py_compiler.syntax.function.calls import coerce
             return coerce(self.expr(node, env), expected, self, token.span)

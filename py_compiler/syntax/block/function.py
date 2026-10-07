@@ -66,6 +66,9 @@ class Function(DeclarationProvider):
             env[binding.name], builder.values[binding.identity] = binding, value
             builder.body.bindings.append(binding)
             parameters.append(value)
+            builder.parameter_bindings[binding.identity] = len(env) - 1
+            if type_ and type_.binding_ownership != 'copy' and mode in ('view', 'borrow'):
+                builder.value_sources[value.identity] = {len(env) - 1}
         builder.current.parameters = tuple(parameters)
         context.scope = builder.declaration_scope
         from py_compiler.syntax.block.phases import ContractPhases

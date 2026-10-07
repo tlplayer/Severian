@@ -7,11 +7,12 @@ def name(value):
 
 
 def render_body(body):
+    from py_compiler.mlir.src.lib import symbol_ref
     body.verify()
     first = body.blocks[0]
     arguments = ", ".join(f"{name(v)}: {v.type.mlir}" for v in first.parameters)
     result = " -> " + body.result_type.mlir if body.result_type.mlir else ""
-    lines = [f"  func.func @{body.name}({arguments}){result} {{"]
+    lines = [f"  func.func {symbol_ref(body.name)}({arguments}){result} {{"]
     def edge(e):
         if not e.arguments:
             return f"^bb{e.target}"

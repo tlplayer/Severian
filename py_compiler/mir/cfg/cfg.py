@@ -52,6 +52,7 @@ class Body:
     storage: list = field(default_factory=list)
     complexity: dict = field(default_factory=dict)
     test: dict | None = None
+    result_sources: tuple = ()
 
     def verify(self):
         if not self.blocks:

@@ -8,6 +8,7 @@ class BoundSyntax:
     @property
     def types(self):
         result = dict(self.context.types)
+        result.update(self.context.template_types)
         for length in range(len(self.context.scope) + 1):
             prefix = '.'.join(self.context.scope[:length])
             prefix = prefix + '.' if prefix else ''
@@ -36,6 +37,7 @@ class DeclarationContext:
         self.scope = ()
         self.tests = []
         self.unsafe_depth = 0
+        self.template_types, self.template_functions, self.realizations = {}, {}, {}
 
     def declaration_name(self, name, scope):
         for length in range(len(scope), -1, -1):
@@ -45,6 +47,8 @@ class DeclarationContext:
         return name
 
     def lookup_functions(self, name, scope):
+        if name in self.template_functions:
+            return (self.template_functions[name],)
         for length in range(len(scope), -1, -1):
             key = ".".join((*scope[:length], name))
             if key in self.functions:
@@ -65,13 +69,17 @@ class DeclarationContext:
 
     def type(self, name):
         name = name.replace(" ", "")
+        if name in self.template_types:
+            return self.template_types[name]
         if "[" in name and name.endswith("]"):
             base, argument = name[:-1].split("[", 1)
             definition = self.types.get(base)
             specialize = getattr(definition, "specialize", None)
             if specialize is None:
                 raise ValueError(f"{base} has no generic type provider")
-            return specialize(self.type(argument))
+            result = specialize(self.type(argument))
+            self.types[result.name] = result
+            return result
         if '|' in name:
             from py_compiler.syntax.block.union import Union
             union = Union().resolve(self.type(part.strip()) for part in name.split('|'))
@@ -100,6 +108,8 @@ class DeclarationContext:
         self.declared_nodes.add(entry.node.identity)
 
     def compile(self, entry):
+        if entry.templates:
+            return None
         if entry.body is not None:
             return entry.body
         if entry.compiling:
@@ -109,11 +119,14 @@ class DeclarationContext:
         entry.compiling = True
         previous = self.scope
         self.scope = entry.scope
+        previous_types, previous_functions = self.template_types, self.template_functions
+        self.template_types, self.template_functions = entry.type_arguments, entry.callable_arguments
         try:
             return self.compilers[id(entry)].compile(entry, self)
         finally:
             entry.compiling = False
             self.scope = previous
+            self.template_types, self.template_functions = previous_types, previous_functions
 
     def require(self, name, operation):
         self.requirements.append((name, operation))

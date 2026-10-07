@@ -89,6 +89,8 @@ class LiteralModuleGrammar(Grammar):
                 current.append(token)
         for items in lines:
             cursor = 0
+            if len(items) > 2 and items[1].text == ':' and items[2].text == 'dynamic':
+                return None
             if items[0].kind == 'INDENT':
                 return None
             if len(items) > 1 and items[0].kind == 'IDENTIFIER' and items[1].text in (':', '=', ':='):

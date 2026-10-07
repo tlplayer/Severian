@@ -134,7 +134,6 @@ class PreludeTests(unittest.TestCase):
         for text, expected in (
             ('def work():\n    pending = async work() with self\n', 'async callable has no declared'),
             ('def work():\n    fn = lambda x: x + 1\n', 'lambda has no declared'),
-            ('value: dynamic = 1\n', 'dynamic has no declared'),
         ):
             result = self.compile(text)
             self.assertTrue(result.diagnostics)

@@ -26,6 +26,9 @@ class ArrayType:
     binding_ownership: str = 'view'
     parameter_ownership: str = 'view'
 
+    def grammars(self):
+        return ()
+
     def __post_init__(self):
         if self.element.family != 'integer':
             raise ValueError('array allocation currently requires an integer element type')

@@ -28,16 +28,38 @@ def coerce(value, expected, cfg, span):
     raise ValueError(f'{value.type.name} does not satisfy {expected.name}')
 
 
-def select(entries, arguments, cfg, env):
+def select(entries, arguments, cfg, env, explicit=()):
     candidates = [e for e in entries if len(e.parameters) == len(arguments)]
     if not candidates:
         raise ValueError('no callable matches the argument count')
     # Evaluate each argument once; use an expected type only when all candidates agree.
     values = []
     for index, argument in enumerate(arguments):
-        annotations = {e.parameters[index][1] for e in candidates}
+        from py_compiler.syntax.complex.generic import explicit_bindings, substitute, type_parameters
+        annotations = set()
+        for candidate in candidates:
+            annotation = candidate.parameters[index][1]
+            if candidate.templates:
+                types, _ = explicit_bindings(candidate, explicit, cfg.context)
+                annotation = substitute(annotation, types)
+                import re
+                if set(re.findall(r'\b[A-Za-z_]\w*\b', annotation or '')) & (type_parameters(candidate) - set(types)):
+                    annotation = None
+            elif explicit:
+                raise ValueError('callable does not declare template parameters')
+            annotations.add(annotation)
         expected = cfg.context.type(next(iter(annotations))) if len(annotations) == 1 and None not in annotations else None
         values.append(cfg.expr(argument, env, expected))
+    from py_compiler.syntax.complex.generic import realize
+    realized, failures = [], []
+    for candidate in candidates:
+        try:
+            realized.append(realize(candidate, explicit, values, cfg.context) if candidate.templates else candidate)
+        except ValueError as failure:
+            failures.append(str(failure))
+    candidates = realized
+    if not candidates:
+        raise ValueError('; '.join(failures))
     def accepts(entry):
         for value, (_, annotation) in zip(values, entry.parameters):
             if annotation is None:
@@ -103,7 +125,10 @@ def invoke(entry, values, cfg, span, receiver=None):
         cfg.effect('call', operands, operation, span)
         return None
     value = cfg.emit('call', result, operands, operation, span)
-    # Until result lifetime contracts exist, reference results conservatively retain inputs.
+    sources = entry.body.result_sources if entry.body is not None else ()
+    cfg.value_sources[value.identity] = set().union(*(cfg.value_sources.get(values[i].identity, set()) for i in sources))
+    if any(values[i].identity in cfg.stack_values for i in sources):
+        cfg.stack_values.add(value.identity)
     return value
 
 
@@ -198,6 +223,12 @@ def lower_expression(node, cfg, env, expected=None):
         from py_compiler.syntax.grammar.expression import type_spelling
         target = context.type('pointer[' + type_spelling(argument) + ']')
         return target.from_value(cfg.expr(arguments[0], env), cfg, span)
+    explicit = ()
+    if callee.kind == 'index':
+        from py_compiler.syntax.grammar.expression import type_spelling
+        terms = argument.operands if argument.kind == 'template_arguments' else (argument,)
+        explicit = tuple(type_spelling(term) for term in terms)
+        callee = base
     receiver = None
     receiver_binding = None
     if callee.kind == 'name':
@@ -206,7 +237,7 @@ def lower_expression(node, cfg, env, expected=None):
         provider = context.provider_by_name.get(declaration_name)
         if hasattr(provider, 'instantiate'):
             return coerce(provider.instantiate(context.by_name[declaration_name], arguments, cfg, env, span), expected, cfg, span)
-        if name in context.syntax.types:
+        if name in context.bound_syntax.types:
             from py_compiler.syntax.generic.owned import select as select_grammar
             grammar = select_grammar(context.type(name), 'F.constructor', 'construct')
             return coerce(grammar.expand(cfg, arguments, env), expected, cfg, span)
@@ -235,11 +266,22 @@ def lower_expression(node, cfg, env, expected=None):
         entries = context.functions.get(receiver.type.name + '.' + callee.token.text, ())
     else:
         raise ValueError('expression does not provide a callable')
-    entry, values = select(entries, arguments, cfg, env)
+    entry, values = select(entries, arguments, cfg, env, explicit)
     if receiver_binding and receiver_binding.ownership == 'view':
         body = context.compile(entry)
         from py_compiler.syntax.generic.storage import FieldPlace
         if body is None or any(o.kind == 'write' and isinstance(o.payload, FieldPlace) for b in body.blocks for o in b.operations):
             raise ValueError('cannot call a mutating method through a view')
     value = invoke(entry, values, cfg, span, receiver)
+    if value is not None and entry.body is not None and entry.body.result_sources:
+        owners = []
+        for index in entry.body.result_sources:
+            argument = arguments[index]
+            owner = cfg.lookup(argument, env) if argument.kind in ('name', 'reference') else cfg.call_result_owners.get(values[index].identity)
+            if owner is not None:
+                owners.append(owner)
+        if owners:
+            if len({owner.identity for owner in owners}) != 1:
+                raise ValueError('returned view has multiple possible owners')
+            cfg.call_result_owners[value.identity] = owners[0]
     return coerce(value, expected, cfg, span) if expected else value

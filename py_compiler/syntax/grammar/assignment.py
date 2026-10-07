@@ -106,6 +106,10 @@ class Assignment:
         value = cfg.expr(core, env, expected)
         if value is None:
             raise ValueError("a no-result call cannot initialize a binding")
+        if owner and value.type.family == 'dynamic' and owner.type != value.type:
+            owner = None
+        if core.kind == 'call' and value.identity in cfg.call_result_owners:
+            owner = cfg.call_result_owners[value.identity]
         if expected and value.type != expected:
             raise ValueError(f"initializer {value.type.name} does not satisfy {expected.name}")
         if value is None:

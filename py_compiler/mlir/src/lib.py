@@ -13,6 +13,12 @@ def quoted(value):
                          for b in value.encode("utf-8")) + '"'
 
 
+def symbol_ref(symbol):
+    """Use MLIR quoted symbol references for source names and template arguments."""
+    import re
+    return '@' + (symbol if re.fullmatch(r'[A-Za-z_$.-][A-Za-z_0-9$.-]*', symbol) else quoted(symbol))
+
+
 @dataclass(frozen=True)
 class MlirFunction:
     symbol: str
@@ -70,11 +76,18 @@ def render(program):
     from py_compiler.mlir.src.cfg import render_body
     from py_compiler.syntax.generic.atom import ExternalSymbol
     external = {}
+    owner_globals = set()
     defined = {body.name for body in program.bodies} | {f.symbol for f in program.functions}
     for body in program.bodies:
         for block in body.blocks:
             for operation in block.operations:
                 implementation = operation.atom.implementation if operation.atom else None
+                definitions = getattr(implementation, 'global_definitions', None)
+                if definitions is not None:
+                    for definition in definitions():
+                        if definition not in owner_globals:
+                            owner_globals.add(definition)
+                            globals_.append('  ' + definition)
                 if isinstance(implementation, ExternalSymbol):
                     signature = (tuple(t.mlir for t in operation.atom.inputs), operation.atom.result.mlir if operation.atom.result else "")
                     if implementation.symbol in defined:
@@ -113,6 +126,11 @@ from py_compiler.syntax.prelude import type_definitions
 
 
 class MlirTests(unittest.TestCase):
+    def test_quoted_function_symbols_escape_source_characters(self):
+        self.assertEqual(symbol_ref('__sev_fn_identity[i32]'), '@"__sev_fn_identity[i32]"')
+        self.assertEqual(symbol_ref('native_step'), '@native_step')
+        self.assertEqual(symbol_ref('fn"\\name'), '@' + quoted('fn"\\name'))
+
     def test_render_is_pure_and_retains_semantic_types(self):
         types = type_definitions(64)
         constants = tuple(Constant(name, name, types[name], value, Span("s", 0, 1), "x.sev", "=")

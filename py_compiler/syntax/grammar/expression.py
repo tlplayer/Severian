@@ -66,7 +66,11 @@ def parse_expression(tokens, syntax):
             if tokens[cursor[0]].text == "[":
                 bracket = tokens[cursor[0]]
                 cursor[0] += 1
-                index = parse()
+                arguments = [parse()]
+                while cursor[0] < len(tokens) and tokens[cursor[0]].text == ',':
+                    cursor[0] += 1
+                    arguments.append(parse())
+                index = arguments[0] if len(arguments) == 1 else Expression('template_arguments', bracket, tuple(arguments))
                 if cursor[0] == len(tokens) or tokens[cursor[0]].text != "]":
                     raise ValueError("expected closing index bracket")
                 cursor[0] += 1

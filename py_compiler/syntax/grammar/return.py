@@ -15,13 +15,17 @@ class Return:
             value = cfg.expr(expression(node.tokens[1:]), env, expected) if len(node.tokens) > 1 else None
         if value and value.identity in cfg.stack_values:
             raise ValueError("cannot return an object/view whose storage belongs to this callable")
+        if value:
+            cfg.body.result_sources = tuple(sorted(set(cfg.body.result_sources) | cfg.value_sources.get(value.identity, set())))
         if value and callable(getattr(value.type, 'release', None)):
             term = expression(node.tokens[1:])
             binding = cfg.lookup(term, env) if term.kind in ('name', 'reference') else None
             if binding:
                 if binding.ownership in ('view', 'borrow'):
-                    raise ValueError('returning a memory view requires a result lifetime contract')
-                cfg.flow.move(binding)
+                    if not cfg.value_sources.get(value.identity):
+                        raise ValueError('returning a memory view requires a result lifetime contract')
+                else:
+                    cfg.flow.move(binding)
             elif term.kind != 'call':
                 raise ValueError('memory return requires ownership')
             elif term.operands[0].kind == 'index' and term.operands[0].operands[0].token.text == 'pointer':
