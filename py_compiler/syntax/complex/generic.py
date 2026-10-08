@@ -9,6 +9,32 @@ class GenericType(TypeDefinition):
         super().__init__('generic')
 
 
+def split_arguments(text):
+    depth, start, result = 0, 0, []
+    for index, character in enumerate(text):
+        depth += (character == '[') - (character == ']')
+        if character == ',' and depth == 0:
+            result.append(text[start:index])
+            start = index + 1
+    result.append(text[start:])
+    if depth or any(not item for item in result):
+        raise ValueError('invalid generic argument list')
+    return tuple(result)
+
+
+@dataclass(frozen=True)
+class NumberArgument:
+    value: int
+
+    @property
+    def name(self):
+        return str(self.value)
+
+
+def template_argument(spelling, context):
+    return NumberArgument(int(spelling)) if spelling.isdigit() else context.type(spelling)
+
+
 @dataclass(frozen=True)
 class TemplateParameter:
     name: str
@@ -73,7 +99,7 @@ def explicit_bindings(entry, explicit, context):
     typed = type_parameters(entry)
     for parameter, spelling in zip(entry.templates, explicit):
         if parameter.name in typed:
-            types[parameter.name] = context.type(spelling)
+            types[parameter.name] = template_argument(spelling, context)
         else:
             functions[parameter.name] = resolve_callable(spelling, context, context.scope)
     return types, functions
@@ -96,9 +122,18 @@ def realize(entry, explicit, values, context):
             types[pattern] = actual
         elif pattern and '[' in pattern and pattern.endswith(']'):
             base, inner = pattern[:-1].split('[', 1)
-            if getattr(actual, 'family', None) != base or not hasattr(actual, 'element'):
+            if getattr(actual, 'family', None) != base:
                 raise ValueError('generic container argument does not match its type pattern')
-            infer(inner, actual.element)
+            terms = split_arguments(inner)
+            actual_arguments = getattr(actual, 'generic_arguments', None)
+            if actual_arguments is None:
+                actual_arguments = (actual.element,) if hasattr(actual, 'element') else ()
+            if len(terms) > len(actual_arguments):
+                raise ValueError('generic container argument count mismatch')
+            for term, argument in zip(terms, actual_arguments):
+                infer(term, argument)
+        elif pattern and pattern.isdigit() and getattr(actual, 'name', None) != pattern:
+            raise ValueError('generic element count mismatch')
     for (_, pattern), value in zip(entry.parameters, values):
         infer(pattern, value.type)
     previous_scope, previous_types = context.scope, context.template_types
@@ -111,7 +146,7 @@ def realize(entry, explicit, values, context):
             if parameter.default is None:
                 raise ValueError(f'cannot infer template argument {parameter.name}')
             if parameter.name in typed:
-                types[parameter.name] = context.type(substitute(parameter.default, types))
+                types[parameter.name] = template_argument(substitute(parameter.default, types), context)
                 context.template_types[parameter.name] = types[parameter.name]
             else:
                 functions[parameter.name] = functions.get(parameter.default) or resolve_callable(parameter.default, context, entry.scope)
@@ -128,7 +163,8 @@ def realize(entry, explicit, values, context):
     context.realizations[cache_key] = result
     context.compilers[id(result)] = context.compilers[id(entry)]
     for type_ in types.values():
-        context.types[type_.name] = type_
+        if not isinstance(type_, NumberArgument):
+            context.types[type_.name] = type_
     return result
 
 
@@ -234,3 +270,13 @@ class GenericRealizationTests(unittest.TestCase):
             self.skipTest('install mlir-opt to verify generic realizations')
         program = self.valid(self.identity + 'class Point:\n    x: int\ndef work():\n    a = identity(1)\n    b = identity("hello")\n    p = Point(2)\n    c = identity(p)\n    value: dynamic = 3\n    d = identity(value)\n')
         verify_native(render(lower(program)))
+
+    def test_multiple_type_and_number_parameters(self):
+        source = ('def first[T1,N1,T2,N2](a: array[T1,N1], b: array[T2,N2]) -> T1:\n    return a[0]\n'
+                  'def work() -> int:\n    a = array[int,2](1,2)\n    b = array[i32,3](3,4,5)\n    return first(a,b)\n')
+        program = self.valid(source)
+        body = next(body for body in program.bodies if body.declaration == 'first')
+        self.assertIn('[i64,2,i32,3]', body.name)
+
+    def test_number_template_default(self):
+        self.valid('def make[T = int,N = 2]() -> array[T,N]:\n    return array[T,N](1,2)\ndef work():\n    a = make()\n')

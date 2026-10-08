@@ -26,8 +26,12 @@ def expression(tokens):
 
 
 def type_spelling(node):
-    if node.kind == 'name':
+    if node.kind in ('name', 'literal'):
         return node.token.text
+    if node.kind == 'template_arguments':
+        return ','.join(type_spelling(item) for item in node.operands)
+    if node.kind == 'template_binding':
+        return ':'.join(type_spelling(item) for item in node.operands)
     if node.kind == 'index':
         return type_spelling(node.operands[0]) + '[' + type_spelling(node.operands[1]) + ']'
     raise ValueError('expected a concrete type argument')
@@ -53,6 +57,22 @@ def parse_expression(tokens, syntax):
             if cursor[0] == len(tokens) or tokens[cursor[0]].text != ")":
                 raise ValueError("expected closing parenthesis")
             cursor[0] += 1
+        elif token.text == '{':
+            entries = []
+            while cursor[0] < len(tokens) and tokens[cursor[0]].text != '}':
+                key = parse()
+                if cursor[0] == len(tokens) or tokens[cursor[0]].text != ':':
+                    raise ValueError('map entry requires key: value')
+                cursor[0] += 1
+                entries.extend((key, parse()))
+                if cursor[0] < len(tokens) and tokens[cursor[0]].text == ',':
+                    cursor[0] += 1
+                else:
+                    break
+            if cursor[0] == len(tokens) or tokens[cursor[0]].text != '}':
+                raise ValueError('expected closing map brace')
+            cursor[0] += 1
+            left = Expression('map', token, tuple(entries))
         elif token.kind in ("NUMBER", "CHAR", "STRING") or token.text in ("true", "false", "None", "absent"):
             left = Expression("literal", token)
         elif token.text in ("module", "local", "self") and cursor[0] + 1 < len(tokens) and tokens[cursor[0]].text == "." and tokens[cursor[0] + 1].kind == "IDENTIFIER":
@@ -66,10 +86,16 @@ def parse_expression(tokens, syntax):
             if tokens[cursor[0]].text == "[":
                 bracket = tokens[cursor[0]]
                 cursor[0] += 1
-                arguments = [parse()]
+                def argument():
+                    value = parse()
+                    if cursor[0] < len(tokens) and tokens[cursor[0]].text == ':':
+                        cursor[0] += 1
+                        value = Expression('template_binding', value.token, (value, parse()))
+                    return value
+                arguments = [argument()]
                 while cursor[0] < len(tokens) and tokens[cursor[0]].text == ',':
                     cursor[0] += 1
-                    arguments.append(parse())
+                    arguments.append(argument())
                 index = arguments[0] if len(arguments) == 1 else Expression('template_arguments', bracket, tuple(arguments))
                 if cursor[0] == len(tokens) or tokens[cursor[0]].text != "]":
                     raise ValueError("expected closing index bracket")

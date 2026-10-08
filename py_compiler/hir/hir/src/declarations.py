@@ -91,7 +91,10 @@ class DeclarationContext:
             specialize = getattr(definition, "specialize", None)
             if specialize is None:
                 raise ValueError(f"{base} has no generic type provider")
-            result = specialize(self.type(argument))
+            from py_compiler.syntax.complex.generic import split_arguments
+            arguments = split_arguments(argument)
+            resolver = getattr(definition, 'specialize_arguments', None)
+            result = resolver(arguments, self) if resolver else specialize(*(self.type(item) for item in arguments))
             self.types[result.name] = result
             return result
         if '|' in name:

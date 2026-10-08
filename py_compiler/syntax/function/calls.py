@@ -216,6 +216,11 @@ def lower_expression(node, cfg, env, expected=None):
     callee, *arguments = node.operands
     from py_compiler.syntax.prelude import builtin_call_providers
     base, argument = (callee.operands if callee.kind == 'index' else (callee, None))
+    definition = context.types.get(base.token.text) if base.kind == 'name' else None
+    if callable(getattr(definition, 'construct', None)):
+        from py_compiler.syntax.grammar.expression import type_spelling
+        terms = argument.operands if argument and argument.kind == 'template_arguments' else ((argument,) if argument else ())
+        return coerce(definition.construct(tuple(type_spelling(term) for term in terms), arguments, cfg, env, span, expected), expected, cfg, span)
     builtin = builtin_call_providers().get(base.token.text) if base.kind == 'name' else None
     if builtin is not None:
         from py_compiler.syntax.grammar.expression import type_spelling
@@ -262,6 +267,10 @@ def lower_expression(node, cfg, env, expected=None):
                 return coerce(value, expected, cfg, span) if expected else value
         receiver_binding = cfg.lookup(subject, env) if subject.kind in ("name", "reference") else None
         receiver = cfg.expr(subject, env)
+        method = getattr(receiver.type, 'call_method', None)
+        if method is not None:
+            value = method(receiver, callee.token.text, arguments, cfg, env, span, receiver_binding)
+            return coerce(value, expected, cfg, span) if expected else value
         if receiver.type.family == 'trait':
             value = dispatch(receiver, callee.token.text, arguments, cfg, env, span)
             return coerce(value, expected, cfg, span) if expected else value
