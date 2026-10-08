@@ -24,6 +24,7 @@ def recognize_blocks(source, tokens, syntax=None):
     root = Node(source.identity + ":root", "module", source.span(0, len(source.text)), (), "")
     root.syntax = syntax
     root.provider = import_module("py_compiler.syntax.block.global").Global()
+    root.scope = root.provider.bind_scope(root)
     lines, current, errors, delimiters = [], [], [], []
     for token in tokens:
         if token.kind in ("NEWLINE", "EOF"):
@@ -82,6 +83,7 @@ def recognize_blocks(source, tokens, syntax=None):
             node = Node(source.identity + ":" + str(first.span.start), kind,
                         source.span(first.span.start, items[-1].span.end), tuple(items), parent.identity, header=header, provider=provider)
             node.syntax, node.imports = provider.expand(header, active_syntax) if provider else (active_syntax, ())
+            node.scope = provider.bind_scope(node, parent.scope) if provider else parent.scope
             parent.children.append(node)
             if provider and provider.has_body(node):
                 pending = node
@@ -94,6 +96,7 @@ def recognize_blocks(source, tokens, syntax=None):
             extend(child)
         if node.children:
             node.span = source.span(node.span.start, max(node.span.end, node.children[-1].span.end))
+        if node.provider:
+            node.scope.span = node.span
     extend(root)
     return root, errors
-

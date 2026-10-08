@@ -288,6 +288,7 @@ def lower_module(module):
     context.resolve_contracts()
     initializer = Builder(source, context.bound_syntax, root.identity, "__sev_init_" + source.identity, syntax.types["absent"])
     initializer.context = context
+    initializer.block_scope = root.scope
     initializer.declared_nodes = context.declared_nodes
     root.provider.configure(initializer, context)
     initializer.scope(root.children, context.global_bindings)

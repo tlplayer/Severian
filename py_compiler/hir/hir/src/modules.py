@@ -1,5 +1,5 @@
 """Resolve syntax terms into declaration modules before executable MIR construction."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from py_compiler.hir.hir.src.program import Submodule
 
 
@@ -34,10 +34,20 @@ def resolve(source, root, syntax, builder):
             while parent in nodes:
                 candidates = names.get((parent, token.text))
                 if candidates:
+                    if any(not node.scope.allows(nodes[candidate].scope) for candidate in candidates):
+                        raise ValueError(f'production scope cannot depend on test declaration {token.text!r}')
                     edges[identity].update(candidates)
                     break
                 parent = nodes[parent].parent
-        edges[identity].update(child.identity for child in node.children)
+        edges[identity].update(child.identity for child in node.children if node.scope.allows(child.scope))
+    # Select the declaration tree before resolving types or realizing callables.
+    # Nested helpers and templates inherit the domain from their owning block.
+    if not syntax.include_tests:
+        def production(node):
+            return replace(node, children=[production(child) for child in node.children if not child.scope.development])
+        root = production(root)
+        nodes = {identity: node for identity, node in nodes.items() if not node.scope.development}
+        edges = {identity: dependencies & nodes.keys() for identity, dependencies in edges.items() if identity in nodes}
     # Tarjan partitions mutually dependent terms; independent components remain separate.
     active, indices, low, stack, components = set(), {}, {}, [], []
     def visit(identity):
@@ -70,6 +80,7 @@ def resolve(source, root, syntax, builder):
     # Resolve the partitioned terms into their owning module before MIR construction.
     from py_compiler.hir.hir.src.declarations import DeclarationContext
     context = DeclarationContext(source, syntax, builder)
+    context.scopes = {identity: node.scope for identity, node in nodes.items()}
     context.declared_nodes = set()
     context.declare_nodes(root.children, ())
     context.resolve_contracts()

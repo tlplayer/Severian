@@ -30,7 +30,7 @@ def write_atomic(path, text):
     os.replace(temporary, path)
 
 
-def build(root, target="x86_64-unknown-linux-gnu", pointer_bits=64, jobs=4, mlir_opt=None):
+def build(root, target="x86_64-unknown-linux-gnu", pointer_bits=64, jobs=4, mlir_opt=None, include_tests=False):
     root = Path(root).resolve()
     output = root / "package.pkg"
     log = output / "debug/build/log.txt"
@@ -40,13 +40,13 @@ def build(root, target="x86_64-unknown-linux-gnu", pointer_bits=64, jobs=4, mlir
         write_atomic(output / "debug/build/warn.txt", "")
     report("Building with py_compiler\n")
     try:
-        return _build(root, output, target, pointer_bits, jobs, mlir_opt, report)
+        return _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_tests)
     except (OSError, ValueError, subprocess.TimeoutExpired) as failure:
         report(str(failure) + "\n", True)
         raise
 
 
-def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
+def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_tests=False):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", target):
         raise ValueError("target must be a safe target-triple path component")
     if jobs < 1:
@@ -56,7 +56,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
                       "i386": 32, "i686": 32, "arm": 32, "wasm32": 32}.get(architecture)
     if required_width and required_width != pointer_bits:
         raise ValueError(f"{target} requires --pointer-bits {required_width}")
-    syntax = Syntax(pointer_bits)
+    syntax = Syntax(pointer_bits, include_tests=include_tests)
     syntax.types  # Validate target representation before reading source.
     manifest_text = (root / "package.json").read_text(encoding="utf-8")
     manifest = json.loads(manifest_text)
@@ -100,7 +100,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
     compiler_id = digest(encode([(p.relative_to(compiler_root).as_posix(), p.read_text())
                                 for p in sorted(compiler_root.rglob("*.py"))]))
     content_id = digest(encode([manifest_text, lock, snapshots]))
-    build_id = digest(encode([content_id, compiler_id, target, pointer_bits]))
+    build_id = digest(encode([content_id, compiler_id, target, pointer_bits, include_tests]))
     abi_id = digest(encode([target, pointer_bits, "py-primitive-abi-v1"]))
     identity = {"name": package["name"], "version": package["version"], "content-id": content_id}
     ir_path = f"artifacts/{target}/{build_id}/ir/package.mlir"
@@ -144,6 +144,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report):
                  "declarations": declarations}
     interface_text = encode(interface)
     realization = {"format": "py_compiler.realization", "version": 1, "package": identity,
+                   "scope": "test" if include_tests else "production",
                    "build-id": build_id, "state": "compiled-object", "compiler": compiler_id,
                    "target": target, "abi": abi_id, "pointer-bits": pointer_bits,
                    "interface": {"path": interface_path, "checksum": digest(interface_text)},

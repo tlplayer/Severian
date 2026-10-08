@@ -17,6 +17,7 @@ class Node:
     provider: object = None
     syntax: object = None
     imports: tuple = ()
+    scope: object = None
 
 
 def parse_blocks(source, tokens, syntax=None):

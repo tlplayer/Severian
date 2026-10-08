@@ -38,6 +38,20 @@ class DeclarationContext:
         self.tests = []
         self.unsafe_depth = 0
         self.template_types, self.template_functions, self.realizations = {}, {}, {}
+        self.scopes = {}
+
+    def callable_scope(self, entry):
+        scope = entry.node.scope
+        for argument in entry.callable_arguments.values():
+            dependency = self.callable_scope(argument)
+            if dependency is not None and dependency.development:
+                return dependency
+        for argument in entry.type_arguments.values():
+            declaration = self.by_name.get(argument.name)
+            dependency = self.scopes.get(declaration.identity) if declaration else None
+            if dependency is not None and dependency.development:
+                return dependency
+        return scope
 
     def declaration_name(self, name, scope):
         for length in range(len(scope), -1, -1):

@@ -4,6 +4,10 @@ from py_compiler.syntax.complex.object import ObjectType
 
 class Class(RecordProvider):
     spelling = "class"
+    scope_kind = 'self'
+
+    def bindings(self, cfg, env):
+        return cfg.namespaces.get('self', {})
 
     def parse_header(self, items):
         header = tuple(items[1:-1] if items[-1].text == ":" else items[1:])

@@ -1,17 +1,7 @@
-"""Scope qualifiers select bindings; they do not introduce source blocks."""
+"""Compatibility catalog; block classes own scope qualifier behavior."""
+from importlib import import_module
+from py_compiler.syntax.block.function import Function as Local
 
 
-class Local:
-    def bindings(self, cfg, env):
-        return {name: env[name] for name in cfg.local_names if name in env}
-
-
-class Namespace:
-    def __init__(self, name):
-        self.name = name
-
-    def bindings(self, cfg, env):
-        return cfg.namespaces.get(self.name, {})
-
-
-SCOPES = {"local": Local(), "module": Namespace("module"), "self": Namespace("self")}
+SCOPES = {'local': Local(), 'module': import_module('py_compiler.syntax.block.global').Global(),
+          'self': import_module('py_compiler.syntax.block.class').Class()}

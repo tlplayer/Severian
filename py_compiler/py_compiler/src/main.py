@@ -18,6 +18,7 @@ def main(argv=None):
     command.add_argument("--pointer-bits", type=int, choices=(32, 64), default=64)
     command.add_argument("--jobs", type=int, default=4)
     command.add_argument("--mlir-opt", help="MLIR verifier executable; auto-detected when omitted")
+    command.add_argument("--include-tests", action="store_true", help="include development scopes in the compiled artifact")
     tokens = commands.add_parser("tokens", help="inspect primitive and keyword recognition")
     tokens.add_argument("source")
     commands.add_parser("test", help="run tests embedded beside compiler implementations")
@@ -32,7 +33,7 @@ def main(argv=None):
                        "syntax.primitive.bool.declarations", "syntax.primitive.char.declarations",
                        "syntax.primitive.byte.byte", "syntax.primitive.pointer.operations",
                        "syntax.primitive.numeric.conversion", "syntax.complex.array", "syntax.complex.generic", "syntax.function.contracts", "syntax.dynamic.dynamic", "syntax.complex.string", "syntax.operator.operation",
-                       "syntax.grammar.expression", "syntax.grammar.call", "syntax.block.unsafe", "syntax.prelude", "mlir.src.lib", "package"]
+                       "syntax.grammar.expression", "syntax.grammar.call", "syntax.block.unsafe", "syntax.block.test", "syntax.prelude", "mlir.src.lib", "package"]
             suite = unittest.defaultTestLoader.loadTestsFromNames(["py_compiler." + m for m in modules])
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
         if args.command == "tokens":
@@ -40,7 +41,7 @@ def main(argv=None):
             for token in lex(source, Syntax()):
                 print(json.dumps({"kind": token.kind, "text": token.text, "span": [token.span.start, token.span.end]}, ensure_ascii=False))
             return 0
-        result = build(args.package, args.target, args.pointer_bits, args.jobs, args.mlir_opt)
+        result = build(args.package, args.target, args.pointer_bits, args.jobs, args.mlir_opt, args.include_tests)
         if result["success"]:
             print("MLIR: " + result["ir"])
             print("Object: " + result["object"])

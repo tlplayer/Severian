@@ -3,6 +3,11 @@ from py_compiler.syntax.generic.block import BlockProvider
 
 class Global(BlockProvider):
     """The source window is the global block. No module: header exists."""
+    scope_kind = 'module'
+
+    def bindings(self, cfg, env):
+        return cfg.namespaces.get('module', {})
+
     def parse_header(self, items):
         raise ValueError("module is a scope qualifier; use module.name, not module:")
 

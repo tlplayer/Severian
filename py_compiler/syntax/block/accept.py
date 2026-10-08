@@ -4,6 +4,7 @@ from py_compiler.syntax.generic.block import BlockProvider
 
 class Accept(BlockProvider):
     spelling = 'accept'
+    required_scope = 'test'
     expected_failure = False
 
     def parse_header(self, items):
@@ -30,4 +31,3 @@ class Accept(BlockProvider):
             details = '\n'.join(map(str, result.diagnostics))
             raise ValueError(f'{self.spelling} fixture {"unexpectedly compiled" if not failed else "failed"}: {details}')
         return 1
-

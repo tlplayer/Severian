@@ -109,6 +109,10 @@ def select(entries, arguments, cfg, env, explicit=()):
 
 
 def invoke(entry, values, cfg, span, receiver=None):
+    source_scope = getattr(cfg, 'block_scope', None)
+    target_scope = cfg.context.callable_scope(entry)
+    if source_scope is not None and target_scope is not None and not source_scope.allows(target_scope):
+        raise ValueError(f'production scope cannot call test declaration {entry.name!r}')
     cfg.context.compile(entry)
     operands = tuple(coerce(v, cfg.context.type(t), cfg, span) for v, (_, t) in zip(values, entry.parameters))
     if entry.receiver:

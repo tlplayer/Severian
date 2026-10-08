@@ -75,5 +75,12 @@ def integration():
     return GrammarImport('integ')
 
 
+def test():
+    from py_compiler.syntax.block.mock import Mock
+    from py_compiler.syntax.block.throws import Throws
+    from py_compiler.syntax.block.when import When
+    return GrammarImport('test', (Mock(), Throws(), When()))
+
+
 def standard_expansions():
-    return {'compiler': compiler, 'integ': integration}
+    return {'compiler': compiler, 'integ': integration, 'test': test}

@@ -5,6 +5,10 @@ from py_compiler.mir.ownership.flow import Binding
 
 class Function(DeclarationProvider):
     spelling = "def"
+    scope_kind = 'local'
+
+    def bindings(self, cfg, env):
+        return {name: env[name] for name in cfg.local_names if name in env}
 
     def parse_header(self, items):
         return tuple(items[1:-1] if items[-1].text == ":" else items[1:])
@@ -42,6 +46,7 @@ class Function(DeclarationProvider):
         builder = context.builder(source, syntax, entry.symbol, entry.symbol, result)
         builder.imported = {name: value for imported in entry.imports for name, value in imported.exports}
         builder.context = context
+        builder.block_scope = context.callable_scope(entry)
         builder.declaration_scope = (*entry.scope, node.identity)
         builder.body.declaration = entry.name
         builder.declared_nodes = context.declared_nodes

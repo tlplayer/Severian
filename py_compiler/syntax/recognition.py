@@ -8,6 +8,7 @@ class Syntax:
     pointer_bits: int = 64
     keywords: frozenset = KEYWORDS
     symbols: tuple = SYMBOLS
+    include_tests: bool = True
 
     @property
     def block_providers(self):
@@ -26,8 +27,11 @@ class Syntax:
 
     @property
     def scope_providers(self):
-        from py_compiler.syntax.keywords.scope import SCOPES
-        return SCOPES
+        from importlib import import_module
+        from py_compiler.syntax.block.function import Function
+        owners = (Function(), import_module('py_compiler.syntax.block.global').Global(),
+                  import_module('py_compiler.syntax.block.class').Class())
+        return {owner.scope_kind: owner for owner in owners}
 
     @property
     def expansions(self):
