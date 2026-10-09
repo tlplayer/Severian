@@ -24,6 +24,8 @@ class Callable:
     callable_arguments: dict = field(default_factory=dict)
     realization_key: tuple = ()
 
+    defaults: dict = field(default_factory=dict)
+    receiver_ownership: str | None = None
     declaration_signature: tuple | None = None
 
     def __post_init__(self):
@@ -58,39 +60,65 @@ def signature(node, owner=""):
     templates, items = template_header(list(node.header))
     if len(items) < 3 or items[0].kind != "IDENTIFIER" or items[1].text != "(":
         raise ValueError("expected def name(parameters) -> Type")
-    end = next((i for i, item in enumerate(items) if item.text == ")"), -1)
+    depth, end = 0, -1
+    for index in range(1, len(items)):
+        depth += (items[index].text == '(') - (items[index].text == ')')
+        if depth == 0:
+            end = index
+            break
     if end < 2:
         raise ValueError("missing parameter-list delimiter")
-    parameters, cursor = [], 2
-    parameter_ownership = {}
-    while cursor < end:
-        name = items[cursor].text
-        if items[cursor].kind != "IDENTIFIER" or any(p[0] == name for p in parameters):
-            raise ValueError("parameter name is invalid or duplicated")
-        cursor += 1
-        type_name = None
-        if cursor < end and items[cursor].text == ":":
+    groups, group, depth = [], [], 0
+    for token in items[2:end]:
+        if token.text == ',' and depth == 0:
+            groups.append(group); group = []
+        else:
+            group.append(token)
+            depth += (token.text in ('[', '(', '{')) - (token.text in (']', ')', '}'))
+    if group:
+        groups.append(group)
+    parameters, parameter_ownership, defaults = [], {}, {}
+    receiver_ownership = None
+    for group in groups:
+        if not group:
+            raise ValueError('empty parameter')
+        name = group[0].text
+        if name == 'self':
+            if not owner or parameters or receiver_ownership is not None:
+                raise ValueError('self must be the first method parameter')
+            words = [t.text for t in group[1:]]
+            if not words:
+                receiver_ownership = 'view'
+            elif words[:1] == [':'] and words[-1:] == ['Self']:
+                receiver_ownership = words[1] if len(words) == 3 else 'view'
+                if receiver_ownership not in ('view', 'borrow'):
+                    raise ValueError('receiver currently supports view or borrow')
+            else:
+                raise ValueError('expected self: view Self or self: borrow Self')
+            continue
+        if group[0].kind != 'IDENTIFIER' or any(p[0] == name for p in parameters):
+            raise ValueError('parameter name is invalid or duplicated')
+        cursor, annotation = 1, None
+        if cursor < len(group) and group[cursor].text == ':':
             cursor += 1
-            if cursor == end:
-                raise ValueError("parameter annotation is missing")
-            if items[cursor].text in ('view', 'move', 'borrow', 'copy', 'mirror'):
-                parameter_ownership[name] = items[cursor].text
+            if cursor < len(group) and group[cursor].text in ('view', 'borrow', 'move', 'copy', 'mirror'):
+                parameter_ownership[name] = group[cursor].text; cursor += 1
+            start = cursor
+            while cursor < len(group) and group[cursor].text != '=':
                 cursor += 1
-            start, depth = cursor, 0
-            while cursor < end:
-                word = items[cursor].text
-                if word == ',' and depth == 0:
-                    break
-                depth += (word == '[') - (word == ']')
-                cursor += 1
-            type_name = ''.join(t.text for t in items[start:cursor])
-            if not type_name or depth:
-                raise ValueError('invalid parameter type')
-        parameters.append((name, type_name))
-        if cursor < end:
-            if items[cursor].text != ",":
-                raise ValueError("expected parameter separator")
-            cursor += 1
+            annotation = ''.join(t.text for t in group[start:cursor])
+            if not annotation:
+                raise ValueError('parameter annotation is missing')
+        if cursor < len(group):
+            if group[cursor].text != '=' or not annotation:
+                raise ValueError('parameter defaults require a type annotation')
+            default = expression(group[cursor + 1:])
+            if default.kind != 'literal' and not (default.kind == 'unary' and default.token.text in ('+', '-') and default.operands[0].kind == 'literal'):
+                raise ValueError('parameter default currently requires a literal value')
+            defaults[name] = default
+        elif defaults:
+            raise ValueError('required parameter cannot follow a default parameter')
+        parameters.append((name, annotation))
     cursor, result, guards = end + 1, None, []
     complexity, obligations, suffix = {}, [], []
     if cursor < len(items) and items[cursor].text == "->":
@@ -119,7 +147,7 @@ def signature(node, owner=""):
         if token.text == "complexity" and index >= 2 and items[index - 1].text == "." and items[index - 2].text not in (items[0].text, "F"):
             raise ValueError("complexity contract must name its declaring function")
     return Callable(node, (owner + "." if owner else "") + items[0].text,
-                    tuple(parameters), result, tuple(guards), complexity=complexity, obligations=tuple(obligations), suffix=tuple(suffix), parameter_ownership=parameter_ownership, templates=templates)
+                    tuple(parameters), result, tuple(guards), complexity=complexity, obligations=tuple(obligations), suffix=tuple(suffix), parameter_ownership=parameter_ownership, templates=templates, defaults=defaults, receiver_ownership=receiver_ownership)
 
 
 def pure_predicate(node, parameters):
@@ -200,3 +228,18 @@ class CallableSymbolTests(unittest.TestCase):
         right = replace(integer, realization_key=(*integer.realization_key, ('F', 'callable', '__sev_fn_right[int]::ops.sev:3:1')))
         self.assertNotEqual(left.symbol, right.symbol)
         self.assertIn('F=left[int]', left.symbol)
+
+
+class ParameterDefaultTests(unittest.TestCase):
+    def test_typed_parameter_defaults_and_nested_delimiters(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = 'def scale(value: int, factor: int = 2) -> int:\n    return value * factor\ndef work() -> int:\n    return scale(3)\n'
+        result = compile_source('defaults.sev', source, Syntax())
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+
+    def test_required_parameter_after_default_is_rejected(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('defaults.sev', 'def bad(a: int = 1, b: int) -> int:\n    return b\n', Syntax())
+        self.assertTrue(result.diagnostics)

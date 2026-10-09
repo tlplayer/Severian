@@ -33,7 +33,7 @@ def main(argv=None):
                        "syntax.primitive.bool.declarations", "syntax.primitive.char.declarations",
                        "syntax.primitive.byte.byte", "syntax.primitive.pointer.operations",
                        "syntax.primitive.numeric.conversion", "syntax.complex.array", "syntax.complex.vector", "syntax.complex.dictionary", "syntax.complex.map", "syntax.complex.generic", "syntax.function.contracts", "syntax.dynamic.dynamic", "syntax.complex.string", "syntax.operator.operation",
-                       "syntax.grammar.expression", "syntax.grammar.call", "syntax.block.unsafe", "syntax.block.test", "syntax.prelude", "mlir.src.lib", "package"]
+                       "syntax.grammar.expression", "syntax.grammar.call", "syntax.block.class", "syntax.block.trait", "syntax.block.unsafe", "syntax.block.test", "syntax.prelude", "mlir.src.lib", "package"]
             suite = unittest.defaultTestLoader.loadTestsFromNames(["py_compiler." + m for m in modules])
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
         if args.command == "tokens":

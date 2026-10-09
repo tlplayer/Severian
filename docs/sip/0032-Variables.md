@@ -10,11 +10,11 @@ Superseded by:
 
 ## Appendix
 
-primtives:    int | char | float | bool | byte | pointer | type | None| none | absent | atom
+primtives:    int | char | float | bool | byte | pointer | type | infer | None | none | absent | atom
 unit:         unit | duration | frequency | memory (byte) 
-complex:      class | trait | generics | enum | union | iterator | with
+complex:      class | trait | generics | enum | union  | with
 generic:      T | V | K | F | B | G | Y | N | C | W | L | E | R | M
-collections:  list | map | dict | stack | heap | queue | chain 
+collections:  list | map | dict | stack | heap | queue | chain | iterator
 lifetime:     static 
 scope:        local | global | self 
 ownership:    move | borrow | view | copy | mirror | drop 
@@ -70,6 +70,18 @@ type(0) -> int
 type(0.0) -> float
 type('c') -> char
 type("") -> string
+```
+
+Types are defaulted to infer, meaning static types are inferred. If the type cannot be inferred this is a compiler error. 
+This is different from the runtime any which is to say any value can be used which is too permissive and is supposed to be used
+for dynamic runtime values.
+
+```
+class X:
+    p: pointer
+
+a:infer = x().p
+
 ```
 
 ## Responsibilities

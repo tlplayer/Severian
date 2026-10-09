@@ -26,6 +26,11 @@ class Function(DeclarationProvider):
         entry = signature(node, receiver.name if receiver else ".".join(context.scope))
         entry.scope = context.scope
         entry.receiver = receiver
+        if entry.receiver_ownership is not None and receiver is None:
+            raise ValueError('self is only valid in a class method')
+        entry.type_arguments = dict(context.template_types)
+        if receiver:
+            entry.type_arguments['Self'] = context.types[receiver.name]
         imported = []
         active = node.syntax
         while hasattr(active, "parent"):
@@ -56,10 +61,11 @@ class Function(DeclarationProvider):
         builder.fallback_scopes = [context.global_bindings]
         env, parameters = {}, []
         if entry.receiver:
+            builder.receiver_mode = entry.receiver_ownership or 'borrow'
             entry.receiver.configure(builder, node, parameters)
             builder.receiver = entry.receiver
             builder.receiver_value = parameters[0]
-        builder.constructor = bool(entry.receiver and entry.name.rsplit(".", 1)[-1] == entry.receiver.name.rsplit(".", 1)[-1])
+        builder.constructor = bool(entry.receiver and entry.name.rsplit(".", 1)[-1] == entry.receiver.name.rsplit(".", 1)[-1].split('[', 1)[0])
         builder.uninitialized_fields = {b.identity for b in builder.namespaces.get("self", {}).values()} if builder.constructor else set()
         for parameter, annotation in entry.parameters:
             type_ = context.type(annotation) if annotation else None

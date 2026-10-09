@@ -3,6 +3,12 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 
+def root_binding(node, cfg, env):
+    while node.kind in ('member', 'index'):
+        node = node.operands[0]
+    return cfg.lookup(node, env) if node.kind in ('name', 'reference') else None
+
+
 @dataclass(frozen=True)
 class GlobalPlace:
     identity: str
@@ -45,6 +51,7 @@ class FieldPlace:
     index: int
     record_type: str
     type: object
+    storage_type: str = ''
 
     def read(self, cfg, span):
         return cfg.emit("read", self.type, (self.receiver,), self, span)
@@ -64,9 +71,16 @@ class FieldPlace:
         address = f"%field_{suffix}_{self.index}"
         lines = [f"{address} = llvm.getelementptr {name(self.receiver)}[0, {self.index}] : (!llvm.ptr) -> !llvm.ptr, {self.record_type}"]
         if operation.result:
-            lines.append(f"{name(operation.result)} = llvm.load {address} : !llvm.ptr -> {self.type.mlir}")
+            if self.type.family == 'record':
+                lines[0] = lines[0].replace(address + ' =', name(operation.result) + ' =', 1)
+            else:
+                lines.append(f"{name(operation.result)} = llvm.load {address} : !llvm.ptr -> {self.type.mlir}")
         else:
-            lines.append(f"llvm.store {name(operation.operands[-1])}, {address} : {self.type.mlir}, !llvm.ptr")
+            value, storage = name(operation.operands[-1]), self.storage_type or self.type.mlir
+            if self.type.family == 'record':
+                lines.append(f'%aggregate_{suffix}_{self.index} = llvm.load {value} : !llvm.ptr -> {storage}')
+                value = f'%aggregate_{suffix}_{self.index}'
+            lines.append(f"llvm.store {value}, {address} : {storage}, !llvm.ptr")
         return lines
 
 

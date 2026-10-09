@@ -47,10 +47,10 @@ arena[T = any]: block of memory deallocates all at once when all is
              view / borrow / move / copy / mirror
                            |
                            v
-                     Object / Container
+                     Object / Collection 
                            |
                            v
-                       Storage[T]
+                       memory[T]
                 /          |           \
              owned       arena       external
                 \          |           /
@@ -61,9 +61,6 @@ arena[T = any]: block of memory deallocates all at once when all is
                         Allocator
                 /        |        \
              heap      arena      pool
-                           |
-                           v
-                      core.memory
                            |
                            v
                        pointer[T]

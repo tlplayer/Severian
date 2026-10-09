@@ -29,9 +29,14 @@ def coerce(value, expected, cfg, span):
 
 
 def select(entries, arguments, cfg, env, explicit=()):
-    candidates = [e for e in entries if len(e.parameters) == len(arguments)]
+    candidates = [e for e in entries if len(e.parameters) - len(e.defaults) <= len(arguments) <= len(e.parameters)]
     if not candidates:
         raise ValueError('no callable matches the argument count')
+    if any(len(e.parameters) != len(arguments) for e in candidates):
+        if len(candidates) != 1:
+            raise ValueError('default arguments require an unambiguous callable signature')
+        entry = candidates[0]
+        arguments = (*arguments, *(entry.defaults[name] for name, _ in entry.parameters[len(arguments):]))
     # Evaluate each argument once; use an expected type only when all candidates agree.
     values = []
     for index, argument in enumerate(arguments):
@@ -130,8 +135,10 @@ def invoke(entry, values, cfg, span, receiver=None):
         return None
     value = cfg.emit('call', result, operands, operation, span)
     sources = entry.body.result_sources if entry.body is not None else ()
-    cfg.value_sources[value.identity] = set().union(*(cfg.value_sources.get(values[i].identity, set()) for i in sources))
-    if any(values[i].identity in cfg.stack_values for i in sources):
+    dependencies = [receiver if i == -1 else values[i] for i in sources]
+    dependencies = [source for source in dependencies if source is not None]
+    cfg.value_sources[value.identity] = set().union(*(cfg.value_sources.get(source.identity, set()) for source in dependencies))
+    if any(source.identity in cfg.stack_values for source in dependencies):
         cfg.stack_values.add(value.identity)
     return value
 
@@ -243,6 +250,10 @@ def lower_expression(node, cfg, env, expected=None):
     if callee.kind == 'name':
         name = callee.token.text
         declaration_name = context.declaration_name(name, cfg.declaration_scope)
+        if declaration_name in context.record_templates:
+            target = context.record_templates[declaration_name].realize(explicit, context)
+            provider = context.provider_by_name[target.name]
+            return coerce(provider.instantiate(target.declaration, arguments, cfg, env, span), expected, cfg, span)
         provider = context.provider_by_name.get(declaration_name)
         if hasattr(provider, 'instantiate'):
             return coerce(provider.instantiate(context.by_name[declaration_name], arguments, cfg, env, span), expected, cfg, span)
@@ -265,7 +276,8 @@ def lower_expression(node, cfg, env, expected=None):
             if declared and declared.family == 'trait':
                 value = dispatch(None, callee.token.text, arguments, cfg, env, span, name)
                 return coerce(value, expected, cfg, span) if expected else value
-        receiver_binding = cfg.lookup(subject, env) if subject.kind in ("name", "reference") else None
+        from py_compiler.syntax.generic.storage import root_binding
+        receiver_binding = root_binding(subject, cfg, env)
         receiver = cfg.expr(subject, env)
         method = getattr(receiver.type, 'call_method', None)
         if method is not None:
@@ -289,6 +301,12 @@ def lower_expression(node, cfg, env, expected=None):
     if value is not None and entry.body is not None and entry.body.result_sources:
         owners = []
         for index in entry.body.result_sources:
+            if index == -1:
+                if receiver_binding is not None:
+                    owners.append(receiver_binding)
+                continue
+            if index >= len(arguments):
+                continue
             argument = arguments[index]
             owner = cfg.lookup(argument, env) if argument.kind in ('name', 'reference') else cfg.call_result_owners.get(values[index].identity)
             if owner is not None:

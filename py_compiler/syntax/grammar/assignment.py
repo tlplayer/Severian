@@ -2,7 +2,7 @@ from dataclasses import replace
 from py_compiler.syntax.grammar.expression import expression, OWNERSHIP
 from py_compiler.mir.ownership.flow import Binding
 from py_compiler.syntax.generic.owned import select
-from py_compiler.syntax.generic.storage import BindingPlace, AddressPlace
+from py_compiler.syntax.generic.storage import BindingPlace, AddressPlace, root_binding
 
 
 class Assignment:
@@ -20,7 +20,7 @@ class Assignment:
             if left.kind != 'member':
                 raise ValueError('assignment target is not a field')
             subject = left.operands[0]
-            owner = cfg.lookup(subject, env) if subject.kind in ('name', 'reference') else None
+            owner = root_binding(subject, cfg, env)
             if owner and owner.ownership == 'view':
                 raise ValueError('cannot mutate a field through a view; use borrow or copy')
             receiver = cfg.expr(subject, env)
@@ -92,6 +92,8 @@ class Assignment:
             destination = cfg.namespaces["self"]
             existing = destination[first.text]
             qualified = "self"
+        if existing and qualified == 'self' and existing.ownership == 'view':
+            raise ValueError('cannot mutate a field through a view receiver')
         if not qualified and existing and first.text not in local_names and (operator == ":=" or annotation):
             existing = None
         if existing and qualified == "self" and existing.identity in cfg.uninitialized_fields and operator == ":=":
@@ -104,6 +106,8 @@ class Assignment:
             cfg.flow.read(existing)
         expected = annotation or (existing.type if existing else None)
         value = cfg.expr(core, env, expected)
+        if core.kind == 'member' and value is not None and value.type.family == 'record':
+            owner = root_binding(core, cfg, env)
         if value is None:
             raise ValueError("a no-result call cannot initialize a binding")
         if owner and value.type.family == 'dynamic' and owner.type != value.type:

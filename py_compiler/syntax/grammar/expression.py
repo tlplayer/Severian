@@ -78,7 +78,7 @@ def parse_expression(tokens, syntax):
         elif token.text in ("module", "local", "self") and cursor[0] + 1 < len(tokens) and tokens[cursor[0]].text == "." and tokens[cursor[0] + 1].kind == "IDENTIFIER":
             left = Expression("reference", token, (tokens[cursor[0] + 1],))
             cursor[0] += 2
-        elif token.kind == "IDENTIFIER":
+        elif token.kind == "IDENTIFIER" or token.text == 'self':
             left = Expression("name", token)
         else:
             raise ValueError(f"unsupported expression keyword {token.text!r}")

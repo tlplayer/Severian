@@ -39,6 +39,7 @@ def template_argument(spelling, context):
 class TemplateParameter:
     name: str
     default: str | None = None
+    constraint: str | None = None
 
 
 def template_header(items):
@@ -65,10 +66,17 @@ def template_header(items):
     for tokens in groups:
         if not tokens or tokens[0].kind != 'IDENTIFIER' or any(p.name == tokens[0].text for p in result):
             raise ValueError('invalid or duplicate template parameter')
-        if len(tokens) > 1 and (len(tokens) < 3 or tokens[1].text != '='):
-            raise ValueError('expected template parameter or parameter = default')
-        default = ''.join(t.text for t in tokens[2:]) if len(tokens) > 1 else None
-        result.append(TemplateParameter(tokens[0].text, default))
+        words = [token.text for token in tokens]
+        equal = words.index('=') if '=' in words else len(words)
+        constraint = None
+        if equal > 1:
+            if words[1] != ':' or equal == 2:
+                raise ValueError('expected template parameter, constraint, or default')
+            constraint = ''.join(words[2:equal])
+        default = ''.join(words[equal + 1:]) if equal < len(words) else None
+        if equal < len(words) and not default:
+            raise ValueError('template default is missing')
+        result.append(TemplateParameter(words[0], default, constraint))
     return tuple(result), [items[0], *items[end + 1:]]
 
 
@@ -78,9 +86,32 @@ def substitute(annotation, types):
     return re.sub(r'\b[A-Za-z_]\w*\b', lambda m: types[m[0]].name if m[0] in types else m[0], annotation)
 
 
+def check_constraints(parameters, bindings, context):
+    for parameter in parameters:
+        if not parameter.constraint:
+            continue
+        actual = bindings.get(parameter.name)
+        if actual is None:
+            raise ValueError(f'unbound constrained parameter {parameter.name}')
+        for requirement in parameter.constraint.split('+'):
+            required = substitute(requirement, bindings)
+            if isinstance(actual, NumberArgument):
+                if required not in ('int', 'usize', 'N') or actual.value < 0:
+                    raise ValueError(f'{parameter.name} does not satisfy {required}')
+                continue
+            contract = context.type(required)
+            if actual == contract:
+                continue
+            declaration = context.by_name.get(actual.name)
+            if contract.family != 'trait' or declaration is None or contract.name not in declaration.traits:
+                raise ValueError(f'{actual.name} does not satisfy {required}')
+            context.provider_by_name[contract.name].satisfy(context.by_name[contract.name], declaration)
+
+
 def type_parameters(entry):
     words = set(re.findall(r'\b[A-Za-z_]\w*\b', ' '.join(t or '' for _, t in entry.parameters) + ' ' + (entry.result or '')))
     typed = {p.name for p in entry.templates if p.name in words}
+    typed.update(p.name for p in entry.templates if p.constraint)
     changed = True
     while changed:
         previous = set(typed)
@@ -122,7 +153,8 @@ def realize(entry, explicit, values, context):
             types[pattern] = actual
         elif pattern and '[' in pattern and pattern.endswith(']'):
             base, inner = pattern[:-1].split('[', 1)
-            if getattr(actual, 'family', None) != base:
+            actual_base = getattr(getattr(actual, 'declaration', None), 'template_name', '')
+            if getattr(actual, 'family', None) != base and actual_base.rsplit('.', 1)[-1] != base:
                 raise ValueError('generic container argument does not match its type pattern')
             terms = split_arguments(inner)
             actual_arguments = getattr(actual, 'generic_arguments', None)
@@ -152,13 +184,19 @@ def realize(entry, explicit, values, context):
                 functions[parameter.name] = functions.get(parameter.default) or resolve_callable(parameter.default, context, entry.scope)
     finally:
         context.scope, context.template_types = previous_scope, previous_types
+    previous_scope = context.scope
+    context.scope = entry.scope
+    try:
+        check_constraints(entry.templates, types, context)
+    finally:
+        context.scope = previous_scope
     key = tuple((p.name, 'type', types[p.name].name) if p.name in types else
                 (p.name, 'callable', functions[p.name].symbol) for p in entry.templates)
     cache_key = (entry.symbol, key)
     if cache_key in context.realizations:
         return context.realizations[cache_key]
     result = replace(entry, parameters=tuple((n, substitute(t, types)) for n, t in entry.parameters),
-                     result=substitute(entry.result, types), templates=(), type_arguments=types,
+                     result=substitute(entry.result, types), templates=(), type_arguments={**entry.type_arguments, **types},
                      callable_arguments=functions, realization_key=key, body=None, compiling=False)
     context.realizations[cache_key] = result
     context.compilers[id(result)] = context.compilers[id(entry)]
@@ -280,3 +318,19 @@ class GenericRealizationTests(unittest.TestCase):
 
     def test_number_template_default(self):
         self.valid('def make[T = int,N = 2]() -> array[T,N]:\n    return array[T,N](1,2)\ndef work():\n    a = make()\n')
+
+
+def record_clone(node, bindings, suffix):
+    """Keep source spans while giving each realization distinct declaration IDs."""
+    from dataclasses import replace
+    local = bindings
+    if node.provider and node.provider.spelling == 'def':
+        parameters, _ = template_header(list(node.header))
+        local = {name: value for name, value in bindings.items() if name not in {p.name for p in parameters}}
+    def token(value):
+        text = substitute(value.text, local) if value.kind == 'IDENTIFIER' else value.text
+        return replace(value, text=text, kind='NUMBER' if text.isdigit() else value.kind)
+    return replace(node, identity=node.identity + suffix, parent=node.parent + suffix,
+                   tokens=tuple(token(value) for value in node.tokens),
+                   header=tuple(token(value) if hasattr(value, 'text') else value for value in node.header),
+                   children=[record_clone(child, local, suffix) for child in node.children])

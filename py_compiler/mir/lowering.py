@@ -89,6 +89,8 @@ class Builder:
         self.current.operations.append(operation)
 
     def lookup(self, node, env):
+        if node.kind == 'name' and node.token.text == 'self' and hasattr(self, 'self_binding'):
+            return self.self_binding
         if node.kind == "reference":
             provider = self.syntax.scope_providers[node.token.text]
             return provider.bindings(self, env).get(node.operands[0].text)
@@ -104,6 +106,10 @@ class Builder:
         if identity in self.storage:
             return self.storage[identity].read(self, span)
         value = self.values[identity]
+        if binding.type.family == 'record' and binding.identity in self.values and binding.type != value.type:
+            # A nested record view borrows the containing binding's lifetime,
+            # but retains the address and type of its own field.
+            value = self.values[binding.identity]
         if binding.type != value.type and callable(getattr(binding.type, 'from_value', None)):
             return binding.type.from_value(value, self, span)
         return value
@@ -305,7 +311,7 @@ class LoweringTests(unittest.TestCase):
         result = self.compile('x = 0\nclass foo:\n    x = 1\n    def add(a):\n        local.x: local int = 2 + self.x\n        return local.x + a\n    def outer() -> int:\n        return module.x\n')
         self.assertFalse(result.diagnostics, "\n".join(map(str, result.diagnostics)))
         add = next(body for body in result.program.bodies if body.declaration == "foo.add")
-        self.assertEqual([v.type.name for v in add.blocks[0].parameters], ["pointer", "i64"])
+        self.assertEqual([v.type.name for v in add.blocks[0].parameters], ["foo", "i64"])
         self.assertEqual(add.result_type.name, "i64")
         from py_compiler.syntax.generic.storage import FieldPlace, GlobalPlace
         self.assertTrue(any(isinstance(o.payload, FieldPlace) for b in add.blocks for o in b.operations))

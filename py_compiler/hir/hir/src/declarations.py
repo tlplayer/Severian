@@ -39,6 +39,8 @@ class DeclarationContext:
         self.unsafe_depth = 0
         self.template_types, self.template_functions, self.realizations = {}, {}, {}
         self.scopes = {}
+        self.record_templates = {}
+        self.realizing_records = set()
 
     def callable_scope(self, entry):
         scope = entry.node.scope
@@ -56,7 +58,7 @@ class DeclarationContext:
     def declaration_name(self, name, scope):
         for length in range(len(scope), -1, -1):
             candidate = '.'.join((*scope[:length], name))
-            if candidate in self.by_name:
+            if candidate in self.by_name or candidate in self.record_templates:
                 return candidate
         return name
 
@@ -71,6 +73,7 @@ class DeclarationContext:
 
     def declare_nodes(self, nodes, scope):
         previous = self.scope
+        previous_provider = self.active_provider
         self.scope = scope
         try:
             for node in nodes:
@@ -80,11 +83,21 @@ class DeclarationContext:
                     node.provider.declare(node, self)
         finally:
             self.scope = previous
+            self.active_provider = previous_provider
 
     def type(self, name):
         name = name.replace(" ", "")
         if name in self.template_types:
             return self.template_types[name]
+        if name in self.types and name not in self.record_templates:
+            return self.types[name]
+        template_name = name.split('[', 1)[0]
+        for length in range(len(self.scope), -1, -1):
+            candidate = '.'.join((*self.scope[:length], template_name))
+            if candidate in self.record_templates:
+                from py_compiler.syntax.complex.generic import split_arguments
+                arguments = split_arguments(name.split('[', 1)[1][:-1]) if '[' in name else ()
+                return self.record_templates[candidate].realize(arguments, self)
         if "[" in name and name.endswith("]"):
             base, argument = name[:-1].split("[", 1)
             definition = self.types.get(base)

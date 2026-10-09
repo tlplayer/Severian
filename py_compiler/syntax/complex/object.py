@@ -26,6 +26,10 @@ class ObjectType:
             raise ValueError(f"{self.name} has no defining object supplying grammar")
         return self.declaration.grammars()
 
+    @property
+    def generic_arguments(self):
+        return getattr(self.declaration, 'arguments', ())
+
 
 
 @dataclass(frozen=True)
