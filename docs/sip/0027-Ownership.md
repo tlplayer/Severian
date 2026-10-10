@@ -27,9 +27,47 @@ Superseded by: None
 | `Diagnostic`, `OperationOrigin` | Result / provenance | Conflicting use and origin of ownership obligations. |
 | `.sev` | File format | Source implementation; no ownership archive format is introduced. |
 
+
+## Ownership Overview
+
+Move: Transfers exclusive ownership of a field.
+Borrow: Temporarily grants access to a field without transferring ownership.
+View: Grants read-only access to a field.
+Share: Creates another owning reference to the same field.
+Copy: Creates an independent value.
+
+
+Ownership is a guard against mutations causing bugs. If ownership of an item is clear to the compiler, bugs can be caught statically and dynamic bugs can be handled safely. 
+
+A big problem with this syntax layer is:
+- Ceremony around what is actually happening who owns this? How will its lifetime perspire? In this scenario how do I handle this? What is the default behavior of ownership for X?
+
+These problems partially arise because configuration of ownership was seen as a black and white issue. Whereas if 
+there's flexibility for these scenarios we can avoid bugs without having a lot of ceremony.
+
+Scalar Types
+```sev
+a: int = 0
+b: float = 0.0
+
+def add(x,y):
+    return x+y
+
+add(a,b)
+```
+
+In the above snippet, who owns a and b in the add function? In some languages it would copy, pass by reference, an immutable view of the values, etc. 
+
+
+
 ## Source block → MIR → ownership fields
 
 `sev` blocks use the compiler-test syntax from [ownership examples](../examples/06-ownership/15-compiler-rejections.sev).
+
+
+
+
+
 
 ### Move x; keep y and z
 

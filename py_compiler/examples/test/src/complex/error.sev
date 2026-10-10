@@ -5,3 +5,25 @@ def bounded(a: int) -> int | Error with
     bounded.complexity.time := BigO.constant,
 }:
     return a
+
+def contract_error_phases(x: int) -> int with
+{
+    x >= 0 -> Error("negative at entry"),
+    fix 0 <= x <= 100 -> Error("outside bounds during execution"),
+    suffix x == 100 -> Error("expected 100 at exit"),
+}:
+    x = 0
+    x = 100
+    return x
+
+test "valid contracts do not execute Error failure actions":
+    assert(contract_error_phases(0) == 100)
+    assert(contract_error_phases(100) == 100)
+
+test with compiler "Error contract actions require a diagnostic message":
+    reject:
+        def missing_message(x: int) with {fix x > 0 -> Error()}:
+            return
+    reject:
+        def wrong_message(x: int) with {fix x > 0 -> Error(123)}:
+            return

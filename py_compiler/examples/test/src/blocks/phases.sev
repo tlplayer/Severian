@@ -10,3 +10,125 @@ def contract_phases(a: int) -> int with
 
 test "contract phase order":
     assert(contract_phases(3) == 4)
+
+
+contract_failures = 0
+
+def contract_failed():
+    module.contract_failures += 1
+
+def record_contract_phase(phase: int):
+    module.contract_failures *= 10
+    module.contract_failures += phase
+
+def contract_action_order() with
+{
+    prefix false -> record_contract_phase(1),
+    fix false -> record_contract_phase(2),
+    suffix false -> record_contract_phase(3),
+}:
+    return
+
+def default_contract(x: int) -> int with {x > 0 -> contract_failed()}:
+    x = -1
+    return x
+
+def prefix_contract(x: int) -> int with {prefix x > 0 -> contract_failed()}:
+    x = -1
+    return x
+
+def fix_contract(x: int) -> int with {fix 0 <= x <= 100 -> contract_failed()}:
+    x = 101
+    x = 50
+    x = -1
+    x = 100
+    return x
+
+def fix_entry_exit(x: int) -> int with {fix x > 0 -> contract_failed()}:
+    return x
+
+def fix_nested(x: int, change: bool) -> int with {fix x <= 100 -> contract_failed()}:
+    if change:
+        x = 101
+        x = 50
+    return x
+
+def suffix_contract(x: int) -> int with {suffix x > 0 -> contract_failed()}:
+    x = -1
+    return x
+
+def deferred_contract(x: int) with {defer x > 0 -> contract_failed()}:
+    x = -1
+
+class ContractBox:
+    value: int = 50
+
+def transient_contract_change(box: borrow ContractBox):
+    box.value = 200
+    box.value = 50
+
+def lasting_contract_change(box: borrow ContractBox):
+    box.value = 200
+
+def contract_call_boundary(box: borrow ContractBox) with
+{
+    fix 0 <= box.value <= 100 -> contract_failed(),
+}:
+    transient_contract_change(box)
+    assert(module.contract_failures == 0)
+    lasting_contract_change(box)
+    box.value = 50
+    assert(module.contract_failures == 1)
+
+test "default and explicit prefix run only at entry":
+    module.contract_failures = 0
+    assert(default_contract(1) == -1)
+    assert(prefix_contract(1) == -1)
+    assert(module.contract_failures == 0)
+    assert(default_contract(-1) == -1)
+    assert(prefix_contract(-1) == -1)
+    assert(module.contract_failures == 2)
+
+test "failure actions run in prefix fix entry fix exit suffix order":
+    module.contract_failures = 0
+    contract_action_order()
+    assert(module.contract_failures == 1223)
+
+test "fix checks mutations before the next statement repairs the value":
+    module.contract_failures = 0
+    assert(fix_contract(50) == 100)
+    assert(module.contract_failures == 2)
+
+test "fix checks both entry and explicit exit":
+    module.contract_failures = 0
+    assert(fix_entry_exit(-1) == -1)
+    assert(module.contract_failures == 2)
+
+test "fix checks the current value inside a nested branch":
+    module.contract_failures = 0
+    assert(fix_nested(50, true) == 50)
+    assert(fix_nested(50, false) == 50)
+    assert(module.contract_failures == 1)
+
+test "suffix and defer check explicit and implicit exit only":
+    module.contract_failures = 0
+    assert(suffix_contract(-1) == -1)
+    deferred_contract(-1)
+    assert(module.contract_failures == 2)
+
+test "fix checks after a call without instrumenting the callee":
+    module.contract_failures = 0
+    box = ContractBox()
+    contract_call_boundary(box)
+    assert(module.contract_failures == 1)
+
+test with compiler "contract arrows require a condition and a callable action":
+    reject:
+        def missing_condition(x: int) with {fix -> contract_failed()}:
+            return
+    reject:
+        def missing_action(x: int) with {fix x > 0 ->}:
+            return
+    reject:
+        def value_action(x: int) with {fix x > 0 -> 42}:
+            return

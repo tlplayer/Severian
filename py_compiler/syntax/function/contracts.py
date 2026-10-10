@@ -17,6 +17,7 @@ class Callable:
     complexity: dict = field(default_factory=dict)
     obligations: tuple = ()
     suffix: tuple = ()
+    failure_actions: tuple = ()
     imports: tuple = ()
     parameter_ownership: dict = field(default_factory=dict)
     templates: tuple = ()
@@ -120,7 +121,7 @@ def signature(node, owner=""):
             raise ValueError('required parameter cannot follow a default parameter')
         parameters.append((name, annotation))
     cursor, result, guards = end + 1, None, []
-    complexity, obligations, suffix = {}, [], []
+    complexity, obligations, suffix, failure_actions = {}, [], [], []
     if cursor < len(items) and items[cursor].text == "->":
         if cursor + 1 == len(items):
             raise ValueError("missing result annotation")
@@ -136,18 +137,18 @@ def signature(node, owner=""):
         for token in items[cursor + 2:-1]:
             if token.text == "," and depth == 0:
                 if current:
-                    add_clause(current, guards, obligations, complexity, suffix)
+                    add_clause(current, guards, obligations, complexity, suffix, failure_actions)
                     current = []
             else:
                 current.append(token)
-                depth += int(token.text == "(") - int(token.text == ")")
+                depth += (token.text in ('(', '[', '{')) - (token.text in (')', ']', '}'))
         if current:
-            add_clause(current, guards, obligations, complexity, suffix)
+            add_clause(current, guards, obligations, complexity, suffix, failure_actions)
     for index, token in enumerate(items):
         if token.text == "complexity" and index >= 2 and items[index - 1].text == "." and items[index - 2].text not in (items[0].text, "F"):
             raise ValueError("complexity contract must name its declaring function")
     return Callable(node, (owner + "." if owner else "") + items[0].text,
-                    tuple(parameters), result, tuple(guards), complexity=complexity, obligations=tuple(obligations), suffix=tuple(suffix), parameter_ownership=parameter_ownership, templates=templates, defaults=defaults, receiver_ownership=receiver_ownership)
+                    tuple(parameters), result, tuple(guards), complexity=complexity, obligations=tuple(obligations), suffix=tuple(suffix), failure_actions=tuple(failure_actions), parameter_ownership=parameter_ownership, templates=templates, defaults=defaults, receiver_ownership=receiver_ownership)
 
 
 def pure_predicate(node, parameters):
@@ -172,14 +173,32 @@ def pure_predicate(node, parameters):
 from py_compiler.syntax.complex.big_o import BigO
 
 
-def add_clause(tokens, guards, obligations, complexity, suffix):
+def add_clause(tokens, guards, obligations, complexity, suffix, failure_actions):
+    depth, action = 0, None
+    for index, token in enumerate(tokens):
+        if token.text == '->' and depth == 0:
+            action = expression(tokens[index + 1:])
+            if action.kind != 'call':
+                raise ValueError('contract failure action requires a call')
+            tokens = tokens[:index]
+            break
+        depth += (token.text in ('(', '[', '{')) - (token.text in (')', ']', '}'))
+    if not tokens:
+        raise ValueError('contract requires a condition before ->')
     words = [t.text for t in tokens]
     from py_compiler.syntax.prelude import clause_providers
     provider = clause_providers().get(words[0])
     if provider is not None:
+        lengths = tuple(len(items) for items in (guards, obligations, suffix))
         provider.attach(tokens[1:], guards, obligations, suffix)
+        if action is not None:
+            for items, length in zip((guards, obligations, suffix), lengths):
+                if len(items) > length:
+                    failure_actions.append((items[-1], action))
         return
     if ':=' in words:
+        if action is not None:
+            raise ValueError('complexity declarations do not take failure actions')
         if len(words) != 9 or words[1:4] != ['.', 'complexity', '.'] or words[4] not in ('time', 'space') or words[5:8] != [':=', 'BigO', '.']:
             raise ValueError('expected function.complexity.time/space := BigO.variant')
         try:
@@ -190,7 +209,10 @@ def add_clause(tokens, guards, obligations, complexity, suffix):
             raise ValueError('duplicate complexity contract')
         complexity[words[4]] = value
         return
-    guards.append(expression(tokens))
+    condition = expression(tokens)
+    guards.append(condition)
+    if action is not None:
+        failure_actions.append((condition, action))
 
 
 import unittest

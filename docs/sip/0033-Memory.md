@@ -65,7 +65,7 @@ arena[T = any]: block of memory deallocates all at once when all is
 - **Custom memory:** Users should be able to define memory locations and allocation strategies without modifying the compiler.
 
 ### 2. Proposed Severian Interface
-- `allocate[T](SIZE:BYTE)` — Allocates using the type's default memory policy.
+- `allocate[T=u8,F=memory.infer](SIZE:BYTE)` — Allocates using the type's default memory policy.
 - `allocate[T, memory.heap](SIZE:BYTE)` — Explicit heap allocation.
 - `allocate[T, memory.stack](SIZE:BYTE)` — Explicit stack allocation.
 - `allocate[T, memory.infer](SIZE:BYTE)` — Compiler selects placement from type constraints, lifetime, and target.
