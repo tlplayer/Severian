@@ -10,24 +10,20 @@ Superseded by:
 
 ## Appendix
 
--- all terms, file formats, variables, classes, functions, traits in a table
-
-## Context
+ all terms in a list
 
 ## Goal(s)
 
+List of goals to 
+
 ## Examples
 
-## Responsibilities
-
-## Data Models
-
-## API
-
-## Structure
+Blocks of severian code to show the desired behavior
 
 ## Problem(s)
 
-## Testing
+Examples of corner cases
 
+## Tests
 
+Blocks of severian code to test behavior
