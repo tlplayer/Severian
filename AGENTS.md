@@ -8,6 +8,7 @@ NO TASK SHOULD TAKE LONGER THAN 10 MINUTES if builds hold it back that's a probl
 Dont touch MD files, they just glob/pollute the namespace and you make bad decisions vs me. 
 Don't give prose or abstract prose. Give examples with tests and when x -> y type responses those are more verifiable vs 5 sentences of nonsense
 IIF you are building rust can you run the rust compiler to validate the change. Dont run the severian build to validate that change. 
+Don't do tables in .md files they make editing/cleaning the md very hard. do `-` lists but prefer code snippets or pseudo code with comments. They convey meaning better 
 
 Only after after rust/sev implementation is COMPLETE 100%! not partial, can you run tests and builds in severian
 
