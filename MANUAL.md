@@ -151,6 +151,7 @@ same general rules for hidden/export request only.
 Run these commands from the package directory:
 
 ```sh
+sev file.sev                  # create (at the package's root if we're in a package) a runnable build for the file
 sev build                     # Build the current package
 sev test                      # Build and run the package tests
 ```
@@ -196,13 +197,100 @@ view # Const reference to an object, you can view it but it might be changed/alt
 copy # copy an object 
 move # Take ownership of the object
 borrow # Temporarily take ownership of the object and return it potentially changed
+share  # multiple owners of an object, when all references' lifetimes expire/drop the object is removed
 mirror # Copy on write equivalent but flat, and cannot mirror a mirror to a T
 ```
 
 Severian have some core methods for owning objects
 
 ```sev
+# view
+# Read-only reference to an object.
+# Does not own the object or extend its lifetime.
+# The underlying object may change through another owner/process.
 
+a = [1, 2, 3]
+b := view a
+
+print(b[0])       # 1
+a[0] = 10
+print(b[0])       # 10
+b[0] = 20         # Error: cannot mutate through view
+
+
+# copy
+# Creates an independently owned copy of an object.
+# Copy depth follows the type's ownership/copy contract.
+
+a = [1, 2, 3]
+b := copy a
+
+b[0] = 10
+
+print(a[0])       # 1
+print(b[0])       # 10
+
+
+# move
+# Transfers ownership to another binding.
+# The original binding can no longer access the object.
+
+a = [1, 2, 3]
+b := move a
+
+print(b[0])       # 1
+print(a[0])       # Error: a was moved
+
+
+# borrow
+# Temporarily transfers exclusive access to an object.
+# The caller regains access when the borrow ends.
+# Changes made during the borrow persist.
+
+def increment(a: borrow list[int]):
+    a[0] += 1
+
+a = [1, 2, 3]
+increment(borrow a)
+
+print(a[0])       # 2
+
+
+# share
+# Multiple bindings own the same object.
+# The object is destroyed when the final owner drops.
+# Does not copy the underlying object.
+
+a = [1, 2, 3]
+b := share a
+c := share a
+
+b[0] = 10
+print(c[0])       # 10
+
+drop(a)           # Object survives: b and c own it
+drop(b)           # Object survives: c owns it
+drop(c)           # Last owner: object destroyed
+
+
+# mirror
+# Flat copy-on-write ownership.
+# Initially shares backing memory with the original.
+# Mutation detaches the mirror by copying its top-level storage.
+# A mirror cannot itself be mirrored.
+
+a = [1, 2, 3]
+b := mirror a
+
+print(b[0])       # 1
+
+b[0] = 10         # Detach and copy before mutation
+
+print(a[0])       # 1
+print(b[0])       # 10
+
+c := mirror b     # Error: cannot mirror a mirror
+c := copy b       # Valid: independent copy
 ```
 
 

@@ -42,32 +42,6 @@ arena[T = any]: block of memory deallocates all at once when all is
 
 ## Context
 
-```
-                    language ownership
-             view / borrow / move / copy / mirror
-                           |
-                           v
-                     Object / Collection 
-                           |
-                           v
-                       memory[T]
-                /          |           \
-             owned       arena       external
-                \          |           /
-                           v
-                       Allocation
-                           |
-                           v
-                        Allocator
-                /        |        \
-             heap      arena      pool
-                           |
-                           v
-                       pointer[T]
-                           |
-                           v
-                         MLIR
-```
 ## Goal(s)
 
 1. Easy memory usage for safe operations
@@ -75,6 +49,36 @@ arena[T = any]: block of memory deallocates all at once when all is
 3. Memory safety so that no deallocations/reallocations occur
 4. No memory leaks
 5. Avoid excessive memory usage
+
+
+
+## Problems
+
+### 1. Problems
+- **Memory location:** Stack, heap, cache, GPU global, GPU shared, GPU local, registers, distributed, and custom memory.
+- **Inference vs. explicit:** Compiler inference should be available, but engineers must be able to override placement.
+- **Type defaults:** Types should declare preferred memory locations through syntax/type metadata, not MIR heuristics.
+- **Allocation strategy:** Memory location, allocator, alignment, layout, and lifetime are separate concerns.
+- **Ownership:** Allocation determines where memory lives; pointers and ownership determine who can access, modify, and release it.
+- **Escape analysis:** Stack allocations that escape their lifetime must be rejected or explicitly promoted.
+- **Hardware constraints:** Not all locations support dynamic allocation, arbitrary pointers, or equivalent access semantics.
+- **Custom memory:** Users should be able to define memory locations and allocation strategies without modifying the compiler.
+
+### 2. Proposed Severian Interface
+- `allocate[T](SIZE:BYTE)` — Allocates using the type's default memory policy.
+- `allocate[T, memory.heap](SIZE:BYTE)` — Explicit heap allocation.
+- `allocate[T, memory.stack](SIZE:BYTE)` — Explicit stack allocation.
+- `allocate[T, memory.infer](SIZE:BYTE)` — Compiler selects placement from type constraints, lifetime, and target.
+- `allocate[T, memory.gpu.shared](SIZE:BYTE)` — GPU shared-memory allocation.
+- `allocate[T, memory.custom](SIZE:BYTE)` — User-defined memory location.
+- `pointer[T]` — Typed pointer; location inferred from its allocation.
+- `pointer[T, memory.heap]` — Pointer constrained to heap memory.
+- `memory.layout[T](alignment=64, packing=...)` — Explicit memory layout contract.
+- `memory.location` — Extensible interface for stack, heap, GPU, and custom backends.
+- `class A: _memory_location = memory.heap` — Type-defined default allocation policy.
+- **Resolution:** Syntax/type definitions supply memory constraints → HIR resolves allocation intent → MIR performs escape/lifetime analysis and validates placement → LIR lowers to target-specific memory operations.
+
+**Key distinction:** `memory.infer` should be a policy, not a physical memory location. Type defaults establish intent; the compiler validates feasibility.
 
 ## Examples
 
@@ -100,13 +104,21 @@ drop(owning pointer) → destroy initialized contents
 drop(view pointer)  → compiler rejection
 view leaves scope   → end access; no destruction or deallocation
 
-## Responsibilities
 
-## Data Models
+### Allocating on the stack
+```
+# scalar types usually are on the stack
+a:int = 0
+a:static int = 0
 
-## API
+# collection types are usually on the heap
+b:list = [1,'a',"abc"]
 
-## Structure
+# collections can also be on the stack if static
+b:list = [1,2,3,4]
+
+# 
+```
 
 ### Allocation 
 allocation lowers to MLIR 
@@ -135,36 +147,14 @@ memref.dealloc %buffer : memref<128xi32>
 ```
 
 ### Data models
+
 pointer[T]
     address
     allocation_id
     offset
 
-Allocation
-    base
-    size
-    alignment
-    allocator
-    initialized_range
-    owner
 
-## Problem(s)
-| Problem | Required test |
-|---|---|
-| Allocation is initially uninitialized | Allocate four elements → reading before writing is rejected when provable |
-| Initialization can contain holes | Initialize indexes `0` and `3` → cleanup destroys exactly those two |
-| Partial moves create new holes | Move out index `0` → cleanup does not destroy it again |
-| Slice bounds differ from allocation bounds | Slice covers one element → accessing its second element fails even if backing allocation is larger |
-| Owning pointer accidentally copied | Ordinary aliasing cannot create two release obligations |
-| `&a` points into expired local storage | Returning ownership preserves storage; returning a local view is rejected |
-| Same address reused | An old handle never becomes valid merely because another allocation occupies that address |
-| Allocation arithmetic overflows | Excessive `count * sizeof(T)` fails before allocation |
-| Constructor fails halfway | Destroy completed fields/elements only; release allocation once |
-| Owner moved on one branch | Later unconditional owner use is rejected; cleanup follows the actual branch |
-| Arena reset with outstanding access | Reset followed by use of the old pointer is rejected |
-| `arena[any]` contains different types | Each initialized object gets its own correct destructor and alignment |
-| Reference cycles | Weak edges or a defined cycle policy; counts alone cannot guarantee reclamation |
-| Atomic reference counts | Concurrent handle operations are safe; payload mutation still requires its own access rules |
 ## Testing
+
 
 

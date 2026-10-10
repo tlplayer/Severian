@@ -2,7 +2,7 @@
 
 Status: Draft
 Type: Compiler
-Authors: Severian contributors
+Authors: Timothy Player 
 Created: 2026-10-03
 Target: `sev_compiler/mir/ownership`
 Supersedes: None
@@ -29,7 +29,7 @@ Superseded by: None
 
 ## Source block → MIR → ownership fields
 
-`sev` blocks use the compiler-test syntax from [ownership examples](../examples/06-ownership/15-compiler-rejections.sev). `text` blocks are expected IR/state assertions, not implemented inspection APIs. Humans run tests.
+`sev` blocks use the compiler-test syntax from [ownership examples](../examples/06-ownership/15-compiler-rejections.sev).
 
 ### Move x; keep y and z
 
