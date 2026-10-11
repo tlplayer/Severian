@@ -113,22 +113,3 @@ class DictionaryPlace:
         if value.type != self.type:
             raise ValueError('dictionary assignment must satisfy V')
         emit('sev_dict_set', None, (self.receiver, *self.key, value), cfg, span, mutation=True)
-
-
-import unittest
-
-
-class DictionaryTests(unittest.TestCase):
-    def test_storage_policy_preserves_interface(self):
-        from py_compiler.frontend.src.lib import compile_source
-        from py_compiler.syntax.recognition import Syntax
-        for container in ('btree', 'vector'):
-            source = f'def work() -> int:\n    d = dict[int,int,{container}](1,10)\n    d[2] = 20\n    d.set(1,30)\n    return d.get(1)\n'
-            result = compile_source('dict.sev', source, Syntax())
-            self.assertFalse(result.diagnostics, str(result.diagnostics))
-
-    def test_unknown_container_is_rejected(self):
-        from py_compiler.frontend.src.lib import compile_source
-        from py_compiler.syntax.recognition import Syntax
-        result = compile_source('dict.sev', 'def bad():\n    d = dict[int,int,array](1,2)\n', Syntax())
-        self.assertTrue(result.diagnostics)

@@ -145,8 +145,8 @@ class RecordTemplate:
             try:
                 _, header, _ = record_header(self.node.header)
                 node = record_clone(self.node, bindings, suffix)
-                node.header = tuple(replace(token, text=substitute(token.text, bindings)) for token in header)
-                node.header = (replace(node.header[0], text=node.header[0].text + suffix), *node.header[1:])
+                node.header = tuple(token.with_text(substitute(token.text, bindings)) for token in header)
+                node.header = (node.header[0].with_text(node.header[0].text + suffix), *node.header[1:])
                 node.record_arguments = tuple(bindings[p.name] for p in self.parameters)
                 node.record_template = self.name
                 context.active_provider = self.provider

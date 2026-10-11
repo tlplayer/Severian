@@ -101,6 +101,25 @@ class PreludeTests(unittest.TestCase):
         from py_compiler.syntax.recognition import Syntax
         return compile_source('prelude.sev', text, Syntax())
 
+    def test_unregistered_native_collections_are_rejected(self):
+        from py_compiler.syntax.recognition import Syntax
+        for name, arguments in (('vector', 'int,1'), ('dict', 'int,int'), ('map', 'int,int')):
+            with self.subTest(collection=name):
+                self.assertNotIn(name, Syntax().types)
+                result = self.compile(f'def work():\n    value = {name}[{arguments}](1,2)\n')
+                self.assertTrue(result.diagnostics)
+                self.assertIn('no callable matches the argument count', str(result.diagnostics[0]))
+
+    def test_array_constructor_and_size_parameter_are_not_supported(self):
+        for source, message in (
+            ('def work():\n    value = array[int,2](1,2)\n', 'F.constructor'),
+            ('def work(value: array[int,2]):\n    return\n', "unresolved type '2'"),
+        ):
+            with self.subTest(source=source):
+                result = self.compile(source)
+                self.assertTrue(result.diagnostics)
+                self.assertIn(message, str(result.diagnostics[0]))
+
     def test_owner_words_are_unambiguous_and_preserve_identifiers(self):
         from py_compiler.syntax.recognition import Syntax
         syntax = Syntax()

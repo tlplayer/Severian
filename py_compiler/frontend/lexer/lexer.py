@@ -1,5 +1,5 @@
 """Syntax-driven tokenization. Recognition does not evaluate literals."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from py_compiler.frontend.source.source import Diagnostic, SourceFile, Span
 from py_compiler.syntax.recognition import Syntax
 
@@ -17,10 +17,15 @@ class Token:
     lexeme: Lexeme
     grammar: object = None
     syntax: object = None
+    replacement: str | None = None
 
     @property
     def text(self):
-        return self.lexeme.text
+        return self.lexeme.text if self.replacement is None else self.replacement
+
+    def with_text(self, text, *, kind=None):
+        # Specialization changes parser input, not the original source lexeme.
+        return replace(self, replacement=text, kind=self.kind if kind is None else kind)
 
     @property
     def span(self):
@@ -56,6 +61,17 @@ import unittest
 
 
 class LexerTests(unittest.TestCase):
+    def test_specialized_token_preserves_original_lexeme_and_span(self):
+        source = SourceFile('generic.sev', 'T N')
+        type_token, count_token = lex(source, Syntax())[:2]
+        specialized = type_token.with_text('i32')
+        count = count_token.with_text('2', kind='NUMBER')
+        self.assertEqual((specialized.text, count.text, count.kind), ('i32', '2', 'NUMBER'))
+        self.assertIs(specialized.lexeme, type_token.lexeme)
+        self.assertEqual(specialized.lexeme.text, 'T')
+        self.assertEqual(specialized.span, type_token.span)
+        self.assertEqual((type_token.text, count_token.text, count_token.kind), ('T', 'N', 'IDENTIFIER'))
+
     def test_keyword_boundaries_and_longest_symbol(self):
         tokens = lex(SourceFile("x.sev", "if iffy <= 1..2 # comment\n"), Syntax())
         self.assertEqual([(t.kind, t.text) for t in tokens[:6]],

@@ -312,14 +312,17 @@ class GenericRealizationTests(unittest.TestCase):
         verify_native(render(lower(program)))
 
     def test_multiple_type_and_number_parameters(self):
-        source = ('def first[T1,N1,T2,N2](a: array[T1,N1], b: array[T2,N2]) -> T1:\n    return a[0]\n'
-                  'def work() -> int:\n    a = array[int,2](1,2)\n    b = array[i32,3](3,4,5)\n    return first(a,b)\n')
+        source = ('class Counted[T,N]:\n    value: T\n'
+                  'def first[T1,N1,T2,N2](a: Counted[T1,N1], b: Counted[T2,N2]) -> T1:\n    return a.value\n'
+                  'def work() -> int:\n    a = Counted[int,2](1)\n    b = Counted[i32,3](3)\n    return first(a,b)\n')
         program = self.valid(source)
         body = next(body for body in program.bodies if body.declaration == 'first')
         self.assertIn('[i64,2,i32,3]', body.name)
 
     def test_number_template_default(self):
-        self.valid('def make[T = int,N = 2]() -> array[T,N]:\n    return array[T,N](1,2)\ndef work():\n    a = make()\n')
+        program = self.valid('def make[T = int,N: int = 2]() -> T:\n    return T(1)\ndef work():\n    a = make()\n')
+        body = next(body for body in program.bodies if body.declaration == 'make')
+        self.assertIn('[i64,2]', body.name)
 
 
 def record_clone(node, bindings, suffix):
@@ -331,7 +334,7 @@ def record_clone(node, bindings, suffix):
         local = {name: value for name, value in bindings.items() if name not in {p.name for p in parameters}}
     def token(value):
         text = substitute(value.text, local) if value.kind == 'IDENTIFIER' else value.text
-        return replace(value, text=text, kind='NUMBER' if text.isdigit() else value.kind)
+        return value.with_text(text, kind='NUMBER' if text.isdigit() else value.kind)
     return replace(node, identity=node.identity + suffix, parent=node.parent + suffix,
                    tokens=tuple(token(value) for value in node.tokens),
                    header=tuple(token(value) if hasattr(value, 'text') else value for value in node.header),

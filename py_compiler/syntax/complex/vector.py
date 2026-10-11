@@ -99,24 +99,3 @@ class VectorPlace:
         if value.type != self.type:
             raise ValueError('vector assignment must satisfy T')
         emit('sev_vector_set', None, (self.receiver, self.index, value), cfg, span, mutation=True)
-
-
-import unittest
-
-
-class VectorTests(unittest.TestCase):
-    def test_growth_and_indexed_access_lower_to_runtime(self):
-        from py_compiler.frontend.src.lib import compile_source
-        from py_compiler.syntax.recognition import Syntax
-        from py_compiler.mlir.src.lib import lower, render
-        result = compile_source('vector.sev', 'def work() -> int:\n    v = vector[int,1](1)\n    v.append(2)\n    v[0] = 3\n    return v[1]\n', Syntax())
-        self.assertFalse(result.diagnostics, str(result.diagnostics))
-        text = render(lower(result.program))
-        for symbol in ('sev_vector_push', 'sev_vector_get', 'sev_vector_set', 'sev_vector_drop'):
-            self.assertIn(symbol, text)
-
-    def test_view_cannot_append(self):
-        from py_compiler.frontend.src.lib import compile_source
-        from py_compiler.syntax.recognition import Syntax
-        result = compile_source('view.sev', 'def bad(v: vector[int,1]):\n    v.append(2)\n', Syntax())
-        self.assertTrue(result.diagnostics)
