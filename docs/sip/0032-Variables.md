@@ -12,12 +12,12 @@ Superseded by:
 
 primtives:    int | char | float | bool | byte | pointer | type | infer | None | none | absent | atom
 unit:         unit | duration | frequency | memory (byte) 
-complex:      class | trait | generics | enum | union  | with
+complex:      class | trait | generics | enum | union  | with | callable (F)
 generic:      T | V | K | F | B | G | Y | N | C | W | L | E | R | M
 collections:  list | map | dict | stack | heap | queue | chain | iterator
 lifetime:     static 
 scope:        local | global | self 
-ownership:    move | borrow | view | copy | mirror | drop 
+ownership:    move | borrow | view | copy | mirror | drop | _ (infer ownership)
 mutability:   := | =
 dynamic:      dynamic | any | numeric 
 concurrency:  atomic

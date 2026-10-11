@@ -13,6 +13,7 @@ class Lir:
     target: str
     pointer_bits: int
     dependencies: tuple = ()
+    atoms: tuple = ()
 
     def text(self):
         return render(self.mlir)
@@ -27,6 +28,14 @@ class ObjectArtifact:
 
 
 def lower(program, target, pointer_bits):
+    if program.stage != 'mir' or (program.typed_modules and not program.mir_modules):
+        raise ValueError('LIR requires MIR registration after THIR')
+    if program.mir_modules:
+        registered_bodies = tuple(body for module in program.mir_modules for body in module.bodies)
+        if (len({id(body) for body in registered_bodies}) != len(registered_bodies)
+                or len({id(body) for body in program.bodies}) != len(program.bodies)
+                or {id(body) for body in registered_bodies} != {id(body) for body in program.bodies}):
+            raise ValueError('LIR body membership changed after MIR registration')
     for body in program.bodies:
         body.verify()
     from py_compiler.syntax.generic.atom import ExternalSymbol
@@ -39,7 +48,17 @@ def lower(program, target, pointer_bits):
                 implementation = operation.atom.implementation
                 if isinstance(implementation, ExternalSymbol):
                     dependencies.update(implementation.dependencies)
-    return Lir(lower_mlir(program), target, pointer_bits, tuple(sorted(dependencies)))
+    atoms = tuple(atom for module in program.mir_modules for sub in module.submodules for atom in sub.atoms)
+    if program.mir_modules:
+        current = {(body.name, block.identity, position): operation.atom
+                   for body in program.bodies for block in body.blocks
+                   for position, operation in enumerate(block.operations)}
+        registered = {(atom.callable, atom.block, atom.position): atom.atom for atom in atoms}
+        if len(registered) != len(atoms) or current.keys() != registered.keys():
+            raise ValueError('LIR operation membership changed after MIR registration')
+        if any(current[key] is not registered[key] for key in current):
+            raise ValueError('LIR Atom changed after MIR registration')
+    return Lir(lower_mlir(program), target, pointer_bits, tuple(sorted(dependencies)), atoms)
 
 
 def companion(name, optimizer):

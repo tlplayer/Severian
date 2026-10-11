@@ -39,6 +39,9 @@ class Program:
     submodules: tuple[Submodule, ...]
     bodies: tuple = ()
     declarations: tuple = ()
+    typed_modules: tuple = ()
+    mir_modules: tuple = ()
+    stage: str = 'mir'
 
 
 def resolve_literal(literal, syntax, context=None):

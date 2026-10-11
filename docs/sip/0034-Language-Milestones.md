@@ -24,13 +24,9 @@ Superseded by:
 
 ## Examples
 
-## Responsibilities
 
-## Data Models
 
-## API
 
-## Structure
 
 ## Problem(s)
 

@@ -1,5 +1,6 @@
-"""Package publication: content-addressed IR, interface and metadata; index committed last."""
+"""Package publication: timestamped builds with content identities; index committed last."""
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 import json
@@ -22,6 +23,14 @@ def digest(value):
     return sha256(value.encode()).hexdigest()
 
 
+def new_build_id(now=None):
+    """Single build-ID format for native and checkpoint outputs, using UTC."""
+    instant = datetime.now(timezone.utc) if now is None else now
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    return instant.astimezone(timezone.utc).strftime('%Y_%m_%d_%H_%M_%S')
+
+
 def write_atomic(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as stream:
@@ -30,7 +39,7 @@ def write_atomic(path, text):
     os.replace(temporary, path)
 
 
-def build(root, target="x86_64-unknown-linux-gnu", pointer_bits=64, jobs=4, mlir_opt=None, include_tests=False):
+def build(root, target="x86_64-unknown-linux-gnu", pointer_bits=64, jobs=4, mlir_opt=None, include_tests=False, stop_after=None):
     root = Path(root).resolve()
     output = root / "package.pkg"
     log = output / "debug/build/log.txt"
@@ -40,13 +49,15 @@ def build(root, target="x86_64-unknown-linux-gnu", pointer_bits=64, jobs=4, mlir
         write_atomic(output / "debug/build/warn.txt", "")
     report("Building with py_compiler\n")
     try:
-        return _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_tests)
+        return _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_tests, stop_after)
     except (OSError, ValueError, subprocess.TimeoutExpired) as failure:
         report(str(failure) + "\n", True)
         raise
 
 
-def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_tests=False):
+def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_tests=False, stop_after=None):
+    if stop_after not in (None, 'thir', 'mir'):
+        raise ValueError('stop_after must be thir or mir')
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", target):
         raise ValueError("target must be a safe target-triple path component")
     if jobs < 1:
@@ -80,7 +91,8 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     lock = (root / "package.lock").read_text(encoding="utf-8") if (root / "package.lock").exists() else encode({"version": 1, "packages": []})
     # Executor.map preserves source order while independent source units compile concurrently.
     with ThreadPoolExecutor(max_workers=jobs) as executor:
-        results = list(executor.map(lambda pair: compile_source(pair[0], pair[1], syntax), snapshots))
+        results = list(executor.map(lambda pair: compile_source(pair[0], pair[1], syntax,
+                            stop_after=stop_after or 'mir', interface=package['name']), snapshots))
     errors = [diagnostic for result in results for diagnostic in result.diagnostics]
     if errors:
         report("\n\n".join(map(str, errors)) + "\n", True)
@@ -89,7 +101,12 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     program = Program(tuple(c for r in results for c in r.program.constants),
                       tuple(s for r in results for s in r.program.submodules),
                       tuple(b for r in results for b in r.program.bodies),
-                      tuple(d for r in results for d in r.program.declarations))
+                      tuple(d for r in results for d in r.program.declarations),
+                      tuple(m for r in results for m in r.program.typed_modules),
+                      tuple(m for r in results for m in r.program.mir_modules), stop_after or 'mir')
+    if stop_after:
+        return checkpoint(output, program, package, manifest_text, lock, snapshots, target,
+                          pointer_bits, include_tests, stop_after, report)
     lir = lower(program, target, pointer_bits)
     target_program = lir.mlir
     ir = lir.text()
@@ -100,7 +117,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     compiler_id = digest(encode([(p.relative_to(compiler_root).as_posix(), p.read_text())
                                 for p in sorted(compiler_root.rglob("*.py"))]))
     content_id = digest(encode([manifest_text, lock, snapshots]))
-    build_id = digest(encode([content_id, compiler_id, target, pointer_bits, include_tests]))
+    build_id = new_build_id()
     abi_id = digest(encode([target, pointer_bits, "py-primitive-abi-v1"]))
     identity = {"name": package["name"], "version": package["version"], "content-id": content_id}
     ir_path = f"artifacts/{target}/{build_id}/ir/package.mlir"
@@ -150,6 +167,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                    "interface": {"path": interface_path, "checksum": digest(interface_text)},
                    "artifacts": [{"path": ir_path, "kind": "mlir", "checksum": digest(ir)}],
                    "dependencies": list(native.dependencies), "native-artifacts": [{"path": object_path, "kind": "object", "checksum": sha256(native.object_bytes).hexdigest()}]}
+    realization['submodules'] = realization_records(program)
     realization["artifacts"].extend([{"path": llvm_path, "kind": "llvm-ir", "checksum": digest(native.llvm_ir)},
                                      {"path": lowered_path, "kind": "llvm-dialect", "checksum": digest(native.llvm_dialect)},
                                      *realization["native-artifacts"]])
@@ -192,10 +210,104 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
             "log": str(output / "debug/build/log.txt")}
 
 
+def realization_records(program):
+    from py_compiler.thir.src.lib import type_identity
+    registered = {sub.typed.identity: sub for module in program.mir_modules for sub in module.submodules}
+    return [{
+        'id': sub.identity, 'source-submodule': sub.source, 'source-members': list(sub.declarations),
+        'interface': module.interface, 'module': module.identity, 'source': module.source.path,
+        'substitution': sub.substitution, 'dependencies': list(sub.dependencies),
+        'constants': [{'id': value.identity, 'name': value.name, 'type': type_identity(value.type)} for value in sub.constants],
+        'label': registered[sub.identity].label if sub.identity in registered else None,
+        'callables': [{'id': call.identity, 'definition': call.definition, 'name': call.name,
+                       'symbol': call.body.name,
+                       'parameters': [{'name': value.name, 'id': type_identity(value)} for value in call.parameters],
+                       'result': {'name': call.result.name, 'id': type_identity(call.result)},
+                       'type-arguments': {name: {'name': value.name, 'id': type_identity(value)}
+                                          for name, value in call.type_arguments},
+                       'callable-arguments': dict(call.callable_arguments)} for call in sub.callables],
+        'atoms': [{'label': atom.label, 'callable': atom.callable, 'block': atom.block, 'position': atom.position}
+                  for atom in registered[sub.identity].atoms] if sub.identity in registered else [],
+    } for module in program.typed_modules for sub in module.submodules]
+
+
+def checkpoint(output, program, package, manifest_text, lock, snapshots, target,
+               pointer_bits, include_tests, stage, report):
+    compiler_root = Path(__file__).parent
+    compiler_id = digest(encode([(p.relative_to(compiler_root).as_posix(), p.read_text())
+                                for p in sorted(compiler_root.rglob('*.py'))]))
+    build_id = new_build_id()
+    interface_path = f'package.pkgi/severian/{build_id}/lib.sevi'
+    realization_path = f'metadata/realizations/{build_id}.json'
+    records = realization_records(program)
+    metadata = {'format': 'py_compiler.realization', 'version': 1, 'package': package,
+                'build-id': build_id, 'state': stage + '-registered', 'linkable': False,
+                'scope': 'test' if include_tests else 'production',
+                'compiler': compiler_id, 'target': target, 'pointer-bits': pointer_bits,
+                'submodules': records, 'artifacts': [], 'native-artifacts': []}
+    interface = {'format': 'severian.interface', 'version': 1, 'package': package,
+                 'linkable': False, 'stage': stage,
+                 'metadata': {'build-id': build_id, 'path': realization_path},
+                 'declarations': [declaration for sub in records for declaration in (*sub['callables'], *sub['constants'])]}
+    pending = {interface_path: encode(interface), realization_path: encode(metadata),
+               f'metadata/symbols/{build_id}.json': encode(interface['declarations']),
+               f'metadata/dependencies/{build_id}.json': encode([
+                   {'submodule': sub['id'], 'dependencies': sub['dependencies']} for sub in records]),
+               'source/package.json': manifest_text, 'source/package.lock': lock}
+    pending.update({'source/' + path: text for path, text in snapshots})
+    for path, text in pending.items():
+        write_atomic(output / path, text)
+    index_path = output / 'package.pkgi/index.json'
+    index = json.loads(index_path.read_text()) if index_path.exists() else {'interfaces': [], 'binding-sets': []}
+    if not isinstance(index.get('interfaces'), list):
+        raise ValueError('existing interface index uses an incompatible schema')
+    index['interfaces'] = [entry for entry in index['interfaces'] if entry.get('build-id') != build_id]
+    index['interfaces'].append({'build-id': build_id, 'path': interface_path, 'stage': stage, 'linkable': False})
+    write_atomic(index_path, encode(index))
+    report(f'Stopped after {stage}: {len(records)} typed submodules; no native artifacts\n')
+    return {'success': True, 'build-id': build_id, 'stage': stage, 'linkable': False,
+            'metadata': str(output / realization_path), 'log': str(output / 'debug/build/log.txt')}
+
+
 import unittest
 
 
 class PackageTests(unittest.TestCase):
+    def test_build_id_format_is_utc_and_zero_padded(self):
+        from datetime import timedelta
+        self.assertEqual(new_build_id(datetime(2026, 1, 2, 3, 4, 5, 123456, timezone.utc)),
+                         '2026_01_02_03_04_05')
+        self.assertEqual(new_build_id(datetime(2026, 1, 1, 22, 4, 5,
+                                               tzinfo=timezone(timedelta(hours=-5)))),
+                         '2026_01_02_03_04_05')
+
+    def test_hash_checkpoint_layout_has_three_realizations_and_no_native_artifacts(self):
+        from unittest.mock import patch
+        from py_compiler.thir.src.lib import ThirTests
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src/hash').mkdir(parents=True)
+            (root / 'package.json').write_text(encode({'package': {'name': 'geometry', 'version': '0.1.0'}}))
+            (root / 'src/hash/mod.sev').write_text(ThirTests.source)
+            with patch(__name__ + '.lower') as lir, patch(__name__ + '.compile_object') as native, patch(__name__ + '.verify_native') as verifier:
+                result = build(root, include_tests=True, stop_after='mir')
+                lir.assert_not_called()
+                native.assert_not_called()
+                verifier.assert_not_called()
+            self.assertTrue(result['success'], str(result))
+            output, build_id = root / 'package.pkg', result['build-id']
+            expected = {'package.pkgi/index.json', f'package.pkgi/severian/{build_id}/lib.sevi',
+                        f'metadata/realizations/{build_id}.json', f'metadata/symbols/{build_id}.json',
+                        f'metadata/dependencies/{build_id}.json', 'source/package.json', 'source/package.lock',
+                        'source/src/hash/mod.sev', 'debug/build/log.txt', 'debug/build/error.txt', 'debug/build/warn.txt'}
+            self.assertEqual({p.relative_to(output).as_posix() for p in output.rglob('*') if p.is_file()}, expected)
+            metadata = json.loads(Path(result['metadata']).read_text())
+            hashes = [sub for sub in metadata['submodules'] if any(call['name'] == 'hash' for call in sub['callables'])]
+            self.assertEqual(len(hashes), 3)
+            self.assertTrue(all(sub['interface'] == 'geometry' and sub['label'] for sub in hashes))
+            self.assertFalse(metadata['linkable'])
+            self.assertEqual(metadata['native-artifacts'], [])
+
     def test_independent_errors_do_not_publish(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -210,6 +322,7 @@ class PackageTests(unittest.TestCase):
 
     def test_verified_package_has_reproducible_identity(self):
         import shutil
+        from unittest.mock import patch
         if not shutil.which(verifier_path()):
             self.skipTest("install mlir-opt for package publication test")
         with tempfile.TemporaryDirectory() as directory:
@@ -217,10 +330,14 @@ class PackageTests(unittest.TestCase):
             (root / "src").mkdir()
             (root / "package.json").write_text(encode({"package": {"name": "test", "version": "0.1.0"}}))
             (root / "src/constants.sev").write_text("size: i32 = 42\ntext = \"λ\"\n")
-            first, second = build(root), build(root)
-            self.assertEqual(first["build-id"], second["build-id"])
+            with patch(__name__ + '.new_build_id', side_effect=['2026_01_02_03_04_05', '2026_01_02_03_04_06']) as generate:
+                first, second = build(root), build(root)
+            self.assertEqual(generate.call_count, 2)
+            self.assertEqual(first['build-id'], '2026_01_02_03_04_05')
+            self.assertEqual(second['build-id'], '2026_01_02_03_04_06')
             index = json.loads((root / "package.pkg/package.pkgi/index.json").read_text())
-            self.assertEqual(len(index["interfaces"]), 1)
+            self.assertEqual(len(index["interfaces"]), 2)
+            self.assertEqual(index['interfaces'][0]['semantic-id'], index['interfaces'][1]['semantic-id'])
             self.assertTrue(Path(first["ir"]).is_file())
 
 

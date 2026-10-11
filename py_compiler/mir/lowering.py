@@ -287,6 +287,13 @@ def prepare(source, root, syntax):
 
 
 def lower_module(module):
+    from py_compiler.thir.src.lib import prepare
+    from py_compiler.mir.registration import register
+    typed = prepare(module)
+    return register(typed).bodies, typed.declarations
+
+
+def resolve_bodies(module):
     source, root, context = module.source, module.root, module.context
     syntax = context.syntax
     from py_compiler.mir.ownership.flow import FlowState

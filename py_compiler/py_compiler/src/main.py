@@ -19,6 +19,7 @@ def main(argv=None):
     command.add_argument("--jobs", type=int, default=4)
     command.add_argument("--mlir-opt", help="MLIR verifier executable; auto-detected when omitted")
     command.add_argument("--include-tests", action="store_true", help="include development scopes in the compiled artifact")
+    command.add_argument('--stop-after', choices=('thir', 'mir'), help='write non-linkable typed metadata without LIR or native codegen')
     tokens = commands.add_parser("tokens", help="inspect primitive and keyword recognition")
     tokens.add_argument("source")
     commands.add_parser("test", help="run tests embedded beside compiler implementations")
@@ -28,7 +29,7 @@ def main(argv=None):
             import unittest
             modules = ["frontend.source.source", "syntax.primitive.catalog", "syntax.symbol.forms", "syntax.symbol.symbol", "syntax.symbol.absent",
                        "frontend.lexer.lexer", "frontend.parser.parser", "hir.hir.src.program",
-                       "frontend.src.lib", "frontend.parser.blocks", "mir.cfg.cfg", "mir.ownership.flow",
+                       "frontend.src.lib", "frontend.parser.blocks", "thir.src.lib", "mir.registration", "mir.cfg.cfg", "mir.ownership.flow",
                        "mir.lowering", "syntax.primitive.int.operations", "syntax.primitive.float.operations",
                        "syntax.primitive.bool.declarations", "syntax.primitive.char.declarations",
                        "syntax.primitive.byte.byte", "syntax.primitive.pointer.operations",
@@ -41,8 +42,11 @@ def main(argv=None):
             for token in lex(source, Syntax()):
                 print(json.dumps({"kind": token.kind, "text": token.text, "span": [token.span.start, token.span.end]}, ensure_ascii=False))
             return 0
-        result = build(args.package, args.target, args.pointer_bits, args.jobs, args.mlir_opt, args.include_tests)
+        result = build(args.package, args.target, args.pointer_bits, args.jobs, args.mlir_opt, args.include_tests, args.stop_after)
         if result["success"]:
+            if args.stop_after:
+                print('Metadata: ' + result['metadata'])
+                return 0
             print("MLIR: " + result["ir"])
             print("Object: " + result["object"])
             return 0
