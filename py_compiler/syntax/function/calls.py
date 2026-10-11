@@ -216,7 +216,7 @@ def lower_expression(node, cfg, env, expected=None):
             if callable(getattr(declared, 'variant', None)):
                 return coerce(literal_value(declared.variant(node.token.text), declared, cfg, span), expected, cfg, span)
         receiver = cfg.expr(node.operands[0], env)
-        provider = context.provider_by_name.get(receiver.type.name)
+        provider = context.provider_by_name.get(receiver.type.name, receiver.type)
         if not hasattr(provider, 'field_place'):
             raise ValueError('type has no field access provider')
         return coerce(provider.field_place(receiver, node.token.text, cfg, span).read(cfg, span), expected, cfg, span)
@@ -231,7 +231,10 @@ def lower_expression(node, cfg, env, expected=None):
     builtin = builtin_call_providers().get(base.token.text) if base.kind == 'name' else None
     if builtin is not None:
         from py_compiler.syntax.grammar.expression import type_spelling
-        type_argument = context.type(type_spelling(argument)) if argument is not None else None
+        if callable(getattr(builtin, 'resolve_arguments', None)):
+            type_argument = builtin.resolve_arguments(argument, context)
+        else:
+            type_argument = context.type(type_spelling(argument)) if argument is not None else None
         return coerce(builtin.call(type_argument, arguments, cfg, env, span), expected, cfg, span) if expected else builtin.call(type_argument, arguments, cfg, env, span)
     if callee.kind == 'index' and base.kind == 'name' and base.token.text == 'pointer':
         if len(arguments) != 1:
@@ -251,7 +254,29 @@ def lower_expression(node, cfg, env, expected=None):
         name = callee.token.text
         declaration_name = context.declaration_name(name, cfg.declaration_scope)
         if declaration_name in context.record_templates:
-            target = context.record_templates[declaration_name].realize(explicit, context)
+            template = context.record_templates[declaration_name]
+            if not explicit and any(p.default is None for p in template.parameters):
+                inferred = {}
+                fields = [child for child in template.node.children if child.provider is None and child.tokens and not child.tokens[0].text.startswith('_memory_')]
+                for child, value in zip(fields, arguments):
+                    tokens = child.tokens
+                    if len(tokens) >= 3 and tokens[1].text == ':' and tokens[2].text in {p.name for p in template.parameters}:
+                        annotation = tokens[2].text
+                        if value.kind in ('name', 'reference'):
+                            binding = cfg.lookup(value, env)
+                            actual = binding.type if binding else None
+                        elif value.kind == 'call' and value.operands[0].kind == 'name':
+                            actual = context.types.get(value.operands[0].token.text)
+                        else:
+                            actual = None
+                        if actual is not None:
+                            if annotation in inferred and inferred[annotation] != actual.name:
+                                raise ValueError('conflicting class field type inference')
+                            inferred[annotation] = actual.name
+                explicit = tuple(inferred.get(p.name, p.default) for p in template.parameters)
+                if any(value is None for value in explicit):
+                    raise ValueError('class field types require explicit or inferable type arguments')
+            target = template.realize(explicit, context)
             provider = context.provider_by_name[target.name]
             return coerce(provider.instantiate(target.declaration, arguments, cfg, env, span), expected, cfg, span)
         provider = context.provider_by_name.get(declaration_name)

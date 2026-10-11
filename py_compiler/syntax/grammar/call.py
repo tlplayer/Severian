@@ -8,7 +8,15 @@ class Call:
         if len(node.tokens) < 2:
             return False
         assignments = assignment_spellings(node.syntax)
-        return not any(token.text in assignments for token in node.tokens)
+        depth = 0
+        for token in node.tokens:
+            if token.text in ('(', '['):
+                depth += 1
+            elif token.text in (')', ']'):
+                depth -= 1
+            elif depth == 0 and token.text in assignments:
+                return False
+        return True
 
     def lower(self, node, cfg, env, local_names):
         if node.tokens[0].text == 'assert':

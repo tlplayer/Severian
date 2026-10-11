@@ -14,7 +14,15 @@ class Assignment:
         from py_compiler.syntax.catalog import assignment_spellings
         assignments = assignment_spellings(cfg.syntax)
         # Object stores go through the class storage provider.
-        assignment = next((i for i, t in enumerate(items) if t.text in assignments), None)
+        depth, assignment = 0, None
+        for i, token in enumerate(items):
+            if token.text in ('[', '('):
+                depth += 1
+            elif token.text in (']', ')'):
+                depth -= 1
+            elif depth == 0 and token.text in assignments:
+                assignment = i
+                break
         if assignment is not None and any(t.text == '.' for t in items[:assignment]) and items[0].text not in cfg.syntax.scope_providers:
             left = expression(items[:assignment])
             if left.kind != 'member':
@@ -87,6 +95,10 @@ class Assignment:
             owner = cfg.lookup(source, env) if source and source.kind in ('name', 'reference') else None
             if owner is None:
                 raise ValueError('pointer conversion requires a live array binding')
+        if core.kind == 'address':
+            owner = cfg.lookup(core.operands[0], env)
+            if mode in ('move', 'copy', 'mirror'):
+                raise ValueError('address of local storage cannot transfer allocation ownership')
         existing = destination.get(first.text)
         if not existing and qualified is None and first.text in cfg.namespaces.get("self", {}):
             destination = cfg.namespaces["self"]

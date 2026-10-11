@@ -28,6 +28,24 @@ The class is the MOA for programs in modern programming languages. They encapsol
 
 See docs/examples/01-types/02-classes
 
+```sev
+class Header:
+    kind: u8
+    length: u32
+
+test:
+    offsets := offset[Header]()
+
+    assert(offsets.kind == 0B)
+    assert(offsets.length == 4B)
+    assert(alignment[Header]() == 4B)
+    assert(bytes[Header]() == 8B)
+
+test with compiler:
+    reject:
+        offset[Header]().missing
+```
+
 ```
 #Classes must start with uppercase letter, they can sometimes use lowercase for important items 
 class A:

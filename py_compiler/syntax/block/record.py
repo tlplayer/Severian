@@ -20,6 +20,7 @@ class TypeDeclaration:
     methods: tuple = ()
     template_name: str = ''
     arguments: tuple = ()
+    memory_defaults: tuple = ()
 
     @property
     def binding_ownership(self):
@@ -68,6 +69,8 @@ class RecordProvider(DeclarationProvider):
         for child in node.children:
             if child.provider:
                 members.append(child)
+                continue
+            if child.tokens and child.tokens[0].text.startswith('_memory_'):
                 continue
             field, default = self.field(child, context)
             if any(f[0] == field[0] for f in fields):

@@ -76,7 +76,7 @@ class Builder:
         self.current.operations.append(operation)
         if type_ and type_.binding_ownership != 'copy':
             self.value_sources[result.identity] = set().union(*(self.value_sources.get(v.identity, set()) for v in operands))
-        if type_ and type_.family in ("record", "trait", "union", "dynamic") and any(v.identity in self.stack_values for v in operands):
+        if kind != "memory-copy" and type_ and type_.family in ("record", "trait", "union", "dynamic", "array", "pointer") and any(v.identity in self.stack_values for v in operands):
             self.stack_values.add(result.identity)
         return result
 
@@ -103,6 +103,8 @@ class Builder:
         identity = self.flow.resolve(binding.identity)
         if identity in self.uninitialized_fields:
             raise ValueError("constructor reads a field before initialization")
+        if binding.type.family == 'pointer' and binding.identity in self.values and binding.identity != identity:
+            return self.values[binding.identity]
         if identity in self.storage:
             return self.storage[identity].read(self, span)
         value = self.values[identity]
@@ -147,6 +149,31 @@ class Builder:
 
     def expression_value(self, node, env, expected=None):
         token = node.token
+        if node.kind == 'address':
+            from py_compiler.syntax.complex.array import ArrayType, MemoryOperation, ElementPlace
+            from py_compiler.syntax.function.allocate import resolve_plan
+            from py_compiler.syntax.function.calls import literal_value
+            source = node.operands[0]
+            binding = self.lookup(source, env) if source.kind in ('name', 'reference') else None
+            if binding is None:
+                raise ValueError('address requires a live binding')
+            value = self.read_binding(binding, token.span)
+            target = self.context.type('pointer[' + binding.type.name + ']')
+            if binding.identity in self.storage:
+                place = self.storage[binding.identity]
+                if not isinstance(place, ElementPlace):
+                    raise ValueError('this storage has no bounded address implementation')
+                storage = place.receiver
+            else:
+                one = literal_value(1, self.context.type('index'), self, token.span)
+                storage = self.emit('address-storage', ArrayType(binding.type, location='stack'), (one,),
+                                    MemoryOperation('allocate', resolve_plan(binding.type, {'location': 'memory.stack'}, self.context)), token.span)
+                self.stack_values.add(storage.identity)
+                zero = literal_value(0, self.context.type('index'), self, token.span)
+                place = ElementPlace(storage, zero, binding.type)
+                place.write(self, value, token.span)
+                self.storage[binding.identity] = place
+            return target.from_value(storage, self, token.span)
         if node.kind == 'owned':
             return node.operands[0].lower_expression(node, self, env, expected)
         if expected and expected.family == 'dynamic':

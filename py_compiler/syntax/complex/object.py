@@ -45,6 +45,7 @@ class NamedDefinition:
 @dataclass(frozen=True)
 class Allocate:
     record_type: str
+    plan: object = None
 
     def atom(self, operation):
         from py_compiler.syntax.generic.atom import Atom
@@ -54,8 +55,9 @@ class Allocate:
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name
         value = operation.result
+        alignment = f' {{alignment = {self.plan.alignment} : i64}}' if self.plan else ''
         return [f"%count_{value.identity} = arith.constant 1 : i64",
-                f"{name(value)} = llvm.alloca %count_{value.identity} x {self.record_type} : (i64) -> !llvm.ptr"]
+                f"{name(value)} = llvm.alloca %count_{value.identity} x {self.record_type}{alignment} : (i64) -> !llvm.ptr"]
 
 
 @dataclass(frozen=True)

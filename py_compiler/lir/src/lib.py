@@ -16,7 +16,13 @@ class Lir:
     atoms: tuple = ()
 
     def text(self):
-        return render(self.mlir)
+        text = render(self.mlir)
+        widths = (8, 16, 32, 64, 128)
+        layout = f'e-p:{self.pointer_bits}:{self.pointer_bits}-' + '-'.join(f'i{n}:{n}' for n in widths) + '-f16:16-f32:32-f64:64'
+        attribute = f'llvm.data_layout = "{layout}"'
+        if text.startswith('module attributes {'):
+            return text.replace('module attributes {', 'module attributes {' + attribute + ', ', 1)
+        return text.replace('module {', 'module attributes {' + attribute + '} {', 1)
 
 
 @dataclass(frozen=True)

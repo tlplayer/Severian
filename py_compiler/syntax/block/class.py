@@ -25,6 +25,16 @@ class Class(RecordProvider):
         declaration = TypeDeclaration(node.identity, ".".join((*context.scope, node.header[0].text)), self.spelling,
                                       fields, (), traits, node.span, context.source.path, defaults,
                                       template_name=getattr(node, 'record_template', ''), arguments=getattr(node, 'record_arguments', ()))
+        from dataclasses import replace
+        from py_compiler.syntax.function.allocate import PROPERTIES
+        defaults = {}
+        for child in node.children:
+            if not child.provider and child.tokens and child.tokens[0].text.startswith('_memory_'):
+                key = child.tokens[0].text[len('_memory_'):]
+                if key not in PROPERTIES or len(child.tokens) < 3 or child.tokens[1].text != '=' or key in defaults:
+                    raise ValueError('invalid or duplicate class memory default')
+                defaults[key] = ''.join(t.text for t in child.tokens[2:])
+        declaration = replace(declaration, memory_defaults=tuple(defaults.items()))
         context.register(declaration)
         context.types[declaration.name] = ObjectType(declaration.name, "record", "!llvm.ptr", declaration=declaration)
         context.tags[declaration.name] = len(context.tags) + 1
@@ -55,12 +65,17 @@ class Class(RecordProvider):
                 return FieldPlace(value, index, self.layout(declaration, cfg.context), type_, self.storage_type(type_, cfg.context))
         raise ValueError(f"{declaration.name} has no field {field!r}")
 
-    def instantiate(self, declaration, arguments, cfg, env, span):
+    def instantiate(self, declaration, arguments, cfg, env, span, allocation_plan=None):
         from py_compiler.syntax.complex.object import Allocate
         from py_compiler.syntax.generic.storage import FieldPlace
         from py_compiler.syntax.function.calls import invoke, literal_value, select
+        if allocation_plan is None:
+            from py_compiler.syntax.function.allocate import resolve_plan
+            allocation_plan = resolve_plan(cfg.context.type(declaration.name), {}, cfg.context)
+        if allocation_plan.location != 'stack':
+            raise ValueError('class heap allocation requires an owning aggregate lowering contract')
         layout = self.layout(declaration, cfg.context)
-        value = cfg.emit("allocate", cfg.context.type(declaration.name), (), Allocate(layout), span)
+        value = cfg.emit("allocate", cfg.context.type(declaration.name), (), Allocate(layout, allocation_plan), span)
         cfg.stack_values.add(value.identity)
         constructors = cfg.context.functions.get(declaration.name + "." + declaration.name.rsplit(".", 1)[-1].split('[', 1)[0], [])
         if constructors:
@@ -178,3 +193,10 @@ class ClassTests(unittest.TestCase):
 
     def test_infer_function_argument_from_class_specialization(self):
         self.valid('class Cell[T]:\n    value: T\ndef read[T](cell: Cell[T]) -> T:\n    return cell.value\ndef work() -> int:\n    value = Cell[int](2)\n    return read(value)\n')
+
+    def test_generic_class_infers_concrete_scalar_constructor(self):
+        program = self.valid('class Cell[T]:\n    value: T\ndef work() -> i32:\n    a = Cell(i32(1))\n    b = Cell(i64(2))\n    return a.value\n')
+        self.assertEqual({d.name for d in program.declarations}, {'Cell[i32]', 'Cell[i64]'})
+
+    def test_allocate_uses_class_defaults_without_adding_fields(self):
+        self.valid('class Item:\n    _memory_location = memory.stack\n    _memory_alignment = 16\n    value: i32 = 0\ndef work() -> i32:\n    item = allocate[Item]()\n    return item.value\n')

@@ -31,7 +31,9 @@ def type_spelling(node):
     if node.kind == 'template_arguments':
         return ','.join(type_spelling(item) for item in node.operands)
     if node.kind == 'template_binding':
-        return ':'.join(type_spelling(item) for item in node.operands)
+        return node.token.text.join(type_spelling(item) for item in node.operands)
+    if node.kind == 'member':
+        return type_spelling(node.operands[0]) + '.' + node.token.text
     if node.kind == 'index':
         return type_spelling(node.operands[0]) + '[' + type_spelling(node.operands[1]) + ']'
     raise ValueError('expected a concrete type argument')
@@ -50,6 +52,8 @@ def parse_expression(tokens, syntax):
         owner = syntax.expression_providers.get(token.text)
         if owner is not None:
             left = owner.parse_prefix(token, parse, tokens, cursor)
+        elif token.text == "&":
+            left = Expression("address", token, (parse(6),))
         elif token.text in ("not", "+", "-", "~"):
             left = Expression("unary", token, (parse(6),))
         elif token.text == "(":
@@ -88,9 +92,10 @@ def parse_expression(tokens, syntax):
                 cursor[0] += 1
                 def argument():
                     value = parse()
-                    if cursor[0] < len(tokens) and tokens[cursor[0]].text == ':':
+                    if cursor[0] < len(tokens) and tokens[cursor[0]].text in (':', '='):
+                        separator = tokens[cursor[0]]
                         cursor[0] += 1
-                        value = Expression('template_binding', value.token, (value, parse()))
+                        value = Expression('template_binding', separator, (value, parse()))
                     return value
                 arguments = [argument()]
                 while cursor[0] < len(tokens) and tokens[cursor[0]].text == ',':

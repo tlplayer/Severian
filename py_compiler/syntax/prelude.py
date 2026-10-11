@@ -53,7 +53,9 @@ def type_definitions(pointer_bits):
 def builtin_call_providers():
     from py_compiler.syntax.function.allocate import Allocate
     from py_compiler.syntax.function.deallocate import Deallocate
-    return {'allocate': Allocate(), 'deallocate': Deallocate()}
+    from py_compiler.syntax.function.layout import LayoutQuery
+    return {'allocate': Allocate(), 'deallocate': Deallocate(),
+            **{name: LayoutQuery(name) for name in ('bytes', 'alignment', 'offset')}}
 
 
 def context_type_definitions():
@@ -110,15 +112,11 @@ class PreludeTests(unittest.TestCase):
                 self.assertTrue(result.diagnostics)
                 self.assertIn('no callable matches the argument count', str(result.diagnostics[0]))
 
-    def test_array_constructor_and_size_parameter_are_not_supported(self):
-        for source, message in (
-            ('def work():\n    value = array[int,2](1,2)\n', 'F.constructor'),
-            ('def work(value: array[int,2]):\n    return\n', "unresolved type '2'"),
-        ):
-            with self.subTest(source=source):
-                result = self.compile(source)
-                self.assertTrue(result.diagnostics)
-                self.assertIn(message, str(result.diagnostics[0]))
+    def test_fixed_array_type_requires_allocate_interface(self):
+        result = self.compile('def work(value: array[int,2]):\n    return\n')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        result = self.compile('def work():\n    value = array[int,2](1,2)\n')
+        self.assertTrue(result.diagnostics)
 
     def test_owner_words_are_unambiguous_and_preserve_identifiers(self):
         from py_compiler.syntax.recognition import Syntax

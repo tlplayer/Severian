@@ -106,42 +106,37 @@ class TypedPointerTests(unittest.TestCase):
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         return render(lower(result.program))
 
-    def test_noninteger_and_nested_elements_use_their_own_llvm_type(self):
-        for element, storage in (('int', 'i64'), ('f64', 'f64'), ('bool', 'i1'), ('pointer[i32]', '!llvm.ptr')):
-            with self.subTest(element=element):
-                text = self.ir(f'def read(p: pointer[{element}], i: isize) -> {element}:\n    unsafe:\n        return p[i]\n')
-                self.assertIn('llvm.getelementptr', text)
-                self.assertIn(f'-> !llvm.ptr, {storage}', text)
-                self.assertIn(f': !llvm.ptr -> {storage}', text)
-                self.assertNotIn('memref.load', text)
-                self.assertNotIn('cf.assert', text)
-                self.assertNotIn('memref.dealloc', text)
+    def test_safe_pointer_load_and_store_are_bounded(self):
+        text = self.ir('def read(p: pointer[f64], i: isize) -> f64:\n    return p[i]\ndef write(p: borrow pointer[f64]):\n    p[0] = 1.0\n')
+        self.assertIn('memref.load', text)
+        self.assertIn('memref.store', text)
+        self.assertIn('memory index outside allocation', text)
 
-    def test_pointer_store_uses_llvm_and_requires_unsafe(self):
-        text = self.ir('def write(p: borrow pointer[f64], i: isize, value: f64):\n    unsafe:\n        p[i] = value\n')
-        self.assertIn('llvm.store', text)
-        self.assertIn(': f64, !llvm.ptr', text)
-        self.assertNotIn('memref.store', text)
-        for source in (
-            'def read(p: pointer[int]) -> int:\n    return p[0]\n',
-            'def write(p: borrow pointer[int]):\n    p[0] = 1\n',
-        ):
-            result = self.compile(source)
-            self.assertTrue(result.diagnostics)
-            self.assertIn('pointer indexing requires an unsafe block', str(result.diagnostics[0]))
+    def test_address_infers_view_and_preserves_owner(self):
+        text = self.ir('def work() -> int:\n    value = 42\n    p = &value\n    value = 43\n    return p[0] + value\n')
+        self.assertIn('memref.alloca', text)
+        self.assertNotIn('memref.dealloc', text)
+        result = self.compile('def work() -> pointer[int]:\n    value = 42\n    return &value\n')
+        self.assertTrue(result.diagnostics)
 
-    def test_array_address_uses_target_pointer_width(self):
-        for width in (32, 64):
-            text = self.ir('def address(values: array[int]) -> pointer[int]:\n    return pointer[int](values)\n', width)
-            self.assertIn('memref.extract_aligned_pointer_as_index', text)
-            self.assertIn(f': index to i{width}', text)
-            self.assertIn(f': i{width} to !llvm.ptr', text)
-            self.assertNotIn('memref.dealloc', text)
+    def test_view_cannot_release_storage(self):
+        result = self.compile('def work():\n    a = allocate[int]()\n    p: pointer[int] = a\n    deallocate(p)\n')
+        self.assertTrue(result.diagnostics)
+        self.assertIn('cannot deallocate a view', str(result.diagnostics))
 
-    def test_array_address_and_pointer_access_verify_natively(self):
+    def test_pointer_lowering_verifies_natively(self):
         import shutil
         from py_compiler.mlir.src.lib import verify_native, verifier_path
         if not shutil.which(verifier_path()):
             self.skipTest('install mlir-opt to verify pointer lowering')
-        text = self.ir('def work() -> int:\n    unsafe:\n        a = allocate[int](1)\n        a[0] = 7\n        p: pointer[int] = view a\n        return p[0]\n')
-        verify_native(text)
+        verify_native(self.ir('def work() -> int:\n    a = allocate[int]()\n    p: pointer[int] = a\n    return p[0]\n'))
+
+
+@dataclass(frozen=True)
+class BoundedAddress:
+    def atom(self, operation):
+        return Atom(self, (operation.operands[0].type,), operation.result.type, ('view',), (), self)
+
+    def render_operation(self, operation):
+        source = operation.operands[0]
+        return [f'{name(operation.result)} = memref.cast {name(source)} : {source.type.mlir} to {operation.result.type.mlir}']

@@ -1,5 +1,5 @@
 """Integer arrays own allocation, indexing and memref lowering."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from py_compiler.syntax.generic.atom import Atom
 from py_compiler.mlir.src.cfg import name
 
@@ -16,10 +16,20 @@ class Array:
     def specialize(self, element):
         return ArrayType(element)
 
+    def specialize_arguments(self, arguments, context):
+        if len(arguments) not in (1, 2):
+            raise ValueError('array[T,N] requires an element type and optional fixed count')
+        count = int(arguments[1]) if len(arguments) == 2 else None
+        if count is not None and count < 0:
+            raise ValueError('array count must be nonnegative')
+        return ArrayType(context.type(arguments[0]), count=count)
+
 
 @dataclass(frozen=True)
 class ArrayType:
     element: object
+    count: int | None = None
+    location: str = field(default='heap', compare=False)
     family: str = 'array'
     bits: int = 0
     signed: bool = False
@@ -30,12 +40,13 @@ class ArrayType:
         return ()
 
     def __post_init__(self):
-        if self.element.family != 'integer':
-            raise ValueError('array allocation currently requires an integer element type')
+        if not (self.element.mlir.startswith('i') and self.element.mlir[1:].isdigit() or self.element.mlir in ('f16', 'bf16', 'f32', 'f64')):
+            raise ValueError('array element requires a supported scalar memory representation')
 
     @property
     def name(self):
-        return f'{self.family}[{self.element.name}]'
+        suffix = '' if self.count is None else f',{self.count}'
+        return f'{self.family}[{self.element.name}{suffix}]'
 
     @property
     def mlir(self):
@@ -52,10 +63,12 @@ class ArrayType:
         return ElementPlace(receiver, index, self.element)
 
     def copy_value(self, value, cfg, span):
-        return cfg.emit('memory-copy', self, (value,), MemoryOperation('copy'), span)
+        from dataclasses import replace
+        return cfg.emit('memory-copy', replace(self, location='heap'), (value,), MemoryOperation('copy'), span)
 
     def release(self, value, cfg, span):
-        cfg.effect('deallocate', (value,), MemoryOperation('release'), span)
+        if value.identity not in cfg.stack_values and value.type.location != 'stack':
+            cfg.effect('deallocate', (value,), MemoryOperation('release'), span)
 
 
 @dataclass(frozen=True)
@@ -74,6 +87,7 @@ class ElementPlace:
 @dataclass(frozen=True)
 class MemoryOperation:
     kind: str
+    plan: object = None
 
     def atom(self, operation):
         modes = {'allocate': ('copy',), 'load': ('view', 'copy'),
@@ -91,13 +105,22 @@ class MemoryOperation:
         if self.kind == 'allocate':
             count = name(values[0])
             maximum = ((1 << (values[0].type.bits - 1)) - 1) // max(1, operation.result.type.element.bits // 8)
+            allocator = 'memref.alloca' if self.plan and self.plan.location == 'stack' else 'memref.alloc'
+            alignment = f' {{alignment = {self.plan.alignment} : i64}}' if self.plan else ''
+            scalar = operation.result.type.element.mlir
+            zero = '0.0' if scalar in ('f16', 'bf16', 'f32', 'f64') else '0'
             return [f'%zero_{tag} = arith.constant 0 : index',
                     f'%valid_{tag} = arith.cmpi sge, {count}, %zero_{tag} : index',
                     f'cf.assert %valid_{tag}, "allocation count must be nonnegative"',
                     f'%maximum_{tag} = arith.constant {maximum} : index',
                     f'%fits_{tag} = arith.cmpi ule, {count}, %maximum_{tag} : index',
                     f'cf.assert %fits_{tag}, "allocation byte size overflow"',
-                    f'{name(operation.result)} = memref.alloc({count}) : {operation.result.type.mlir}']
+                    f'{name(operation.result)} = {allocator}({count}){alignment} : {operation.result.type.mlir}',
+                    f'%step_{tag} = arith.constant 1 : index',
+                    f'%initial_{tag} = arith.constant {zero} : {scalar}',
+                    f'scf.for %init_index_{tag} = %zero_{tag} to {count} step %step_{tag} {{',
+                    f'  memref.store %initial_{tag}, {name(operation.result)}[%init_index_{tag}] : {operation.result.type.mlir}',
+                    '}']
         memory, type_ = name(values[0]), values[0].type.mlir
         if self.kind == 'release':
             return [f'memref.dealloc {memory} : {type_}']
@@ -135,7 +158,7 @@ class ArrayTypeTests(unittest.TestCase):
 
     def test_integer_array_pointer_and_explicit_release(self):
         text = self.ir('def work() -> int:\n    unsafe:\n        a: array[int] = allocate[int](128)\n        a[0] = 42\n        p: pointer[int] = view a\n        value = p[0]\n        deallocate[int](a)\n        return value\n')
-        for operation in ('memref.alloc', 'llvm.load', 'memref.store', 'memref.dealloc', 'memref<?xi64>', '!llvm.ptr'):
+        for operation in ('memref.alloc', 'memref.load', 'memref.store', 'memref.dealloc', 'memref<?xi64>'):
             self.assertIn(operation, text)
         self.assertEqual(text.count('memref.dealloc'), 1)
 
@@ -174,16 +197,14 @@ class ArrayTypeTests(unittest.TestCase):
         from py_compiler.syntax.prelude import type_definitions
         self.assertEqual(type_definitions(64)['array'].family, 'array')
 
-    def test_allocation_still_requires_unsafe(self):
-        result = self.compile('def work():\n    a = allocate[int](1)\n')
-        self.assertTrue(result.diagnostics)
-        self.assertIn('raw allocation requires an unsafe block', str(result.diagnostics[0]))
+    def test_safe_allocation_initializes_elements(self):
+        text = self.ir('def work() -> int:\n    a = allocate[int]()\n    return a[0]\n')
+        self.assertIn('scf.for', text)
+        self.assertIn('memref.store', text)
+        self.assertEqual(text.count('memref.dealloc'), 1)
 
-    def test_raw_pointer_cannot_take_or_release_array_ownership(self):
-        for action, message in (
-            ('p: pointer[int] = move a', 'cannot transfer array allocation ownership'),
-            ('p: pointer[int] = view a\n        deallocate(p)', 'deallocate requires an owning array'),
-        ):
-            result = self.compile('def work():\n    unsafe:\n        a = allocate[int](1)\n        ' + action + '\n')
-            self.assertTrue(result.diagnostics)
-            self.assertIn(message, str(result.diagnostics[0]))
+    def test_typed_pointer_can_take_array_ownership(self):
+        text = self.ir('def work() -> int:\n    a = allocate[int]()\n    p: pointer[int] = move a\n    p[0] = 9\n    return p[0]\n')
+        self.assertEqual(text.count('memref.dealloc'), 1)
+        result = self.compile('def work():\n    a = allocate[int]()\n    p: pointer[int] = move a\n    deallocate(a)\n')
+        self.assertTrue(result.diagnostics)
