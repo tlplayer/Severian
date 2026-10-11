@@ -12,7 +12,7 @@ from py_compiler.syntax.recognition import Syntax
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="sev", description="Severian bootstrap: syntax -> tokens -> submodules -> modules -> MIR -> LIR -> object")
     commands = parser.add_subparsers(dest="command", required=True)
-    command = commands.add_parser("build", help="compile package/src/**/*.sev and publish verified LIR and relocatable objects")
+    command = commands.add_parser("build", help="compile package/src/**/*.sev into reusable development outputs")
     command.add_argument("package", nargs="?", default=".")
     command.add_argument("--target", default="x86_64-unknown-linux-gnu")
     command.add_argument("--pointer-bits", type=int, choices=(32, 64), default=64)
@@ -20,6 +20,7 @@ def main(argv=None):
     command.add_argument("--mlir-opt", help="MLIR verifier executable; auto-detected when omitted")
     command.add_argument("--include-tests", action="store_true", help="include development scopes in the compiled artifact")
     command.add_argument('--stop-after', choices=('thir', 'mir'), help='write non-linkable typed metadata without LIR or native codegen')
+    command.add_argument('--publish', action='store_true', help='prepare a timestamped local publication snapshot')
     tokens = commands.add_parser("tokens", help="inspect primitive and keyword recognition")
     tokens.add_argument("source")
     test = commands.add_parser("test", help="build and run the current package's test blocks natively")
@@ -56,7 +57,8 @@ def main(argv=None):
                 print(json.dumps({"kind": token.kind, "text": token.text, "span": [token.span.start, token.span.end]}, ensure_ascii=False))
             return 0
         result = build_package(args.package, target=args.target, pointer_bits=args.pointer_bits, jobs=args.jobs,
-                               mlir_opt=args.mlir_opt, include_tests=args.include_tests, stop_after=args.stop_after)
+                               mlir_opt=args.mlir_opt, include_tests=args.include_tests, stop_after=args.stop_after,
+                               publish=args.publish)
         if result["success"]:
             if args.stop_after:
                 print('Metadata: ' + result['metadata'])

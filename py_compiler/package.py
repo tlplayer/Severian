@@ -1,4 +1,4 @@
-"""Package publication: timestamped builds with content identities; index committed last."""
+"""Reusable development outputs and timestamped publication snapshots."""
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -6,6 +6,7 @@ from pathlib import Path
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from py_compiler.frontend.src.lib import compile_source
@@ -24,11 +25,56 @@ def digest(value):
 
 
 def new_build_id(now=None):
-    """Single build-ID format for native and checkpoint outputs, using UTC."""
+    """Publication build-ID format, using UTC."""
     instant = datetime.now(timezone.utc) if now is None else now
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=timezone.utc)
     return instant.astimezone(timezone.utc).strftime('%Y_%m_%d_%H_%M_%S')
+
+
+def output_slot(publish=False, include_tests=False):
+    return new_build_id() if publish else ('test' if include_tests else 'dev')
+
+
+def prepare_output(output, slot, publish=False):
+    """Replace generated development conflicts; preserve published snapshots."""
+    index_path = output / 'package.pkgi/index.json'
+    index = json.loads(index_path.read_text()) if index_path.exists() else {'interfaces': [], 'binding-sets': []}
+    if not isinstance(index.get('interfaces'), list):
+        raise ValueError('existing interface index uses an incompatible schema')
+    kept, purge = [], {slot} if not publish else set()
+    for entry in index['interfaces']:
+        previous = entry.get('output-slot', entry.get('build-id'))
+        if entry.get('published'):
+            if previous == slot:
+                raise ValueError('a publication already exists for this second; retry with a new build ID')
+            kept.append(entry)
+        elif previous == slot or 'output-slot' not in entry:
+            if previous is not None:
+                purge.add(previous)
+        else:
+            kept.append(entry)
+    def remove(path):
+        if not path.resolve().is_relative_to(output.resolve()):
+            raise ValueError('generated artifact path escapes package.pkg')
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
+    for old in purge:
+        if not isinstance(old, str) or not re.fullmatch(r'[A-Za-z0-9_]+', old):
+            raise ValueError('invalid generated output slot')
+        for target in (output / 'artifacts').glob('*'):
+            remove(target / old)
+        for folder in ('package.pkgi/severian', 'build', 'debug/test', 'debug/profile', 'debug/coverage'):
+            remove(output / folder / old)
+        for folder in ('realizations', 'symbols', 'dependencies'):
+            remove(output / 'metadata' / folder / (old + '.json'))
+    # Remove invalidated interfaces before writing replacement artifacts.
+    index['interfaces'] = kept
+    if index_path.exists():
+        write_atomic(index_path, encode(index))
+    remove(output / 'source')
 
 
 def write_atomic(path, text):
@@ -92,7 +138,7 @@ def native_dependencies(root, manifest, target, pointer_bits):
     return result
 
 
-def build(root, target="x86_64-unknown-linux-gnu", pointer_bits=64, jobs=4, mlir_opt=None, include_tests=False, stop_after=None):
+def build(root, target="x86_64-unknown-linux-gnu", pointer_bits=64, jobs=4, mlir_opt=None, include_tests=False, stop_after=None, publish=False):
     root = Path(root).resolve()
     output = root / "package.pkg"
     log = output / "debug/build/log.txt"
@@ -102,13 +148,15 @@ def build(root, target="x86_64-unknown-linux-gnu", pointer_bits=64, jobs=4, mlir
         write_atomic(output / "debug/build/warn.txt", "")
     report("Building with py_compiler\n")
     try:
-        return _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_tests, stop_after)
+        return _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_tests, stop_after, publish)
     except (OSError, ValueError, subprocess.TimeoutExpired) as failure:
         report(str(failure) + "\n", True)
         raise
 
 
-def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_tests=False, stop_after=None):
+def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_tests=False, stop_after=None, publish=False):
+    if publish and (include_tests or stop_after):
+        raise ValueError('publication requires a complete production build')
     if stop_after not in (None, 'thir', 'mir'):
         raise ValueError('stop_after must be thir or mir')
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", target):
@@ -167,7 +215,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     native = compile_object(lir, mlir_opt)
     compiler_id = compiler_identity()
     content_id = digest(encode([manifest_text, lock, snapshots]))
-    build_id = new_build_id()
+    build_id = output_slot(publish, include_tests)
     abi_id = digest(encode([target, pointer_bits, "py-primitive-abi-v1"]))
     identity = {"name": package["name"], "version": package["version"], "content-id": content_id}
     ir_path = f"artifacts/{target}/{build_id}/ir/package.mlir"
@@ -213,6 +261,11 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                             'parameters': [{'name': b.name, 'type': b.type.name, 'ownership': b.ownership} for b in parameters],
                             'result': body.result_type.name, 'result-sources': list(body.result_sources)})
     semantic_id = digest(encode([declarations, exports]))
+    source_root = f'build/{build_id}/{target}/source' if publish else 'source'
+    if publish:
+        for entry in (*declarations, *symbols):
+            if 'source' in entry:
+                entry['source'] = source_root + '/' + entry['source'].removeprefix('source/')
     interface = {"format": "severian.interface", "version": 1, "package": identity,
                  "semantic-id": semantic_id, "metadata": {"build-id": build_id, "path": realization_path},
                  "declarations": declarations, "exports": exports}
@@ -240,13 +293,18 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     layouts = {"abi": abi_id, "state": "representation-only", "native-layouts": [],
                "representations": [{"type": t.name, "mlir": t.mlir, "bits": getattr(t, 'bits', 0)}
                                    for t in represented.values()]}
+    interface['metadata'].update({'build-id': build_id if publish else None, 'output-slot': build_id})
+    interface_text = encode(interface)
+    realization.update({'build-id': build_id if publish else None, 'output-slot': build_id, 'published': publish})
+    realization['interface']['checksum'] = digest(interface_text)
+    prepare_output(output, build_id, publish)
     pending = {ir_path: ir, llvm_path: native.llvm_ir, lowered_path: native.llvm_dialect, interface_path: interface_text, realization_path: encode(realization),
                f"metadata/symbols/{build_id}.json": encode(symbols),
                f"metadata/dependencies/{build_id}.json": encode([{"submodule": sub.identity, "declarations": sub.declarations, "dependencies": sub.dependencies} for sub in program.submodules]),
                f"metadata/layouts/{abi_id}.json": encode(layouts),
                f"build/{build_id}/{target}/artifacts.json": encode(realization["artifacts"]),
-               "source/package.json": manifest_text, "source/package.lock": lock}
-    pending.update({"source/" + path: text for path, text in snapshots})
+               source_root + '/package.json': manifest_text, source_root + '/package.lock': lock}
+    pending.update({source_root + '/' + path: text for path, text in snapshots})
     for path, text in pending.items():
         write_atomic(output / path, text)
     object_destination = output / object_path
@@ -260,12 +318,13 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     index = json.loads(index_path.read_text()) if index_path.exists() else {"interfaces": [], "binding-sets": []}
     if not isinstance(index.get("interfaces"), list):
         raise ValueError("existing interface index uses an incompatible schema")
-    entries = [entry for entry in index["interfaces"] if entry.get("build-id") != build_id]
-    entries.append({"build-id": build_id, "path": interface_path, "semantic-id": semantic_id})
+    entries = index['interfaces']
+    entries.append({'build-id': build_id if publish else None, 'output-slot': build_id, 'published': publish,
+                    'path': interface_path, 'semantic-id': semantic_id})
     index["interfaces"] = entries
     write_atomic(index_path, encode(index))
     report(f"Built {len(snapshots)} source files; {len(program.constants)} primitive values\nMLIR: {ir_path}\n")
-    return {"success": True, "build-id": build_id, "ir": str(output / ir_path), "object": str(output / object_path),
+    return {"success": True, "build-id": build_id if publish else None, 'output-slot': build_id, "ir": str(output / ir_path), "object": str(output / object_path),
             "dependencies": list(native.dependencies), "log": str(output / "debug/build/log.txt")}
 
 
@@ -295,18 +354,18 @@ def checkpoint(output, program, package, manifest_text, lock, snapshots, target,
     compiler_root = Path(__file__).parent
     compiler_id = digest(encode([(p.relative_to(compiler_root).as_posix(), p.read_text())
                                 for p in sorted(compiler_root.rglob('*.py'))]))
-    build_id = new_build_id()
+    build_id = output_slot(include_tests=include_tests)
     interface_path = f'package.pkgi/severian/{build_id}/lib.sevi'
     realization_path = f'metadata/realizations/{build_id}.json'
     records = realization_records(program)
     metadata = {'format': 'py_compiler.realization', 'version': 1, 'package': package,
-                'build-id': build_id, 'state': stage + '-registered', 'linkable': False,
+                'build-id': None, 'output-slot': build_id, 'published': False, 'state': stage + '-registered', 'linkable': False,
                 'scope': 'test' if include_tests else 'production',
                 'compiler': compiler_id, 'target': target, 'pointer-bits': pointer_bits,
                 'submodules': records, 'artifacts': [], 'native-artifacts': []}
     interface = {'format': 'severian.interface', 'version': 1, 'package': package,
                  'linkable': False, 'stage': stage,
-                 'metadata': {'build-id': build_id, 'path': realization_path},
+                 'metadata': {'build-id': None, 'output-slot': build_id, 'path': realization_path},
                  'declarations': [declaration for sub in records for declaration in (*sub['callables'], *sub['constants'])]}
     pending = {interface_path: encode(interface), realization_path: encode(metadata),
                f'metadata/symbols/{build_id}.json': encode(interface['declarations']),
@@ -314,17 +373,18 @@ def checkpoint(output, program, package, manifest_text, lock, snapshots, target,
                    {'submodule': sub['id'], 'dependencies': sub['dependencies']} for sub in records]),
                'source/package.json': manifest_text, 'source/package.lock': lock}
     pending.update({'source/' + path: text for path, text in snapshots})
+    prepare_output(output, build_id)
     for path, text in pending.items():
         write_atomic(output / path, text)
     index_path = output / 'package.pkgi/index.json'
     index = json.loads(index_path.read_text()) if index_path.exists() else {'interfaces': [], 'binding-sets': []}
     if not isinstance(index.get('interfaces'), list):
         raise ValueError('existing interface index uses an incompatible schema')
-    index['interfaces'] = [entry for entry in index['interfaces'] if entry.get('build-id') != build_id]
-    index['interfaces'].append({'build-id': build_id, 'path': interface_path, 'stage': stage, 'linkable': False})
+    index['interfaces'].append({'build-id': None, 'output-slot': build_id, 'published': False,
+                                'path': interface_path, 'stage': stage, 'linkable': False})
     write_atomic(index_path, encode(index))
     report(f'Stopped after {stage}: {len(records)} typed submodules; no native artifacts\n')
-    return {'success': True, 'build-id': build_id, 'stage': stage, 'linkable': False,
+    return {'success': True, 'build-id': None, 'output-slot': build_id, 'stage': stage, 'linkable': False,
             'metadata': str(output / realization_path), 'log': str(output / 'debug/build/log.txt')}
 
 
@@ -332,6 +392,56 @@ import unittest
 
 
 class PackageTests(unittest.TestCase):
+    def test_only_publication_allocates_a_build_id(self):
+        from unittest.mock import patch
+        with patch(__name__ + '.new_build_id', return_value='2026_10_11_12_34_56') as generate:
+            self.assertEqual(output_slot(), 'dev')
+            self.assertEqual(output_slot(include_tests=True), 'test')
+            generate.assert_not_called()
+            self.assertEqual(output_slot(publish=True), '2026_10_11_12_34_56')
+            generate.assert_called_once_with()
+
+    def test_conflicting_dev_artifacts_are_purged_and_publications_survive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'package.pkg'
+            old, published = '2026_10_10_01_02_03', '2026_10_11_01_02_03'
+            entries = [{'build-id': old, 'path': f'package.pkgi/severian/{old}/lib.sevi'},
+                       {'build-id': None, 'output-slot': 'dev'},
+                       {'build-id': None, 'output-slot': 'test'},
+                       {'build-id': published, 'output-slot': published, 'published': True}]
+            write_atomic(output / 'package.pkgi/index.json', encode({'interfaces': entries}))
+            for slot in (old, published, 'dev', 'test'):
+                write_atomic(output / f'artifacts/target/{slot}/object/package.o', 'object')
+            write_atomic(output / 'source/src/removed.sev', 'old source')
+            prepare_output(output, 'dev')
+            self.assertFalse((output / f'artifacts/target/{old}').exists())
+            self.assertFalse((output / 'artifacts/target/dev').exists())
+            self.assertFalse((output / 'source').exists())
+            self.assertTrue((output / 'artifacts/target/test/object/package.o').is_file())
+            self.assertTrue((output / f'artifacts/target/{published}/object/package.o').is_file())
+            self.assertEqual(json.loads((output / 'package.pkgi/index.json').read_text())['interfaces'], entries[2:])
+            with self.assertRaisesRegex(ValueError, 'publication already exists'):
+                prepare_output(output, published, publish=True)
+
+    def test_repeated_development_builds_reuse_the_slot(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'package.json').write_text(encode({'package': {'name': 'stable', 'version': '0.1.0'}}))
+            (root / 'src/lib.sev').write_text('def answer() -> int:\n    return 42\n')
+            with patch(__name__ + '.new_build_id') as generate:
+                first = build(root, stop_after='mir')
+                (root / 'src/lib.sev').write_text('def answer() -> int:\n    return 43\n')
+                second = build(root, stop_after='mir')
+                generate.assert_not_called()
+            self.assertTrue(first['success'] and second['success'])
+            self.assertIsNone(second['build-id'])
+            self.assertEqual(first['metadata'], second['metadata'])
+            index = json.loads((root / 'package.pkg/package.pkgi/index.json').read_text())
+            self.assertEqual(len(index['interfaces']), 1)
+            self.assertEqual(index['interfaces'][0]['output-slot'], 'dev')
+
     def test_build_id_format_is_utc_and_zero_padded(self):
         from datetime import timedelta
         self.assertEqual(new_build_id(datetime(2026, 1, 2, 3, 4, 5, 123456, timezone.utc)),
@@ -354,7 +464,7 @@ class PackageTests(unittest.TestCase):
                 native.assert_not_called()
                 verifier.assert_not_called()
             self.assertTrue(result['success'], str(result))
-            output, build_id = root / 'package.pkg', result['build-id']
+            output, build_id = root / 'package.pkg', result['output-slot']
             expected = {'package.pkgi/index.json', f'package.pkgi/severian/{build_id}/lib.sevi',
                         f'metadata/realizations/{build_id}.json', f'metadata/symbols/{build_id}.json',
                         f'metadata/dependencies/{build_id}.json', 'source/package.json', 'source/package.lock',
@@ -390,7 +500,7 @@ class PackageTests(unittest.TestCase):
             (root / "package.json").write_text(encode({"package": {"name": "test", "version": "0.1.0"}}))
             (root / "src/constants.sev").write_text("size: i32 = 42\ntext = \"λ\"\n")
             with patch(__name__ + '.new_build_id', side_effect=['2026_01_02_03_04_05', '2026_01_02_03_04_06']) as generate:
-                first, second = build(root), build(root)
+                first, second = build(root, publish=True), build(root, publish=True)
             self.assertEqual(generate.call_count, 2)
             self.assertEqual(first['build-id'], '2026_01_02_03_04_05')
             self.assertEqual(second['build-id'], '2026_01_02_03_04_06')

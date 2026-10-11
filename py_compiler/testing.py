@@ -27,7 +27,7 @@ def build_package(root, *, include_tests=False, _active=(), _built=None, **optio
             raise ValueError('native dependencies require a local path')
         dependency = (root / specification['path']).resolve()
         if dependency not in built:
-            dependency_options = {key: value for key, value in options.items() if key != 'stop_after'}
+            dependency_options = {key: value for key, value in options.items() if key not in ('stop_after', 'publish')}
             result = build_package(dependency, _active=(*_active, root), _built=built, **dependency_options)
             if not result['success']:
                 return result
@@ -114,12 +114,13 @@ def test_package(root, *, sanitize=None, timeout=30, **options):
     if not result['success']:
         return result
     package = Path(root).resolve() / 'package.pkg'
-    build_id = result['build-id']
+    build_id = result['output-slot']
     metadata = json.loads((package / 'metadata/realizations' / (build_id + '.json')).read_text())
     symbols = json.loads((package / 'metadata/symbols' / (build_id + '.json')).read_text())
     output = package / 'debug/test' / build_id
     output.mkdir(parents=True, exist_ok=True)
-    report = {'success': False, 'build-id': build_id, 'pipeline': 'MLIR -> LLVM -> object', 'tests': []}
+    report = {'success': False, 'build-id': result['build-id'], 'output-slot': build_id,
+              'pipeline': 'MLIR -> LLVM -> object', 'tests': []}
     report_path = output / 'results.json'
     write_atomic(report_path, encode(report))
     optimizer = options.get('mlir_opt') or verifier_path()
