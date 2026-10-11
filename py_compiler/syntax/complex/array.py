@@ -88,6 +88,8 @@ class ElementPlace:
 class MemoryOperation:
     kind: str
     plan: object = None
+    region: str = ''
+    offset: int = 0
 
     def atom(self, operation):
         modes = {'allocate': ('copy',), 'load': ('view', 'copy'),
@@ -109,13 +111,17 @@ class MemoryOperation:
             alignment = f' {{alignment = {self.plan.alignment} : i64}}' if self.plan else ''
             scalar = operation.result.type.element.mlir
             zero = '0.0' if scalar in ('f16', 'bf16', 'f32', 'f64') else '0'
+            allocation = [f'{name(operation.result)} = {allocator}({count}){alignment} : {operation.result.type.mlir}']
+            if self.region:
+                allocation = [f'%shift_{tag} = arith.constant {self.offset} : index',
+                              f'{name(operation.result)} = memref.view %{self.region}[%shift_{tag}][{count}] : memref<?xi8> to {operation.result.type.mlir}']
             return [f'%zero_{tag} = arith.constant 0 : index',
                     f'%valid_{tag} = arith.cmpi sge, {count}, %zero_{tag} : index',
                     f'cf.assert %valid_{tag}, "allocation count must be nonnegative"',
                     f'%maximum_{tag} = arith.constant {maximum} : index',
                     f'%fits_{tag} = arith.cmpi ule, {count}, %maximum_{tag} : index',
                     f'cf.assert %fits_{tag}, "allocation byte size overflow"',
-                    f'{name(operation.result)} = {allocator}({count}){alignment} : {operation.result.type.mlir}',
+                    *allocation,
                     f'%step_{tag} = arith.constant 1 : index',
                     f'%initial_{tag} = arith.constant {zero} : {scalar}',
                     f'scf.for %init_index_{tag} = %zero_{tag} to {count} step %step_{tag} {{',
@@ -157,20 +163,20 @@ class ArrayTypeTests(unittest.TestCase):
         return render(lower(result.program))
 
     def test_integer_array_pointer_and_explicit_release(self):
-        text = self.ir('def work() -> int:\n    unsafe:\n        a: array[int] = allocate[int](128)\n        a[0] = 42\n        p: pointer[int] = view a\n        value = p[0]\n        deallocate[int](a)\n        return value\n')
+        text = self.ir('def work() -> int:\n    unsafe:\n        a: array[int] = allocate[int,location=memory.heap](128)\n        a[0] = 42\n        p: pointer[int] = view a\n        value = p[0]\n        deallocate[int](a)\n        return value\n')
         for operation in ('memref.alloc', 'memref.load', 'memref.store', 'memref.dealloc', 'memref<?xi64>'):
             self.assertIn(operation, text)
         self.assertEqual(text.count('memref.dealloc'), 1)
 
     def test_borrow_parameter_mutates_and_default_view_reads(self):
-        text = self.ir('def write(a: borrow array[int]):\n    a[0] = 9\ndef read(a: array[int]) -> int:\n    return a[0]\ndef work() -> int:\n    unsafe:\n        a = allocate[int](1)\n        write(a)\n        return read(a)\n')
+        text = self.ir('def write(a: borrow array[int]):\n    a[0] = 9\ndef read(a: array[int]) -> int:\n    return a[0]\ndef work() -> int:\n    unsafe:\n        a = allocate[int,location=memory.heap](1)\n        write(a)\n        return read(a)\n')
         self.assertIn('memref.store', text)
         self.assertIn('memref.load', text)
         self.assertIn('memory index outside allocation', text)
         self.assertEqual(text.count('memref.dealloc'), 1)
 
     def test_copy_parameter_has_independent_storage(self):
-        text = self.ir('def write(a: copy array[int]):\n    unsafe:\n        a[0] = 9\ndef work():\n    unsafe:\n        a = allocate[int](1)\n        a[0] = 4\n        write(a)\n')
+        text = self.ir('def write(a: copy array[int]):\n    unsafe:\n        a[0] = 9\ndef work():\n    unsafe:\n        a = allocate[int,location=memory.heap](1)\n        a[0] = 4\n        write(a)\n')
         self.assertIn('memref.copy', text)
         self.assertEqual(text.count('memref.dealloc'), 2)
 
@@ -178,7 +184,7 @@ class ArrayTypeTests(unittest.TestCase):
         cases = (
             ('def work(a: array[int]):\n    unsafe:\n        a[0] = 1\n', 'requires an owner or borrow'),
             ('def work(a: array[int]):\n    unsafe:\n        deallocate(a)\n', 'cannot deallocate a view'),
-            ('def work():\n    unsafe:\n        a = allocate[int](1)\n        deallocate(a)\n        deallocate(a)\n', 'moved or dropped'),
+            ('def work():\n    unsafe:\n        a = allocate[int,location=memory.heap](1)\n        deallocate(a)\n        deallocate(a)\n', 'moved or dropped'),
         )
         for source, message in cases:
             with self.subTest(source=source):
@@ -187,7 +193,7 @@ class ArrayTypeTests(unittest.TestCase):
                 self.assertIn(message, str(result.diagnostics[0]))
 
     def test_dynamic_index_and_element_count_use_mlir_index(self):
-        text = self.ir('def work(n: int, i: int) -> int:\n    unsafe:\n        a = allocate[int](n)\n        a[i] = 5\n        return a[i]\n')
+        text = self.ir('def work(n: int, i: int) -> int:\n    unsafe:\n        a = allocate[int,location=memory.heap](n)\n        a[i] = 5\n        return a[i]\n')
         self.assertIn('arith.index_cast', text)
         self.assertIn('memory index outside allocation', text)
         self.assertIn('allocation byte size overflow', text)
@@ -198,13 +204,13 @@ class ArrayTypeTests(unittest.TestCase):
         self.assertEqual(type_definitions(64)['array'].family, 'array')
 
     def test_safe_allocation_initializes_elements(self):
-        text = self.ir('def work() -> int:\n    a = allocate[int]()\n    return a[0]\n')
+        text = self.ir('def work() -> int:\n    a = allocate[int,location=memory.heap]()\n    return a[0]\n')
         self.assertIn('scf.for', text)
         self.assertIn('memref.store', text)
         self.assertEqual(text.count('memref.dealloc'), 1)
 
     def test_typed_pointer_can_take_array_ownership(self):
-        text = self.ir('def work() -> int:\n    a = allocate[int]()\n    p: pointer[int] = move a\n    p[0] = 9\n    return p[0]\n')
+        text = self.ir('def work() -> int:\n    a = allocate[int,location=memory.heap]()\n    p: pointer[int] = move a\n    p[0] = 9\n    return p[0]\n')
         self.assertEqual(text.count('memref.dealloc'), 1)
-        result = self.compile('def work():\n    a = allocate[int]()\n    p: pointer[int] = move a\n    deallocate(a)\n')
+        result = self.compile('def work():\n    a = allocate[int,location=memory.heap]()\n    p: pointer[int] = move a\n    deallocate(a)\n')
         self.assertTrue(result.diagnostics)

@@ -13,7 +13,7 @@ class FrontendResult:
     diagnostics: tuple[Diagnostic, ...]
 
 
-def compile_source(path, text, syntax, *, stop_after='mir', interface=None):
+def compile_source(path, text, syntax, *, stop_after='mir', interface=None, native_packages=None):
     if stop_after not in ('thir', 'mir'):
         raise ValueError('stop_after must be thir or mir')
     source = SourceFile(path, text)
@@ -45,7 +45,7 @@ def compile_source(path, text, syntax, *, stop_after='mir', interface=None):
         modules = (register(typed),) if stop_after == 'mir' else ()
         return FrontendResult(source, replace(program, typed_modules=(typed,), mir_modules=modules, stage=stop_after), ())
     try:
-        module = resolve(source, root, syntax, Builder)
+        module = resolve(source, root, syntax, Builder, native_packages, interface)
         typed = prepare(module, interface)
         constants = tuple(o.payload for b in typed.bodies for block in b.blocks for o in block.operations if o.kind == "constant")
         if stop_after == 'thir':

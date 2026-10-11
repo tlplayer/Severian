@@ -3,7 +3,7 @@ from importlib import import_module
 
 
 BLOCKS = (
-    ('block.if', 'Conditional'), ('block.elif', 'Elif'), ('block.else', 'Else'),
+    ('block.while', 'While'), ('block.import', 'Import'), ('block.if', 'Conditional'), ('block.elif', 'Elif'), ('block.else', 'Else'),
     ('block.class', 'Class'), ('block.trait', 'Trait'), ('block.enum', 'Enum'),
     ('block.function', 'Function'), ('block.test', 'Test'),
     ('block.operator', 'Operator'), ('block.extend', 'Extend'), ('block.match', 'Match'),
@@ -11,7 +11,8 @@ BLOCKS = (
 )
 CLAUSES = (('keywords.prefix', 'Prefix'), ('keywords.fix', 'Fix'),
            ('keywords.suffix', 'Suffix'), ('keywords.defer', 'Defer'))
-STATEMENTS = (('keywords.yield', 'Yield'), ('keywords.static', 'Static'), ('keywords.atomic', 'Atomic'))
+STATEMENTS = (('keywords.yield', 'Yield'), ('keywords.static', 'Static'), ('keywords.atomic', 'Atomic'),
+              ('block.while', 'Break'), ('block.while', 'Continue'))
 CALLABLES = (('operator.async', 'Async'), ('operator.await', 'Await'), ('function.lambda', 'Lambda'))
 DYNAMIC_TYPES = (('dynamic.dynamic', 'DynamicType'), ('dynamic.any', 'AnyType'),
                  ('dynamic.numeric', 'NumericType'))
@@ -53,8 +54,9 @@ def type_definitions(pointer_bits):
 def builtin_call_providers():
     from py_compiler.syntax.function.allocate import Allocate
     from py_compiler.syntax.function.deallocate import Deallocate
+    from py_compiler.syntax.function.length import Length
     from py_compiler.syntax.function.layout import LayoutQuery
-    return {'allocate': Allocate(), 'deallocate': Deallocate(),
+    return {'allocate': Allocate(), 'deallocate': Deallocate(), 'len': Length(),
             **{name: LayoutQuery(name) for name in ('bytes', 'alignment', 'offset')}}
 
 

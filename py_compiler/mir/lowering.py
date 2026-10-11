@@ -48,6 +48,7 @@ class Builder:
         self.imported = {}
         self.unsafe_depth = 0
         self.active_scopes = []
+        self.loops = []
         self.value_sources = {}
         self.call_result_owners = {}
         self.parameter_bindings = {}
@@ -252,6 +253,10 @@ class Builder:
         raise ValueError("sentence has no registered syntax provider")
 
     def cleanup_memory(self, bindings, span):
+        bindings = list(bindings)
+        for binding in bindings:
+            if binding.ownership in ("view", "borrow"):
+                self.flow.loans.pop(binding.identity, None)
         seen = set()
         for binding in reversed(list(bindings)):
             if binding.identity in seen or binding.identity in self.flow.moved:
@@ -277,6 +282,13 @@ class Builder:
         try:
             while index < len(nodes):
                 node = nodes[index]
+                def referenced_names(terms):
+                    return {token.text for term in terms for token in term.tokens} | set().union(*(referenced_names(term.children) for term in terms))
+                remaining = referenced_names(nodes[index:])
+                for binding in env.values():
+                    if (binding.name in local_names and binding.type and binding.type.family == 'pointer'
+                            and binding.name not in remaining):
+                        self.flow.loans.pop(binding.identity, None)
                 if self.current.terminator:
                     raise ValueError("unreachable sentence after a terminating operation")
                 if node.provider is None:
@@ -304,6 +316,8 @@ class Builder:
             if self.body.result_type.mlir:
                 raise ValueError("not every path returns the declared result")
             self.current.terminator = Terminator("finish")
+        from py_compiler.mir.memory import resolve
+        resolve(self.body)
         self.body.verify()
         return self.body
 
@@ -326,7 +340,8 @@ def resolve_bodies(module):
     from py_compiler.mir.ownership.flow import FlowState
     context.initial_flow = FlowState()
     context.resolve_contracts()
-    initializer = Builder(source, context.bound_syntax, root.identity, "__sev_init_" + source.identity, syntax.types["absent"])
+    qualifier = '::package=' + context.interface if context.interface else ''
+    initializer = Builder(source, context.bound_syntax, root.identity, "__sev_init_" + source.identity + qualifier, syntax.types["absent"])
     initializer.context = context
     initializer.block_scope = root.scope
     initializer.declared_nodes = context.declared_nodes

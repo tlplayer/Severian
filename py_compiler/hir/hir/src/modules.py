@@ -12,7 +12,7 @@ class Module:
     submodules: tuple
 
 
-def resolve(source, root, syntax, builder):
+def resolve(source, root, syntax, builder, native_packages=None, interface=None):
     nodes = {}
     def collect(node):
         nodes[node.identity] = node
@@ -80,6 +80,9 @@ def resolve(source, root, syntax, builder):
     # Resolve the partitioned terms into their owning module before MIR construction.
     from py_compiler.hir.hir.src.declarations import DeclarationContext
     context = DeclarationContext(source, syntax, builder)
+    context.interface = interface
+    context.native_packages = native_packages or {}
+    context.package_imports = set()
     context.scopes = {identity: node.scope for identity, node in nodes.items()}
     context.declared_nodes = set()
     context.declare_nodes(root.children, ())

@@ -1,0 +1,26 @@
+def shared_value() -> int:
+    value = allocate[int]()
+    value[0] = 42
+    reference: share array[int] = share value
+    drop value
+    return reference[0]
+
+
+def atomic_shared_value() -> int:
+    value: share atomic array[int] = allocate[int]()
+    value_reference = share atomic value
+    drop value
+    return value_reference[0]
+
+
+test:
+    assert(shared_value() == 42)
+    assert(atomic_shared_value() == 0)
+
+
+test with compiler:
+    reject:
+        def invalid():
+            value = allocate[int]()
+            reference = share atomic value
+            reference[0] = 1

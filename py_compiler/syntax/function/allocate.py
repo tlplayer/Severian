@@ -24,7 +24,7 @@ def resolve_plan(type_, overrides, context):
     values = {key: value.removeprefix('memory.') if isinstance(value, str) else value
               for key, value in constraints.items()}
     for key, allowed in (('location', ('infer', 'stack', 'heap')),
-                         ('strategy', ('infer', 'default')),
+                         ('strategy', ('infer', 'default', 'arena', 'pool')),
                          ('ownership', ('infer', 'unique')),
                          ('layout', ('infer', 'contiguous')),
                          ('lifetime', ('infer', 'function'))):
@@ -37,8 +37,12 @@ def resolve_plan(type_, overrides, context):
         raise ValueError('allocation alignment must be a power of two satisfying the type alignment')
     location = values.get('location', 'infer')
     if location == 'infer':
-        location = 'stack' if values.get('lifetime') == 'function' or type_.family == 'record' else 'heap'
-    return AllocationPlan(location=location, alignment=alignment,
+        location = 'stack' if values.get('lifetime') == 'function' or type_.family == 'record' else 'infer'
+    strategy = values.get('strategy', 'default')
+    strategy = 'default' if strategy == 'infer' else strategy
+    if strategy != 'default' and location == 'stack':
+        raise ValueError('arena/pool strategy requires heap region storage')
+    return AllocationPlan(location=location, strategy=strategy, alignment=alignment,
                           lifetime=values.get('lifetime', 'infer'), explicit=tuple(sorted(overrides.items())))
 
 
@@ -104,7 +108,7 @@ class AllocationTests(unittest.TestCase):
 
     def test_unsupported_policies_and_stack_escape_are_rejected(self):
         for override in ('location=memory.gpu.global', 'ownership=memory.arc',
-                         'strategy=memory.arena', 'layout=memory.tiled', 'alignment=3',
+                         'strategy=memory.missing', 'layout=memory.tiled', 'alignment=3',
                          'location=memory.heap,location=memory.stack'):
             result = self.compile(f'def work():\n    a = allocate[i32,{override}]()\n')
             self.assertTrue(result.diagnostics, override)

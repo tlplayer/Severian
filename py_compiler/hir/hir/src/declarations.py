@@ -24,6 +24,7 @@ class BoundSyntax:
 class DeclarationContext:
     def __init__(self, source, syntax, builder):
         self.source, self.syntax, self.builder = source, syntax, builder
+        self.interface = None
         self.declarations, self.bodies, self.pending, self.requirements = [], [], [], []
         self.by_name, self.provider_by_name = {}, {}
         self.active_provider = None
@@ -87,6 +88,13 @@ class DeclarationContext:
 
     def type(self, name):
         name = name.replace(" ", "")
+        if name.startswith('share'):
+            from py_compiler.syntax.complex.shared import Shared
+            atomic = name.startswith('shareatomic')
+            payload = self.type(name[len('shareatomic') if atomic else len('share'):])
+            if not callable(getattr(payload, 'release', None)):
+                raise ValueError('shared type requires an owning memory representation')
+            return Shared(payload, self.type('usize').bits, atomic)
         if name in self.template_types:
             return self.template_types[name]
         if name in self.types and name not in self.record_templates:
@@ -132,6 +140,7 @@ class DeclarationContext:
         self.declarations.append(declaration)
 
     def add_callable(self, entry, provider):
+        entry.symbol_namespace = self.interface or ''
         self.callables.append(entry)
         self.functions.setdefault(entry.name, []).append(entry)
         self.compilers[id(entry)] = provider

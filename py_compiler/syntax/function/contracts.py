@@ -28,6 +28,7 @@ class Callable:
     defaults: dict = field(default_factory=dict)
     receiver_ownership: str | None = None
     declaration_signature: tuple | None = None
+    symbol_namespace: str = ''
 
     def __post_init__(self):
         # Inference rewrites parameters after compilation; names must stay stable
@@ -53,7 +54,8 @@ class Callable:
             arguments = [readable(annotation) for annotation in self.declaration_signature]
         # The source qualifier distinguishes overload declarations and files.
         # It deliberately avoids '@', which ELF linkers use for symbol versions.
-        return f"__sev_fn_{readable(self.name)}[{','.join(arguments)}]::{source.path}:{line}:{column}"
+        qualifier = '::package=' + self.symbol_namespace if self.symbol_namespace else ''
+        return f"__sev_fn_{readable(self.name)}[{','.join(arguments)}]::{source.path}:{line}:{column}{qualifier}"
 
 
 def signature(node, owner=""):
@@ -219,6 +221,17 @@ import unittest
 
 
 class CallableSymbolTests(unittest.TestCase):
+    def test_packages_with_identical_source_have_distinct_symbols(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = 'def value() -> int:\n    return 42\n'
+        packages = [compile_source('src/lib.sev', source, Syntax(), interface=name)
+                    for name in ('first', 'second')]
+        for result in packages:
+            self.assertFalse(result.diagnostics, str(result.diagnostics))
+        symbols = [{body.name for body in result.program.bodies} for result in packages]
+        self.assertTrue(symbols[0].isdisjoint(symbols[1]))
+
     def declaration(self, path, text):
         from py_compiler.frontend.source.source import SourceFile
         from py_compiler.frontend.lexer.lexer import lex

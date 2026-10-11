@@ -1,0 +1,32 @@
+def arena_values() -> int:
+    first = allocate[int, strategy=memory.arena](8)
+    second = allocate[int, strategy=memory.arena](8)
+    first[0] = 12
+    second[0] = 30
+    return first[0] + second[0]
+
+
+def pool_values() -> int:
+    first = allocate[int, strategy=memory.pool](8)
+    first[0] = 42
+    drop first
+    second = allocate[int, strategy=memory.pool](8)
+    return second[0]
+
+
+def local_value() -> int:
+    value = allocate[int]()
+    return value[0]
+
+
+def escaping_value() -> array[int]:
+    value = allocate[int]()
+    return value
+
+
+test:
+    assert(arena_values() == 42)
+    assert(pool_values() == 0)
+    assert(local_value() == 0)
+    value = escaping_value()
+    assert(value[0] == 0)

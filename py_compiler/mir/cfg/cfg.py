@@ -107,7 +107,7 @@ class Body:
             changed = False
             for b in sorted(reachable):
                 incoming = set().union(*(moved_out[p] for p in predecessors[b] & reachable))
-                outgoing = set(incoming)
+                outgoing = incoming - {v.identity for v in self.blocks[b].parameters}
                 for operation in self.blocks[b].operations:
                     if operation.result:
                         outgoing.discard(operation.result.identity)
@@ -116,7 +116,7 @@ class Body:
                 if incoming != moved_in[b] or outgoing != moved_out[b]:
                     moved_in[b], moved_out[b], changed = incoming, outgoing, True
         for b in reachable:
-            moved = set(moved_in[b])
+            moved = moved_in[b] - {v.identity for v in self.blocks[b].parameters}
             available = {v.identity for v in self.blocks[b].parameters}
             def check(value):
                 if value.identity in moved:

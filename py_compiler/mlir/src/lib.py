@@ -97,7 +97,7 @@ def render(program):
                     external[implementation.symbol] = signature
     for symbol, (inputs, result) in sorted(external.items()):
         suffix = " -> " + result if result else ""
-        functions.append(f"  func.func private @{symbol}({', '.join(inputs)}){suffix}")
+        functions.append(f"  func.func private {symbol_ref(symbol)}({', '.join(inputs)}){suffix}")
     functions.extend(render_body(body) for body in program.bodies)
     contracts = [{"name": d.name, "kind": d.kind, "fields": d.fields, "variants": d.variants, "traits": d.traits}
                  for d in program.declarations]

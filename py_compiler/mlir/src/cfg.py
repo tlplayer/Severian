@@ -13,6 +13,9 @@ def render_body(body):
     arguments = ", ".join(f"{name(v)}: {v.type.mlir}" for v in first.parameters)
     result = " -> " + body.result_type.mlir if body.result_type.mlir else ""
     lines = [f"  func.func {symbol_ref(body.name)}({arguments}){result} {{"]
+    for region in getattr(body, 'memory_regions', ()):
+        lines.extend([f'    %{region.name}_size = arith.constant {region.size} : index',
+                      f'    %{region.name} = memref.alloc(%{region.name}_size) {{alignment = {region.alignment} : i64}} : memref<?xi8>'])
     def edge(e):
         if not e.arguments:
             return f"^bb{e.target}"
@@ -50,5 +53,7 @@ def render_body(body):
             lines.append("    llvm.unreachable")
         else:
             value = terminator.value
+            for region in getattr(body, 'memory_regions', ()):
+                lines.append(f'    memref.dealloc %{region.name} : memref<?xi8>')
             lines.append(f"    func.return {name(value)} : {value.type.mlir}" if value else "    func.return")
     return "\n".join(lines + ["  }"])

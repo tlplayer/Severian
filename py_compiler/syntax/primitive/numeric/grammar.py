@@ -16,7 +16,7 @@ class NumericLiteral(OwnedGrammar):
         end, spelling = found.end(), found.group().lower()
         if end < window.end and (window.source.text[end].isalnum() or window.source.text[end] == '_'):
             raise ValueError('invalid numeric literal or unsupported suffix')
-        based = spelling.startswith(('0x', '0o', '0b'))
+        based = len(spelling) > 2 and spelling.startswith(('0x', '0o', '0b'))
         family = 'byte' if spelling.endswith('b') and not based else ('float' if not based and any(c in spelling for c in '.e') else 'integer')
         if family != self.literal_kind:
             return None

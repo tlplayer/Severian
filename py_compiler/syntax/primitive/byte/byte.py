@@ -17,7 +17,7 @@ class ByteLiteral(OwnedGrammar):
         if found is None:
             return None
         spelling = found.group()
-        if spelling.lower().startswith(('0x', '0o', '0b')) or not spelling.endswith('B'):
+        if (len(spelling) > 2 and spelling.lower().startswith(('0x', '0o', '0b'))) or not spelling.endswith('B'):
             return None
         end = found.end()
         if end < window.end and (window.source.text[end].isalnum() or window.source.text[end] == '_'):

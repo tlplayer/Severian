@@ -28,7 +28,7 @@ class Return:
                     cfg.flow.move(binding)
             elif term.kind != 'call':
                 raise ValueError('memory return requires ownership')
-            elif term.operands[0].kind == 'index' and term.operands[0].operands[0].token.text == 'pointer':
+            elif term.operands[0].kind == 'index' and term.operands[0].operands[0].token.text == 'pointer' and not cfg.value_sources.get(value.identity):
                 raise ValueError('returning a pointer view requires a result lifetime contract')
         if cfg.phases:
             cfg.phases.leave()

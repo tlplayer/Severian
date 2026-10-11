@@ -146,6 +146,226 @@ memref.store %value, %buffer[%i] : memref<128xi32>
 memref.dealloc %buffer : memref<128xi32>
 ```
 
+## Allocation optimizations
+
+**Arena memory optimizes allocation and deallocation of groups of objects. Pool memory optimizes repeated allocation and deallocation of similarly sized objects.**
+
+Both reduce calls to general-purpose allocators, but they solve different problems.
+
+## 1. Arena vs. Pool
+
+| Property | Arena | Pool |
+|---|---|---|
+| Allocation | Sequential allocation from a region | Take a reusable block |
+| Deallocation | Release the entire region together | Release individual blocks |
+| Reuse | Usually after reset | Immediately after individual free |
+| Object sizes | Variable | Usually fixed or size-classed |
+| Fragmentation | Low internal management overhead | Depends on size classes |
+| Allocation speed | Often pointer increment | Often free-list operation |
+| Memory efficiency | Can retain dead objects | Can reuse dead objects |
+| Best application | Shared lifetimes | Repeated object creation/destruction |
+
+### Arena
+
+```text
+Arena: 1024 bytes
+
+Allocate A (100 bytes)
+Allocate B (200 bytes)
+Allocate C (300 bytes)
+
+[A:100][B:200][C:300][free:424]
+
+Drop B:
+[A:100][B:200][C:300][free:424]
+        ^
+        Memory not individually reclaimed
+
+Reset:
+[free:1024]
+```
+
+Useful for parsers, ASTs, temporary computations, and collections whose members share a lifetime.
+
+### Pool
+
+```text
+Pool: 4 blocks, 64 bytes each
+
+[A][B][C][free]
+
+Drop B:
+[A][free][C][free]
+
+Allocate D:
+[A][D][C][free]
+```
+
+Useful for linked lists, trees, graph nodes, queues, and objects frequently created and destroyed.
+
+A pool can also manage variable-sized allocations through size classes.
+
+## 2. What should Severian collections use?
+
+| Collection | Default recommendation | When arena helps | When pool helps |
+|---|---|---|---|
+| `array[T,N]` | Inline storage | Many arrays sharing a lifetime | Repeated arrays of the same size |
+| `list[T]` | Contiguous dynamic buffer | Lists built and discarded together | Reusing backing buffers |
+| `stack[T]` | Contiguous dynamic buffer | Temporary stacks | Repeated stack instances |
+| `queue[T]` | Circular buffer | Temporary queues | Linked-node queues with churn |
+| `map[K,V]` | Hash table | Maps discarded together | Node-based maps or reusable buffers |
+| `set[T]` | Hash table | Temporary sets | Node-based sets |
+| `tree[T]` | Node allocation | Entire trees discarded together | Frequent insertion/deletion |
+| `graph[T]` | Contiguous adjacency structures or nodes | Graph-wide lifetime | Dynamic graph nodes and edges |
+
+**Important:** The collection's data structure matters more than its allocator.
+
+A contiguous `list[T]` doesn't benefit from a pool per element because its elements should generally reside in one buffer.
+
+A linked list does benefit from pooled nodes because each node requires independently managed storage.
+
+## 3. Severian allocation examples
+
+Default behavior:
+
+```python
+# Fixed size; inline or stack storage when possible
+a := allocate[array[int, 32]]()
+
+# Dynamic contiguous allocation
+b := allocate[list[int]]()
+
+# Hash table
+c := allocate[map[int, float]]()
+
+# Tree with individually allocated nodes
+d := allocate[tree[int]]()
+```
+
+Explicit strategies:
+
+```python
+# All nodes share the tree's lifetime
+ast := allocate[
+    tree[Node],
+    strategy=memory.arena
+]()
+
+# Nodes frequently inserted and removed
+tree := allocate[
+    tree[Node],
+    strategy=memory.pool
+]()
+
+# Temporary list with known capacity
+values := allocate[
+    list[int],
+    strategy=memory.arena,
+    capacity=1000
+]()
+```
+
+The important difference between the tree examples:
+
+- Arena tree: Individual node deletion does not reclaim arena space.
+- Pool tree: Deleted nodes return their slots to the pool for reuse.
+
+An arena-backed list with repeated growth can waste memory because old buffers may remain allocated until the arena is released. Reserving capacity avoids this.
+
+## 4. How the compiler should infer strategies
+
+Consider:
+
+```python
+def build_tree(data: list[int]) -> tree[int]:
+    result := tree[int]()
+
+    for x in data:
+        result.insert(x)
+
+    return result
+```
+
+The compiler cannot automatically select an arena just because this is a tree.
+
+It must establish whether individual nodes can be deleted, whether storage escapes, and whether nodes share a lifetime.
+
+Compare:
+
+```python
+def process(data: list[int]):
+    tree := tree[int]()
+
+    for x in data:
+        tree.insert(x)
+
+    analyze(tree)
+
+    # Entire tree dies here
+```
+
+This is a candidate for arena allocation.
+
+Now:
+
+```python
+def process(tree: tree[int]):
+    tree.insert(10)
+    tree.remove(20)
+    tree.insert(30)
+```
+
+This is a candidate for pooled nodes, particularly if these operations occur repeatedly.
+
+However, **the compiler should not select a pool simply because it sees insertions and deletions**. It needs cost information or explicit strategy selection.
+
+## 5. What belongs in `memory` and MIR?
+
+I would separate three decisions:
+
+1. **Collection representation:** Contiguous buffer, linked nodes, tree nodes, hash buckets.
+2. **Allocation strategy:** Stack, arena, pool, general-purpose allocator.
+3. **Memory location:** CPU heap, GPU global, GPU shared, etc.
+
+These are independent dimensions.
+
+For example:
+
+```python
+nodes := allocate[
+    tree[int],
+    strategy=memory.pool,
+    location=memory.heap
+]()
+```
+
+MIR could represent this as:
+
+```text
+Collection:
+    type: tree[int]
+    representation: node_based
+
+Allocation:
+    location: heap
+    strategy: pool
+    block_size: sizeof(tree.node[int])
+    lifetime: inferred
+    ownership: inferred
+```
+
+The collection's implementation determines *what* gets allocated. `memory` determines *how and where* those allocations occur.
+
+One design decision is especially important for Severian:
+
+**Should allocation parameters apply only to the collection object or also to its internally allocated elements?**
+
+I recommend that `allocate[tree[T], strategy=memory.pool]()` propagates the strategy to the tree's internal allocations by default. Otherwise, the caller selects a pool but the tree's nodes may still allocate through the general heap.
+
+The type's syntax can define which internal allocations inherit the policy.
+
+This allows you to optimize collections without introducing separate `arena_list`, `pool_tree`, or `pool_map` types.
+
 ### Data models
 
 pointer[T]

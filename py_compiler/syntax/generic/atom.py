@@ -23,7 +23,8 @@ class ExternalSymbol:
         types = ", ".join(v.type.mlir for v in operation.operands)
         result = operation.result.type.mlir if operation.result else "()"
         prefix = name(operation.result) + " = " if operation.result else ""
-        return [f"{prefix}func.call @{self.symbol}({arguments}) : ({types}) -> {result}"]
+        from py_compiler.mlir.src.lib import symbol_ref
+        return [f"{prefix}func.call {symbol_ref(self.symbol)}({arguments}) : ({types}) -> {result}"]
 
 
 @dataclass(frozen=True)

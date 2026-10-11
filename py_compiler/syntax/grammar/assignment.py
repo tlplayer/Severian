@@ -89,6 +89,9 @@ class Assignment:
         rhs = expression(items[position + 1:])
         mode = rhs.token.text if rhs.kind == "unary" and rhs.token.text in OWNERSHIP else None
         core = rhs.operands[0] if mode else rhs
+        atomic_share = mode == 'share' and core.kind == 'atomic-share'
+        if atomic_share:
+            core = core.operands[0]
         owner = cfg.lookup(core, env) if core.kind in ("name", "reference") else None
         if core.kind == 'call' and core.operands[0].kind == 'index' and core.operands[0].operands[0].token.text == 'pointer':
             source = core.operands[1] if len(core.operands) == 2 else None
@@ -117,7 +120,28 @@ class Assignment:
                 raise ValueError("compound assignment requires an existing binding")
             cfg.flow.read(existing)
         expected = annotation or (existing.type if existing else None)
-        value = cfg.expr(core, env, expected)
+        if expected and expected.family == 'shared' and owner and owner.type != expected and mode != 'share':
+            raise ValueError('use share to convert a named owner into shared ownership')
+        value = cfg.expr(core, env, None if mode == 'share' else expected)
+        if mode == 'share':
+            from py_compiler.syntax.complex.shared import Shared
+            if owner is None or owner.ownership in ('view', 'borrow'):
+                raise ValueError('share requires an owning binding')
+            cfg.flow.transfer(owner)
+            if not isinstance(value.type, Shared):
+                if any(source == owner.identity for source in cfg.flow.views.values()):
+                    raise ValueError('cannot share while views or borrows are live')
+                target = Shared(value.type, cfg.context.type('usize').bits, atomic_share)
+                value = target.from_value(value, cfg, node.span)
+                updated_owner = replace(owner, type=target, ownership='own')
+                env[owner.name] = updated_owner
+                cfg.values[owner.identity] = value
+                cfg.body.bindings = [updated_owner if b.identity == owner.identity else b for b in cfg.body.bindings]
+                owner = updated_owner
+            elif value.type.atomic != atomic_share:
+                raise ValueError('shared reference atomicity cannot change through sharing')
+            value = value.type.copy_value(value, cfg, node.span)
+            mode, owner = 'own', None
         if core.kind == 'member' and value is not None and value.type.family == 'record':
             owner = root_binding(core, cfg, env)
         if value is None:
@@ -155,8 +179,8 @@ class Assignment:
             select(existing.type, 'O.assignment', operator).expand(cfg, BindingPlace(existing), value, node.span)
             return
         if existing:
-            if callable(getattr(existing.type, 'release', None)):
-                raise ValueError('memory rebinding requires a new binding; release the previous owner explicitly')
+            if callable(getattr(existing.type, 'release', None)) and existing.identity not in cfg.flow.moved:
+                raise ValueError('memory rebinding requires moving or releasing the previous owner')
             cfg.flow.replace(existing)
             if existing.type != value.type:
                 raise ValueError("assignment changes the binding's type")

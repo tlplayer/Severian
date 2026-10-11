@@ -41,8 +41,22 @@ class Test(DeclarationProvider):
         context.declare_nodes(node.children, (*context.scope, node.identity))
 
     def compile(self, entry, context):
-        body = Function().compile(entry, context)
+        from dataclasses import replace
+        import ast
+        expected = None
+        compiled = entry
+        children = entry.node.children
+        if (len(children) == 1 and getattr(children[0].provider, 'spelling', None) == 'throws'
+                and len(children[0].header) == 1 and children[0].header[0].kind == 'STRING'):
+            expected = ast.literal_eval(children[0].header[0].text)
+            if not expected:
+                raise ValueError('throws requires a nonempty runtime diagnostic')
+            compiled = replace(entry, node=replace(entry.node, children=children[0].children))
+        body = Function().compile(compiled, context)
+        entry.body = body
         body.test = {'mode': entry.test_mode, 'label': entry.test_label, 'imports': [item.name for item in entry.imports]}
+        if expected is not None:
+            body.test['expected-failure'] = expected
         return body
 
 
@@ -50,6 +64,12 @@ import unittest
 
 
 class TestScopeTests(unittest.TestCase):
+    def test_runtime_failure_expectation_is_test_metadata(self):
+        result = self.compile('test "bounds":\n    throws "assertion failed":\n        assert(false)\n', True)
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.test)
+        self.assertEqual(body.test['expected-failure'], 'assertion failed')
+
     def compile(self, text, include_tests):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax

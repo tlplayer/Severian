@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+SEV_REPOSITORY=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)
+export PYTHONPATH="$SEV_REPOSITORY${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m py_compiler "$@"

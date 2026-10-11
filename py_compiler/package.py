@@ -39,6 +39,59 @@ def write_atomic(path, text):
     os.replace(temporary, path)
 
 
+def compiler_identity():
+    root = Path(__file__).parent
+    return digest(encode([(path.relative_to(root).as_posix(), path.read_text())
+                          for path in sorted(root.rglob('*.py'))]))
+
+
+def native_dependencies(root, manifest, target, pointer_bits):
+    result = {}
+    for alias, specification in manifest.get('dependencies', {}).items():
+        if not re.fullmatch(r'[A-Za-z_]\w*', alias) or not isinstance(specification, dict) or not isinstance(specification.get('path'), str):
+            raise ValueError('native dependencies require an identifier alias and a local path')
+        package_root = (root / specification['path']).resolve()
+        output = package_root / 'package.pkg'
+        def artifact(relative):
+            path = (output / relative).resolve()
+            if not path.is_relative_to(output.resolve()):
+                raise ValueError('dependency artifact escapes package.pkg')
+            return path
+        index = json.loads(artifact('package.pkgi/index.json').read_text())
+        candidates = []
+        for item in reversed(index.get('interfaces', [])):
+            interface_path = artifact(item['path'])
+            interface_text = interface_path.read_text()
+            interface = json.loads(interface_text)
+            realization = json.loads(artifact(interface['metadata']['path']).read_text())
+            if (realization.get('scope') != 'production' or realization.get('state') != 'compiled-object'
+                    or realization.get('target') != target or realization.get('pointer-bits') != pointer_bits
+                    or realization.get('compiler') != compiler_identity()):
+                continue
+            if digest(interface_text) != realization['interface']['checksum']:
+                raise ValueError('dependency interface checksum mismatch')
+            if specification.get('package', interface['package']['name']) != interface['package']['name']:
+                raise ValueError('dependency package identity mismatch')
+            objects = []
+            for entry in realization['native-artifacts']:
+                path = artifact(entry['path'])
+                if entry['kind'] != 'object' or sha256(path.read_bytes()).hexdigest() != entry['checksum']:
+                    raise ValueError('dependency object checksum mismatch')
+                objects.append(str(path))
+            if not objects:
+                raise ValueError('dependency has no native objects')
+            if realization.get('dependencies'):
+                raise ValueError('transitive native dependencies need a pinned dependency closure')
+            candidates.append({'exports': interface.get('exports', []), 'objects': objects,
+                               'initializers': realization.get('initializers', []),
+                               'package': interface['package'], 'build-id': realization['build-id']})
+            break
+        if not candidates:
+            raise ValueError(f'build compatible production artifacts for dependency {alias!r} first')
+        result[alias] = candidates[0]
+    return result
+
+
 def build(root, target="x86_64-unknown-linux-gnu", pointer_bits=64, jobs=4, mlir_opt=None, include_tests=False, stop_after=None):
     root = Path(root).resolve()
     output = root / "package.pkg"
@@ -78,8 +131,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
         raise ValueError("package.json requires package.name and package.version")
     if not all(isinstance(package[field], str) for field in ("name", "version")):
         raise ValueError("package.name and package.version must be strings")
-    if manifest.get("dependencies"):
-        raise ValueError("dependency linking is outside the primitive milestone")
+    packages = native_dependencies(root, manifest, target, pointer_bits)
     files = sorted((root / "src").rglob("*.sev"))
     if not files:
         raise ValueError("package has no src/**/*.sev sources")
@@ -92,7 +144,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     # Executor.map preserves source order while independent source units compile concurrently.
     with ThreadPoolExecutor(max_workers=jobs) as executor:
         results = list(executor.map(lambda pair: compile_source(pair[0], pair[1], syntax,
-                            stop_after=stop_after or 'mir', interface=package['name']), snapshots))
+                            stop_after=stop_after or 'mir', interface=package['name'], native_packages=packages), snapshots))
     errors = [diagnostic for result in results for diagnostic in result.diagnostics]
     if errors:
         report("\n\n".join(map(str, errors)) + "\n", True)
@@ -113,9 +165,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     # Publishing an artifact requires the actual dialect verifier, not only our structural checks.
     verify_native(ir, mlir_opt)
     native = compile_object(lir, mlir_opt)
-    compiler_root = Path(__file__).parent
-    compiler_id = digest(encode([(p.relative_to(compiler_root).as_posix(), p.read_text())
-                                for p in sorted(compiler_root.rglob("*.py"))]))
+    compiler_id = compiler_identity()
     content_id = digest(encode([manifest_text, lock, snapshots]))
     build_id = new_build_id()
     abi_id = digest(encode([target, pointer_bits, "py-primitive-abi-v1"]))
@@ -155,10 +205,17 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                         "complexity": body.complexity, "test": body.test,
                         "bindings": [{"id": b.identity, "name": b.name, "type": b.type.name,
                                       "constant": b.constant, "ownership": b.ownership} for b in body.bindings]})
-    semantic_id = digest(encode(declarations))
+    exports = []
+    for body in program.bodies:
+        if body.declaration and not body.test and '.' not in body.declaration and '[' not in body.declaration:
+            parameters = body.bindings[:len(body.blocks[0].parameters)]
+            exports.append({'name': body.declaration, 'symbol': body.name,
+                            'parameters': [{'name': b.name, 'type': b.type.name, 'ownership': b.ownership} for b in parameters],
+                            'result': body.result_type.name, 'result-sources': list(body.result_sources)})
+    semantic_id = digest(encode([declarations, exports]))
     interface = {"format": "severian.interface", "version": 1, "package": identity,
                  "semantic-id": semantic_id, "metadata": {"build-id": build_id, "path": realization_path},
-                 "declarations": declarations}
+                 "declarations": declarations, "exports": exports}
     interface_text = encode(interface)
     realization = {"format": "py_compiler.realization", "version": 1, "package": identity,
                    "scope": "test" if include_tests else "production",
@@ -172,6 +229,8 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                                      {"path": lowered_path, "kind": "llvm-dialect", "checksum": digest(native.llvm_dialect)},
                                      *realization["native-artifacts"]])
     realization["initializers"] = [body.name for body in program.bodies if not body.declaration]
+    realization['dependency-initializers'] = list(dict.fromkeys(
+        symbol for dependency in packages.values() for symbol in dependency['initializers']))
     # No native layout is claimed before target data-layout conversion.
     represented = {constant.type.name: constant.type for constant in program.constants}
     for body in program.bodies:
@@ -207,7 +266,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     write_atomic(index_path, encode(index))
     report(f"Built {len(snapshots)} source files; {len(program.constants)} primitive values\nMLIR: {ir_path}\n")
     return {"success": True, "build-id": build_id, "ir": str(output / ir_path), "object": str(output / object_path),
-            "log": str(output / "debug/build/log.txt")}
+            "dependencies": list(native.dependencies), "log": str(output / "debug/build/log.txt")}
 
 
 def realization_records(program):
