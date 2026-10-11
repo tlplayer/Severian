@@ -8,6 +8,7 @@ import pty
 import re
 import resource
 import signal
+import shutil
 import subprocess
 import threading
 
@@ -80,8 +81,9 @@ def execute(binary, timeout, env):
                 break
             chunks.append(chunk)
     try:
-        process = subprocess.Popen([str(binary)], stdout=slave, stderr=subprocess.PIPE,
-                                   env=env, preexec_fn=no_core)
+        command = list(map(str, binary)) if isinstance(binary, (list, tuple)) else [str(binary)]
+        process = subprocess.Popen(command, stdout=slave, stderr=subprocess.PIPE,
+                                   env=env, preexec_fn=no_core, start_new_session=True)
     except BaseException:
         os.close(master)
         raise
@@ -93,17 +95,54 @@ def execute(binary, timeout, env):
         try:
             _, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
-            process.kill()
+            os.killpg(process.pid, signal.SIGKILL)
             process.communicate()
             raise
         reader.join(timeout=1)
-        return subprocess.CompletedProcess([str(binary)], process.returncode,
+        return subprocess.CompletedProcess(command, process.returncode,
                                            b''.join(chunks).decode(errors='replace'), stderr.decode(errors='replace'))
     finally:
         os.close(master)
 
 
-def test_package(root, *, sanitize=None, timeout=30, **options):
+GDB_SCRIPT = '''import gdb, json, signal
+result = {"exit": None, "backtrace": ""}
+def exited(event):
+    result["exit"] = getattr(event, "exit_code", None)
+def stopped(event):
+    if isinstance(event, gdb.SignalEvent):
+        result["exit"] = -int(getattr(signal, event.stop_signal))
+        result["backtrace"] = gdb.execute("thread apply all bt", to_string=True)
+gdb.events.exited.connect(exited)
+gdb.events.stop.connect(stopped)
+gdb.execute("run")
+print("SEV_DEBUG_RESULT=" + json.dumps(result))
+'''
+
+
+def debug_execute(binary, timeout, env, script):
+    debugger = shutil.which('gdb')
+    if not debugger:
+        raise ValueError('--backtrace requires gdb')
+    process = execute([debugger, '--quiet', '--nx', '--batch',
+                       '-ex', 'set pagination off', '-ex', 'set confirm off',
+                       '-ex', 'set disable-randomization off', '-x', script,
+                       '--args', binary], timeout, env)
+    marker = 'SEV_DEBUG_RESULT='
+    records = [line[len(marker):] for line in process.stdout.splitlines() if line.startswith(marker)]
+    if process.returncode or len(records) != 1:
+        raise ValueError('debugger could not run the test:\n' + process.stdout + process.stderr)
+    result = json.loads(records[0])
+    if result['exit'] is None:
+        raise ValueError('debugger did not report a test exit or fatal signal')
+    process.returncode = result['exit']
+    process.stdout = '\n'.join(line for line in process.stdout.splitlines() if not line.startswith(marker))
+    return process, result['backtrace']
+
+
+def test_package(root, *, sanitize=None, timeout=30, backtrace=False, **options):
+    if backtrace and sanitize:
+        raise ValueError('run --backtrace and --sanitize separately; LeakSanitizer cannot run under ptrace')
     target = options.get('target', 'x86_64-unknown-linux-gnu')
     machine = {'AMD64': 'x86_64', 'arm64': 'aarch64'}.get(platform.machine(), platform.machine())
     if platform.system() != 'Linux' or target.split('-')[0] != machine or 'linux' not in target:
@@ -123,6 +162,9 @@ def test_package(root, *, sanitize=None, timeout=30, **options):
               'pipeline': 'MLIR -> LLVM -> object', 'tests': []}
     report_path = output / 'results.json'
     write_atomic(report_path, encode(report))
+    script = output / 'backtrace.py'
+    if backtrace:
+        script.write_text(GDB_SCRIPT)
     optimizer = options.get('mlir_opt') or verifier_path()
     linker = companion('clang', optimizer)
 
@@ -136,7 +178,8 @@ def test_package(root, *, sanitize=None, timeout=30, **options):
         instrumented = []
         for index, obj in enumerate(objects):
             llvm = Path(obj).parent.parent / 'ir/package.ll'
-            text = re.sub(r'^(define [^\n]*?) \{$', r'\1 sanitize_address {', llvm.read_text(), flags=re.MULTILINE)
+            text = re.sub(r'^(define [^\n]*?)( !dbg ![0-9]+)? \{$',
+                          r'\1 sanitize_address\2 {', llvm.read_text(), flags=re.MULTILINE)
             source, lowered, destination = (output / f'asan-{index}{suffix}' for suffix in ('.ll', '.instrumented.ll', '.o'))
             source.write_text(text)
             tool([companion('opt', optimizer), '-mtriple=' + target, '-passes=asan', '-S', source, '-o', lowered])
@@ -154,10 +197,18 @@ def test_package(root, *, sanitize=None, timeout=30, **options):
         expected = test.get('expected-failure')
         env = {**os.environ, **({'ASAN_OPTIONS': 'detect_leaks=1:halt_on_error=1'} if sanitize else {})}
         try:
-            process = execute(stem, timeout, env)
+            trace = ''
+            if backtrace:
+                process, trace = debug_execute(stem, timeout, env, script)
+            else:
+                process = execute(stem, timeout, env)
             passed = test_passed(process, expected)
             record = {'label': test['label'], 'mode': test['mode'], 'passed': passed,
-                      'exit': process.returncode, 'stdout': process.stdout, 'stderr': process.stderr}
+                      'exit': process.returncode, 'stdout': process.stdout, 'stderr': process.stderr,
+                      'backtrace': trace}
+            if trace:
+                stem.with_suffix('.backtrace.txt').write_text(trace)
+                print(trace, end='')
         except subprocess.TimeoutExpired:
             record = {'label': test['label'], 'mode': test['mode'], 'passed': False, 'error': 'test timed out'}
         report['tests'].append(record)
@@ -173,6 +224,25 @@ import unittest
 
 
 class PackageTestRunnerTests(unittest.TestCase):
+    def test_debugger_success_preserves_inferior_failure(self):
+        from unittest.mock import patch
+        payload = {'exit': -signal.SIGABRT, 'backtrace': '#0 leaf at example.sev:3\n'}
+        process = subprocess.CompletedProcess([], 0, 'assertion failed\nSEV_DEBUG_RESULT=' + json.dumps(payload), '')
+        with patch(__name__ + '.shutil.which', return_value='/usr/bin/gdb'), patch(__name__ + '.execute', return_value=process):
+            result, trace = debug_execute('binary', 30, {}, 'script.py')
+        self.assertEqual(result.returncode, -signal.SIGABRT)
+        self.assertEqual(trace, payload['backtrace'])
+        self.assertNotIn('SEV_DEBUG_RESULT', result.stdout)
+        self.assertFalse(test_passed(result))
+        self.assertTrue(test_passed(result, 'assertion failed'))
+
+    def test_debugger_startup_failure_is_not_a_test_pass(self):
+        from unittest.mock import patch
+        process = subprocess.CompletedProcess([], 0, 'ptrace: Operation not permitted', '')
+        with patch(__name__ + '.shutil.which', return_value='/usr/bin/gdb'), patch(__name__ + '.execute', return_value=process):
+            with self.assertRaisesRegex(ValueError, 'debugger could not run'):
+                debug_execute('binary', 30, {}, 'script.py')
+
     def test_build_orders_local_dependencies_before_consumer(self):
         import tempfile
         from unittest.mock import patch

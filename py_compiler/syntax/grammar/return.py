@@ -33,4 +33,4 @@ class Return:
         if cfg.phases:
             cfg.phases.leave()
         cfg.cleanup_memory((binding for scope in cfg.active_scopes for binding in scope.values()), node.span)
-        cfg.current.terminator = Terminator("finish", value=value)
+        cfg.current.terminator = Terminator("finish", value=value, span=node.span)

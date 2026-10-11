@@ -192,7 +192,8 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     # Executor.map preserves source order while independent source units compile concurrently.
     with ThreadPoolExecutor(max_workers=jobs) as executor:
         results = list(executor.map(lambda pair: compile_source(pair[0], pair[1], syntax,
-                            stop_after=stop_after or 'mir', interface=package['name'], native_packages=packages), snapshots))
+                            stop_after=stop_after or 'mir', interface=package['name'], native_packages=packages,
+                            debug_path=str(root / pair[0])), snapshots))
     errors = [diagnostic for result in results for diagnostic in result.diagnostics]
     if errors:
         report("\n\n".join(map(str, errors)) + "\n", True)

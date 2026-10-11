@@ -54,6 +54,7 @@ class Function(DeclarationProvider):
         builder.block_scope = context.callable_scope(entry)
         builder.declaration_scope = (*entry.scope, node.identity)
         builder.body.declaration = entry.name
+        builder.body.source_span = node.span
         builder.declared_nodes = context.declared_nodes
         builder.namespaces["module"] = context.global_bindings
         builder.storage = dict(context.global_storage)

@@ -91,13 +91,38 @@ def compile_object(lir, optimizer=None):
                    '--convert-arith-to-llvm', f'--convert-index-to-llvm=index-bitwidth={lir.pointer_bits}',
                    '--convert-cf-to-llvm', f'--finalize-memref-to-llvm=index-bitwidth={lir.pointer_bits}',
                    f'--convert-func-to-llvm=index-bitwidth={lir.pointer_bits}',
-                   '--convert-arith-to-llvm', '--reconcile-unrealized-casts'], lir.text())
+                   '--convert-arith-to-llvm', '--reconcile-unrealized-casts',
+                   '--ensure-debug-info-scope-on-llvm-func', '--mlir-print-debuginfo'], lir.text())
     llvm_ir = run([translator, '--mlir-to-llvmir'], dialect)
     with tempfile.TemporaryDirectory(prefix='sev-object-') as directory:
         destination = Path(directory) / 'package.o'
-        run([compiler, '-filetype=obj', '-relocation-model=pic', '-mtriple=' + lir.target,
+        run([compiler, '-O0', '--frame-pointer=all', '-filetype=obj', '-relocation-model=pic', '-mtriple=' + lir.target,
              '-o', str(destination)], llvm_ir)
         object_bytes = destination.read_bytes()
         if not object_bytes:
             raise ValueError('object compiler produced an empty artifact')
     return ObjectArtifact(dialect, llvm_ir, object_bytes, lir.dependencies)
+
+
+import unittest
+
+
+class DebugInfoTests(unittest.TestCase):
+    def test_source_locations_survive_lowering_into_dwarf(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = 'def leaf(value: int) -> int:\n    return value + 1\ndef caller() -> int:\n    return leaf(41)\n'
+        result = compile_source('debug.sev', source, Syntax(), debug_path='/tmp/severian-debug/debug.sev')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        artifact = compile_object(lower(result.program, 'x86_64-unknown-linux-gnu', 64))
+        self.assertIn('!DISubprogram', artifact.llvm_ir)
+        self.assertIn('!DILocation(line: 4,', artifact.llvm_ir)
+        self.assertIn('filename: "debug.sev", directory: "/tmp/severian-debug"', artifact.llvm_ir)
+        with tempfile.TemporaryDirectory() as directory:
+            obj = Path(directory) / 'debug.o'
+            obj.write_bytes(artifact.object_bytes)
+            tool = companion('llvm-dwarfdump', verifier_path())
+            checked = subprocess.run([tool, '--verify', str(obj)], capture_output=True, text=True)
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+            lines = subprocess.run([tool, '--debug-line', str(obj)], capture_output=True, text=True, check=True)
+            self.assertIn('debug.sev', lines.stdout)

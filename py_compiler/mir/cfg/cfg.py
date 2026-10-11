@@ -30,6 +30,7 @@ class Terminator:
     edges: tuple = ()
     value: Value | None = None
     message: str = ""
+    span: object = None
 
 
 @dataclass
@@ -53,6 +54,8 @@ class Body:
     complexity: dict = field(default_factory=dict)
     test: dict | None = None
     result_sources: tuple = ()
+    source_snapshot: object = None
+    source_span: object = None
 
     def verify(self):
         if not self.blocks:

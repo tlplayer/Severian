@@ -31,6 +31,7 @@ def main(argv=None):
     test.add_argument('--jobs', type=int, default=4)
     test.add_argument('--mlir-opt')
     test.add_argument('--sanitize', choices=('address',))
+    test.add_argument('--backtrace', action='store_true', help='capture native signal backtraces using gdb')
     test.add_argument('--timeout', type=float, default=30)
     args = parser.parse_args(argv)
     try:
@@ -43,12 +44,13 @@ def main(argv=None):
                        "syntax.primitive.bool.declarations", "syntax.primitive.char.declarations",
                        "syntax.primitive.byte.byte", "syntax.primitive.pointer.operations",
                        "syntax.primitive.numeric.conversion", "syntax.complex.array", "syntax.complex.generic", "syntax.function.contracts", "syntax.dynamic.dynamic", "syntax.complex.string", "syntax.operator.operation",
-                       "syntax.block.while", "syntax.function.layout", "syntax.function.allocate", "syntax.grammar.expression", "syntax.grammar.call", "syntax.block.class", "syntax.block.trait", "syntax.block.unsafe", "syntax.block.test", "syntax.prelude", "mlir.src.lib", "package", "testing"]
+                       "syntax.block.while", "syntax.function.layout", "syntax.function.allocate", "syntax.grammar.expression", "syntax.grammar.call", "syntax.block.class", "syntax.block.trait", "syntax.block.unsafe", "syntax.block.test", "syntax.prelude", "mlir.src.lib", "mlir.src.cfg", "lir.src.lib", "package", "testing"]
             suite = unittest.defaultTestLoader.loadTestsFromNames(["py_compiler." + m for m in modules])
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
         if args.command == 'test':
             result = test_package(args.package, target=args.target, pointer_bits=args.pointer_bits,
-                                  jobs=args.jobs, mlir_opt=args.mlir_opt, sanitize=args.sanitize, timeout=args.timeout)
+                                  jobs=args.jobs, mlir_opt=args.mlir_opt, sanitize=args.sanitize, timeout=args.timeout,
+                                  backtrace=args.backtrace)
             print(json.dumps(result, indent=2))
             return 0 if result['success'] else 1
         if args.command == "tokens":

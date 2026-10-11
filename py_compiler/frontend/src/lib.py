@@ -13,10 +13,10 @@ class FrontendResult:
     diagnostics: tuple[Diagnostic, ...]
 
 
-def compile_source(path, text, syntax, *, stop_after='mir', interface=None, native_packages=None):
+def compile_source(path, text, syntax, *, stop_after='mir', interface=None, native_packages=None, debug_path=None):
     if stop_after not in ('thir', 'mir'):
         raise ValueError('stop_after must be thir or mir')
-    source = SourceFile(path, text)
+    source = SourceFile(path, text, debug_path)
     try:
         tokens = lex(source, syntax)
     except Diagnostic as failure:

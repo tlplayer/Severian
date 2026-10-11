@@ -27,6 +27,8 @@ class Builder:
     def __init__(self, source, syntax, identity, name, result):
         self.source, self.syntax = source, syntax
         self.body = Body(identity, name, source.path, result)
+        self.body.source_snapshot = source
+        self.body.source_span = source.span(0, 0)
         self.next_value = 0
         self.current = self.block()
         self.flow = FlowState()

@@ -14,6 +14,7 @@ class Span:
 class SourceFile:
     path: str
     text: str
+    debug_path: str | None = None
 
     @property
     def identity(self):
