@@ -1,0 +1,104 @@
+import DefinitionID, Substitution, TypeId, semantic_key from "../../syntax/symbol/symbol.sev"
+import InferenceContext, Signature, TyInterner, TypeKind from "../../syntax/type/system.sev"
+
+
+def definition_key(definition: DefinitionID) -> string:
+    return semantic_key([string(definition.package), string(definition.module), string(definition.declaration.value)])
+
+
+# Resolve inference recursively; a solved outer constructor can still contain
+# unsolved children. Never give MIR a Parameter or Infer masquerading as a type.
+def concrete(types: TyInterner, inference: InferenceContext, value: TypeId) -> TypeId:
+    resolved = inference.resolve(types, value)
+    match types.kind(resolved):
+        case Parameter | Infer:
+            throw Error("THIR requires a concrete type after inference")
+        case Primitive:
+            return resolved
+        case Nominal:
+            return types.intern(TypeKind.Nominal(definition, concrete_arguments(types, inference, substitution)))
+        case Resource:
+            return types.intern(TypeKind.Resource(definition, concrete_arguments(types, inference, substitution)))
+        case Function:
+            return types.intern(TypeKind.Function(Signature(concrete_types(types, inference, signature.parameters), concrete(types, inference, signature.result))))
+        case Tuple:
+            return types.intern(TypeKind.Tuple(concrete_types(types, inference, elements)))
+        case Union:
+            return types.union(concrete_types(types, inference, members))
+        case Reference:
+            return types.intern(TypeKind.Reference(concrete(types, inference, target), mutable, lifetime))
+
+
+def concrete_types(types: TyInterner, inference: InferenceContext, values: list[TypeId]) -> list[TypeId]:
+    result: list[TypeId] = []
+    for value in values:
+        result.append(concrete(types, inference, value))
+    return result
+
+
+def concrete_arguments(types: TyInterner, inference: InferenceContext, arguments: Substitution) -> Substitution:
+    result = Substitution()
+    for binding in arguments.arguments:
+        result.bind(binding.parameter, concrete(types, inference, binding.type_id))
+    return result
+
+
+def substitution_key(types: TyInterner, arguments: Substitution) -> string:
+    parts: list[string] = []
+    for binding in arguments.arguments:
+        parts.append(semantic_key([string(binding.parameter.index), type_key(types, binding.type_id)]))
+    return semantic_key(parts)
+
+
+# TypeId is an interner-local position, never a persistent realization identity.
+def type_key(types: TyInterner, value: TypeId) -> string:
+    match types.kind(value):
+        case Primitive:
+            return semantic_key(["primitive", string(primitive.declaration.value)])
+        case Nominal:
+            return semantic_key(["nominal", definition_key(definition), substitution_key(types, substitution)])
+        case Resource:
+            return semantic_key(["resource", definition_key(definition), substitution_key(types, substitution)])
+        case Function:
+            parts = ["function"]
+            for parameter in signature.parameters:
+                parts.append(type_key(types, parameter))
+            parts.append(type_key(types, signature.result))
+            return semantic_key(parts)
+        case Tuple:
+            parts = ["tuple"]
+            for element in elements:
+                parts.append(type_key(types, element))
+            return semantic_key(parts)
+        case Union:
+            # Interner order can differ between compilation sessions.
+            keys: list[string] = []
+            for member in members:
+                key = type_key(types, member)
+                if key not in keys:
+                    keys.append(key)
+            return semantic_key(["union"] + sorted(keys))
+        case Reference:
+            return semantic_key(["reference", type_key(types, target), string(mutable), string(lifetime.index)])
+        case Parameter | Infer:
+            throw Error("unresolved type cannot identify a THIR realization")
+
+
+import DeclarationId, PrimitiveId from "../../syntax/symbol/symbol.sev"
+
+
+test "THIR resolves nested inference and keys ignore interner order":
+    first = TyInterner()
+    variable = first.fresh_infer()
+    integer = first.intern(TypeKind.Primitive(PrimitiveId(DeclarationId(10))))
+    inference = InferenceContext()
+    inference.unify(first, variable, integer)
+    nested = first.intern(TypeKind.Tuple([variable]))
+    resolved = concrete(first, inference, nested)
+    second = TyInterner()
+    other_integer = second.intern(TypeKind.Primitive(PrimitiveId(DeclarationId(10))))
+    other_nested = second.intern(TypeKind.Tuple([other_integer]))
+    assert(type_key(first, resolved) == type_key(second, other_nested))
+    missing = first.intern(TypeKind.Tuple([first.fresh_infer()]))
+    failure ?= concrete(first, inference, missing)
+    assert(failure is Error)

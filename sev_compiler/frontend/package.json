@@ -12,6 +12,14 @@
     "explicit-imports": true
   },
   "dependencies": {
+    "thir": {
+      "package": "sev-compiler-thir",
+      "path": "../thir"
+    },
+    "mir": {
+      "package": "sev-compiler-mir",
+      "path": "../mir"
+    },
     "source": {
       "package": "sev-compiler-source",
       "path": "source"

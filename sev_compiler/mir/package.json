@@ -1,0 +1,9 @@
+{
+  "package": { "name": "sev-compiler-mir", "version": "0.1.0", "edition": "2026" },
+  "lib": { "name": "mir", "path": "src/lib.sev" },
+  "language": { "explicit-imports": true },
+  "dependencies": {
+    "thir": { "package": "sev-compiler-thir", "path": "../thir" },
+    "syntax": { "package": "sev-compiler-syntax", "path": "../syntax" }
+  }
+}

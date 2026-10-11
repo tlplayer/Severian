@@ -1,0 +1,105 @@
+import TypedProgram, TypedSubmodule from "../../thir/src/lib.sev"
+import InterfaceId, semantic_digest from "../../syntax/symbol/symbol.sev"
+
+
+class MirSubmodule:
+    typed: TypedSubmodule
+    label: string
+    dependencies: list[string] = []
+
+
+class MirModule:
+    source: int
+    submodules: list[MirSubmodule] = []
+
+
+class MirInterface:
+    identity: InterfaceId
+    modules: list[MirModule] = []
+
+
+# Registration is not executable readiness. CFG, ownership and LIR remain
+# separate passes; no object inventory or linkable artifact is invented here.
+class MirState:
+    typed: TypedProgram
+    interfaces: list[MirInterface] = []
+    roots: list[string] = []
+
+
+def register(typed: TypedProgram) -> MirState | Error:
+    result = MirState(typed)
+    labels: map[string, string] = {}
+    keys: map[string, string] = {}
+    for submodule in typed.submodules:
+        if submodule.key in labels:
+            throw Error("duplicate typed submodule at MIR handoff")
+        label = "sev_realization_" + string(semantic_digest(submodule.key))
+        if label in keys and keys[label] != submodule.key:
+            throw Error("MIR realization label collision")
+        labels[submodule.key] = label
+        keys[label] = submodule.key
+    for submodule in typed.submodules:
+        if submodule.module < 0 or submodule.module >= len(typed.source.modules):
+            throw Error("MIR realization has no source module")
+        if submodule.source not in typed.source.modules[submodule.module].submodules:
+            throw Error("MIR realization disagrees with HIR membership")
+        interface_index := -1
+        for index in range(len(result.interfaces)):
+            if result.interfaces[index].identity.value == submodule.interface.value:
+                interface_index = index
+        if interface_index < 0:
+            interface_index = len(result.interfaces)
+            result.interfaces.append(MirInterface(submodule.interface))
+        interface = result.interfaces[interface_index]
+        module_index := -1
+        for index in range(len(interface.modules)):
+            if interface.modules[index].source == submodule.module:
+                module_index = index
+        if module_index < 0:
+            module_index = len(interface.modules)
+            interface.modules.append(MirModule(submodule.module))
+        registered = MirSubmodule(submodule, labels[submodule.key])
+        for dependency in submodule.dependencies:
+            if dependency not in labels:
+                throw Error("MIR dependency has no typed realization")
+            registered.dependencies.append(labels[dependency])
+        interface.modules[module_index].submodules.append(registered)
+    for root in typed.roots:
+        if root not in labels:
+            throw Error("MIR root has no typed realization")
+        result.roots.append(labels[root])
+    return result
+
+
+import prepare, RealizationRequest, hash_typing_fixture from "../../thir/src/lib.sev"
+import TyInterner from "../../syntax/type/system.sev"
+
+
+test "MIR groups three hash realizations under one interface and module":
+    types = TyInterner()
+    program, provider, inputs = hash_typing_fixture(types)
+    requests = [RealizationRequest(provider.template.definition, [value]) for value in inputs]
+    typed = prepare(program, types, provider, requests)
+    mir = register(typed)
+    assert(len(mir.interfaces) == 1)
+    assert(mir.interfaces[0].identity.value == "geometry")
+    assert(len(mir.interfaces[0].modules) == 1)
+    submodules = mir.interfaces[0].modules[0].submodules
+    assert(len(submodules) == 3 and len(mir.roots) == 3)
+    assert(submodules[0].label != submodules[1].label)
+    assert(submodules[0].typed.blocks[0].source == program.submodules[0].blocks[0])
+    reordered = register(prepare(program, types, provider, [requests[2], requests[0], requests[1]]))
+    assert(reordered.roots == [mir.roots[2], mir.roots[0], mir.roots[1]])
+
+
+test "MIR carries recursive labels and rejects missing dependency realizations":
+    types = TyInterner()
+    program, provider, inputs = hash_typing_fixture(types)
+    provider.recursive = true
+    typed = prepare(program, types, provider, [RealizationRequest(provider.template.definition, [inputs[0]])])
+    mir = register(typed)
+    submodule = mir.interfaces[0].modules[0].submodules[0]
+    assert(submodule.dependencies == [submodule.label])
+    typed.submodules[0].dependencies.append("missing-realization")
+    failure ?= register(typed)
+    assert(failure is Error)

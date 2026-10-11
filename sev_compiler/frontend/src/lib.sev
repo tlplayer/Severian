@@ -8,6 +8,9 @@ import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import "../../syntax/recognition.sev" as syntax
 import PointerPrimitive from "../../syntax/primitive/pointer/declarations.sev"
 import MlirTypeBinding, TypeMapping, DeclaredTypeMapping from "../../mlir/src/types.sev"
+import TypedProgram, TypingProvider, RealizationRequest, prepare from "../../thir/src/lib.sev"
+import TyInterner from "../../syntax/type/system.sev"
+import MirState, register from "../../mir/src/lib.sev"
 
 class FrontendState:
     source: SourceFile
@@ -19,6 +22,8 @@ class FrontendState:
     diagnostics: list[Diagnostic] = []
     pointer: MlirTypeBinding | None = None
     types: TypeMapping | None = None
+    typed: TypedProgram | None = None
+    mir: MirState | None = None
 
 trait FrontendStage:
     name: string
@@ -76,8 +81,45 @@ class HirStage: FrontendStage
         state.program = partition(graph)
 
 
+class ThirStage: FrontendStage
+    typing: TypingProvider
+    interner: TyInterner
+    roots: list[RealizationRequest]
+    name: string = "thir"
+    provider: string = "sev-compiler-thir"
+
+    def apply(state: FrontendState) -> absent | Error:
+        state.typed = None
+        state.mir = None
+        program ?= state.program
+        if program == None:
+            throw Error("THIR requires HIR output")
+        state.typed = prepare(program, self.interner, self.typing, self.roots)
+
+
+class MirRegistrationStage: FrontendStage
+    name: string = "mir-registration"
+    provider: string = "sev-compiler-mir"
+
+    def apply(state: FrontendState) -> absent | Error:
+        state.mir = None
+        typed ?= state.typed
+        if typed == None:
+            throw Error("MIR registration requires typed submodules")
+        if state.program != typed.source:
+            throw Error("MIR registration requires the current HIR program")
+        state.mir = register(typed)
+
+
 def stages() -> list[FrontendStage]:
     return [MlirStage(), SyntaxStage(), LexerStage(), ParserStage(), HirStage()]
+
+
+def typed_stages(typing: TypingProvider, interner: TyInterner, roots: list[RealizationRequest]) -> list[FrontendStage]:
+    result = stages()
+    result.append(ThirStage(typing, interner, roots))
+    result.append(MirRegistrationStage())
+    return result
 
 
 def inspect(state: FrontendState) -> string | Error:
@@ -92,3 +134,23 @@ test "parser stage requires actual lexer output":
     result ?= ParserStage().apply(state)
     assert(result is Error)
     assert(state.graph == None and state.program == None)
+
+
+import hash_typing_fixture from "../../thir/src/lib.sev"
+
+
+test "frontend hands typed hash submodules to MIR and clears rejected output":
+    types = TyInterner()
+    program, typing, inputs = hash_typing_fixture(types)
+    state = FrontendState(SourceFile(0, "hash.sev", ""), program=program)
+    roots = [RealizationRequest(typing.template.definition, [value]) for value in inputs]
+    stage = ThirStage(typing, types, roots)
+    stage.apply(state)
+    MirRegistrationStage().apply(state)
+    mir ?= state.mir
+    assert(mir != None)
+    assert(len(mir.interfaces[0].modules[0].submodules) == 3)
+    typing.reject = true
+    failure ?= stage.apply(state)
+    assert(failure is Error)
+    assert(state.typed == None and state.mir == None)

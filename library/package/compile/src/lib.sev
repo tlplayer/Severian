@@ -2,4 +2,4 @@
 import unit_arguments from "driver.sev"
 import "../frontend/lib.sev" as frontend
 
-import FrontendState, FrontendStage, stages, inspect from compiler_frontend
+import FrontendState, FrontendStage, ThirStage, MirRegistrationStage, typed_stages, stages, inspect from compiler_frontend

@@ -1,0 +1,9 @@
+{
+  "package": { "name": "sev-compiler-thir", "version": "0.1.0", "edition": "2026" },
+  "lib": { "name": "thir", "path": "src/lib.sev" },
+  "language": { "explicit-imports": true },
+  "dependencies": {
+    "hir": { "package": "sev-compiler-hir", "path": "../hir" },
+    "syntax": { "package": "sev-compiler-syntax", "path": "../syntax" }
+  }
+}

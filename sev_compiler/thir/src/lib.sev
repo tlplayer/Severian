@@ -1,0 +1,355 @@
+import Program from "../../hir/hir/src/program.sev"
+import BlockAddress, contains_block, same_block, checked_block from "../../hir/hir/src/dependencies.sev"
+import DefinitionID, GenericParamId, HirId, InterfaceId, Substitution, TypeId, same_definition, semantic_key from "../../syntax/symbol/symbol.sev"
+import InferenceContext, Signature, TyInterner, TypeKind from "../../syntax/type/system.sev"
+import concrete, concrete_arguments, definition_key, substitution_key from "types.sev"
+
+
+class TypeEquation:
+    left: TypeId
+    right: TypeId
+
+
+class TypedValue:
+    source: HirId
+    type_id: TypeId
+
+
+class BlockTyping:
+    source: BlockAddress
+    definition: DefinitionID
+    signature: Signature | None = None
+    values: list[TypedValue] = []
+
+
+class CallableSelection:
+    definition: DefinitionID
+    signature: Signature
+    parameters: list[GenericParamId] = []
+    substitution: Substitution = Substitution()
+
+
+class CallableBinding:
+    parameter: GenericParamId
+    selection: CallableSelection
+
+
+class CallableParameter:
+    parameter: GenericParamId
+    signature: Signature
+    default: CallableSelection | None = None
+
+
+# A provider describes the existing HIR dependency component. It supplies
+# semantic contracts, not copied source bodies or target representations.
+class SubmoduleTyping:
+    definition: DefinitionID
+    source: int
+    interface: InterfaceId
+    blocks: list[BlockTyping]
+    parameters: list[GenericParamId] = []
+    defaults: Substitution = Substitution()
+    callables: list[CallableParameter] = []
+    equations: list[TypeEquation] = []
+
+
+class RealizationRequest:
+    definition: DefinitionID
+    arguments: list[TypeId]
+    substitution: Substitution = Substitution()
+    callables: list[CallableBinding] = []
+    result: TypeId | None = None
+
+
+class TypedSubmodule:
+    key: string
+    definition: DefinitionID
+    source: int
+    module: int
+    interface: InterfaceId
+    substitution: Substitution
+    callables: list[CallableBinding]
+    blocks: list[BlockTyping]
+    dependencies: list[string] = []
+
+
+trait TypingProvider:
+    def describe(program: Program, definition: DefinitionID) -> SubmoduleTyping | Error
+    # Resolve body operations/constraints against this substitution, reject
+    # unsupported contracts, and return the selected dependency requests.
+    def check(program: Program, types: TyInterner, submodule: TypedSubmodule) -> list[RealizationRequest] | Error
+
+
+class TypedProgram:
+    source: Program
+    types: TyInterner
+    submodules: list[TypedSubmodule] = []
+    roots: list[string] = []
+
+
+def has_parameter(parameters: list[GenericParamId], parameter: GenericParamId) -> bool:
+    for known in parameters:
+        if known.index == parameter.index:
+            return true
+    return false
+
+
+def fresh_arguments(types: TyInterner, parameters: list[GenericParamId], explicit: Substitution) -> Substitution:
+    result = Substitution()
+    for binding in explicit.arguments:
+        if not has_parameter(parameters, binding.parameter):
+            throw Error("unknown THIR type argument")
+    for parameter in parameters:
+        if result.get(parameter) != None:
+            throw Error("duplicate THIR generic parameter")
+        result.bind(parameter, types.fresh_infer())
+    return result
+
+
+def apply_explicit(types: TyInterner, inference: InferenceContext, fresh: Substitution, explicit: Substitution):
+    for binding in explicit.arguments:
+        variable ?= fresh.get(binding.parameter)
+        if variable == None:
+            throw Error("unknown THIR type argument")
+        inference.unify(types, variable, binding.type_id)
+
+
+def realize(program: Program, types: TyInterner, template: SubmoduleTyping, request: RealizationRequest) -> TypedSubmodule | Error:
+    if template.source < 0 or template.source >= len(program.submodules):
+        throw Error("THIR template refers to a missing source submodule")
+    if template.interface.value == "":
+        throw Error("THIR realization requires its owning interface")
+    members = program.submodules[template.source].blocks
+    seen: list[BlockAddress] = []
+    entry: Signature | None := None
+    for block in template.blocks:
+        checked_block(program.graph, block.source)
+        if not contains_block(members, block.source) or contains_block(seen, block.source):
+            throw Error("THIR block must belong exactly once to its source submodule")
+        seen.append(block.source)
+        if same_definition(block.definition, request.definition):
+            if entry != None:
+                throw Error("ambiguous THIR entry declaration")
+            entry = block.signature
+    if len(seen) != len(members) or entry == None:
+        throw Error("THIR requires contracts for every source member and an entry signature")
+    module := -1
+    for index in range(len(program.modules)):
+        if template.source in program.modules[index].submodules:
+            if module >= 0:
+                throw Error("THIR source submodule has multiple owning modules")
+            module = index
+    if module < 0:
+        throw Error("THIR source submodule has no owning module")
+    inference = InferenceContext()
+    arguments = fresh_arguments(types, template.parameters, request.substitution)
+    apply_explicit(types, inference, arguments, request.substitution)
+    if len(entry.parameters) != len(request.arguments):
+        throw Error("THIR call argument count does not match its signature")
+    for index in range(len(request.arguments)):
+        inference.unify(types, types.substitute(entry.parameters[index], arguments), request.arguments[index])
+    expected ?= request.result
+    if expected != None:
+        inference.unify(types, types.substitute(entry.result, arguments), expected)
+    for equation in template.equations:
+        inference.unify(types, types.substitute(equation.left, arguments), types.substitute(equation.right, arguments))
+    selected: list[CallableBinding] = []
+    supplied: list[int] = []
+    for binding in request.callables:
+        if int(binding.parameter.index) in supplied:
+            throw Error("duplicate THIR callable argument")
+        supplied.append(int(binding.parameter.index))
+    declared: list[int] = []
+    for parameter in template.callables:
+        if has_parameter(template.parameters, parameter.parameter) or int(parameter.parameter.index) in declared:
+            throw Error("duplicate THIR generic parameter")
+        declared.append(int(parameter.parameter.index))
+        selection ?= parameter.default
+        for binding in request.callables:
+            if binding.parameter.index == parameter.parameter.index:
+                selection = binding.selection
+        if selection == None:
+            throw Error("THIR callable parameter has no argument or default")
+        callable_arguments = fresh_arguments(types, selection.parameters, selection.substitution)
+        apply_explicit(types, inference, callable_arguments, selection.substitution)
+        actual = types.substitute(types.intern(TypeKind.Function(selection.signature)), callable_arguments)
+        required = types.substitute(types.intern(TypeKind.Function(parameter.signature)), arguments)
+        inference.unify(types, actual, required)
+        selected.append(CallableBinding(parameter.parameter, CallableSelection(selection.definition, selection.signature, selection.parameters, callable_arguments)))
+    for parameter in supplied:
+        if parameter not in declared:
+            throw Error("unknown THIR callable argument")
+    # Defaults fill holes only after argument, body and callable inference.
+    for binding in template.defaults.arguments:
+        variable ?= arguments.get(binding.parameter)
+        if variable == None:
+            throw Error("THIR default refers to an unknown parameter")
+        match types.kind(inference.resolve(types, variable)):
+            case Infer:
+                inference.unify(types, variable, types.substitute(binding.type_id, arguments))
+            case Primitive | Nominal | Parameter | Function | Tuple | Union | Reference | Resource:
+                continue
+    substitution = concrete_arguments(types, inference, arguments)
+    callable_keys: list[string] = []
+    for binding in selected:
+        selection = binding.selection
+        selection.substitution = concrete_arguments(types, inference, selection.substitution)
+        callable_keys.append(semantic_key([string(binding.parameter.index), definition_key(selection.definition), substitution_key(types, selection.substitution)]))
+        signature = selection.signature
+        selection.signature = Signature([concrete(types, inference, types.substitute(value, selection.substitution)) for value in signature.parameters], concrete(types, inference, types.substitute(signature.result, selection.substitution)))
+    blocks: list[BlockTyping] = []
+    for block in template.blocks:
+        signature: Signature | None := None
+        original ?= block.signature
+        if original != None:
+            signature = Signature([concrete(types, inference, types.substitute(value, arguments)) for value in original.parameters], concrete(types, inference, types.substitute(original.result, arguments)))
+        values: list[TypedValue] = []
+        identities: list[int] = []
+        for value in block.values:
+            if int(value.source.index) in identities:
+                throw Error("duplicate THIR value identity in source block")
+            identities.append(int(value.source.index))
+            values.append(TypedValue(value.source, concrete(types, inference, types.substitute(value.type_id, arguments))))
+        blocks.append(BlockTyping(block.source, block.definition, signature, values))
+    key = semantic_key(["typed-submodule", definition_key(template.definition), substitution_key(types, substitution), semantic_key(sorted(callable_keys))])
+    return TypedSubmodule(key, template.definition, template.source, module, template.interface, substitution, selected, blocks)
+
+
+def prepare(program: Program, types: TyInterner, provider: TypingProvider, roots: list[RealizationRequest]) -> TypedProgram | Error:
+    result = TypedProgram(program, types)
+    pending = roots[:]
+    consumers: list[int] = [-1 for root in roots]
+    index := 0
+    while index < len(pending):
+        request = pending[index]
+        template = provider.describe(program, request.definition)
+        submodule = realize(program, types, template, request)
+        owner = consumers[index]
+        found := -1
+        for candidate in range(len(result.submodules)):
+            if result.submodules[candidate].key == submodule.key:
+                found = candidate
+                existing = result.submodules[candidate]
+                if existing.source != submodule.source or existing.interface.value != submodule.interface.value:
+                    throw Error("THIR realization identity has conflicting source membership")
+                if existing.blocks != submodule.blocks or existing.callables != submodule.callables:
+                    throw Error("THIR realization identity has conflicting typed contracts")
+        if owner < 0:
+            if submodule.key not in result.roots:
+                result.roots.append(submodule.key)
+        elif submodule.key not in result.submodules[owner].dependencies:
+            result.submodules[owner].dependencies.append(submodule.key)
+        if found < 0:
+            found = len(result.submodules)
+            # Register before expansion so recursive dependencies reuse identity.
+            result.submodules.append(submodule)
+            for dependency in provider.check(program, types, submodule):
+                pending.append(dependency)
+                consumers.append(found)
+        index += 1
+    for submodule in result.submodules:
+        for dependency in program.submodules[submodule.source].dependencies:
+            matched := false
+            for target in result.submodules:
+                if target.source == dependency and target.key in submodule.dependencies:
+                    matched = true
+            if not matched:
+                throw Error("THIR provider omitted a source submodule dependency")
+    # A failure above never returns a partially accepted TypedProgram.
+    return result
+
+
+import Block, BlockFile, SourceBlockId from "../../syntax/block/block.sev"
+import BlockGraph, BlockUnit, index_block_file from "../../hir/hir/src/dependencies.sev"
+import partition from "../../hir/hir/src/program.sev"
+import DeclarationId, PrimitiveId, named_definition from "../../syntax/symbol/symbol.sev"
+
+
+class HashTypingFixture: TypingProvider
+    template: SubmoduleTyping
+    recursive: bool = false
+    reject: bool = false
+
+    def describe(program: Program, definition: DefinitionID) -> SubmoduleTyping | Error:
+        if not same_definition(definition, self.template.definition):
+            throw Error("unknown fixture definition")
+        return self.template
+
+    def check(program: Program, types: TyInterner, submodule: TypedSubmodule) -> list[RealizationRequest] | Error:
+        if self.reject:
+            throw Error("fixture constraint is not satisfied")
+        if self.recursive:
+            signature ?= submodule.blocks[0].signature
+            if signature == None:
+                throw Error("fixture requires a callable")
+            return [RealizationRequest(submodule.definition, signature.parameters, submodule.substitution)]
+        return []
+
+
+def hash_typing_fixture(types: TyInterner) -> tuple[Program, HashTypingFixture, list[TypeId]]:
+    graph = BlockGraph()
+    file = BlockFile("hash.sev", 0, [Block(id=SourceBlockId(0))])
+    index_block_file(graph, BlockUnit("hash.sev", "geometry", "hash", "", file))
+    program = partition(graph)
+    inputs = [types.intern(TypeKind.Primitive(PrimitiveId(DeclarationId(value)))) for value in [10, 20, 30]]
+    parameter = types.parameter(GenericParamId(0))
+    callable_parameter = types.parameter(GenericParamId(2))
+    definition = named_definition("geometry.hash", "function", "hash")
+    simple_hash = CallableSelection(named_definition("geometry.hash", "function", "simple_hash"), Signature([callable_parameter], inputs[0]), [GenericParamId(2)])
+    signature = Signature([parameter], inputs[0])
+    block = BlockTyping(BlockAddress(0, SourceBlockId(0)), definition, signature, [TypedValue(HirId(0), parameter)])
+    template = SubmoduleTyping(definition, 0, InterfaceId("geometry"), [block], [GenericParamId(0)], callables=[CallableParameter(GenericParamId(1), signature, simple_hash)])
+    return (program, HashTypingFixture(template), inputs)
+
+
+test "THIR hash splits into int float char and reuses explicit default":
+    types = TyInterner()
+    program, provider, inputs = hash_typing_fixture(types)
+    roots = [RealizationRequest(provider.template.definition, [value]) for value in inputs]
+    explicit = Substitution()
+    explicit.bind(GenericParamId(0), inputs[0])
+    selection ?= provider.template.callables[0].default
+    assert(selection != None)
+    roots.append(RealizationRequest(provider.template.definition, [inputs[0]], explicit, [CallableBinding(GenericParamId(1), selection)]))
+    typed = prepare(program, types, provider, roots)
+    assert(len(typed.submodules) == 3 and len(typed.roots) == 3)
+    for index in range(3):
+        submodule = typed.submodules[index]
+        assert(submodule.source == 0 and submodule.module == 0)
+        assert(submodule.blocks[0].values[0].type_id == inputs[index])
+        assert(submodule.callables[0].selection.signature.parameters == [inputs[index]])
+        assert(submodule.callables[0].selection.signature.result == inputs[0])
+    assert(len(program.submodules) == 1)
+    assert(provider.template.blocks[0].values[0].type_id == types.parameter(GenericParamId(0)))
+
+
+test "THIR rejects explicit conflicts unresolved values and invalid callable results":
+    types = TyInterner()
+    program, provider, inputs = hash_typing_fixture(types)
+    explicit = Substitution()
+    explicit.bind(GenericParamId(0), inputs[0])
+    conflict ?= prepare(program, types, provider, [RealizationRequest(provider.template.definition, [inputs[1]], explicit)])
+    assert(conflict is Error)
+    wrong = CallableSelection(named_definition("geometry.hash", "function", "wrong"), Signature([inputs[0]], inputs[1]))
+    mismatch ?= prepare(program, types, provider, [RealizationRequest(provider.template.definition, [inputs[0]], callables=[CallableBinding(GenericParamId(1), wrong)])])
+    assert(mismatch is Error)
+    provider.template.blocks[0].values.append(TypedValue(HirId(1), types.fresh_infer()))
+    unresolved ?= prepare(program, types, provider, [RealizationRequest(provider.template.definition, [inputs[0]])])
+    assert(unresolved is Error)
+
+
+test "THIR callable identity distinguishes equal signatures and recursion terminates":
+    types = TyInterner()
+    program, provider, inputs = hash_typing_fixture(types)
+    alternate = CallableSelection(named_definition("geometry.hash", "function", "alternate"), Signature([inputs[0]], inputs[0]))
+    roots = [RealizationRequest(provider.template.definition, [inputs[0]]), RealizationRequest(provider.template.definition, [inputs[0]], callables=[CallableBinding(GenericParamId(1), alternate)])]
+    typed = prepare(program, types, provider, roots)
+    assert(len(typed.submodules) == 2)
+    assert(typed.submodules[0].key != typed.submodules[1].key)
+    provider.recursive = true
+    recursive = prepare(program, types, provider, [roots[0]])
+    assert(len(recursive.submodules) == 1)
+    assert(recursive.submodules[0].dependencies == [recursive.submodules[0].key])
+    provider.reject = true
+    failed ?= prepare(program, types, provider, [roots[0]])
+    assert(failed is Error)
