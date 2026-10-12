@@ -55,6 +55,8 @@ class Test(DeclarationProvider):
         body = Function().compile(compiled, context)
         entry.body = body
         body.test = {'mode': entry.test_mode, 'label': entry.test_label, 'imports': [item.name for item in entry.imports]}
+        line, column = context.source.position(entry.node.tokens[0].span.start)
+        body.test['location'] = {'file': context.source.path, 'line': line, 'column': column}
         if expected is not None:
             body.test['expected-failure'] = expected
         return body
@@ -64,11 +66,18 @@ import unittest
 
 
 class TestScopeTests(unittest.TestCase):
+    def test_location_points_to_indented_test_header(self):
+        result = self.compile('class Item:\n    value: int\n    test "location":\n        assert(true)\n', True)
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.test)
+        self.assertEqual(body.test['location'], {'file': 'scopes.sev', 'line': 3, 'column': 5})
+
     def test_runtime_failure_expectation_is_test_metadata(self):
         result = self.compile('test "bounds":\n    throws "assertion failed":\n        assert(false)\n', True)
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         body = next(body for body in result.program.bodies if body.test)
         self.assertEqual(body.test['expected-failure'], 'assertion failed')
+        self.assertEqual(body.test['location'], {'file': 'scopes.sev', 'line': 1, 'column': 1})
 
     def compile(self, text, include_tests):
         from py_compiler.frontend.src.lib import compile_source

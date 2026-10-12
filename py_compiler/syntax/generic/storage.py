@@ -63,7 +63,7 @@ class FieldPlace:
         from py_compiler.syntax.generic.atom import Atom
         if operation.result is not None:
             return Atom(self, (self.receiver.type,), self.type, ('view',), ('read',), self)
-        return Atom(self, (self.receiver.type, self.type), None, ('borrow', 'copy'), ('mutation',), self)
+        return Atom(self, (self.receiver.type, self.type), None, ('borrow', 'move' if callable(getattr(self.type, 'release', None)) else 'copy'), ('mutation',), self)
 
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name
@@ -73,6 +73,9 @@ class FieldPlace:
         if operation.result:
             if self.type.family == 'record':
                 lines[0] = lines[0].replace(address + ' =', name(operation.result) + ' =', 1)
+            elif self.type.mlir.startswith('memref'):
+                lines.append(f"%descriptor_{suffix} = llvm.load {address} : !llvm.ptr -> {self.storage_type}")
+                lines.append(f"{name(operation.result)} = builtin.unrealized_conversion_cast %descriptor_{suffix} : {self.storage_type} to {self.type.mlir}")
             else:
                 lines.append(f"{name(operation.result)} = llvm.load {address} : !llvm.ptr -> {self.type.mlir}")
         else:
@@ -80,6 +83,9 @@ class FieldPlace:
             if self.type.family == 'record':
                 lines.append(f'%aggregate_{suffix}_{self.index} = llvm.load {value} : !llvm.ptr -> {storage}')
                 value = f'%aggregate_{suffix}_{self.index}'
+            elif self.type.mlir.startswith('memref'):
+                lines.append(f'%descriptor_{suffix}_{self.index} = builtin.unrealized_conversion_cast {value} : {self.type.mlir} to {storage}')
+                value = f'%descriptor_{suffix}_{self.index}'
             lines.append(f"llvm.store {value}, {address} : {storage}, !llvm.ptr")
         return lines
 
@@ -103,7 +109,7 @@ class BindingPlace:
             identity = cfg.flow.resolve(self.binding.identity)
             conflicts = [loan for loan, owner in cfg.flow.loans.items() if owner == identity and loan != self.binding.identity]
             if conflicts:
-                raise ValueError('cannot acquire writable self while another borrow is live')
+                raise ValueError('cannot acquire writable self while a borrow is live')
             key = self.binding.identity + ':grammar-borrow'
             cfg.flow.loans[key] = identity
             try:

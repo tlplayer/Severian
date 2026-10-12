@@ -128,7 +128,7 @@ def native_dependencies(root, manifest, target, pointer_bits):
                 raise ValueError('dependency has no native objects')
             if realization.get('dependencies'):
                 raise ValueError('transitive native dependencies need a pinned dependency closure')
-            candidates.append({'exports': interface.get('exports', []), 'objects': objects,
+            candidates.append({'exports': interface.get('exports', []), 'types': interface.get('types', []), 'objects': objects,
                                'initializers': realization.get('initializers', []),
                                'package': interface['package'], 'build-id': realization['build-id']})
             break
@@ -254,14 +254,23 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                         "complexity": body.complexity, "test": body.test,
                         "bindings": [{"id": b.identity, "name": b.name, "type": b.type.name,
                                       "constant": b.constant, "ownership": b.ownership} for b in body.bindings]})
+    types = [{'name': d.name, 'fields': list(d.fields), 'defaults': list(d.defaults),
+              'memory-defaults': list(d.memory_defaults)}
+             for d in program.declarations if d.kind == 'class' and '.' not in d.name and '[' not in d.name]
+    type_names = {t['name'] for t in types}
     exports = []
     for body in program.bodies:
-        if body.declaration and not body.test and '.' not in body.declaration and '[' not in body.declaration:
+        if body.declaration and not body.test and '[' not in body.declaration and ('.' not in body.declaration or body.declaration.rsplit('.', 1)[0] in type_names):
             parameters = body.bindings[:len(body.blocks[0].parameters)]
+            receiver = parameters[0] if parameters and parameters[0].name == 'self' else None
+            if receiver:
+                parameters = parameters[1:]
             exports.append({'name': body.declaration, 'symbol': body.name,
+                            'receiver': receiver.type.name if receiver else None,
+                            'receiver-ownership': receiver.ownership if receiver else None,
                             'parameters': [{'name': b.name, 'type': b.type.name, 'ownership': b.ownership} for b in parameters],
                             'result': body.result_type.name, 'result-sources': list(body.result_sources)})
-    semantic_id = digest(encode([declarations, exports]))
+    semantic_id = digest(encode([declarations, exports, types]))
     source_root = f'build/{build_id}/{target}/source' if publish else 'source'
     if publish:
         for entry in (*declarations, *symbols):
@@ -269,7 +278,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                 entry['source'] = source_root + '/' + entry['source'].removeprefix('source/')
     interface = {"format": "severian.interface", "version": 1, "package": identity,
                  "semantic-id": semantic_id, "metadata": {"build-id": build_id, "path": realization_path},
-                 "declarations": declarations, "exports": exports}
+                 "declarations": declarations, "exports": exports, "types": types}
     interface_text = encode(interface)
     realization = {"format": "py_compiler.realization", "version": 1, "package": identity,
                    "scope": "test" if include_tests else "production",

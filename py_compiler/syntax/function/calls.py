@@ -111,6 +111,10 @@ def select(entries, arguments, cfg, env, explicit=()):
                 raise ValueError('call arguments have conflicting ownership')
             if mode == 'borrow' and binding.ownership == 'view':
                 raise ValueError('cannot pass a view as a mutable borrow')
+            if mode == 'borrow':
+                from py_compiler.syntax.generic.storage import BindingPlace
+                with BindingPlace(binding, rebind=False).capture(cfg, 'borrow'):
+                    pass
             loans.append((mode, identity))
     return entry, tuple(values)
 
@@ -131,10 +135,11 @@ def invoke(entry, values, cfg, span, receiver=None):
                   for value, (parameter, _) in zip(values, entry.parameters))
     modes = tuple('move' if mode in ('copy', 'mirror') and callable(getattr(value.type, 'release', None)) else ('copy' if mode == 'mirror' else mode)
                   for mode, value in zip(modes, values))
-    operation = Invoke(entry.symbol, result, (('view',) if entry.receiver else ()) + modes)
+    receiver_modes = (entry.receiver_ownership or 'borrow',) if entry.receiver else ()
+    operation = Invoke(entry.symbol, result, receiver_modes + modes)
     if getattr(entry, 'native_symbol', None) is not None:
         from py_compiler.syntax.generic.atom import Atom
-        operation = Atom(entry, tuple(v.type for v in operands), result if result.mlir else None, modes, ('call',), entry.native_symbol)
+        operation = Atom(entry, tuple(v.type for v in operands), result if result.mlir else None, receiver_modes + modes, ('call',), entry.native_symbol)
     if not result.mlir:
         cfg.effect('call', operands, operation, span)
         return None
@@ -313,6 +318,8 @@ def lower_expression(node, cfg, env, expected=None):
         from py_compiler.syntax.generic.storage import root_binding
         receiver_binding = root_binding(subject, cfg, env)
         receiver = cfg.expr(subject, env)
+        if receiver_binding is None and callable(getattr(receiver.type, 'release', None)):
+            raise ValueError('owning method receiver must be bound before use')
         method = getattr(receiver.type, 'call_method', None)
         if method is not None:
             value = method(receiver, callee.token.text, arguments, cfg, env, span, receiver_binding)
@@ -326,11 +333,14 @@ def lower_expression(node, cfg, env, expected=None):
     else:
         raise ValueError('expression does not provide a callable')
     entry, values = select(entries, arguments, cfg, env, explicit)
-    if receiver_binding and receiver_binding.ownership == 'view':
-        body = context.compile(entry)
-        from py_compiler.syntax.generic.storage import FieldPlace
-        if body is None or any(o.kind == 'write' and isinstance(o.payload, FieldPlace) for b in body.blocks for o in b.operations):
+    if receiver is not None and receiver_binding is None:
+        receiver_binding = getattr(cfg, 'self_binding', None)
+    if receiver_binding and (entry.receiver_ownership or 'borrow') == 'borrow':
+        if receiver_binding.ownership == 'view':
             raise ValueError('cannot call a mutating method through a view')
+        from py_compiler.syntax.generic.storage import BindingPlace
+        with BindingPlace(receiver_binding, rebind=False).capture(cfg, 'borrow'):
+            pass
     value = invoke(entry, values, cfg, span, receiver)
     if value is not None and entry.body is not None and entry.body.result_sources:
         owners = []

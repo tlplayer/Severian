@@ -45,13 +45,40 @@ class Import(DeclarationProvider):
         if alias in context.package_imports:
             raise ValueError(f'duplicate package import {alias!r}')
         context.package_imports.add(alias)
+        from py_compiler.syntax.block.record import TypeDeclaration
+        from importlib import import_module
+        Class = import_module('py_compiler.syntax.block.class').Class
+        Receiver = import_module('py_compiler.syntax.block.class').Receiver
+        from py_compiler.syntax.complex.object import ObjectType
+        type_contracts = {t['name']: t for t in package.get('types', ())}
+        def qualify(name):
+            return alias + '.' + name if name in type_contracts else name
+        for contract in type_contracts.values():
+            name = qualify(contract['name'])
+            declaration = TypeDeclaration(node.identity + ':' + name, name, 'class',
+                tuple((field, qualify(type_)) for field, type_ in contract['fields']), (), (), node.span,
+                defaults=tuple(contract['defaults']), memory_defaults=tuple(map(tuple, contract['memory-defaults'])))
+            context.register(declaration)
+            context.provider_by_name[name] = Class()
+            context.types[name] = ObjectType(name, 'record', '!llvm.ptr', declaration=declaration)
+        from dataclasses import replace
+        def owned(name, active=()):
+            if name in active:
+                raise ValueError('recursive inline class layout')
+            return any(owned(t, (*active, name)) if t in type_contracts else
+                       callable(getattr(context.type(t), 'release', None))
+                       for _, t in type_contracts[name]['fields'])
+        for name in type_contracts:
+            context.types[qualify(name)] = replace(context.types[qualify(name)], owns_fields=owned(name))
         for contract in package['exports']:
             name = alias + '.' + contract['name']
-            parameters = tuple((p['name'], p['type']) for p in contract['parameters'])
+            parameters = tuple((p['name'], qualify(p['type'])) for p in contract['parameters'])
             for _, type_ in parameters:
                 context.type(type_)
-            context.type(contract['result'])
-            entry = ImportedCallable(node, name, parameters, contract['result'], (),
+            context.type(qualify(contract['result']))
+            entry = ImportedCallable(node, name, parameters, qualify(contract['result']), (),
+                                     receiver=Receiver(context.by_name[qualify(contract['receiver'])]) if contract.get('receiver') else None,
+                                     receiver_ownership=contract.get('receiver-ownership'),
                                      parameter_ownership={p['name']: p['ownership'] for p in contract['parameters']},
                                      native_symbol=NativeSymbol(contract['symbol'], 'severian', tuple(package['objects'])))
             entry.body = SimpleNamespace(result_sources=tuple(contract['result-sources']))

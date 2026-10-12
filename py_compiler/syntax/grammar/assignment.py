@@ -23,7 +23,7 @@ class Assignment:
             elif depth == 0 and token.text in assignments:
                 assignment = i
                 break
-        if assignment is not None and any(t.text == '.' for t in items[:assignment]) and items[0].text not in cfg.syntax.scope_providers:
+        if assignment is not None and items[assignment - 1].text != ']' and any(t.text == '.' for t in items[:assignment]) and items[0].text not in cfg.syntax.scope_providers:
             left = expression(items[:assignment])
             if left.kind != 'member':
                 raise ValueError('assignment target is not a field')
@@ -39,6 +39,11 @@ class Assignment:
             operator = items[assignment].text
             if operator == ':=':
                 raise ValueError('a field is already declared; use = to update it')
+            if operator == '=':
+                from importlib import import_module
+                store_field = import_module('py_compiler.syntax.block.class').store_field
+                store_field(place, expression(items[assignment + 1:]), cfg, env, node.span, owner)
+                return
             value = cfg.expr(expression(items[assignment + 1:]), env, place.type)
             if operator != '=':
                 select(place.type, 'O.assignment', operator).expand(cfg, AddressPlace(place, owner), value, node.span)
@@ -50,7 +55,7 @@ class Assignment:
             if left.kind != 'index':
                 raise ValueError('assignment target is not an indexed place')
             subject, index = left.operands
-            owner = cfg.lookup(subject, env) if subject.kind in ('name', 'reference') else None
+            owner = root_binding(subject, cfg, env)
             if owner is None or owner.ownership == 'view':
                 raise ValueError('indexed mutation requires an owner or borrow parameter')
             receiver = cfg.expr(subject, env)
@@ -95,7 +100,7 @@ class Assignment:
         owner = cfg.lookup(core, env) if core.kind in ("name", "reference") else None
         if core.kind == 'call' and core.operands[0].kind == 'index' and core.operands[0].operands[0].token.text == 'pointer':
             source = core.operands[1] if len(core.operands) == 2 else None
-            owner = cfg.lookup(source, env) if source and source.kind in ('name', 'reference') else None
+            owner = root_binding(source, cfg, env) if source else None
             if owner is None:
                 raise ValueError('pointer conversion requires a live array binding')
         if core.kind == 'address':
@@ -119,6 +124,13 @@ class Assignment:
             if not existing:
                 raise ValueError("compound assignment requires an existing binding")
             cfg.flow.read(existing)
+        if existing and qualified == 'self' and operator == '=':
+            from importlib import import_module
+            store_field = import_module('py_compiler.syntax.block.class').store_field
+            store_field(cfg.storage[existing.identity], rhs, cfg, env, node.span,
+                        cfg.self_binding, existing.identity not in cfg.uninitialized_fields)
+            cfg.uninitialized_fields.discard(existing.identity)
+            return
         expected = annotation or (existing.type if existing else None)
         if expected and expected.family == 'shared' and owner and owner.type != expected and mode != 'share':
             raise ValueError('use share to convert a named owner into shared ownership')
@@ -142,8 +154,14 @@ class Assignment:
                 raise ValueError('shared reference atomicity cannot change through sharing')
             value = value.type.copy_value(value, cfg, node.span)
             mode, owner = 'own', None
-        if core.kind == 'member' and value is not None and value.type.family == 'record':
+        if core.kind == 'member' and value is not None and value.type.family in ('record', 'array', 'pointer', 'shared'):
             owner = root_binding(core, cfg, env)
+        if owner and owner.identity in cfg.storage:
+            from py_compiler.syntax.generic.storage import FieldPlace
+            if isinstance(cfg.storage[owner.identity], FieldPlace):
+                if mode == 'move':
+                    raise ValueError('moving an owned field requires replacing it; use copy')
+                owner = cfg.self_binding
         if value is None:
             raise ValueError("a no-result call cannot initialize a binding")
         if owner and value.type.family == 'dynamic' and owner.type != value.type:
@@ -168,6 +186,10 @@ class Assignment:
         if mode in ("borrow", "view", "move") and owner is None:
             raise ValueError(f"{mode} requires an existing binding")
         if mode == "move":
+            if owner and owner.identity in cfg.storage and callable(getattr(value.type, 'release', None)):
+                raise ValueError('moving an owned field requires replacing it; use copy')
+            if core.kind == 'member' and callable(getattr(value.type, 'release', None)):
+                raise ValueError('moving an owned field requires replacing it; use copy')
             viewed = cfg.flow.views.get(owner.identity)
             cfg.flow.move(owner)
             ownership = owner.ownership if viewed else "own"

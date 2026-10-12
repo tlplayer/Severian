@@ -1,0 +1,4 @@
+{
+  "package": {"name": "lab-vector-consumer", "version": "0.1.0"},
+  "dependencies": {"vector": {"package": "lab-vector", "path": "../vector"}}
+}

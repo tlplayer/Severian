@@ -111,7 +111,7 @@ class Builder:
         if identity in self.storage:
             return self.storage[identity].read(self, span)
         value = self.values[identity]
-        if binding.type.family == 'record' and binding.identity in self.values and binding.type != value.type:
+        if binding.type.family in ('record', 'array', 'shared') and binding.identity in self.values and binding.type != value.type:
             # A nested record view borrows the containing binding's lifetime,
             # but retains the address and type of its own field.
             value = self.values[binding.identity]

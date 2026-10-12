@@ -10,6 +10,7 @@ import resource
 import signal
 import shutil
 import subprocess
+import sys
 import threading
 
 from py_compiler.package import build, encode, write_atomic
@@ -140,6 +141,23 @@ def debug_execute(binary, timeout, env, script):
     return process, result['backtrace']
 
 
+def test_location(root, test):
+    location = test['location']
+    path = (Path(root) / location['file']).resolve()
+    return {**location, 'file': str(path), 'uri': path.as_uri()}
+
+
+def format_test_result(record, fallback='', *, hyperlinks=None):
+    location = record['location']
+    address = f"{location['file']}:{location['line']}:{location['column']}"
+    if hyperlinks is None:
+        hyperlinks = sys.stdout.isatty() and os.environ.get('TERM') != 'dumb'
+    if hyperlinks:
+        address = f"\033]8;;{location['uri']}\033\\{address}\033]8;;\033\\"
+    status = 'PASS' if record['passed'] else 'FAIL'
+    return f"{status} {record['label'] or fallback} ({address})"
+
+
 def test_package(root, *, sanitize=None, timeout=30, backtrace=False, **options):
     if backtrace and sanitize:
         raise ValueError('run --backtrace and --sanitize separately; LeakSanitizer cannot run under ptrace')
@@ -211,9 +229,10 @@ def test_package(root, *, sanitize=None, timeout=30, backtrace=False, **options)
                 print(trace, end='')
         except subprocess.TimeoutExpired:
             record = {'label': test['label'], 'mode': test['mode'], 'passed': False, 'error': 'test timed out'}
+        record['location'] = test_location(root, test)
         report['tests'].append(record)
         write_atomic(report_path, encode(report))
-        print(('PASS ' if record['passed'] else 'FAIL ') + (test['label'] or symbol['entry']))
+        print(format_test_result(record, symbol['entry']))
     report['success'] = all(test['passed'] for test in report['tests'])
     write_atomic(report_path, encode(report))
     return {'success': report['success'], 'tests': len(report['tests']),
@@ -224,6 +243,22 @@ import unittest
 
 
 class PackageTestRunnerTests(unittest.TestCase):
+    def test_result_locations_and_links(self):
+        root = Path('/tmp/package with spaces')
+        location = test_location(root, {'location': {'file': 'src/lib.sev', 'line': 58, 'column': 5}})
+        self.assertEqual(location['file'], str(root / 'src/lib.sev'))
+        self.assertEqual(location['uri'], 'file:///tmp/package%20with%20spaces/src/lib.sev')
+        for passed in (True, False):
+            record = {'label': 'vector growth', 'passed': passed, 'location': location}
+            status = 'PASS' if passed else 'FAIL'
+            plain = format_test_result(record, hyperlinks=False)
+            self.assertEqual(plain, f'{status} vector growth ({root}/src/lib.sev:58:5)')
+            linked = format_test_result(record, hyperlinks=True)
+            self.assertIn(f"\033]8;;{location['uri']}\033\\", linked)
+            self.assertIn(f'{root}/src/lib.sev:58:5', linked)
+        record.update(label='', passed=False, error='test timed out')
+        self.assertIn('FAIL test_symbol (', format_test_result(record, 'test_symbol', hyperlinks=False))
+
     def test_debugger_success_preserves_inferior_failure(self):
         from unittest.mock import patch
         payload = {'exit': -signal.SIGABRT, 'backtrace': '#0 leaf at example.sev:3\n'}

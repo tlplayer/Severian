@@ -1,0 +1,263 @@
+class Vector:
+    items: array[int]
+    count: int
+
+    def Vector(self: borrow Self):
+        self.items = allocate[int](0)
+        self.count = 0
+
+    def size(self: view Self) -> int:
+        return self.count
+
+    def capacity(self: view Self) -> int:
+        return len(self.items)
+
+    def get(self: view Self, position: int) -> int:
+        assert(position >= 0)
+        assert(position < self.count)
+        return self.items[position]
+
+    def set(self: borrow Self, position: int, value: int):
+        assert(position >= 0)
+        assert(position < self.count)
+        self.items[position] = value
+
+    def reserve(self: borrow Self, requested: int):
+        assert(requested >= 0)
+        assert(requested <= 1152921504606846975)
+        if requested > len(self.items):
+            grown = allocate[int](requested)
+            i = 0
+            while i < self.count:
+                grown[i] = self.items[i]
+                i += 1
+            self.items = move grown
+
+    def push(self: borrow Self, value: int):
+        available = len(self.items)
+        if self.count == available:
+            requested = 1
+            if available > 0:
+                assert(available <= 576460752303423487)
+                requested = available * 2
+            self.reserve(requested)
+        self.items[self.count] = value
+        self.count += 1
+
+    def pop(self: borrow Self) -> int:
+        assert(self.count > 0)
+        self.count -= 1
+        value = self.items[self.count]
+        self.items[self.count] = 0
+        return value
+
+    def pointer_view(self: view Self) -> pointer[int]:
+        return pointer[int](self.items)
+
+
+test "owning vector acceptance":
+    values = Vector()
+    values.push(42)
+    values.push(7)
+    assert(values.size() == 2)
+    assert(values.get(0) == 42)
+
+
+test "geometric growth and order":
+    values = Vector()
+    i = 0
+    while i < 1024:
+        values.push(i * 3)
+        i += 1
+    assert(values.size() == 1024)
+    assert(values.capacity() == 1024)
+    i = 0
+    while i < values.size():
+        assert(values.get(i) == i * 3)
+        i += 1
+
+
+test "reserve pop mutation and independent copy":
+    values = Vector()
+    values.push(7)
+    values.push(11)
+    values.reserve(32)
+    snapshot = copy values
+    values.set(0, 42)
+    assert(snapshot.get(0) == 7)
+    assert(values.pop() == 11)
+    assert(values.pop() == 42)
+    assert(values.size() == 0)
+
+
+test "move transfers destruction and pointer observes storage":
+    values = Vector()
+    values.push(42)
+    moved = move values
+    pointer = moved.pointer_view()
+    assert(pointer[0] == 42)
+    moved.push(7)
+    assert(moved.size() == 2)
+
+
+test "owned field replacement destroys the previous allocation":
+    class Buffer:
+        data: array[int]
+    original = allocate[int, location=memory.heap](8)
+    original[0] = 42
+    buffer = Buffer(original)
+    snapshot = copy buffer
+    buffer.data = allocate[int, location=memory.heap](16)
+    assert(len(buffer.data) == 16)
+    buffer.data[0] = 9
+    assert(buffer.data[0] == 9)
+    assert(snapshot.data[0] == 42)
+    buffer.data = copy snapshot.data
+    assert(buffer.data[0] == 42)
+
+
+test "nested owned fields copy independently and destroy recursively":
+    class Pair:
+        left: Vector
+        right: Vector
+    left = Vector()
+    left.push(42)
+    right = Vector()
+    right.push(7)
+    pair = Pair(left, right)
+    snapshot = copy pair
+    pair.left.set(0, 9)
+    drop pair
+    assert(snapshot.left.get(0) == 42)
+    assert(snapshot.right.get(0) == 7)
+
+
+test "return break and continue destroy class fields":
+    def work() -> int:
+        outer = Vector()
+        outer.push(42)
+        i = 0
+        while i < 20:
+            temporary = Vector()
+            temporary.push(i)
+            i += 1
+            if i < 10:
+                nested = Vector()
+                nested.push(i)
+                continue
+            if i == 12:
+                break
+        return outer.get(0) + i
+    assert(work() == 54)
+
+
+test with compiler "live pointers prevent field replacement":
+    reject "while a borrow is live":
+        class Buffer:
+            data: array[int]
+        def invalid() -> int:
+            buffer = Buffer(allocate[int, location=memory.heap](1))
+            pointer = pointer[int](buffer.data)
+            buffer.data = allocate[int, location=memory.heap](2)
+            return pointer[0]
+
+
+test with compiler "borrowed storage cannot initialize owned fields":
+    reject "owned field requires ownership":
+        class Buffer:
+            data: array[int]
+        def invalid(data: array[int]):
+            buffer = Buffer(data)
+
+
+test with compiler "stack storage cannot initialize owned fields":
+    reject "owned field cannot retain stack storage":
+        class Buffer:
+            data: array[int]
+        def invalid():
+            data = allocate[int, location=memory.stack](1)
+            buffer = Buffer(data)
+
+
+test with compiler "view cannot become owner":
+    reject "cannot drop memory through a view":
+        def invalid(values: array[int]):
+            drop values
+
+
+test with compiler "pointer cannot escape stack":
+    reject "storage belongs to this callable":
+        def invalid() -> pointer[int]:
+            values = allocate[int, location=memory.stack](4)
+            return pointer[int](values)
+
+
+test "inferred field allocation survives constructor return":
+    class Buffer:
+        data: array[int]
+        def Buffer(self: borrow Self):
+            self.data = allocate[int](8)
+            self.data[0] = 42
+    value = Buffer()
+    assert(value.data[0] == 42)
+    value.data = allocate[int](16)
+    assert(len(value.data) == 16)
+
+
+test with compiler "field views constrain receiver mutation":
+    reject "while a borrow is live":
+        class Buffer:
+            data: array[int]
+            def replace(self: borrow Self) -> int:
+                saved = self.data
+                self.data = allocate[int](8)
+                return saved[0]
+
+
+test with compiler "shared class ownership needs an aggregate handle":
+    reject "shared class ownership requires an owning aggregate handle":
+        class Buffer:
+            data: array[int]
+        def invalid():
+            value = Buffer(allocate[int](1))
+            shared = share value
+
+
+test with compiler "returning a local owning class needs value return lowering":
+    reject "storage belongs to this callable":
+        class Buffer:
+            data: array[int]
+        def invalid() -> Buffer:
+            value = Buffer(allocate[int](1))
+            return value
+
+
+test with compiler "temporary owning receiver requires a binding":
+    reject "owning method receiver must be bound before use":
+        class Buffer:
+            data: array[int]
+            def size(self: view Self) -> int:
+                return len(self.data)
+        def invalid() -> int:
+            return Buffer(allocate[int](1)).size()
+
+
+test with compiler "partial field moves require replacement semantics":
+    reject "moving an owned field requires replacing it":
+        class Buffer:
+            data: array[int]
+        def invalid():
+            buffer = Buffer(allocate[int](1))
+            data = move buffer.data
+
+
+test with compiler "borrowed class alias cannot replace a pinned field":
+    reject "while a borrow is live":
+        class Buffer:
+            data: array[int]
+        def invalid() -> int:
+            buffer = Buffer(allocate[int](1))
+            alias = borrow buffer
+            pointer = pointer[int](buffer.data)
+            alias.data = allocate[int](2)
+            return pointer[0]

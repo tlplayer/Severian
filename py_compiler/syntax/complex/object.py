@@ -10,6 +10,7 @@ class ObjectType:
     signed: bool = False
     variants: tuple = ()
     declaration: object = None
+    owns_fields: bool = False
 
     @property
     def parameter_ownership(self):
@@ -20,6 +21,21 @@ class ObjectType:
         if self.declaration is None:
             raise ValueError(f"{self.name} has no defining ownership contract")
         return self.declaration.binding_ownership
+
+    def require_context(self, cfg):
+        pass
+
+    @property
+    def release(self):
+        if not self.owns_fields:
+            raise AttributeError("record has no owned fields")
+        return self._release
+
+    def _release(self, value, cfg, span):
+        cfg.context.provider_by_name[self.name].release(value, cfg, span)
+
+    def copy_value(self, value, cfg, span):
+        return cfg.context.provider_by_name[self.name].copy_value(value, cfg, span)
 
     def grammars(self):
         if self.declaration is None or not callable(getattr(self.declaration, "grammars", None)):

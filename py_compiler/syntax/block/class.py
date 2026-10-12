@@ -36,7 +36,8 @@ class Class(RecordProvider):
                 defaults[key] = ''.join(t.text for t in child.tokens[2:])
         declaration = replace(declaration, memory_defaults=tuple(defaults.items()))
         context.register(declaration)
-        context.types[declaration.name] = ObjectType(declaration.name, "record", "!llvm.ptr", declaration=declaration)
+        context.types[declaration.name] = ObjectType(declaration.name, "record", "!llvm.ptr", declaration=declaration,
+            owns_fields=any(callable(getattr(context.type(t), "release", None)) for _, t in fields))
         context.tags[declaration.name] = len(context.tags) + 1
         for trait_name in traits:
             context.require(trait_name, lambda provider, target: provider.satisfy(target, declaration))
@@ -50,6 +51,9 @@ class Class(RecordProvider):
     def storage_type(self, type_, context):
         if type_.family == 'record':
             return context.provider_by_name[type_.name].layout(type_.declaration, context)
+        if type_.mlir.startswith('memref') and type_.family in ('array', 'pointer'):
+            bits = context.type('usize').bits
+            return f'!llvm.struct<(!llvm.ptr, !llvm.ptr, i{bits}, !llvm.array<1 x i{bits}>, !llvm.array<1 x i{bits}>)>'
         if not type_.mlir or type_.mlir.startswith('memref') or type_.mlir == 'index':
             raise ValueError('field type requires an aggregate storage/lifetime contract')
         return type_.mlir
@@ -87,6 +91,10 @@ class Class(RecordProvider):
         for index, ((_, type_name), default) in enumerate(zip(declaration.fields, declaration.defaults)):
             type_ = cfg.context.type(type_name)
             if index < len(arguments):
+                place = FieldPlace(value, index, layout, type_, self.storage_type(type_, cfg.context))
+                if callable(getattr(type_, "release", None)):
+                    store_field(place, arguments[index], cfg, env, span, initialized=False)
+                    continue
                 field = cfg.expr(arguments[index], env, type_)
             elif default is not None:
                 field = literal_value(default, type_, cfg, span)
@@ -106,8 +114,58 @@ class Class(RecordProvider):
             type_ = cfg.context.type(name)
             storage = self.storage_type(type_, cfg.context)
             field = FieldPlace(value, index, layout, type_, storage).read(cfg, span)
+            if callable(getattr(type_, "release", None)):
+                field = type_.copy_value(field, cfg, span)
             FieldPlace(result, index, layout, type_, storage).write(cfg, field, span)
         return result
+
+
+    def release(self, value, cfg, span):
+        from py_compiler.syntax.generic.storage import FieldPlace
+        declaration = value.type.declaration
+        layout = self.layout(declaration, cfg.context)
+        for index in reversed(range(len(declaration.fields))):
+            type_ = cfg.context.type(declaration.fields[index][1])
+            release = getattr(type_, 'release', None)
+            if release:
+                field = FieldPlace(value, index, layout, type_, self.storage_type(type_, cfg.context)).read(cfg, span)
+                # An inline record lives on the stack; its owned buffer does not.
+                cfg.stack_values.discard(field.identity)
+                release(field, cfg, span)
+
+
+def store_field(place, expression, cfg, env, span, owner=None, initialized=True):
+    from py_compiler.syntax.generic.storage import root_binding
+    from py_compiler.syntax.grammar.expression import OWNERSHIP
+    mode = expression.token.text if expression.kind == 'unary' and expression.token.text in OWNERSHIP else None
+    term = expression.operands[0] if mode else expression
+    source = root_binding(term, cfg, env)
+    value = cfg.expr(term, env, place.type)
+    if owner:
+        from py_compiler.syntax.generic.storage import BindingPlace
+        with BindingPlace(owner, rebind=False).capture(cfg, 'borrow'):
+            pass
+    if callable(getattr(place.type, 'release', None)):
+        if mode in ('copy', 'mirror'):
+            value = value.type.copy_value(value, cfg, span)
+        else:
+            if mode in ('view', 'borrow') or (source and source.ownership in ('view', 'borrow')):
+                raise ValueError('owned field requires ownership; use copy for a view or borrow')
+            if term.kind == 'member' or (source and source.identity in cfg.storage):
+                raise ValueError('moving an owned field requires replacing it; use copy')
+            if value.type.family != 'record' and value.identity in cfg.stack_values:
+                raise ValueError('owned field cannot retain stack storage')
+            if value.identity in cfg.call_result_owners or cfg.value_sources.get(value.identity):
+                raise ValueError('owned field cannot retain a borrowed result; use copy')
+            if source:
+                if owner and cfg.flow.resolve(source.identity) == cfg.flow.resolve(owner.identity):
+                    raise ValueError('owned field cannot consume its containing object')
+                cfg.flow.move(source)
+        if initialized:
+            previous = place.read(cfg, span)
+            cfg.stack_values.discard(previous.identity)
+            place.type.release(previous, cfg, span)
+    place.write(cfg, value, span)
 
 
 class Receiver:
@@ -128,7 +186,7 @@ class Receiver:
         builder.values[builder.self_binding.identity] = self_value
         builder.value_sources[self_value.identity] = {-1}
         fields = {}
-        field_types = [syntax.types[type_name] for _, type_name in self.declaration.fields]
+        field_types = [builder.context.type(type_name) for _, type_name in self.declaration.fields]
         provider = builder.context.provider_by_name[self.declaration.name]
         record_type = provider.layout(self.declaration, builder.context)
         for index, ((field_name, _), type_) in enumerate(zip(self.declaration.fields, field_types)):

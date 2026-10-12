@@ -44,7 +44,9 @@ def resolve(body):
         if block.terminator.value:
             escapes.update(roots.get(block.terminator.value.identity, ()))
         for op in block.operations:
-            if op.kind in ('call', 'share-create'):
+            from py_compiler.syntax.generic.storage import FieldPlace
+            owns_field = isinstance(op.payload, FieldPlace) and op.kind == 'write' and callable(getattr(op.payload.type, 'release', None))
+            if op.kind in ('call', 'share-create') or owns_field:
                 for value in op.operands:
                     escapes.update(roots.get(value.identity, ()))
     def repeated(start):

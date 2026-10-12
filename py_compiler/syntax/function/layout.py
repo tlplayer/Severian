@@ -15,7 +15,12 @@ def layout_of(type_, context, active=()):
     if type_.family == 'record':
         offset, alignment, fields = 0, 1, []
         for field, name in type_.declaration.fields:
-            layout = layout_of(context.type(name), context, (*active, type_.name))
+            field_type = context.type(name)
+            if field_type.mlir.startswith('memref'):
+                word = context.type('usize').bits // 8
+                layout = Layout(5 * word, word)
+            else:
+                layout = layout_of(field_type, context, (*active, type_.name))
             offset = (offset + layout.alignment - 1) // layout.alignment * layout.alignment
             fields.append((field, offset))
             offset += layout.size

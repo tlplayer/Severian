@@ -34,6 +34,8 @@ class Shared:
     def from_value(self, value, cfg, span):
         if value.type == self:
             return value
+        if not self.payload.mlir.startswith('memref'):
+            raise ValueError('shared class ownership requires an owning aggregate handle')
         if value.type != self.payload or not callable(getattr(value.type, 'release', None)):
             raise ValueError('share requires a matching owning memory value')
         if value.identity in cfg.stack_values:

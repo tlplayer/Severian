@@ -1,0 +1,411 @@
+import vector
+
+
+def two_sum(values: vector.Vector, target: int) -> int:
+    i = 0
+    while i < values.size():
+        j = i + 1
+        while j < values.size():
+            if values.get(i) + values.get(j) == target:
+                return i * values.size() + j
+            j += 1
+        i += 1
+    return -1
+
+
+def maximum_subarray(values: vector.Vector) -> int:
+    assert(values.size() > 0)
+    ending = values.get(0)
+    best = ending
+    i = 1
+    while i < values.size():
+        value = values.get(i)
+        if ending > 0:
+            ending += value
+        else:
+            ending = value
+        if ending > best:
+            best = ending
+        i += 1
+    return best
+
+
+def sum_positive_until_zero(values: vector.Vector) -> int:
+    i = 0
+    total = 0
+    while i < values.size():
+        scratch = allocate[int, location=memory.heap](1)
+        value = values.get(i)
+        i += 1
+        if value == 0:
+            break
+        if value < 0:
+            continue
+        scratch[0] = value
+        total += scratch[0]
+    return total
+
+
+def reverse(values: borrow vector.Vector) -> absent:
+    left = 0
+    right = values.size() - 1
+    while left < right:
+        first = values.get(left)
+        last = values.get(right)
+        values.set(left, last)
+        values.set(right, first)
+        left += 1
+        right -= 1
+
+
+test "imported vector grows and preserves values":
+    values = vector.Vector()
+    i = 0
+    while i < 4096:
+        values.push(i)
+        i += 1
+    assert(values.size() == 4096)
+    assert(values.capacity() == 4096)
+    assert(values.get(0) == 0)
+    assert(values.get(2048) == 2048)
+    assert(values.get(4095) == 4095)
+
+
+test "while continue skips negatives and break stops at zero":
+    values = vector.Vector()
+    assert(sum_positive_until_zero(values) == 0)
+    values.push(1)
+    values.push(-9)
+    values.push(3)
+    assert(sum_positive_until_zero(values) == 4)
+    values.push(0)
+    values.push(100)
+    assert(sum_positive_until_zero(values) == 4)
+
+
+test "nested jumps target the nearest loop and preserve exit values":
+    outer = 0
+    total = 0
+    while outer < 3:
+        outer += 1
+        inner = 0
+        while inner < 5:
+            inner += 1
+            if inner == 2:
+                continue
+            if inner == 4:
+                break
+            total += inner
+        assert(inner == 4)
+    assert(outer == 3)
+    assert(total == 12)
+
+
+test "both conditional branches can leave a loop":
+    i = 0
+    while i < 10:
+        i += 1
+        if i < 3:
+            continue
+        else:
+            break
+    assert(i == 3)
+
+
+test "loop jumps release nested shared owners and retain outer owners":
+    values = vector.Vector()
+    values.push(42)
+    i = 0
+    while i < 4:
+        scratch = allocate[int, location=memory.heap](1)
+        scratch[0] = i
+        reference = share scratch
+        if i < 2:
+            nested = allocate[int, location=memory.heap](1)
+            atomic_reference = share atomic nested
+            i += 1
+            continue
+        assert(reference[0] == 2)
+        break
+    assert(i == 2)
+    assert(values.get(0) == 42)
+
+
+test "vector growth reaches continue and break destinations":
+    values = vector.Vector()
+    i = 0
+    while i < 10:
+        values.push(i)
+        i += 1
+        if i < 3:
+            continue
+        break
+    assert(i == 3)
+    assert(values.size() == 3)
+    assert(values.get(2) == 2)
+
+
+test with compiler "break and continue require a loop in their own callable":
+    reject "break requires an enclosing while loop":
+        def invalid():
+            break
+    reject "continue requires an enclosing while loop":
+        def invalid():
+            continue
+    reject "break requires an enclosing while loop":
+        def outer():
+            while true:
+                def inner():
+                    break
+
+
+test with compiler "loop jumps reject consuming outer owners without replacement":
+    reject "loop cannot consume an outer binding":
+        def invalid():
+            owner = allocate[int](1)
+            while true:
+                drop owner
+                continue
+    reject "loop cannot consume an outer binding":
+        def invalid():
+            owner = allocate[int](1)
+            while true:
+                drop owner
+                break
+
+
+test "two sum duplicate and absent solutions":
+    values = vector.Vector()
+    values.push(3)
+    values.push(3)
+    values.push(9)
+    assert(two_sum(values, 6) == 1)
+    assert(two_sum(values, 12) == 2)
+    assert(two_sum(values, 100) == -1)
+
+
+test "maximum subarray mixed and negative":
+    values = vector.Vector()
+    values.push(-2)
+    values.push(1)
+    values.push(-3)
+    values.push(4)
+    values.push(-1)
+    values.push(2)
+    values.push(1)
+    values.push(-5)
+    values.push(4)
+    assert(maximum_subarray(values) == 6)
+    negatives = vector.Vector()
+    negatives.push(-8)
+    negatives.push(-2)
+    negatives.push(-5)
+    assert(maximum_subarray(negatives) == -2)
+
+
+test "reverse empty singleton and odd lengths":
+    empty = vector.Vector()
+    reverse(empty)
+    assert(empty.size() == 0)
+    values = vector.Vector()
+    values.push(1)
+    reverse(values)
+    assert(values.get(0) == 1)
+    values.push(2)
+    values.push(3)
+    reverse(values)
+    assert(values.get(0) == 3)
+    assert(values.get(1) == 2)
+    assert(values.get(2) == 1)
+
+
+test "copy survives growth and original destruction":
+    original = vector.Vector()
+    original.push(42)
+    snapshot = copy original
+    original.push(9)
+    drop original
+    assert(snapshot.get(0) == 42)
+
+
+test "shared ownership survives original destruction":
+    values = allocate[int, location=memory.heap](3)
+    values[0] = 1
+    values[2] = 42
+    reference = share values
+    drop values
+    assert(reference[0] == 1)
+    assert(reference[2] == 42)
+
+
+test "atomic shared ownership survives original destruction":
+    values = allocate[int, location=memory.heap](3)
+    values[0] = 1
+    values[2] = 42
+    reference = share atomic values
+    drop values
+    assert(reference[2] == 42)
+
+
+test "imported pointer lifetime ends before growth":
+    values = vector.Vector()
+    values.push(42)
+    pointer = values.pointer_view()
+    assert(pointer[0] == 42)
+    values.push(9)
+    assert(values.get(1) == 9)
+
+
+test with compiler "growth rejects live pointer":
+    reject "while a borrow is live":
+        import vector
+        def invalid() -> int:
+            values = vector.Vector()
+            values.push(42)
+            pointer = values.pointer_view()
+            values.push(9)
+            return pointer[0]
+
+
+test with compiler "moved vector cannot be reused":
+    reject "moved or dropped":
+        import vector
+        def invalid() -> int:
+            values = vector.Vector()
+            grown = move values
+            return values.size()
+
+
+test with compiler "borrowed vector cannot be consumed":
+    reject "cannot call a mutating method through a view":
+        import vector
+        def invalid(values: vector.Vector):
+            values.push(42)
+
+
+test with compiler "nested branch preserves outer pointer loan":
+    reject "while a borrow is live":
+        import vector
+        def invalid(condition: bool) -> int:
+            values = vector.Vector()
+            values.push(42)
+            pointer = values.pointer_view()
+            if condition:
+                values.push(9)
+            return pointer[0]
+
+
+test with compiler "loop backedge preserves outer pointer loan":
+    reject "while a borrow is live":
+        import vector
+        def invalid() -> int:
+            values = vector.Vector()
+            values.push(42)
+            pointer = values.pointer_view()
+            i = 0
+            while i < 2:
+                assert(pointer[0] == 42)
+                values.push(9)
+                i += 1
+            return i
+
+
+test "logical index outside vector size fails":
+    throws "assertion failed":
+        values = vector.Vector()
+        values.get(0)
+
+
+test "pointer index outside allocation fails":
+    throws "memory index outside allocation":
+        values = vector.Vector()
+        pointer = values.pointer_view()
+        value = pointer[len(pointer)]
+
+
+test "pop from empty vector fails":
+    throws "assertion failed":
+        values = vector.Vector()
+        values.pop()
+
+
+test "class methods receive borrowed self":
+    class Counter:
+        value: int
+        def add(self: borrow Self, amount: int):
+            self.value += amount
+    counter = Counter(1)
+    counter.add(41)
+    assert(counter.value == 42)
+
+
+test "recursive calls preserve each invocation's locals":
+    def sum_down(n: int) -> int:
+        if n == 0:
+            return 0
+        saved = n
+        subtotal = sum_down(n - 1)
+        return saved + subtotal
+    assert(sum_down(10) == 55)
+
+
+test "recursive assertion exposes the native call stack":
+    throws "assertion failed":
+        def crash_leaf(depth: int) -> absent:
+            if depth > 0:
+                crash_leaf(depth - 1)
+            else:
+                assert(false)
+        def crash_middle():
+            crash_leaf(3)
+        def crash_outer():
+            crash_middle()
+        crash_outer()
+
+
+test "imported owning move and independent copy":
+    values = vector.Vector()
+    values.push(42)
+    moved = move values
+    snapshot = copy moved
+    moved.set(0, 7)
+    drop moved
+    assert(snapshot.get(0) == 42)
+
+
+test "imported owners clean up across return break and continue":
+    def work() -> int:
+        values = vector.Vector()
+        values.push(42)
+        i = 0
+        while i < 8:
+            temporary = vector.Vector()
+            temporary.push(i)
+            i += 1
+            if i < 4:
+                continue
+            break
+        return values.get(0) + i
+    assert(work() == 46)
+
+
+test with compiler "live imported pointer prevents destruction":
+    reject "while a borrow is live":
+        import vector
+        def invalid() -> int:
+            values = vector.Vector()
+            values.push(42)
+            pointer = values.pointer_view()
+            drop values
+            return pointer[0]
+
+
+test with compiler "live imported pointer prevents moving":
+    reject "while a borrow is live":
+        import vector
+        def invalid() -> int:
+            values = vector.Vector()
+            values.push(42)
+            pointer = values.pointer_view()
+            moved = move values
+            return pointer[0]
