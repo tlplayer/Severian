@@ -84,6 +84,35 @@ a:infer = x().p
 
 ```
 
+## iterator
+
+```sev
+for x in [1,2,3]:
+    
+```
+
+## absent and None
+
+```
+def foo() -> absent:
+    return
+
+foo()          # Valid: executes, produces no value.
+value = foo()  # Compile error: cannot bind an absent result.
+def missing() -> None:
+    return None
+
+value = missing()  # Valid: None is a value.
+foobar(42)        # Argument absent → return None.
+foobar(42, None)  # Argument supplied, containing None → return 42.
+foobar(42, 7)     # Argument supplied → return 42.
+
+'''
+is absent checks whether an argument was supplied, independently of its value.
+The Python None in my patch was an internal “no result” marker, not Severian’s None type. Omitted-argument handling is still unimplemented.
+'''
+
+```
 ## Responsibilities
 
 ## Data Models

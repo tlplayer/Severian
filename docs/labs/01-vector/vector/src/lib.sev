@@ -541,3 +541,18 @@ test "repeated iterator expansions give stores unique MLIR temporaries":
         last.value = value
     assert(output[0] == 18)
     assert(last.value == 5)
+
+
+test "nested vector index assignment targets the indexed position":
+    V = Vector()
+    V.push(1)
+    V.push(7)
+    V.push(99)
+
+    V[V[0]] = 42
+
+    assert(V[1] == 42)
+    assert(V[V[0]] == 42)
+    assert(V[0] == 1)
+    assert(V[2] == 99)
+    assert(V.size() == 3)

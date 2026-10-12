@@ -12,14 +12,18 @@ class CaptureTerm:
     env: dict
     outer: dict
     contract: object
+    active_grammars: frozenset
 
     def apply(self, cfg, operation):
-        previous = cfg.grammar_captures
+        previous = cfg.grammar_captures, cfg.active_grammars
         cfg.grammar_captures = self.outer
+        # Caller expressions may use this same grammar at a deeper source
+        # position. Only expansion of the grammar's own body is recursive.
+        cfg.active_grammars = set(self.active_grammars)
         try:
             return operation()
         finally:
-            cfg.grammar_captures = previous
+            cfg.grammar_captures, cfg.active_grammars = previous
 
     def type(self, cfg, expected=None):
         from py_compiler.syntax.generic.place import expression_type
@@ -100,6 +104,8 @@ class Grammar(DeclarationProvider):
     def declare_member(self, node, context, owner):
         name, arrangement, result_name = node.header
         result = context.type(result_name) if result_name else None
+        if result == context.type('absent'):
+            result = None
         iterator = result is not None and result.family == 'iterator'
         if result is not None and not iterator:
             if result.binding_ownership != 'copy':
@@ -153,7 +159,8 @@ class BoundGrammar(GrammarContract):
                     term = expression(tokens[position:end])
                 except ValueError:
                     continue
-                capture = CaptureTerm(term, self.env, self.cfg.grammar_captures, contract)
+                capture = CaptureTerm(term, self.env, self.cfg.grammar_captures, contract,
+                                      frozenset(self.cfg.active_grammars))
                 match(part + 1, end, {**captures, name: capture})
         match(0, 0, {})
         eligible = []
