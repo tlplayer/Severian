@@ -159,15 +159,15 @@ test with compiler "break and continue require a loop in their own callable":
                     break
 
 
-test with compiler "loop jumps reject consuming outer owners without replacement":
+test with compiler "loop backedges require replacement and exits permit consumption":
     reject "loop cannot consume an outer binding":
         def invalid():
             owner = allocate[int](1)
             while true:
                 drop owner
                 continue
-    reject "loop cannot consume an outer binding":
-        def invalid():
+    accept:
+        def valid():
             owner = allocate[int](1)
             while true:
                 drop owner
@@ -311,7 +311,7 @@ test with compiler "loop backedge preserves outer pointer loan":
 
 
 test "logical index outside vector size fails":
-    throws "assertion failed":
+    throws "prefix contract failed":
         values = vector.Vector()
         values.get(0)
 
@@ -409,3 +409,86 @@ test with compiler "live imported pointer prevents moving":
             pointer = values.pointer_view()
             moved = move values
             return pointer[0]
+
+
+test "imported Vector realizes i32 and f64 independently":
+    integers = vector.Vector[i32]()
+    integers.push(i32(42))
+    integers.push(i32(7))
+    floats = vector.Vector[f64]()
+    floats.push(f64(3.5))
+    floats.push(f64(2.25))
+    assert(integers.get(0) == i32(42))
+    assert(integers.get(1) == i32(7))
+    assert(floats.get(0) == f64(3.5))
+    assert(floats.pop() == f64(2.25))
+    snapshot = copy integers
+    integers.set(0, i32(9))
+    assert(snapshot.get(0) == i32(42))
+
+
+test "native imported factory returns owning Vector by value":
+    values = vector.make_vector(42)
+    values.push(7)
+    assert(values.size() == 2)
+    assert(values.get(0) == 42)
+    assert(values.get(1) == 7)
+
+
+test "local factory returns an imported generic Vector":
+    def make() -> vector.Vector[i32]:
+        values = vector.Vector[i32]()
+        values.push(i32(42))
+        return values
+    values = make()
+    assert(values.get(0) == i32(42))
+
+
+test "imported vector realizes a consumer class element":
+    class Point:
+        x: int
+    values = vector.Vector[Point]()
+    point = Point(42)
+    values.push(point)
+    values.push(point)
+    result = values.get(-1)
+    assert(result.x == 42)
+    snapshot = copy values
+    drop values
+    result = snapshot.pop()
+    assert(result.x == 42)
+
+
+def mixed_vector_example() -> char:
+    characters = vector.Vector[char]()
+    characters.push('a')
+    characters.push('λ')
+    integers = vector.Vector[i32]()
+    integers.push(i32(42))
+    floats = vector.Vector[f64]()
+    floats.push(f64(3.5))
+    assert(integers.get(0) == i32(42))
+    assert(floats.get(0) == f64(3.5))
+    return characters.get(-1)
+
+
+test "consumer combines shipped char and locally realized numeric vectors":
+    assert(mixed_vector_example() == 'λ')
+
+
+test "imported char factory returns reusable owned storage":
+    values = vector.make_char_vector('😀')
+    values.push('λ')
+    snapshot = copy values
+    values.set(0, 'a')
+    assert(snapshot.get(0) == '😀')
+    assert(values.pop() == 'λ')
+    assert(values.get(-1) == 'a')
+
+
+test with compiler "char and i32 vector realizations remain distinct":
+    reject "does not satisfy char":
+        import vector
+        def invalid():
+            values = vector.Vector[char]()
+            values.push(i32(65))

@@ -11,6 +11,7 @@ class FrontendResult:
     source: SourceFile
     program: Program
     diagnostics: tuple[Diagnostic, ...]
+    templates: tuple = ()
 
 
 def compile_source(path, text, syntax, *, stop_after='mir', interface=None, native_packages=None, debug_path=None):
@@ -60,9 +61,13 @@ def compile_source(path, text, syntax, *, stop_after='mir', interface=None, nati
         if stop_after == 'thir':
             return FrontendResult(source, Program(constants, module.submodules, (), typed.declarations,
                                                   (typed,), (), 'thir'), ())
+        templates = tuple({'name': t.name, 'path': source.path,
+                           'source': '\n' * (source.position(t.node.span.start)[0] - 1) + source.text[t.node.span.start:t.node.span.end] + '\n'}
+                          for t in module.context.record_templates.values()
+                          if not t.scope and not t.node.scope.development)
         mir = register(typed)
         return FrontendResult(source, Program(constants, module.submodules, mir.bodies, typed.declarations,
-                                              (typed,), (mir,), 'mir'), ())
+                                              (typed,), (mir,), 'mir'), (), templates)
     except Diagnostic as failure:
         return FrontendResult(source, Program((), ()), (failure,))
     except ValueError as failure:

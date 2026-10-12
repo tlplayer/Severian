@@ -37,7 +37,7 @@ def render_body(body):
     body.verify()
     first = body.blocks[0]
     arguments = ", ".join(f"{name(v)}: {v.type.mlir}" for v in first.parameters)
-    result = " -> " + body.result_type.mlir if body.result_type.mlir else ""
+    result = " -> " + (body.result_layout or body.result_type.mlir) if body.result_type.mlir else ""
     lines = [f"  func.func {symbol_ref(body.name)}({arguments}){result} {{"]
     for region in getattr(body, 'memory_regions', ()):
         lines.extend([f'    %{region.name}_size = arith.constant {region.size} : index',
@@ -88,7 +88,12 @@ def render_body(body):
             value = terminator.value
             for region in getattr(body, 'memory_regions', ()):
                 lines.append(f'    memref.dealloc %{region.name} : memref<?xi8>')
-            lines.append(f"    func.return {name(value)} : {value.type.mlir}" if value else "    func.return")
+            if value and body.result_layout:
+                aggregate = f'%return_record_{block.identity}'
+                lines.append(f'    {aggregate} = llvm.load {name(value)} : !llvm.ptr -> {body.result_layout}')
+                lines.append(f'    func.return {aggregate} : {body.result_layout}')
+            else:
+                lines.append(f"    func.return {name(value)} : {value.type.mlir}" if value else "    func.return")
         span = terminator.span or (block.operations[-1].span if block.operations else body.source_span)
         lines[start:] = located_operations(lines[start:], source_location(body, span))
     return "\n".join(lines + ["  }" + source_location(body)])

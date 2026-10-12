@@ -1,9 +1,9 @@
-class Vector:
-    items: array[int]
+class Vector[T = int]:
+    items: array[T]
     count: int
 
     def Vector(self: borrow Self):
-        self.items = allocate[int](0)
+        self.items = allocate[array[T]](0)
         self.count = 0
 
     def size(self: view Self) -> int:
@@ -12,28 +12,29 @@ class Vector:
     def capacity(self: view Self) -> int:
         return len(self.items)
 
-    def get(self: view Self, position: int) -> int:
-        assert(position >= 0)
-        assert(position < self.count)
-        return self.items[position]
+    def get(self: view Self, position: int) -> T with {-self.count <= position < self.count}:
+        if position < 0:
+            position += self.count
+        value = copy self.items[position]
+        return value
 
-    def set(self: borrow Self, position: int, value: int):
-        assert(position >= 0)
-        assert(position < self.count)
+    def set(self: borrow Self, position: int, value: T) with {-self.count <= position < self.count}:
+        if position < 0:
+            position += self.count
         self.items[position] = value
 
     def reserve(self: borrow Self, requested: int):
         assert(requested >= 0)
         assert(requested <= 1152921504606846975)
         if requested > len(self.items):
-            grown = allocate[int](requested)
+            grown = allocate[array[T]](requested)
             i = 0
             while i < self.count:
                 grown[i] = self.items[i]
                 i += 1
             self.items = move grown
 
-    def push(self: borrow Self, value: int):
+    def push(self: borrow Self, value: T):
         available = len(self.items)
         if self.count == available:
             requested = 1
@@ -44,26 +45,26 @@ class Vector:
         self.items[self.count] = value
         self.count += 1
 
-    grammar assign[self, "[", index: int, "]", "=", value: int]() -> absent:
+    grammar assign[self, "[", index: int, "]", "=", value: T]() -> absent:
         self.set(index, value)
 
-    grammar get[self, "[", index: int, "]"]() -> int:
+    grammar get[self, "[", index: int, "]"]() -> T:
         return self.get(index)
 
-    grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[T]:
         while position < self.count with position = 0:
             yield self.items[position]
             position += 1
 
-    def pop(self: borrow Self) -> int:
+    def pop(self: borrow Self) -> T:
         assert(self.count > 0)
         self.count -= 1
-        value = self.items[self.count]
-        self.items[self.count] = 0
+        value = copy self.items[self.count]
+        drop self.items[self.count]
         return value
 
-    def pointer_view(self: view Self) -> pointer[int]:
-        return pointer[int](self.items)
+    def pointer_view(self: view Self) -> pointer[T]:
+        return pointer[T](self.items)
 
 
 test "owning vector acceptance":
@@ -234,13 +235,15 @@ test with compiler "shared class ownership needs an aggregate handle":
             shared = share value
 
 
-test with compiler "returning a local owning class needs value return lowering":
-    reject "storage belongs to this callable":
-        class Buffer:
-            data: array[int]
-        def invalid() -> Buffer:
-            value = Buffer(allocate[int](1))
-            return value
+test "owning class return transfers its fields":
+    class Buffer:
+        data: array[int]
+    def make() -> Buffer:
+        value = Buffer(allocate[int](1))
+        value.data[0] = 42
+        return value
+    result = make()
+    assert(result.data[0] == 42)
 
 
 test with compiler "temporary owning receiver requires a binding":
@@ -285,7 +288,7 @@ test "class grammar reuses checked vector mutation":
 
 
 test "class grammar preserves logical bounds checks":
-    throws "assertion failed":
+    throws "prefix contract failed":
         values = Vector()
         values[0] = 42
 
@@ -556,3 +559,277 @@ test "nested vector index assignment targets the indexed position":
     assert(V[0] == 1)
     assert(V[2] == 99)
     assert(V.size() == 3)
+
+
+def make_vector(value: int) -> Vector[int]:
+    result = Vector[int]()
+    result.push(value)
+    return result
+
+
+test "owning vector returns transfer storage and copies stay independent":
+    values = make_vector(42)
+    snapshot = copy values
+    values.push(7)
+    assert(values.size() == 2)
+    assert(snapshot.size() == 1)
+    assert(snapshot.get(0) == 42)
+
+
+test "conditional owner consumption cleans the surviving path":
+    def consume(take: bool):
+        values = Vector()
+        values.push(42)
+        if take:
+            moved = move values
+            assert(moved.get(0) == 42)
+    consume(true)
+    consume(false)
+
+
+test "while exit ownership includes zero iterations and break":
+    def consume(enter: bool):
+        values = Vector()
+        values.push(42)
+        while enter:
+            drop values
+            break
+    consume(true)
+    consume(false)
+
+
+test "iterator break reconciles consumed outer owner":
+    source = Vector()
+    source.push(1)
+    values = Vector()
+    values.push(42)
+    for item in source:
+        drop values
+        break
+    source.push(2)
+    assert(source.size() == 2)
+
+
+test with compiler "consumption on either branch forbids later use":
+    reject "moved or dropped":
+        def invalid(take: bool):
+            data = allocate[int](1)
+            if take:
+                drop data
+            assert(data[0] == 0)
+
+
+test "returned owners survive branches and forwarded calls":
+    def choose(first: bool) -> Vector[int]:
+        left = make_vector(42)
+        right = make_vector(7)
+        if first:
+            return left
+        return right
+    def forward() -> Vector[int]:
+        return choose(true)
+    first = forward()
+    second = choose(false)
+    assert(first.get(0) == 42)
+    assert(second.get(0) == 7)
+    pointer = first.pointer_view()
+    assert(pointer[0] == 42)
+
+
+test "replaced owner survives a continuing loop edge":
+    values = make_vector(42)
+    while position < 3 with position = 0:
+        drop values
+        values = make_vector(position)
+        position += 1
+        continue
+    assert(values.get(0) == 2)
+
+
+test with compiler "returned owner cannot invalidate a live pointer":
+    reject "while a borrow is live":
+        class Buffer:
+            data: array[int]
+        def invalid() -> Buffer:
+            data = allocate[int](1)
+            value = Buffer(move data)
+            pointer = pointer[int](value.data)
+            if pointer[0] == 0:
+                return value
+            assert(pointer[0] == 0)
+            return value
+
+
+test "class vector growth copies and negative indexing":
+    class Point:
+        x: int
+        y: int
+    values = Vector[Point]()
+    first = Point(42, 7)
+    values.push(first)
+    first.x = 99
+    while i < 32 with i = 0:
+        point = Point(i, i + 1)
+        values.push(point)
+    head = values.get(-33)
+    tail = values.get(-1)
+    assert(head.x == 42)
+    assert(tail.x == 31)
+    snapshot = copy values
+    replacement = Point(8, 9)
+    values.set(-1, replacement)
+    old = snapshot.get(-1)
+    assert(old.x == 31)
+    popped = values.pop()
+    assert(popped.x == 8)
+    assert(values.size() == 32)
+
+
+test "owning class elements copy their arrays independently":
+    class Buffer:
+        items: array[int]
+    data = allocate[int](2)
+    data[0] = 42
+    buffer = Buffer(move data)
+    values = Vector[Buffer]()
+    values.push(buffer)
+    buffer.items[0] = 7
+    snapshot = copy values
+    drop values
+    result = snapshot.get(0)
+    assert(result.items[0] == 42)
+    result.items[0] = 9
+    independent = snapshot.get(0)
+    assert(independent.items[0] == 42)
+
+
+test "negative indexing includes both end points":
+    values = Vector()
+    values.push(42)
+    values.push(7)
+    assert(values.get(-2) == 42)
+    assert(values.get(-1) == 7)
+    values.set(-1, 9)
+    assert(values.get(1) == 9)
+
+
+test "negative index outside count fails the parameter contract":
+    throws "prefix contract failed":
+        values = Vector()
+        values.push(42)
+        values.get(-2)
+
+
+test "loop owner replacement infers one compatible placement":
+    values = allocate[int](1)
+    while i < 128 with i = 0:
+        drop values
+        values = allocate[int](i + 1)
+        values[0] = i
+        i += 1
+        continue
+    assert(values[0] == 127)
+
+
+test "loop owner replacement handles an empty loop":
+    values = allocate[int](1)
+    while false:
+        drop values
+        values = allocate[int](8192)
+    assert(values[0] == 0)
+
+
+test "record array rejects reads before initialization":
+    throws "read of uninitialized array element":
+        class Point:
+            x: int
+        values = allocate[array[Point]](1)
+        point = values[0]
+        assert(point.x == 0)
+
+
+test with compiler "record array arena regions need initialized cleanup":
+    reject "record array arena/pool":
+        class Point:
+            x: int
+        def unsupported():
+            values = allocate[array[Point], strategy=memory.arena](2)
+
+
+test "class element iteration owns independent snapshots":
+    class Point:
+        x: int
+    values = Vector[Point]()
+    point = Point(42)
+    values.push(point)
+    for item in values:
+        assert(item.x == 42)
+        item.x = 7
+    unchanged = values.get(0)
+    assert(unchanged.x == 42)
+
+
+test "record slots support replacement and reuse after pop":
+    class Buffer:
+        items: array[int]
+    data = allocate[int](1)
+    data[0] = 42
+    buffer = Buffer(move data)
+    values = Vector[Buffer]()
+    values.push(buffer)
+    values.set(0, buffer)
+    popped = values.pop()
+    values.push(popped)
+    drop popped
+    result = values.get(0)
+    assert(result.items[0] == 42)
+
+
+test with compiler "borrowed class elements pin their containing allocation":
+    reject "while a borrow is live":
+        class Point:
+            x: int
+        def invalid():
+            values = allocate[array[Point]](1)
+            original = Point(42)
+            values[0] = original
+            point = values[0]
+            drop values
+            assert(point.x == 42)
+
+
+test with compiler "record array borrowed fields require a lifetime contract":
+    reject "borrowed fields require element lifetime contracts":
+        class Handle:
+            value: pointer[int]
+        def unsupported():
+            values = allocate[array[Handle]](1)
+
+
+test with compiler "string array elements need a storage contract":
+    reject "supported scalar memory representation":
+        def unsupported():
+            values = allocate[array[string]](1)
+
+
+def make_char_vector(value: char) -> Vector[char]:
+    result = Vector[char]()
+    result.push(value)
+    return result
+
+
+test "char vector preserves Unicode growth copies and moves":
+    values = make_char_vector('a')
+    values.push('λ')
+    values.push('😀')
+    assert(values.size() == 3)
+    assert(values.get(0) == 'a')
+    assert(values.get(-2) == 'λ')
+    assert(values.get(-1) == '😀')
+    snapshot = copy values
+    values.set(-1, 'z')
+    assert(snapshot.pop() == '😀')
+    assert(snapshot.get(-1) == 'λ')
+    moved = move values
+    pointer = moved.pointer_view()
+    assert(pointer[2] == 'z')

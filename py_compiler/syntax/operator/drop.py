@@ -10,6 +10,21 @@ class Drop(PrefixOperator):
 
     def lower(self, node, cfg, env, local_names):
         items = list(node.tokens[1:])
+        from py_compiler.syntax.grammar.expression import expression
+        term = cfg.capture_expression(expression(items))
+        if term.kind == 'index':
+            from py_compiler.syntax.generic.place import analyze_target
+            from py_compiler.syntax.generic.storage import AddressPlace
+            place, owner, _, _ = analyze_target(term, cfg, env).lower(cfg, env, node.span)
+            with AddressPlace(place, owner).capture(cfg, 'borrow'):
+                destroy = getattr(place, 'destroy', None)
+                if destroy:
+                    destroy(cfg, node.span)
+                else:
+                    from py_compiler.syntax.function.calls import literal_value
+                    zero = 0.0 if place.type.family == 'float' else 0
+                    place.write(cfg, literal_value(zero, place.type, cfg, node.span), node.span)
+            return
         if len(items) == 3 and items[0].text == '(' and items[-1].text == ')':
             items = items[1:-1]
         if len(items) != 1 or items[0].text not in env:

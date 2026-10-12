@@ -248,7 +248,7 @@ class ClassTests(unittest.TestCase):
     def test_receiver_view_of_local_record_cannot_escape(self):
         result = self.compile('class Item:\n    value: int\n    def identity(self: view Self) -> Self:\n        return self\ndef bad() -> Item:\n    value = Item(1)\n    return value.identity()\n')
         self.assertTrue(result.diagnostics)
-        self.assertIn('storage belongs to this callable', str(result.diagnostics[0]))
+        self.assertIn('class by value requires ownership', str(result.diagnostics[0]))
 
     def test_infer_function_argument_from_class_specialization(self):
         self.valid('class Cell[T]:\n    value: T\ndef read[T](cell: Cell[T]) -> T:\n    return cell.value\ndef work() -> int:\n    value = Cell[int](2)\n    return read(value)\n')

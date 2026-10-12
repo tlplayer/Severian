@@ -108,7 +108,7 @@ class Grammar(DeclarationProvider):
             result = None
         iterator = result is not None and result.family == 'iterator'
         if result is not None and not iterator:
-            if result.binding_ownership != 'copy':
+            if result.binding_ownership != 'copy' and result.family != 'record':
                 raise ValueError('value grammar results currently require copy value types')
             if len(node.children) != 1 or node.children[0].tokens[0].text != 'return':
                 raise ValueError('value grammar requires a single return expression')
@@ -238,6 +238,13 @@ def lower_result(match, cfg):
         value = cfg.expr(expression(provider.node.children[0].tokens[1:]), {}, provider.result)
         if value.type != provider.result:
             raise ValueError('grammar result does not satisfy its declared type')
+        if value.type.family == 'record':
+            term = expression(provider.node.children[0].tokens[1:])
+            if term.kind != 'call' or cfg.value_sources.get(value.identity):
+                raise ValueError('class value grammar must return an owned callable result')
+            if not hasattr(cfg, 'owned_results'):
+                cfg.owned_results = set()
+            cfg.owned_results.add(value.identity)
         return value
     finally:
         cfg.grammar_captures = previous

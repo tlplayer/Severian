@@ -53,7 +53,7 @@ class Loop:
         cfg.flow.end_scope(self.live)
         # The condition can exit before the first iteration. Ownership on every
         # continuing edge must therefore agree with the entry state.
-        if cfg.flow.moved != self.initial_flow.moved:
+        if not exit_loop and cfg.flow.moved != self.initial_flow.moved:
             raise ValueError('loop cannot consume an outer binding without replacing it')
         if cfg.flow.views != self.initial_flow.views:
             raise ValueError('loop cannot retarget an outer view')
@@ -68,7 +68,7 @@ class Loop:
             if value.identity in cfg.stack_values:
                 cfg.stack_values.add(parameter.identity)
         if exit_loop:
-            self.exits.append(cfg.flow.fork())
+            self.exits.append((cfg.current, dict(cfg.values), cfg.flow.fork()))
         cfg.current.terminator = Terminator('jump', (Edge(destination.identity, values),))
 
 
@@ -136,8 +136,9 @@ class While(BlockProvider):
         header_values = dict(cfg.values)
         condition = cfg.expr(expression(node.header), env, cfg.context.type('bool'))
         body, following = cfg.block(), cfg.block(tuple(binding.type for binding in carried))
+        exhausted = cfg.block()
         cfg.current.terminator = Terminator('conditional',
-                                           (Edge(body.identity), Edge(following.identity, header.parameters)), condition)
+                                           (Edge(body.identity), Edge(exhausted.identity)), condition)
         live = cfg.live_binding_ids(env) | {b.identity for scope in cfg.active_scopes for b in scope.values()}
         loop = Loop(header, following, carried, initial_flow, live, len(cfg.active_scopes))
         cfg.current = body
@@ -148,9 +149,17 @@ class While(BlockProvider):
                 loop.jump(cfg, node.span)
         finally:
             cfg.loops.pop()
+        exits = [(exhausted, dict(header_values), initial_flow.fork()), *loop.exits]
+        from py_compiler.mir.ownership.flow import reconcile_owners
+        reconcile_owners(cfg, exits, carried, node.span)
+        retained = [(b, h, v) for b, h, v in zip(carried, header.parameters, following.parameters)
+                    if not (callable(getattr(b.type, 'release', None)) and b.identity in exits[0][2].moved)]
+        following.parameters = tuple(v for _, _, v in retained)
+        for block, values, _ in exits:
+            block.terminator = Terminator('jump', (Edge(following.identity, tuple(values[b.identity] for b, _, _ in retained)),))
         cfg.current, cfg.values = following, header_values
-        cfg.flow = FlowState.join([initial_flow, *loop.exits])
-        for binding, source, value in zip(carried, header.parameters, following.parameters):
+        cfg.flow = FlowState.join([flow for _, _, flow in exits])
+        for binding, source, value in retained:
             cfg.values[binding.identity] = value
             cfg.value_sources.setdefault(value.identity, set()).update(cfg.value_sources.get(source.identity, ()))
             if source.identity in cfg.stack_values:
@@ -190,8 +199,8 @@ class WhileTests(unittest.TestCase):
                 (f'def work():\n    while true:\n        {jump} 1\n', 'does not accept a value or label'),
                 (f'def work():\n    while true:\n        def helper():\n            {jump}\n', 'requires an enclosing while loop'),
                 (f'def work():\n    while true:\n        {jump}\n        value = 1\n', 'unreachable sentence'),
-                ('def work():\n    owner = allocate[int](1)\n    while true:\n'
-                 f'        drop owner\n        {jump}\n', 'cannot consume an outer binding'),
+                *([('def work():\n    owner = allocate[int](1)\n    while true:\n'
+                    '        drop owner\n        continue\n', 'cannot consume an outer binding')] if jump == 'continue' else []),
             ):
                 with self.subTest(jump=jump, source=source):
                     result = compile_source('invalid-jump.sev', source, Syntax())

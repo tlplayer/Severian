@@ -1,6 +1,6 @@
 """Resolve local placement and scoped arena/pool slabs before MIR registration."""
 from dataclasses import dataclass, replace
-from py_compiler.syntax.complex.array import MemoryOperation
+from py_compiler.syntax.complex.array import MemoryOperation, RecordMemory
 
 
 @dataclass(frozen=True)
@@ -23,14 +23,17 @@ class EndLocal:
 def resolve(body):
     operations = [op for block in body.blocks for op in block.operations]
     constants = {op.result.identity: op.payload.value for op in operations if op.kind == 'constant'}
-    allocations = {op.result.identity: op for op in operations if isinstance(op.payload, MemoryOperation) and op.payload.kind == 'allocate' and op.payload.plan}
+    allocations = {op.result.identity: op for op in operations if isinstance(op.payload, (MemoryOperation, RecordMemory)) and op.payload.kind == 'allocate' and op.payload.plan}
     roots = {key: {key} for key in allocations}
+    fresh = {op.result.identity for op in operations if op.result and op.result.type.family in ('array', 'pointer') and op.kind in ('call', 'memory-copy')}
+    fresh.update(value.identity for value in body.blocks[0].parameters if value.type.family in ('array', 'pointer'))
+    roots.update({key: {key} for key in fresh})
     changed = True
     while changed:
         changed = False
         for block in body.blocks:
             for op in block.operations:
-                if op.result and op.kind != 'memory-copy' and op.result.type.binding_ownership != 'copy' and op.result.identity not in allocations:
+                if op.result and op.kind != 'memory-copy' and op.result.type.binding_ownership != 'copy' and op.result.identity not in allocations and op.result.identity not in fresh:
                     inherited = set().union(*(roots.get(v.identity, set()) for v in op.operands))
                     if inherited != roots.get(op.result.identity, set()):
                         roots[op.result.identity] = inherited; changed = True
@@ -62,21 +65,44 @@ def resolve(body):
         return False
     cyclic_allocations = {op.result.identity for block in body.blocks if repeated(block.identity)
                           for op in block.operations if op.result and op.result.identity in allocations}
+    # Every incoming allocation of one descriptor must use a compatible release.
+    # In particular, the pre-loop allocation cannot become stack storage while
+    # its replacement on a backedge remains heap storage.
+    joins = [roots.get(value.identity, set()) for block in body.blocks for value in block.parameters]
+    forced_heap = set(escapes) | cyclic_allocations | fresh
+    for identity, op in allocations.items():
+        count = constants.get(op.operands[0].identity)
+        size = op.payload.stride if isinstance(op.payload, RecordMemory) else max(1, (op.result.type.element.bits + 7) // 8)
+        if op.payload.plan.location == 'heap' or not isinstance(count, int) or not 0 <= count * size <= 4096:
+            forced_heap.add(identity)
+    changed = True
+    while changed:
+        changed = False
+        for incoming in joins:
+            if incoming & forced_heap and not incoming <= forced_heap:
+                forced_heap.update(incoming)
+                changed = True
+    for incoming in joins:
+        explicit_stack = {identity for identity in incoming if identity in allocations and allocations[identity].payload.plan.location == 'stack'}
+        if explicit_stack and (incoming - explicit_stack) & forced_heap:
+            raise ValueError('explicit stack storage cannot join a heap owner')
     replacements, local, regions = {}, set(), []
     groups = {}
     for identity, op in allocations.items():
         plan = op.payload.plan
         count = constants.get(op.operands[0].identity)
-        size = max(1, (op.result.type.element.bits + 7) // 8)
+        size = op.payload.stride if isinstance(op.payload, RecordMemory) else max(1, (op.result.type.element.bits + 7) // 8)
         if plan.strategy in ('arena', 'pool'):
+            if isinstance(op.payload, RecordMemory):
+                raise ValueError('record array arena/pool requires initialized region element cleanup')
             if identity in escapes:
                 raise ValueError('function arena/pool allocation cannot escape or transfer to shared ownership')
             if not isinstance(count, int) or count < 0 or len(body.blocks) != 1:
                 raise ValueError('function arena/pool requires fixed counts in a straight-line region')
             groups.setdefault((plan.strategy, plan.alignment), []).append((identity, op, count, size))
         elif plan.location == 'infer':
-            placement = 'stack' if identity not in escapes and identity not in cyclic_allocations and isinstance(count, int) and 0 <= count * size <= 4096 else 'heap'
-            replacements[identity] = MemoryOperation('allocate', replace(plan, location=placement))
+            placement = 'stack' if identity not in forced_heap and isinstance(count, int) and 0 <= count * size <= 4096 else 'heap'
+            replacements[identity] = replace(op.payload, plan=replace(plan, location=placement))
             if placement == 'stack':
                 local.add(identity)
     positions = {id(op): index for index, op in enumerate(operations)}
@@ -101,7 +127,7 @@ def resolve(body):
     for block in body.blocks:
         for index, op in enumerate(block.operations):
             payload = replacements.get(op.result.identity) if op.result else None
-            if isinstance(op.payload, MemoryOperation) and op.payload.kind == 'release' and roots.get(op.operands[0].identity, set()) & local:
+            if isinstance(op.payload, MemoryOperation) and op.payload.kind == 'release' and roots.get(op.operands[0].identity, set()) and roots[op.operands[0].identity] <= local:
                 payload = EndLocal()
             if payload is not None:
                 updated = replace(op, payload=payload)

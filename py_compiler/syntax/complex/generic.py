@@ -262,7 +262,7 @@ class GenericRealizationTests(unittest.TestCase):
     def test_local_object_view_cannot_escape_through_generic_call(self):
         result = self.compile(self.identity + 'class Point:\n    x: int\ndef bad() -> Point:\n    original = Point(1)\n    return identity(original)\n')
         self.assertTrue(result.diagnostics)
-        self.assertIn('storage belongs to this callable', str(result.diagnostics[0]))
+        self.assertIn('class by value requires ownership', str(result.diagnostics[0]))
 
     def test_conflicting_inference_and_invalid_callable_contract(self):
         cases = (

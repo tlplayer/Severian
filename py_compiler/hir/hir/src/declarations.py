@@ -143,6 +143,9 @@ class DeclarationContext:
 
     def add_callable(self, entry, provider):
         entry.symbol_namespace = self.interface or ''
+        origin = entry.node.tokens[0].lexeme.source
+        if origin is not None and origin.identity != self.source.identity:
+            entry.symbol_namespace += ':' + self.source.identity
         self.callables.append(entry)
         self.functions.setdefault(entry.name, []).append(entry)
         self.compilers[id(entry)] = provider

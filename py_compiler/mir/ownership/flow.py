@@ -87,6 +87,25 @@ class FlowState:
         return result
 
 
+def reconcile_owners(cfg, exits, bindings, span):
+    """At a join, consume surviving owners on paths where they remain live."""
+    partial = [binding for binding in bindings
+               if binding.ownership in ('own', 'move', 'copy', 'mirror')
+               and callable(getattr(binding.type, 'release', None))
+               and len({binding.identity in flow.moved for _, _, flow in exits}) > 1]
+    previous = cfg.current, cfg.values, cfg.flow
+    try:
+        for index, (block, values, flow) in enumerate(exits):
+            cfg.current, cfg.values, cfg.flow = block, values, flow
+            terminator = block.terminator
+            block.terminator = None
+            cfg.cleanup_memory((b for b in partial if b.identity not in flow.moved), span)
+            cfg.current.terminator = terminator
+            exits[index] = (cfg.current, values, flow)
+    finally:
+        cfg.current, cfg.values, cfg.flow = previous
+
+
 import unittest
 
 

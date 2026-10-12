@@ -59,10 +59,15 @@ class ConsumerJump:
         baseline = consumer.flow if exit_loop else self.flow
         expected = baseline.fork()
         expected.end_scope(live)
+        if exit_loop:
+            expected.moved = set(cfg.flow.moved)
         if cfg.flow != expected:
             raise ValueError('iterator loop cannot change outer ownership on a continuing edge')
         edge(cfg, consumer.following if exit_loop else self.resume, kept, span)
-        (consumer.exits if exit_loop else self.exits).append(cfg.flow.fork())
+        if exit_loop:
+            consumer.exits.append((cfg.current, dict(cfg.values), cfg.flow.fork()))
+        else:
+            self.exits.append(cfg.flow.fork())
 
 
 class Consumer:
@@ -80,6 +85,8 @@ class Consumer:
     def emit(self, term, producer_env, span):
         cfg = self.cfg
         value = cfg.expr(term, producer_env, self.element)
+        if value.type.family == 'record':
+            value = value.type.copy_value(value, cfg, span)
         if value.type != self.element:
             raise ValueError('yield value does not satisfy iterator element type')
         carried = tuple(b for b in bindings(self.env, *cfg.active_scopes[self.depth:])
@@ -179,13 +186,22 @@ class For(BlockProvider):
             if cfg.current.terminator is None:
                 cfg.flow.end_scope(ambient)
                 edge(cfg, following, carried, node.span)
-                consumer.exits.append(cfg.flow.fork())
+                consumer.exits.append((cfg.current, dict(cfg.values), cfg.flow.fork()))
         finally:
             cfg.grammar_captures, cfg.yield_handler, cfg.loops = previous
             cfg.active_grammars.remove(provider.node.identity)
+        from py_compiler.mir.ownership.flow import reconcile_owners
+        reconcile_owners(cfg, consumer.exits, carried, node.span)
+        moved = set.union(*(flow.moved for _, _, flow in consumer.exits)) if consumer.exits else set()
+        retained = [(binding, parameter) for binding, parameter in zip(carried, following.parameters)
+                    if not (callable(getattr(binding.type, 'release', None)) and binding.identity in moved)]
+        following.parameters = tuple(parameter for _, parameter in retained)
+        for block, values, _ in consumer.exits:
+            edge_values = tuple(values[b.identity] for b, _ in retained)
+            block.terminator = Terminator('jump', (Edge(following.identity, edge_values),))
         cfg.current, cfg.values = following, original_values
-        cfg.values.update({b.identity: v for b, v in zip(carried, following.parameters)})
-        cfg.flow = FlowState.join(consumer.exits) if consumer.exits else consumer.flow
+        cfg.values.update({b.identity: v for b, v in retained})
+        cfg.flow = FlowState.join([flow for _, _, flow in consumer.exits]) if consumer.exits else consumer.flow
         cfg.flow.loans.pop(loan.identity, None)
         cfg.cleanup_memory((loop_env[n] for n in local_names), node.span)
         cfg.flow.end_scope(cfg.live_binding_ids(env) | {b.identity for scope in cfg.active_scopes for b in scope.values()})

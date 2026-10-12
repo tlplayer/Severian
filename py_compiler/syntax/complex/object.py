@@ -81,6 +81,7 @@ class Invoke:
     symbol: str
     result_type: object
     ownership: tuple = ()
+    result_layout: str = ""
 
     def atom(self, operation):
         from py_compiler.syntax.generic.atom import Atom
@@ -91,9 +92,15 @@ class Invoke:
         from py_compiler.mlir.src.cfg import name
         arguments = ", ".join(name(v) for v in operation.operands)
         types = ", ".join(v.type.mlir for v in operation.operands)
-        result = self.result_type.mlir or "()"
+        result = self.result_layout or self.result_type.mlir or "()"
         prefix = name(operation.result) + " = " if operation.result else ""
         from py_compiler.mlir.src.lib import symbol_ref
+        if self.result_layout:
+            tag = operation.result.identity
+            return [f'%record_result_{tag} = func.call {symbol_ref(self.symbol)}({arguments}) : ({types}) -> {result}',
+                    f'%record_count_{tag} = arith.constant 1 : i64',
+                    f'{name(operation.result)} = llvm.alloca %record_count_{tag} x {result} : (i64) -> !llvm.ptr',
+                    f'llvm.store %record_result_{tag}, {name(operation.result)} : {result}, !llvm.ptr']
         return [f"{prefix}func.call {symbol_ref(self.symbol)}({arguments}) : ({types}) -> {result}"]
 
 

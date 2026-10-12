@@ -337,6 +337,9 @@ class Builder:
             if self.body.result_type.mlir:
                 raise ValueError("not every path returns the declared result")
             self.current.terminator = Terminator("finish")
+        if self.body.result_type.family == 'record':
+            provider = self.context.provider_by_name[self.body.result_type.name]
+            self.body.result_layout = provider.layout(self.body.result_type.declaration, self.context)
         from py_compiler.mir.memory import resolve
         resolve(self.body)
         self.body.verify()

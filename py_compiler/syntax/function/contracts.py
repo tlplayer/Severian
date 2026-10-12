@@ -158,6 +158,11 @@ def pure_predicate(node, parameters):
         for operand in node.operands[::2]:
             pure_predicate(operand, parameters)
         return
+    if node.kind in ("member", "reference") and node.operands and node.token.text == "self" and "self" in parameters:
+        return
+    if node.kind == "member":
+        pure_predicate(node.operands[0], parameters)
+        return
     if node.kind == "literal":
         return
     if node.kind == "name" and node.token.text in parameters:

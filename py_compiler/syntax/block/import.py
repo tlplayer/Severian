@@ -17,6 +17,14 @@ class ImportedCallable(Callable):
 
 @dataclass(frozen=True)
 class NativeSymbol(ExternalSymbol):
+    result_layout: str = ''
+
+    def render_operation(self, operation):
+        if self.result_layout:
+            from py_compiler.syntax.complex.object import Invoke
+            return Invoke(self.symbol, operation.result.type, result_layout=self.result_layout).render_operation(operation)
+        return super().render_operation(operation)
+
     def __post_init__(self):
         if self.abi != 'severian' or not self.symbol or '\x00' in self.symbol:
             raise ValueError('invalid native Severian symbol')
@@ -45,6 +53,29 @@ class Import(DeclarationProvider):
         if alias in context.package_imports:
             raise ValueError(f'duplicate package import {alias!r}')
         context.package_imports.add(alias)
+        from py_compiler.frontend.source.source import SourceFile
+        from py_compiler.frontend.lexer.lexer import lex
+        from py_compiler.frontend.parser.blocks import parse_blocks
+        from py_compiler.syntax.block.record import register_template
+        for contract in package.get('templates', ()):
+            source = SourceFile(package['package']['name'] + '/' + contract['path'], contract['source'])
+            root, errors = parse_blocks(source, lex(source, context.syntax), context.syntax)
+            if errors or len(root.children) != 1:
+                raise ValueError('invalid imported record template interface')
+            template = root.children[0]
+            if not hasattr(context, 'imported_template_origins'):
+                context.imported_template_origins = {}
+            context.imported_template_origins[source.identity] = node.identity
+            if getattr(template.provider, 'spelling', '') != 'class' or template.header[0].text != contract['name']:
+                raise ValueError('imported template identity does not match its declaration')
+            previous = context.scope
+            context.scope = (alias,)
+            try:
+                if not register_template(template.provider, template, context):
+                    raise ValueError('imported class template requires generic parameters')
+            finally:
+                context.scope = previous
+
         from py_compiler.syntax.generic.storage import GlobalPlace
         for contract in package.get('globals', ()):
             symbol = contract['symbol']
@@ -61,8 +92,9 @@ class Import(DeclarationProvider):
         Receiver = import_module('py_compiler.syntax.block.class').Receiver
         from py_compiler.syntax.complex.object import ObjectType
         type_contracts = {t['name']: t for t in package.get('types', ())}
+        template_names = {item['name'] for item in package.get('templates', ())}
         def qualify(name):
-            return alias + '.' + name if name in type_contracts else name
+            return alias + '.' + name if name in type_contracts or name.split('[', 1)[0] in template_names else name
         for contract in type_contracts.values():
             name = qualify(contract['name'])
             declaration = TypeDeclaration(node.identity + ':' + name, name, 'class',

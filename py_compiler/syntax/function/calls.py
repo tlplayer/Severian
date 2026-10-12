@@ -136,14 +136,19 @@ def invoke(entry, values, cfg, span, receiver=None):
     modes = tuple('move' if mode in ('copy', 'mirror') and callable(getattr(value.type, 'release', None)) else ('copy' if mode == 'mirror' else mode)
                   for mode, value in zip(modes, values))
     receiver_modes = (entry.receiver_ownership or 'borrow',) if entry.receiver else ()
-    operation = Invoke(entry.symbol, result, receiver_modes + modes)
+    layout = (cfg.context.provider_by_name[result.name].layout(result.declaration, cfg.context)
+              if result.family == 'record' else '')
+    operation = Invoke(entry.symbol, result, receiver_modes + modes, layout)
     if getattr(entry, 'native_symbol', None) is not None:
         from py_compiler.syntax.generic.atom import Atom
-        operation = Atom(entry, tuple(v.type for v in operands), result if result.mlir else None, receiver_modes + modes, ('call',), entry.native_symbol)
+        from dataclasses import replace
+        operation = Atom(entry, tuple(v.type for v in operands), result if result.mlir else None, receiver_modes + modes, ('call',), replace(entry.native_symbol, result_layout=layout))
     if not result.mlir:
         cfg.effect('call', operands, operation, span)
         return None
     value = cfg.emit('call', result, operands, operation, span)
+    if layout:
+        cfg.stack_values.add(value.identity)
     sources = entry.body.result_sources if entry.body is not None else ()
     dependencies = [receiver if i == -1 else values[i] for i in sources]
     dependencies = [source for source in dependencies if source is not None]
@@ -237,10 +242,13 @@ def lower_expression(node, cfg, env, expected=None):
             raise ValueError('type has no field access provider')
         return coerce(provider.field_place(receiver, node.token.text, cfg, span).read(cfg, span), expected, cfg, span)
     callee, *arguments = node.operands
-    if callee.kind == 'member' and callee.operands[0].kind == 'name' and callee.operands[0].token.text in context.package_imports:
+    imported = callee.operands[0] if callee.kind == 'index' else callee
+    if imported.kind == 'member' and imported.operands[0].kind == 'name' and imported.operands[0].token.text in context.package_imports:
         from py_compiler.syntax.grammar.expression import Expression
-        qualified = callee.operands[0].token.text + '.' + callee.token.text
-        callee = Expression('name', callee.token.with_text(qualified))
+        from dataclasses import replace
+        qualified = imported.operands[0].token.text + '.' + imported.token.text
+        resolved = Expression('name', imported.token.with_text(qualified))
+        callee = replace(callee, operands=(resolved, callee.operands[1])) if callee.kind == 'index' else resolved
     from py_compiler.syntax.prelude import builtin_call_providers
     base, argument = (callee.operands if callee.kind == 'index' else (callee, None))
     definition = context.types.get(base.token.text) if base.kind == 'name' else None

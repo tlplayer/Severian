@@ -61,7 +61,7 @@ class TypedPointer:
 
     @property
     def mlir(self):
-        return f'memref<?x{self.element.mlir}>'
+        return 'memref<?xi8>' if self.element.family == 'record' else f'memref<?x{self.element.mlir}>'
 
     def require_context(self, cfg):
         pass

@@ -40,13 +40,13 @@ class Function(DeclarationProvider):
         if not self.has_body(node):
             raise ValueError("a non-trait callable requires a body; use unimplemented for a stub")
         for guard in entry.guards:
-            pure_predicate(guard, {name for name, _ in entry.parameters})
+            pure_predicate(guard, {name for name, _ in entry.parameters} | ({'self'} if receiver else set()))
         context.add_callable(entry, self)
         context.declare_nodes(node.children, (*context.scope, node.identity))
         return entry
 
     def compile(self, entry, context):
-        source, syntax, node = context.source, context.bound_syntax, entry.node
+        source, syntax, node = entry.node.tokens[0].lexeme.source or context.source, context.bound_syntax, entry.node
         result = context.type(entry.result) if entry.result else None
         builder = context.builder(source, syntax, entry.symbol, entry.symbol, result)
         builder.imported = {name: value for imported in entry.imports for name, value in imported.exports}

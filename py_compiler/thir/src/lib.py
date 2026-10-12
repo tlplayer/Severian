@@ -97,6 +97,9 @@ def prepare(module, interface=None):
     collect(module.root)
 
     def source_owner(node):
+        imported = getattr(context, 'imported_template_origins', {}).get(node.span.source)
+        if imported is not None:
+            return owners[imported]
         if node.identity in owners:
             return owners[node.identity]
         # Generic record clones retain their original source span and provider.

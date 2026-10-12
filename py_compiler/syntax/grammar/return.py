@@ -13,6 +13,23 @@ class Return:
             cfg.body.result_type = value.type if value else cfg.syntax.types["absent"]
         else:
             value = cfg.expr(expression(node.tokens[1:]), env, expected) if len(node.tokens) > 1 else None
+        if value and value.type.family == 'record':
+            term = expression(node.tokens[1:])
+            binding = cfg.lookup(term, env) if term.kind in ('name', 'reference') else None
+            if binding and binding.ownership in ('view', 'borrow'):
+                raise ValueError('returning a class by value requires ownership; use an explicit copy')
+            if term.kind not in ('name', 'call'):
+                raise ValueError('returning a class field requires an explicit owned copy')
+            def borrowed_fields(type_):
+                for _, field in type_.declaration.fields:
+                    member = cfg.context.type(field)
+                    if member.family in ('pointer', 'trait', 'dynamic') or (member.family == 'record' and borrowed_fields(member)):
+                        return True
+                return False
+            if borrowed_fields(value.type):
+                raise ValueError('class return contains borrowed fields without a result lifetime contract')
+            cfg.stack_values.discard(value.identity)
+            cfg.value_sources[value.identity] = set()
         if value and value.identity in cfg.stack_values:
             raise ValueError("cannot return an object/view whose storage belongs to this callable")
         if value:

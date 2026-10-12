@@ -119,7 +119,7 @@ class Assignment:
                 raise ValueError('shared reference atomicity cannot change through sharing')
             value = value.type.copy_value(value, cfg, node.span)
             mode, owner = 'own', None
-        if core.kind == 'member' and value is not None and value.type.family in ('record', 'array', 'pointer', 'shared'):
+        if core.kind in ('member', 'index') and value is not None and value.identity not in getattr(cfg, 'owned_results', ()) and value.type.family in ('record', 'array', 'pointer', 'shared'):
             owner = root_binding(core, cfg, env)
         if owner and owner.identity in cfg.storage:
             from py_compiler.syntax.generic.storage import FieldPlace
@@ -153,7 +153,7 @@ class Assignment:
         if mode == "move":
             if owner and owner.identity in cfg.storage and callable(getattr(value.type, 'release', None)):
                 raise ValueError('moving an owned field requires replacing it; use copy')
-            if core.kind == 'member' and callable(getattr(value.type, 'release', None)):
+            if core.kind in ('member', 'index') and callable(getattr(value.type, 'release', None)):
                 raise ValueError('moving an owned field requires replacing it; use copy')
             viewed = cfg.flow.views.get(owner.identity)
             cfg.flow.move(owner)

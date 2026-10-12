@@ -52,11 +52,8 @@ class Conditional(BlockProvider):
             exits.append((cfg.current, initial_values, initial_flow))
         if not exits:
             return
-        for binding in outer:
-            if callable(getattr(binding.type, 'release', None)):
-                moved = {binding.identity in flow.moved for _, _, flow in exits}
-                if len(moved) != 1:
-                    raise ValueError('memory ownership must agree across continuing branches')
+        from py_compiler.mir.ownership.flow import reconcile_owners
+        reconcile_owners(cfg, exits, outer, chain[-1].span)
         outer = tuple(b for b in outer if not (callable(getattr(b.type, 'release', None)) and b.identity in exits[0][2].moved))
         join = cfg.block(tuple(b.type for b in outer))
         for block, values, _ in exits:

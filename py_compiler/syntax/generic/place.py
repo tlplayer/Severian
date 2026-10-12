@@ -143,5 +143,9 @@ def assign(target, rhs, operator, cfg, env, span):
     if operator == '=':
         with address.capture(cfg, 'borrow'):
             address.write(cfg, value, span)
+        from py_compiler.syntax.complex.array import RecordElementPlace
+        if isinstance(place, RecordElementPlace) and term.kind == 'call' and callable(getattr(value.type, 'release', None)):
+            if not cfg.value_sources.get(value.identity) and value.identity not in cfg.call_result_owners:
+                value.type.release(value, cfg, span)
     else:
         select(place.type, 'O.assignment', operator).expand(cfg, address, value, span)

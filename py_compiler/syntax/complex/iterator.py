@@ -8,7 +8,7 @@ class IteratorType(TypeDefinition):
         super().__init__('iterator')
 
     def specialize(self, element):
-        if element.binding_ownership != 'copy':
+        if element.binding_ownership != 'copy' and element.family != 'record':
             raise ValueError('iterator elements currently require copy value types')
         return Iterator(element)
 

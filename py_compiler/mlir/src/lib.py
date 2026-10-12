@@ -89,7 +89,7 @@ def render(program):
                             owner_globals.add(definition)
                             globals_.append('  ' + definition)
                 if isinstance(implementation, ExternalSymbol):
-                    signature = (tuple(t.mlir for t in operation.atom.inputs), operation.atom.result.mlir if operation.atom.result else "")
+                    signature = (tuple(t.mlir for t in operation.atom.inputs), (getattr(implementation, "result_layout", "") or operation.atom.result.mlir) if operation.atom.result else "")
                     if implementation.symbol in defined:
                         raise ValueError("external symbol conflicts with a local definition")
                     if implementation.symbol in external and external[implementation.symbol] != signature:

@@ -82,7 +82,9 @@ class Allocate:
         result = ArrayType(element, count=count_hint, location=plan.location)
         count = (select(cfg.context.type('index'), 'F.constructor', 'construct').expand(cfg, arguments, env)
                  if arguments else literal_value(count_hint if count_hint is not None else 1, cfg.context.type('index'), cfg, span))
-        value = cfg.emit('allocate-array', result, (count,), MemoryOperation('allocate', plan), span)
+        from py_compiler.syntax.complex.array import record_operation
+        operation = record_operation(result, 'allocate', cfg).with_plan(plan) if element.family == 'record' else MemoryOperation('allocate', plan)
+        value = cfg.emit('allocate-array', result, (count,), operation, span)
         if plan.location == 'stack':
             cfg.stack_values.add(value.identity)
         return value

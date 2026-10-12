@@ -55,6 +55,7 @@ class Body:
     complexity: dict = field(default_factory=dict)
     test: dict | None = None
     result_sources: tuple = ()
+    result_layout: str = ""
     source_snapshot: object = None
     source_span: object = None
 

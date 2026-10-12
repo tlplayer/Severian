@@ -159,7 +159,7 @@ def native_dependencies(root, manifest, target, pointer_bits, *, _active=(), _ca
                        'interface-checksum': digest(interface_text), 'initializers': realization.get('initializers', [])}
                 all_entries = [*closure, own]
                 cache[package_root] = {'exports': interface.get('exports', []), 'types': interface.get('types', []),
-                    'globals': interface.get('globals', []), 'objects': list(dict.fromkeys(objects)),
+                    'templates': interface.get('templates', []), 'globals': interface.get('globals', []), 'objects': list(dict.fromkeys(objects)),
                     'initializers': list(dict.fromkeys(symbol for entry in all_entries for symbol in entry['initializers'])),
                     'closure': all_entries, 'package': interface['package'], 'build-id': realization['build-id']}
                 break
@@ -257,7 +257,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     compiler_id = compiler_identity()
     content_id = digest(encode([manifest_text, lock, snapshots]))
     build_id = output_slot(publish, include_tests)
-    abi_id = digest(encode([target, pointer_bits, "py-primitive-abi-v1"]))
+    abi_id = digest(encode([target, pointer_bits, "py-primitive-abi-v2-record-results"]))
     identity = {"name": package["name"], "version": package["version"], "content-id": content_id}
     ir_path = f"artifacts/{target}/{build_id}/ir/package.mlir"
     object_path = f"artifacts/{target}/{build_id}/object/package.o"
@@ -296,11 +296,11 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                                       "constant": b.constant, "ownership": b.ownership} for b in body.bindings]})
     types = [{'name': d.name, 'fields': list(d.fields), 'defaults': list(d.defaults),
               'memory-defaults': list(d.memory_defaults)}
-             for d in program.declarations if d.kind == 'class' and '.' not in d.name and '[' not in d.name]
+             for d in program.declarations if d.kind == 'class' and '.' not in d.name]
     type_names = {t['name'] for t in types}
     exports = []
     for body in program.bodies:
-        if body.declaration and not body.test and '[' not in body.declaration and ('.' not in body.declaration or body.declaration.rsplit('.', 1)[0] in type_names):
+        if body.declaration and not body.test and (('.' not in body.declaration and '[' not in body.declaration) or body.declaration.rsplit('.', 1)[0] in type_names):
             parameters = body.bindings[:len(body.blocks[0].parameters)]
             receiver = parameters[0] if parameters and parameters[0].name == 'self' else None
             if receiver:
@@ -320,7 +320,8 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                     raise ValueError(f'ambiguous exported global {place.exported_name!r}')
                 globals_.append({'name': place.exported_name, 'symbol': place.symbol,
                                  'type': place.type.name, 'constant': place.constant})
-    semantic_id = digest(encode([declarations, exports, types, globals_]))
+    templates = [template for result in results for template in result.templates]
+    semantic_id = digest(encode([declarations, exports, types, globals_, templates]))
     source_root = f'build/{build_id}/{target}/source' if publish else 'source'
     if publish:
         for entry in (*declarations, *symbols):
@@ -328,7 +329,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                 entry['source'] = source_root + '/' + entry['source'].removeprefix('source/')
     interface = {"format": "severian.interface", "version": 1, "package": identity,
                  "semantic-id": semantic_id, "metadata": {"build-id": build_id, "path": realization_path},
-                 "declarations": declarations, "exports": exports, "types": types, "globals": globals_}
+                 "declarations": declarations, "exports": exports, "types": types, "globals": globals_, "templates": templates}
     interface_text = encode(interface)
     realization = {"format": "py_compiler.realization", "version": 1, "package": identity,
                    "scope": "test" if include_tests else "production",
