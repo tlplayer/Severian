@@ -221,6 +221,12 @@ def lower_expression(node, cfg, env, expected=None):
     context, span = cfg.context, node.token.span
     if node.kind == 'member':
         subject = node.operands[0]
+        if subject.kind == 'name' and subject.token.text in context.package_imports:
+            key = subject.token.text + '.' + node.token.text
+            place = context.imported_globals.get(key)
+            if place is None:
+                raise ValueError(f'package has no exported global {key!r}')
+            return coerce(place.read(cfg, span), expected, cfg, span)
         if subject.kind == 'name':
             declared = context.types.get(context.declaration_name(subject.token.text, cfg.declaration_scope))
             if callable(getattr(declared, 'variant', None)):

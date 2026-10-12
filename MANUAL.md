@@ -597,6 +597,28 @@ Modules use `X` with an explicit module role; `M` is reserved for macros.
 Ordinary local variable names, descriptive type names, and established format
 names such as AST, HIR, MIR, CFG, and MLIR are not compiler-term abbreviations.
 
+## Iteration and Partial results
+
+```
+
+values = [1,2,3,4]
+
+for v in values:
+    print(v)
+
+
+def stream():
+    values = [1,2,3,4]
+    while position < len(values) with position = 0:
+        yield position
+        position += 1
+
+assert(stream() == 1)
+assert(stream() == 2)
+assert(stream() == 3)
+assert(stream() == 4)
+
+```
 
 
 # Prelude functions

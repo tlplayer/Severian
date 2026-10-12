@@ -41,9 +41,18 @@ def compile_source(path, text, syntax, *, stop_after='mir', interface=None, nati
         program, hir_errors = partition(source, graph, syntax)
         if errors or hir_errors:
             return FrontendResult(source, program, tuple(errors + hir_errors))
-        typed = prepare_literals(source, program, interface)
-        modules = (register(typed),) if stop_after == 'mir' else ()
-        return FrontendResult(source, replace(program, typed_modules=(typed,), mir_modules=modules, stage=stop_after), ())
+        stored_globals = bool(interface and program.constants and all(c.name for c in program.constants))
+        if stored_globals:
+            try:
+                for constant in program.constants:
+                    constant.type.module_storage('__check_module_storage')
+            except ValueError:
+                stored_globals = False
+        if not stored_globals:
+            typed = prepare_literals(source, program, interface)
+            modules = (register(typed),) if stop_after == 'mir' else ()
+            return FrontendResult(source, replace(program, typed_modules=(typed,), mir_modules=modules, stage=stop_after), ())
+
     try:
         module = resolve(source, root, syntax, Builder, native_packages, interface)
         typed = prepare(module, interface)

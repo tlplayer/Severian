@@ -7,12 +7,12 @@ PUT TESTS in the same file they test against with test blocks following the code
 NO TASK SHOULD TAKE LONGER THAN 10 MINUTES if builds hold it back that's a problem of not implementing and handing off the build to the human. Humans build/run/create regression tests not agents. 
 Dont touch MD files, they just glob/pollute the namespace and you make bad decisions vs me. 
 Don't give prose or abstract prose. Give examples with tests and when x -> y type responses those are more verifiable vs 5 sentences of nonsense
-IIF you are building rust can you run the rust compiler to validate the change. Dont run the severian build to validate that change. 
+IIF you are building python can you run the python compiler to validate the change. Dont run the severian build to validate that change. 
 Don't do tables in .md files they make editing/cleaning the md very hard. do `-` lists but prefer code snippets or pseudo code with comments. They convey meaning better 
 If there is functionality which you pivoted to avoid because
  it was out of scope, add a test and a note in `.agent_todo.md`
 so I can go over and think about what we should build next. 
-Only after after rust/sev implementation is COMPLETE 100%! not partial, can you run tests and builds in severian
+Only after after python/sev implementation is COMPLETE 100%! not partial, can you run tests and builds in severian
 
 ```
 sev_py # python backup compiler

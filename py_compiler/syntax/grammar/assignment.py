@@ -9,7 +9,7 @@ class Assignment:
     def matches(self, node):
         return True
 
-    def lower(self, node, cfg, env, local_names):
+    def lower(self, node, cfg, env, local_names, *, declare_local=False):
         items = list(node.tokens)
         from py_compiler.syntax.catalog import assignment_spellings
         assignments = assignment_spellings(cfg.syntax)
@@ -23,52 +23,17 @@ class Assignment:
             elif depth == 0 and token.text in assignments:
                 assignment = i
                 break
-        if assignment is not None and items[assignment - 1].text != ']' and any(t.text == '.' for t in items[:assignment]) and items[0].text not in cfg.syntax.scope_providers:
-            left = expression(items[:assignment])
-            if left.kind != 'member':
-                raise ValueError('assignment target is not a field')
-            subject = left.operands[0]
-            owner = root_binding(subject, cfg, env)
-            if owner and owner.ownership == 'view':
-                raise ValueError('cannot mutate a field through a view; use borrow or copy')
-            receiver = cfg.expr(subject, env)
-            provider = cfg.context.provider_by_name.get(receiver.type.name)
-            if not hasattr(provider, 'field_place'):
-                raise ValueError('receiver has no field storage provider')
-            place = provider.field_place(receiver, left.token.text, cfg, node.span, write=True)
-            operator = items[assignment].text
-            if operator == ':=':
-                raise ValueError('a field is already declared; use = to update it')
-            if operator == '=':
-                from importlib import import_module
-                store_field = import_module('py_compiler.syntax.block.class').store_field
-                store_field(place, expression(items[assignment + 1:]), cfg, env, node.span, owner)
-                return
-            value = cfg.expr(expression(items[assignment + 1:]), env, place.type)
-            if operator != '=':
-                select(place.type, 'O.assignment', operator).expand(cfg, AddressPlace(place, owner), value, node.span)
-            else:
-                place.write(cfg, value, node.span)
-            return
-        if assignment is not None and any(t.text == '[' for t in items[:assignment]) and not any(t.text == ':' for t in items[:assignment]):
-            left = expression(items[:assignment])
-            if left.kind != 'index':
-                raise ValueError('assignment target is not an indexed place')
-            subject, index = left.operands
-            owner = root_binding(subject, cfg, env)
-            if owner is None or owner.ownership == 'view':
-                raise ValueError('indexed mutation requires an owner or borrow parameter')
-            receiver = cfg.expr(subject, env)
-            place = receiver.type.element_place(receiver, index, cfg, env, node.span)
-            value = cfg.expr(expression(items[assignment + 1:]), env, place.type)
-            operator = items[assignment].text
-            if operator == '=':
-                place.write(cfg, value, node.span)
-            elif operator == ':=':
-                raise ValueError('indexed storage is already declared')
-            else:
-                select(place.type, 'O.assignment', operator).expand(cfg, AddressPlace(place, owner), value, node.span)
-            return
+        if assignment is not None:
+            left_tokens = items[:assignment]
+            # An annotation introduces a binding; other targets compose as expressions.
+            annotation = len(left_tokens) > 1 and left_tokens[1].text == ':'
+            if not annotation:
+                left = cfg.capture_expression(expression(left_tokens))
+                if left.kind in ('member', 'index', 'capture') or (left.kind == 'reference' and left.token.text == 'self'):
+                    from py_compiler.syntax.generic.place import analyze_target, assign
+                    assign(analyze_target(left, cfg, env), cfg.capture_expression(expression(items[assignment + 1:])),
+                           items[assignment].text, cfg, env, node.span)
+                    return
         destination = env
         qualified = None
         if len(items) > 2 and items[0].text in cfg.syntax.scope_providers and items[1].text == ".":
@@ -107,8 +72,8 @@ class Assignment:
             owner = cfg.lookup(core.operands[0], env)
             if mode in ('move', 'copy', 'mirror'):
                 raise ValueError('address of local storage cannot transfer allocation ownership')
-        existing = destination.get(first.text)
-        if not existing and qualified is None and first.text in cfg.namespaces.get("self", {}):
+        existing = None if declare_local else destination.get(first.text)
+        if not declare_local and not existing and qualified is None and first.text in cfg.namespaces.get("self", {}):
             destination = cfg.namespaces["self"]
             existing = destination[first.text]
             qualified = "self"
@@ -219,7 +184,7 @@ class Assignment:
                 env[first.text] = binding
                 local_names.add(first.text)
             cfg.body.bindings.append(binding)
-            if cfg.storage_factory and ownership not in ("view", "borrow"):
+            if cfg.storage_factory and not declare_local and ownership not in ("view", "borrow"):
                 place = cfg.storage_factory(binding)
                 place.declaration()
                 cfg.storage[binding.identity] = place

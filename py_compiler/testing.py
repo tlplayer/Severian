@@ -24,7 +24,7 @@ def build_package(root, *, include_tests=False, _active=(), _built=None, **optio
         raise ValueError('cyclic package dependency: ' + ' -> '.join(map(str, (*_active, root))))
     built = {} if _built is None else _built
     manifest = json.loads((root / 'package.json').read_text())
-    for specification in manifest.get('dependencies', {}).values():
+    for _, specification in sorted(manifest.get('dependencies', {}).items()):
         if not isinstance(specification, dict) or not isinstance(specification.get('path'), str):
             raise ValueError('native dependencies require a local path')
         dependency = (root / specification['path']).resolve()
@@ -49,7 +49,7 @@ class TestEntry:
 
 
 def entry_source(initializers, test):
-    calls = [*initializers, test]
+    calls = [*dict.fromkeys(initializers), test]
     declarations = [f'  func.func private {symbol_ref(symbol)}()' for symbol in dict.fromkeys(calls)]
     instructions = [f'    func.call {symbol_ref(symbol)}() : () -> ()' for symbol in calls]
     return ('module {\n' + '\n'.join(declarations) + '\n  func.func @main() -> i32 {\n'
@@ -294,6 +294,22 @@ class PackageTestRunnerTests(unittest.TestCase):
             self.assertFalse(compile_package.call_args_list[0].kwargs['include_tests'])
             self.assertTrue(compile_package.call_args_list[1].kwargs['include_tests'])
 
+    def test_diamond_builds_shared_dependency_once(self):
+        import tempfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            graph = {'app': ('right', 'left'), 'left': ('base',), 'right': ('base',), 'base': ()}
+            for name, dependencies in graph.items():
+                path = root / name
+                path.mkdir()
+                (path / 'package.json').write_text(encode({'dependencies': {
+                    dep: {'path': '../' + dep} for dep in dependencies}}))
+            with patch(__name__ + '.build', return_value={'success': True}) as compile_package:
+                build_package(root / 'app')
+            self.assertEqual([call.args[0].name for call in compile_package.call_args_list],
+                             ['base', 'left', 'right', 'app'])
+
     def test_dependency_cycles_fail_before_compilation(self):
         import tempfile
         from unittest.mock import patch
@@ -317,3 +333,6 @@ class PackageTestRunnerTests(unittest.TestCase):
         text = entry_source(['initialize'], 'test with spaces')
         self.assertLess(text.index('func.call @initialize'), text.index('func.call @"test with spaces"'))
         self.assertIn('func.return %zero : i32', text)
+        diamond = entry_source(['base', 'left', 'base', 'right'], 'test')
+        self.assertEqual(diamond.count('func.call @base()'), 1)
+        self.assertLess(diamond.index('func.call @base()'), diamond.index('func.call @left()'))

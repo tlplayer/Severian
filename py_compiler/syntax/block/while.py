@@ -1,10 +1,39 @@
 """While loops carry typed bindings on explicit CFG backedges."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from py_compiler.syntax.generic.block import BlockProvider
 from py_compiler.syntax.grammar.expression import expression
 from py_compiler.mir.cfg.cfg import Edge, Terminator
 from py_compiler.mir.ownership.flow import FlowState
 from py_compiler.syntax.keywords.keyword import Keyword
+
+
+def split_loop_initializer(tokens, spelling):
+    """A loop owns the meaning of its optional, once-only with initializer."""
+    depth = 0
+    for index, token in enumerate(tokens):
+        depth += (token.text in ('(', '[', '{')) - (token.text in (')', ']', '}'))
+        if depth == 0 and token.text == 'with':
+            initializer = tuple(tokens[index + 1:])
+            if (len(initializer) < 3 or initializer[0].kind != 'IDENTIFIER'
+                    or initializer[1].text not in ('=', ':=')):
+                raise ValueError(f'{spelling} with requires a loop-local initializer')
+            expression(initializer[2:])
+            return tuple(tokens[:index]), initializer
+    return tuple(tokens), ()
+
+
+def initialize_loop(node, initializer, cfg, env):
+    from py_compiler.syntax.grammar.assignment import Assignment
+    loop_env, local_names = dict(env), set()
+    if initializer:
+        # Retain a shadowed outer binding on SSA backedges. The RHS still sees it.
+        old = loop_env.get(initializer[0].text)
+        if old is not None:
+            loop_env[':with-outer:' + old.identity] = old
+        init = replace(node, identity=node.identity + ':with', tokens=initializer,
+                       children=[], provider=None)
+        Assignment().lower(init, cfg, loop_env, local_names, declare_local=True)
+    return loop_env, local_names
 
 
 @dataclass
@@ -71,11 +100,27 @@ class While(BlockProvider):
     spelling = 'while'
 
     def parse_header(self, items):
-        header = super().parse_header(items)
-        expression(header)
-        return header
+        condition, initializer = split_loop_initializer(super().parse_header(items), self.spelling)
+        expression(condition)
+        return condition, initializer
 
     def lower(self, node, cfg, env, nodes, index):
+        condition, initializer = node.header
+        if not initializer:
+            return self.lower_loop(replace(node, header=condition), cfg, env)
+        loop_env, local_names = initialize_loop(node, initializer, cfg, env)
+        cfg.active_scopes.append(loop_env)
+        try:
+            result = self.lower_loop(replace(node, header=condition), cfg, loop_env)
+            if cfg.current.terminator is None:
+                cfg.cleanup_memory((loop_env[name] for name in local_names), node.span)
+        finally:
+            cfg.active_scopes.pop()
+        cfg.flow.end_scope(cfg.live_binding_ids(env) |
+                           {b.identity for scope in cfg.active_scopes for b in scope.values()})
+        return result
+
+    def lower_loop(self, node, cfg, env):
         carried = tuple(binding for binding in env.values()
                         if binding.identity not in cfg.storage and binding.identity not in cfg.flow.moved)
         initial_values, initial_flow = dict(cfg.values), cfg.flow.fork()

@@ -179,6 +179,126 @@ This implementation can inspect indentation, quoted regions, and delimiters; est
 
 CFG behavior belongs to the selected construct's semantic/lowering contract and occurs at the appropriate compiler stage.
 
+### Place
+
+**The grammar should own the syntax and its meaning. `Place` should be a reusable semantic facility that a grammar can choose to use.**
+
+The SIP already establishes that `left` and `right` are ordinary capture names, and recognition preserves expressions without evaluating them. That gives us the separation we need. [SIP-0011](/home/tplayer/Documents/Severian/docs/sip/0011-Grammar.md)
+
+Example
+
+```sev
+class Collection[T]:
+    storage: array[T]
+
+    grammar assign[self, "[", index: int, "]", "=", value: T]():
+        self.storage[index] = value
+```
+
+Here:
+
+```text
+Recognition
+    self  → receiver expression
+    index → expression required to produce int
+    value → expression required to produce T
+
+Selected meaning
+    self.storage[index] = value
+
+Lowering
+    apply storage's grammar
+    eventually produce checked storage operations
+```
+
+`index: int` constrains the expression’s resulting type. It does not require recognition to compute the index. Likewise, the captures need not become eagerly evaluated function arguments.
+
+Different syntax can express the same operation:
+
+```sev
+grammar put["put", value: T, "into", self, "at", index: int]():
+    self.storage[index] = value
+```
+
+Or introduce different semantics:
+
+```sev
+grammar wrapped[self, "[", index: int, "]", "<-", value: T]():
+    self.storage[index % len(self.storage)] = value
+```
+
+Both can eventually use the same checked element-storage implementation. The compiler does not need a branch recognizing `put` or `<-`.
+
+**Evaluation order belongs to the selected semantics, rather than the textual order of captures.**
+
+For the first example, the body delegates to the backing array’s assignment semantics. If those specify RHS-first evaluation, the conceptual lowering is:
+
+```python
+# Compiler pseudocode; captures remain expressions until lowered.
+value = lower_value(captures.value)
+receiver = lower_value(captures.self)
+index = lower_value(captures.index)
+
+destination = element_place(receiver.storage, index)
+assign(destination, value)
+```
+
+A custom control-flow grammar may evaluate a capture conditionally or repeatedly. Therefore the common grammar interface must preserve captures as compiler terms until the selected implementation determines their evaluation.
+
+The shared facilities would be:
+
+```text
+Grammar
+    recognition, captures, constraints, construction
+
+Selected semantic implementation
+    evaluation order, repetition, control flow, effects
+
+Reusable operations
+    resolve symbol
+    project field
+    checked indexing
+    read / borrow / move / initialize / replace / destroy
+
+MIR
+    typed operations and explicit control flow
+    ownership and lifetime verification
+
+LIR / MLIR
+    target lowering
+```
+
+Ownership remains enforced across custom grammars:
+
+```text
+custom syntax replaces storage with a live pointer
+    → reject
+
+custom syntax reads through a view
+    → allowed
+
+custom syntax duplicates a unique owner without copying
+    → reject
+```
+
+For your nested example, each indexing expression is recognized through its applicable grammar; the outer collection’s assignment grammar supplies the final meaning:
+
+```sev
+a[b[c[0]]] = c[b[a[0]]]
+```
+
+A useful design acceptance test is:
+
+```text
+Register a new collection grammar
+    → nested expressions compose
+    → its semantics determine evaluation
+    → ownership checks still apply
+    → no changes to the assignment dispatcher
+```
+
+That preserves the SIP’s flexibility while giving grammar authors common, safe operations to build upon.
+
 ## Testing
 
 Establish the common contract using one symbol, one infix operator, one sentence, and one procedural block before expanding the lexer implementation.

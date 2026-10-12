@@ -91,50 +91,85 @@ def compiler_identity():
                           for path in sorted(root.rglob('*.py'))]))
 
 
-def native_dependencies(root, manifest, target, pointer_bits):
+def dependency_closure(packages):
+    ordered, names = {}, {}
+    for package in packages.values():
+        for entry in package['closure']:
+            root, name = entry['root'], entry['package']['name']
+            if name in names and names[name] != root:
+                raise ValueError(f'conflicting local package identity {name!r}: {names[name]} and {root}')
+            if root in ordered and ordered[root] != entry:
+                raise ValueError(f'inconsistent dependency artifacts for {root}')
+            names[name], ordered[root] = root, entry
+    return list(ordered.values())
+
+
+def native_dependencies(root, manifest, target, pointer_bits, *, _active=(), _cache=None):
+    root = Path(root).resolve()
+    if root in _active:
+        raise ValueError('cyclic package dependency: ' + ' -> '.join(map(str, (*_active, root))))
+    cache = {} if _cache is None else _cache
     result = {}
-    for alias, specification in manifest.get('dependencies', {}).items():
+    for alias, specification in sorted(manifest.get('dependencies', {}).items()):
         if not re.fullmatch(r'[A-Za-z_]\w*', alias) or not isinstance(specification, dict) or not isinstance(specification.get('path'), str):
             raise ValueError('native dependencies require an identifier alias and a local path')
         package_root = (root / specification['path']).resolve()
-        output = package_root / 'package.pkg'
-        def artifact(relative):
-            path = (output / relative).resolve()
-            if not path.is_relative_to(output.resolve()):
-                raise ValueError('dependency artifact escapes package.pkg')
-            return path
-        index = json.loads(artifact('package.pkgi/index.json').read_text())
-        candidates = []
-        for item in reversed(index.get('interfaces', [])):
-            interface_path = artifact(item['path'])
-            interface_text = interface_path.read_text()
-            interface = json.loads(interface_text)
-            realization = json.loads(artifact(interface['metadata']['path']).read_text())
-            if (realization.get('scope') != 'production' or realization.get('state') != 'compiled-object'
-                    or realization.get('target') != target or realization.get('pointer-bits') != pointer_bits
-                    or realization.get('compiler') != compiler_identity()):
-                continue
-            if digest(interface_text) != realization['interface']['checksum']:
-                raise ValueError('dependency interface checksum mismatch')
-            if specification.get('package', interface['package']['name']) != interface['package']['name']:
-                raise ValueError('dependency package identity mismatch')
-            objects = []
-            for entry in realization['native-artifacts']:
-                path = artifact(entry['path'])
-                if entry['kind'] != 'object' or sha256(path.read_bytes()).hexdigest() != entry['checksum']:
-                    raise ValueError('dependency object checksum mismatch')
-                objects.append(str(path))
-            if not objects:
-                raise ValueError('dependency has no native objects')
-            if realization.get('dependencies'):
-                raise ValueError('transitive native dependencies need a pinned dependency closure')
-            candidates.append({'exports': interface.get('exports', []), 'types': interface.get('types', []), 'objects': objects,
-                               'initializers': realization.get('initializers', []),
-                               'package': interface['package'], 'build-id': realization['build-id']})
-            break
-        if not candidates:
-            raise ValueError(f'build compatible production artifacts for dependency {alias!r} first')
-        result[alias] = candidates[0]
+        if package_root in (*_active, root):
+            raise ValueError('cyclic package dependency: ' + ' -> '.join(map(str, (*_active, root, package_root))))
+        if package_root not in cache:
+            dependency_manifest = json.loads((package_root / 'package.json').read_text())
+            children = native_dependencies(package_root, dependency_manifest, target, pointer_bits,
+                                           _active=(*_active, root), _cache=cache)
+            closure = dependency_closure(children)
+            output = package_root / 'package.pkg'
+            def artifact(relative):
+                path = (output / relative).resolve()
+                if not path.is_relative_to(output.resolve()):
+                    raise ValueError('dependency artifact escapes package.pkg')
+                return path
+            index = json.loads(artifact('package.pkgi/index.json').read_text())
+            for item in reversed(index.get('interfaces', [])):
+                interface_text = artifact(item['path']).read_text()
+                interface = json.loads(interface_text)
+                realization = json.loads(artifact(interface['metadata']['path']).read_text())
+                if (realization.get('scope') != 'production' or realization.get('state') != 'compiled-object'
+                        or realization.get('target') != target or realization.get('pointer-bits') != pointer_bits
+                        or realization.get('compiler') != compiler_identity()):
+                    continue
+                if digest(interface_text) != realization['interface']['checksum']:
+                    raise ValueError('dependency interface checksum mismatch')
+                if realization.get('dependency-closure', []) != closure:
+                    raise ValueError(f'dependency closure changed; rebuild {package_root}')
+                objects = []
+                for entry in realization['native-artifacts']:
+                    path = artifact(entry['path'])
+                    if entry['kind'] != 'object' or sha256(path.read_bytes()).hexdigest() != entry['checksum']:
+                        raise ValueError('dependency object checksum mismatch')
+                    objects.append(str(path))
+                if not objects:
+                    raise ValueError('dependency has no native objects')
+                for entry in realization.get('link-artifacts', []):
+                    path = Path(entry['path'])
+                    if not path.is_absolute() or path.suffix != '.o' or sha256(path.read_bytes()).hexdigest() != entry['checksum']:
+                        raise ValueError('dependency link artifact checksum mismatch')
+                    objects.append(str(path))
+                if set(realization.get('dependencies', [])) != {entry['path'] for entry in realization.get('link-artifacts', [])}:
+                    raise ValueError('dependency is missing checked link artifacts; rebuild it')
+                own = {'root': str(package_root), 'package': interface['package'],
+                       'interface-checksum': digest(interface_text), 'initializers': realization.get('initializers', [])}
+                all_entries = [*closure, own]
+                cache[package_root] = {'exports': interface.get('exports', []), 'types': interface.get('types', []),
+                    'globals': interface.get('globals', []), 'objects': list(dict.fromkeys(objects)),
+                    'initializers': list(dict.fromkeys(symbol for entry in all_entries for symbol in entry['initializers'])),
+                    'closure': all_entries, 'package': interface['package'], 'build-id': realization['build-id']}
+                break
+            else:
+                raise ValueError(f'build compatible production artifacts for dependency {alias!r} first')
+        dependency = cache[package_root]
+        if specification.get('package', dependency['package']['name']) != dependency['package']['name']:
+            raise ValueError('dependency package identity mismatch')
+        result[alias] = dependency
+    dependency_closure(result)
     return result
 
 
@@ -180,6 +215,9 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     if not all(isinstance(package[field], str) for field in ("name", "version")):
         raise ValueError("package.name and package.version must be strings")
     packages = native_dependencies(root, manifest, target, pointer_bits)
+    closure = dependency_closure(packages)
+    if any(entry['package']['name'] == package['name'] for entry in closure):
+        raise ValueError('root package name conflicts with a dependency')
     files = sorted((root / "src").rglob("*.sev"))
     if not files:
         raise ValueError("package has no src/**/*.sev sources")
@@ -214,6 +252,8 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     # Publishing an artifact requires the actual dialect verifier, not only our structural checks.
     verify_native(ir, mlir_opt)
     native = compile_object(lir, mlir_opt)
+    dependencies = list(dict.fromkeys([*(obj for dependency in packages.values() for obj in dependency['objects']), *native.dependencies]))
+    link_artifacts = [{'path': obj, 'checksum': sha256(Path(obj).read_bytes()).hexdigest()} for obj in dependencies]
     compiler_id = compiler_identity()
     content_id = digest(encode([manifest_text, lock, snapshots]))
     build_id = output_slot(publish, include_tests)
@@ -270,7 +310,17 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                             'receiver-ownership': receiver.ownership if receiver else None,
                             'parameters': [{'name': b.name, 'type': b.type.name, 'ownership': b.ownership} for b in parameters],
                             'result': body.result_type.name, 'result-sources': list(body.result_sources)})
-    semantic_id = digest(encode([declarations, exports, types]))
+    globals_ = []
+    for body in program.bodies:
+        if body.declaration:
+            continue
+        for place in body.storage:
+            if getattr(place, 'exported_name', ''):
+                if any(item['name'] == place.exported_name for item in globals_):
+                    raise ValueError(f'ambiguous exported global {place.exported_name!r}')
+                globals_.append({'name': place.exported_name, 'symbol': place.symbol,
+                                 'type': place.type.name, 'constant': place.constant})
+    semantic_id = digest(encode([declarations, exports, types, globals_]))
     source_root = f'build/{build_id}/{target}/source' if publish else 'source'
     if publish:
         for entry in (*declarations, *symbols):
@@ -278,7 +328,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                 entry['source'] = source_root + '/' + entry['source'].removeprefix('source/')
     interface = {"format": "severian.interface", "version": 1, "package": identity,
                  "semantic-id": semantic_id, "metadata": {"build-id": build_id, "path": realization_path},
-                 "declarations": declarations, "exports": exports, "types": types}
+                 "declarations": declarations, "exports": exports, "types": types, "globals": globals_}
     interface_text = encode(interface)
     realization = {"format": "py_compiler.realization", "version": 1, "package": identity,
                    "scope": "test" if include_tests else "production",
@@ -286,7 +336,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                    "target": target, "abi": abi_id, "pointer-bits": pointer_bits,
                    "interface": {"path": interface_path, "checksum": digest(interface_text)},
                    "artifacts": [{"path": ir_path, "kind": "mlir", "checksum": digest(ir)}],
-                   "dependencies": list(native.dependencies), "native-artifacts": [{"path": object_path, "kind": "object", "checksum": sha256(native.object_bytes).hexdigest()}]}
+                   "dependencies": dependencies, "dependency-closure": closure, "link-artifacts": link_artifacts, "native-artifacts": [{"path": object_path, "kind": "object", "checksum": sha256(native.object_bytes).hexdigest()}]}
     realization['submodules'] = realization_records(program)
     realization["artifacts"].extend([{"path": llvm_path, "kind": "llvm-ir", "checksum": digest(native.llvm_ir)},
                                      {"path": lowered_path, "kind": "llvm-dialect", "checksum": digest(native.llvm_dialect)},
@@ -335,7 +385,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     write_atomic(index_path, encode(index))
     report(f"Built {len(snapshots)} source files; {len(program.constants)} primitive values\nMLIR: {ir_path}\n")
     return {"success": True, "build-id": build_id if publish else None, 'output-slot': build_id, "ir": str(output / ir_path), "object": str(output / object_path),
-            "dependencies": list(native.dependencies), "log": str(output / "debug/build/log.txt")}
+            "dependencies": dependencies, "log": str(output / "debug/build/log.txt")}
 
 
 def realization_records(program):
@@ -402,6 +452,67 @@ import unittest
 
 
 class PackageTests(unittest.TestCase):
+    def test_native_diamond_globals_and_initializers(self):
+        from py_compiler.testing import test_package, build_package
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def package(name, source, dependencies=()):
+                path = root / name
+                (path / 'src').mkdir(parents=True)
+                (path / 'package.json').write_text(encode({
+                    'package': {'name': name, 'version': '0.1.0'},
+                    'dependencies': {dep: {'package': dep, 'path': '../' + dep} for dep in dependencies}}))
+                (path / 'src/lib.sev').write_text(source)
+                return path
+            package('base', 'value = 0\ndef bump() -> int:\n    module.value += 1\n    return module.value\n')
+            branch = 'import base\nvalue = base.bump()\ndef read() -> int:\n    return module.value\n'
+            package('left', branch, ('base',))
+            package('right', branch, ('base',))
+            package('unused', 'import base\nvalue = base.bump()\n', ('base',))
+            package('constants', 'answer := 42\n')
+            app = package('app',
+                'import base\nimport left\nimport right\nimport constants\n'
+                'test "diamond initializes once and isolates identical source globals":\n'
+                '    assert(left.read() == 1)\n    assert(right.read() == 2)\n'
+                '    assert(base.value == 3)\n    assert(left.value == 1)\n'
+                '    left.value = 40\n    left.value += 2\n'
+                '    assert(left.read() == 42)\n    assert(right.read() == 2)\n'
+                '    assert(constants.answer == 42)\n'
+                'test with compiler "imported constants reject mutation":\n'
+                '    reject "imported constant":\n        import constants\n'
+                '        def invalid():\n            constants.answer = 0\n',
+                ('right', 'base', 'unused', 'left', 'constants'))
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = test_package(app)
+            self.assertTrue(result['success'], result)
+            metadata = json.loads((app / 'package.pkg/metadata/realizations/test.json').read_text())
+            self.assertEqual(len(metadata['dependencies']), 5)
+            self.assertEqual(len(metadata['dependency-initializers']), 5)
+            self.assertEqual([entry['package']['name'] for entry in metadata['dependency-closure']],
+                             ['base', 'constants', 'left', 'right', 'unused'])
+            def interface(name):
+                return json.loads((root / name / 'package.pkg/package.pkgi/severian/dev/lib.sevi').read_text())
+            self.assertNotEqual(interface('left')['globals'][0]['symbol'], interface('right')['globals'][0]['symbol'])
+            # A rebuilt leaf invalidates its consumers even when its interface shape is unchanged.
+            (root / 'base/src/lib.sev').write_text('value = 1\ndef bump() -> int:\n    module.value += 1\n    return module.value\n')
+            self.assertTrue(build_package(root / 'base')['success'])
+            with self.assertRaisesRegex(ValueError, 'dependency closure changed'):
+                native_dependencies(app, json.loads((app / 'package.json').read_text()), 'x86_64-unknown-linux-gnu', 64)
+            obj = root / 'base/package.pkg/artifacts/x86_64-unknown-linux-gnu/dev/object/package.o'
+            obj.write_bytes(obj.read_bytes() + b'corrupt')
+            left = root / 'left'
+            with self.assertRaisesRegex(ValueError, 'object checksum mismatch'):
+                native_dependencies(left, json.loads((left / 'package.json').read_text()), 'x86_64-unknown-linux-gnu', 64)
+
+    def test_dependency_closure_rejects_conflicting_package_roots(self):
+        first = {'root': '/first', 'package': {'name': 'same'}, 'initializers': []}
+        second = {**first, 'root': '/second'}
+        with self.assertRaisesRegex(ValueError, 'conflicting local package identity'):
+            dependency_closure({'a': {'closure': [first]}, 'b': {'closure': [second]}})
+        self.assertEqual(dependency_closure({'a': {'closure': [first]}, 'b': {'closure': [first]}}), [first])
+
     def test_only_publication_allocates_a_build_id(self):
         from unittest.mock import patch
         with patch(__name__ + '.new_build_id', return_value='2026_10_11_12_34_56') as generate:

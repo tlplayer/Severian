@@ -15,4 +15,7 @@ class Global(BlockProvider):
         from py_compiler.syntax.generic.storage import GlobalPlace
         cfg.namespaces["module"] = context.global_bindings
         cfg.storage = context.global_storage
-        cfg.storage_factory = lambda binding: GlobalPlace(binding.identity, binding.type)
+        import json
+        cfg.storage_factory = lambda binding: GlobalPlace(
+            json.dumps((context.interface, context.source.path, binding.name)), binding.type,
+            exported_name=binding.name if context.interface else '', constant=binding.constant)

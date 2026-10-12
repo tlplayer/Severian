@@ -39,7 +39,7 @@ class PointerTests(unittest.TestCase):
 
 from dataclasses import dataclass
 from py_compiler.syntax.generic.atom import Atom
-from py_compiler.mlir.src.cfg import name
+from py_compiler.mlir.src.cfg import name, temporary_suffix
 
 
 @dataclass(frozen=True)
@@ -84,7 +84,7 @@ class PointerAccess:
 
     def render_operation(self, operation):
         pointer, index, *values = operation.operands
-        tag = 'store_' + str(operation.span.start) if self.write else str(operation.result.identity)
+        tag = temporary_suffix(operation)
         address = f'%element_address_{tag}'
         lines = [f'{address} = llvm.getelementptr {name(pointer)}[{name(index)}] : (!llvm.ptr, {index.type.mlir}) -> !llvm.ptr, {self.element.mlir}']
         if self.write:

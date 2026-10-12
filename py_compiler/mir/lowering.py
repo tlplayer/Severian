@@ -54,6 +54,10 @@ class Builder:
         self.value_sources = {}
         self.call_result_owners = {}
         self.parameter_bindings = {}
+        self.grammar_captures = {}
+        self.active_grammars = set()
+        self.grammar_expansions = 0
+        self.yield_handler = None
 
     def value(self, type_):
         value = Value(self.next_value, type_)
@@ -91,7 +95,13 @@ class Builder:
         operation.atom.verify(operation)
         self.current.operations.append(operation)
 
+    def capture_expression(self, node):
+        from py_compiler.syntax.block.grammar import capture_expression
+        return capture_expression(node, self.grammar_captures)
+
     def lookup(self, node, env):
+        if node.kind == 'name' and node.token.text in self.grammar_captures:
+            return self.grammar_captures[node.token.text].binding(self)
         if node.kind == 'name' and node.token.text == 'self' and hasattr(self, 'self_binding'):
             return self.self_binding
         if node.kind == "reference":
@@ -144,7 +154,7 @@ class Builder:
         require_context = getattr(expected, 'require_context', None)
         if require_context is not None:
             require_context(self)
-        value = self.expression_value(node, env, expected)
+        value = self.expression_value(self.capture_expression(node), env, expected)
         require_context = getattr(value.type, 'require_context', None) if value is not None else None
         if require_context is not None:
             require_context(self)
@@ -152,6 +162,12 @@ class Builder:
 
     def expression_value(self, node, env, expected=None):
         token = node.token
+        from py_compiler.syntax.block.grammar import expression_grammar, lower_result
+        match = expression_grammar(node, self, env)
+        if match is not None:
+            return lower_result(match, self)
+        if node.kind == 'capture':
+            return node.operands[0].lower(self, expected)
         if node.kind == 'address':
             from py_compiler.syntax.complex.array import ArrayType, MemoryOperation, ElementPlace
             from py_compiler.syntax.function.allocate import resolve_plan
@@ -249,6 +265,9 @@ class Builder:
 
     @located
     def sentence(self, node, env, local_names):
+        from py_compiler.syntax.block.grammar import expand_sentence
+        if expand_sentence(node, self, env):
+            return
         for provider in self.syntax.sentence_providers:
             if provider.matches(node):
                 return provider.lower(node, self, env, local_names)
@@ -343,7 +362,7 @@ def resolve_bodies(module):
     context.initial_flow = FlowState()
     context.resolve_contracts()
     qualifier = '::package=' + context.interface if context.interface else ''
-    initializer = Builder(source, context.bound_syntax, root.identity, "__sev_init_" + source.identity + qualifier, syntax.types["absent"])
+    initializer = Builder(source, context.bound_syntax, root.identity + qualifier, "__sev_init_" + source.identity + qualifier, syntax.types["absent"])
     initializer.context = context
     initializer.block_scope = root.scope
     initializer.declared_nodes = context.declared_nodes

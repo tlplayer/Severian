@@ -7,6 +7,7 @@ class Expression:
     kind: str
     token: object
     operands: tuple = ()
+    tokens: tuple = ()
 
 
 from py_compiler.syntax.operator.ownership import OWNERSHIP
@@ -45,6 +46,7 @@ def parse_expression(tokens, syntax):
     precedence = {spelling: grammar.precedence for spelling, grammar in bindings.items()}
     cursor = [0]
     def parse(minimum=0, strict=False):
+        start = cursor[0]
         if cursor[0] == len(tokens):
             raise ValueError("expected an expression")
         token = tokens[cursor[0]]
@@ -126,6 +128,8 @@ def parse_expression(tokens, syntax):
                 raise ValueError("expected closing call parenthesis")
             cursor[0] += 1
             left = Expression("call", left.token, (left, *arguments))
+        from dataclasses import replace
+        left = replace(left, tokens=tuple(tokens[start:cursor[0]]))
         while cursor[0] < len(tokens):
             level = precedence.get(tokens[cursor[0]].text, -1)
             if level < minimum or (strict and level == minimum):
@@ -141,7 +145,9 @@ def parse_expression(tokens, syntax):
                 left = Expression('chain', operator, (*left.operands, operator, right))
             else:
                 left = Expression("binary", operator, (left, right))
-        return left
+            left = replace(left, tokens=tuple(tokens[start:cursor[0]]))
+        from dataclasses import replace
+        return replace(left, tokens=tuple(tokens[start:cursor[0]]))
     result = parse()
     if cursor[0] != len(tokens):
         raise ValueError(f"unsupported expression suffix {tokens[cursor[0]].text!r}")

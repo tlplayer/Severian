@@ -1,7 +1,7 @@
 """Integer arrays own allocation, indexing and memref lowering."""
 from dataclasses import dataclass, field
 from py_compiler.syntax.generic.atom import Atom
-from py_compiler.mlir.src.cfg import name
+from py_compiler.mlir.src.cfg import name, temporary_suffix
 
 
 @dataclass(frozen=True)
@@ -103,7 +103,7 @@ class MemoryOperation:
 
     def render_operation(self, operation):
         values = operation.operands
-        tag = str(operation.result.identity) if operation.result else 'at_' + str(operation.span.start)
+        tag = temporary_suffix(operation)
         if self.kind == 'allocate':
             count = name(values[0])
             maximum = ((1 << (values[0].type.bits - 1)) - 1) // max(1, operation.result.type.element.bits // 8)

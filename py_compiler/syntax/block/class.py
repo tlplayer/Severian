@@ -134,13 +134,14 @@ class Class(RecordProvider):
                 release(field, cfg, span)
 
 
-def store_field(place, expression, cfg, env, span, owner=None, initialized=True):
+def store_field(place, expression, cfg, env, span, owner=None, initialized=True, value=None):
     from py_compiler.syntax.generic.storage import root_binding
     from py_compiler.syntax.grammar.expression import OWNERSHIP
     mode = expression.token.text if expression.kind == 'unary' and expression.token.text in OWNERSHIP else None
     term = expression.operands[0] if mode else expression
     source = root_binding(term, cfg, env)
-    value = cfg.expr(term, env, place.type)
+    if value is None:
+        value = cfg.expr(term, env, place.type)
     if owner:
         from py_compiler.syntax.generic.storage import BindingPlace
         with BindingPlace(owner, rebind=False).capture(cfg, 'borrow'):

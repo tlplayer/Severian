@@ -45,6 +45,16 @@ class Import(DeclarationProvider):
         if alias in context.package_imports:
             raise ValueError(f'duplicate package import {alias!r}')
         context.package_imports.add(alias)
+        from py_compiler.syntax.generic.storage import GlobalPlace
+        for contract in package.get('globals', ()):
+            symbol = contract['symbol']
+            import re
+            if not re.fullmatch(r'__sev_global_[0-9a-f]{64}', symbol):
+                raise ValueError('invalid imported global symbol')
+            type_ = context.type(contract['type'])
+            type_.module_storage(symbol)
+            context.imported_globals[alias + '.' + contract['name']] = GlobalPlace(
+                symbol, type_, constant=contract['constant'], external_symbol=symbol)
         from py_compiler.syntax.block.record import TypeDeclaration
         from importlib import import_module
         Class = import_module('py_compiler.syntax.block.class').Class

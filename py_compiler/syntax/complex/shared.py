@@ -1,7 +1,7 @@
 """Shared references retain a payload descriptor and a separately owned count."""
 from dataclasses import dataclass
 from py_compiler.syntax.generic.atom import Atom
-from py_compiler.mlir.src.cfg import name
+from py_compiler.mlir.src.cfg import name, temporary_suffix
 
 
 @dataclass(frozen=True)
@@ -80,7 +80,7 @@ class SharedOperation:
 
     def render_operation(self, operation):
         source = name(operation.operands[0])
-        tag = str(operation.result.identity) if operation.result else f'drop_{operation.span.start}_{operation.operands[0].identity}'
+        tag = temporary_suffix(operation)
         desc, shared, data = self.type.descriptor, self.type.mlir, self.type.payload.mlir
         result = name(operation.result) if operation.result else ''
         if self.kind == 'create':

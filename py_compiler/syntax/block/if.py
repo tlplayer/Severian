@@ -43,7 +43,7 @@ class Conditional(BlockProvider):
                 cfg.current.terminator = Terminator("conditional", (Edge(body.identity), Edge(following.identity)), condition)
                 cfg.current = body
             cfg.scope(node.children, dict(env))
-            cfg.flow.end_scope(cfg.live_binding_ids(env))
+            cfg.flow.end_scope(cfg.live_binding_ids(env) | {b.identity for scope in cfg.active_scopes for b in scope.values()})
             if cfg.current.terminator is None:
                 exits.append((cfg.current, dict(cfg.values), cfg.flow.fork()))
             if node.provider.has_condition:

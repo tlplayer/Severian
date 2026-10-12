@@ -10,4 +10,7 @@ class Yield(Keyword):
         return bool(node.tokens) and node.tokens[0].text == self.name
 
     def lower(self, node, cfg, env, local_names):
-        raise ValueError("yield has no declared execution/lowering implementation")
+        if cfg.yield_handler is None:
+            raise ValueError('yield requires an iterator grammar')
+        from py_compiler.syntax.grammar.expression import expression
+        cfg.yield_handler(expression(node.tokens[1:]), env, node.span)

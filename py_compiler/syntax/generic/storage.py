@@ -6,6 +6,8 @@ from hashlib import sha256
 def root_binding(node, cfg, env):
     while node.kind in ('member', 'index'):
         node = node.operands[0]
+    if node.kind == 'capture':
+        return node.operands[0].binding(cfg)
     return cfg.lookup(node, env) if node.kind in ('name', 'reference') else None
 
 
@@ -13,18 +15,33 @@ def root_binding(node, cfg, env):
 class GlobalPlace:
     identity: str
     type: object
+    exported_name: str = ''
+    constant: bool = False
+    external_symbol: str = ''
 
     @property
     def symbol(self):
+        if self.external_symbol:
+            return self.external_symbol
         return "__sev_global_" + sha256(self.identity.encode()).hexdigest()
 
     def declaration(self):
-        return self.type.module_storage(self.symbol)
+        if self.external_symbol:
+            return f'memref.global "private" @{self.symbol} : memref<{self.type.mlir}>'
+        declaration = self.type.module_storage(self.symbol)
+        return declaration.replace('memref.global "private"', 'memref.global "public"', 1) if self.exported_name else declaration
 
     def read(self, cfg, span):
+        if self.external_symbol and self not in cfg.body.storage:
+            cfg.body.storage.append(self)
         return cfg.emit("read", self.type, (), self, span)
 
     def write(self, cfg, value, span):
+        if self.external_symbol:
+            if self.constant:
+                raise ValueError('cannot assign to an imported constant')
+            if self not in cfg.body.storage:
+                cfg.body.storage.append(self)
         cfg.effect("write", (value,), self, span)
 
     def atom(self, operation):
@@ -34,8 +51,8 @@ class GlobalPlace:
         return Atom(self, (self.type,), None, ('copy',), ('mutation',), self)
 
     def render_operation(self, operation):
-        from py_compiler.mlir.src.cfg import name
-        suffix = str(operation.result.identity) if operation.result else f"store_{operation.span.start}_{operation.operands[-1].identity}"
+        from py_compiler.mlir.src.cfg import name, temporary_suffix
+        suffix = temporary_suffix(operation)
         address = f"%global_{suffix}"
         lines = [f"{address} = memref.get_global @{self.symbol} : memref<{self.type.mlir}>"]
         if operation.result:
@@ -66,8 +83,8 @@ class FieldPlace:
         return Atom(self, (self.receiver.type, self.type), None, ('borrow', 'move' if callable(getattr(self.type, 'release', None)) else 'copy'), ('mutation',), self)
 
     def render_operation(self, operation):
-        from py_compiler.mlir.src.cfg import name
-        suffix = str(operation.result.identity) if operation.result else f"store_{operation.span.start}_{operation.operands[-1].identity}"
+        from py_compiler.mlir.src.cfg import name, temporary_suffix
+        suffix = temporary_suffix(operation)
         address = f"%field_{suffix}_{self.index}"
         lines = [f"{address} = llvm.getelementptr {name(self.receiver)}[0, {self.index}] : (!llvm.ptr) -> !llvm.ptr, {self.record_type}"]
         if operation.result:

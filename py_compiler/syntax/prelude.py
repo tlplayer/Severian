@@ -3,9 +3,9 @@ from importlib import import_module
 
 
 BLOCKS = (
-    ('block.while', 'While'), ('block.import', 'Import'), ('block.if', 'Conditional'), ('block.elif', 'Elif'), ('block.else', 'Else'),
+    ('block.for', 'For'), ('block.while', 'While'), ('block.import', 'Import'), ('block.if', 'Conditional'), ('block.elif', 'Elif'), ('block.else', 'Else'),
     ('block.class', 'Class'), ('block.trait', 'Trait'), ('block.enum', 'Enum'),
-    ('block.function', 'Function'), ('block.test', 'Test'),
+    ('block.function', 'Function'), ('block.test', 'Test'), ('block.grammar', 'Grammar'),
     ('block.operator', 'Operator'), ('block.extend', 'Extend'), ('block.match', 'Match'),
     ('block.with', 'With'), ('block.unsafe', 'Unsafe'), ('block.select', 'Select'),
 )

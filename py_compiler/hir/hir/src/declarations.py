@@ -30,6 +30,8 @@ class DeclarationContext:
         self.active_provider = None
         self.callables, self.functions, self.compilers = [], {}, {}
         self.global_bindings, self.global_storage = {}, {}
+        self.imported_globals = {}
+        self.sentence_grammars = []
         self.types = dict(syntax.types)
         from py_compiler.syntax.prelude import context_type_definitions
         self.types.update(context_type_definitions())

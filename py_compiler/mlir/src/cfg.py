@@ -1,9 +1,20 @@
 """Lower checked SSA execution bodies to func, cf and arith dialects."""
 from hashlib import sha256
+from dataclasses import replace
 
 
 def name(value):
     return f"%v{value.identity}"
+
+
+def temporary_suffix(operation):
+    """Function-local names identify emitted operations, never source locations."""
+    if operation.result is not None:
+        return str(operation.result.identity)
+    if operation.lowering_position is None:
+        raise ValueError('MLIR effect operation requires a lowering position')
+    block, position = operation.lowering_position
+    return f'effect_{block}_{position}'
 
 
 def source_location(body, span=None):
@@ -41,7 +52,11 @@ def render_body(body):
         if block.identity:
             args = ", ".join(f"{name(v)}: {v.type.mlir}" for v in block.parameters)
             lines.append(f"  ^bb{block.identity}" + (f"({args})" if args else "") + ":")
-        for operation in block.operations:
+        for position, operation in enumerate(block.operations):
+            # An expansion may repeat both the span and operands. The registered
+            # block/operation coordinates distinguish each emission without
+            # changing MIR identities, source locations, or Atom contracts.
+            operation = replace(operation, lowering_position=(block.identity, position))
             value = operation.result
             operands = operation.operands
             prefix = f"    {name(value)} = " if value is not None else "    "
@@ -83,6 +98,35 @@ import unittest
 
 
 class DebugLocationTests(unittest.TestCase):
+    def test_repeated_effects_keep_locations_and_have_unique_temporaries(self):
+        import re
+        from py_compiler.frontend.source.source import SourceFile
+        from py_compiler.mir.cfg.cfg import Body, ExecutionBlock, Operation, Value, Edge, Terminator
+        from py_compiler.syntax.complex.array import ArrayType, MemoryOperation
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.mlir.src.lib import verify_native
+        source = SourceFile('repeated-store.sev', 'storage[index] = value\n')
+        types = Syntax().types
+        arguments = (Value(0, ArrayType(types['int'])), Value(1, types['index']), Value(2, types['int']))
+        implementation = MemoryOperation('store')
+        operation = Operation('memory-store', None, arguments, implementation, source.span(0, 22))
+        operation = replace(operation, atom=implementation.atom(operation))
+        body = Body('repeated-store', 'repeated_store', source.path, types['absent'])
+        body.source_snapshot = source
+        body.source_span = operation.span
+        body.blocks = [ExecutionBlock(0, arguments, [operation, operation],
+                                      Terminator('jump', (Edge(1),))),
+                       ExecutionBlock(1, (), [operation], Terminator('finish'))]
+        text = render_body(body)
+        definitions = re.findall(r'^\s*(%[A-Za-z_0-9]+)\s*=', text, re.MULTILINE)
+        self.assertEqual(len(definitions), len(set(definitions)))
+        self.assertEqual(text.count('memref.store'), 3)
+        self.assertEqual(text, render_body(body))
+        self.assertTrue(all('loc("repeated-store.sev":1:1)' in line
+                            for line in text.splitlines() if 'memref.store' in line))
+        self.assertIsNone(operation.lowering_position)
+        verify_native('module {\n' + text + '\n}')
+
     def test_region_headers_and_block_labels_are_not_operations(self):
         lines = ['scf.while (%arg = %initial) : (i64) -> i64 {',
                  '^bb0(%arg: i64):', 'scf.yield %arg : i64', '}']

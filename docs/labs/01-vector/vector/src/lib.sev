@@ -44,6 +44,17 @@ class Vector:
         self.items[self.count] = value
         self.count += 1
 
+    grammar assign[self, "[", index: int, "]", "=", value: int]() -> absent:
+        self.set(index, value)
+
+    grammar get[self, "[", index: int, "]"]() -> int:
+        return self.get(index)
+
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+        while position < self.count with position = 0:
+            yield self.items[position]
+            position += 1
+
     def pop(self: borrow Self) -> int:
         assert(self.count > 0)
         self.count -= 1
@@ -261,3 +272,272 @@ test with compiler "borrowed class alias cannot replace a pinned field":
             pointer = pointer[int](buffer.data)
             alias.data = allocate[int](2)
             return pointer[0]
+
+
+test "class grammar reuses checked vector mutation":
+    values = Vector()
+    values.push(1)
+    values.push(2)
+    values[0] = 42
+    values[1] = 7
+    assert(values.get(0) == 42)
+    assert(values.get(1) == 7)
+
+
+test "class grammar preserves logical bounds checks":
+    throws "assertion failed":
+        values = Vector()
+        values[0] = 42
+
+
+test "iterator values match indexed access with loop local counter":
+    X = Vector()
+    X.push(42)
+    X.push(7)
+    visited = 0
+    i = 99
+    for x in X with i = 0:
+        assert(x == X[i])
+        i += 1
+        visited += 1
+    assert(visited == 2)
+    assert(i == 99)
+    X.push(11)
+
+
+test "empty iterator does not execute consumer":
+    values = Vector()
+    visited = 0
+    for x in values:
+        visited += 1
+    assert(visited == 0)
+
+
+test "iterator continue resumes producer and break releases view":
+    values = Vector()
+    values.push(1)
+    values.push(2)
+    values.push(3)
+    total = 0
+    for x in iterator(values):
+        scratch = allocate[int](1)
+        if x == 1:
+            continue
+        total += x
+        break
+    assert(total == 2)
+    values.push(4)
+
+
+test "iterator return cleans producer and consumer locals":
+    def first() -> int:
+        values = Vector()
+        values.push(42)
+        for x in values:
+            scratch = allocate[int](8)
+            return x
+        return 0
+    assert(first() == 42)
+
+
+test "multiple yields preserve producer locals":
+    class Pairs:
+        value: int
+        grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+            scratch = allocate[int](1)
+            scratch[0] = self.value
+            yield scratch[0]
+            scratch[0] += 1
+            yield scratch[0]
+    pairs = Pairs(7)
+    total = 0
+    for x in pairs:
+        total += x
+    assert(total == 15)
+    for x in pairs:
+        break
+
+
+test with compiler "iterator view prevents receiver mutation":
+    reject "while a borrow is live":
+        class Items:
+            value: int
+            def set(self: borrow Self):
+                self.value = 2
+            grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+                yield self.value
+        def invalid():
+            values = Items(1)
+            for x in values:
+                values.set()
+
+
+test with compiler "yield requires an iterator context":
+    reject "yield requires an iterator grammar":
+        def invalid():
+            yield 1
+
+
+test with compiler "stored iterator needs an independent frame":
+    reject "iterator values currently require direct for consumption":
+        class Items:
+            value: int
+            grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+                yield self.value
+        def invalid():
+            values = Items(1)
+            cursor = iterator(values)
+
+
+test "nested consumers have independent continuations":
+    values = Vector()
+    values.push(1)
+    values.push(2)
+    total = 0
+    for a in values:
+        for b in values:
+            total += a * b
+    assert(total == 9)
+
+
+test "with initializer runs once before iteration":
+    class Counter:
+        count: int
+        def increment(self: borrow Self) -> int:
+            self.count += 1
+            return 0
+    counter = Counter(0)
+    values = Vector()
+    values.push(5)
+    values.push(8)
+    for x in values with i = counter.increment():
+        assert(x == values[i])
+        i += 1
+    assert(counter.count == 1)
+
+
+test "conditional yields preserve continuation":
+    class Choices:
+        enabled: bool
+        grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+            if self.enabled:
+                yield 7
+            else:
+                yield 3
+            yield 11
+    choices = Choices(true)
+    total = 0
+    for value in choices:
+        total += value
+    assert(total == 18)
+
+
+test with compiler "yield enforces the iterator element type":
+    reject:
+        class Items:
+            value: int
+            grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+                yield "wrong"
+        def invalid():
+            values = Items(1)
+            for x in values:
+                assert(x == 1)
+
+
+test "while with initializes once and shadows the outer binding":
+    class Counter:
+        calls: int
+        def start(self: borrow Self) -> int:
+            self.calls += 1
+            return 0
+    counter = Counter(0)
+    position = 99
+    visited = 0
+    while position < 3 with position = counter.start():
+        visited += 1
+        position += 1
+    assert(visited == 3)
+    assert(counter.calls == 1)
+    assert(position == 99)
+    while false with position = counter.start():
+        visited += 1
+    assert(counter.calls == 2)
+    assert(visited == 3)
+
+
+test "while with initializer can read the shadowed binding":
+    i = 2
+    visited = 0
+    while i < 4 with i = i:
+        visited += 1
+        i += 1
+    assert(visited == 2)
+    assert(i == 2)
+
+
+test "nested while with bindings remain independent":
+    visited = 0
+    while i < 2 with i = 0:
+        while i < 2 with i = 0:
+            visited += 1
+            i += 1
+        i += 1
+    assert(visited == 4)
+
+
+test "while with owned initializer survives continue and cleans up on break":
+    visited = 0
+    while scratch[0] < 4 with scratch = allocate[int, location=memory.heap](1):
+        scratch[0] += 1
+        if scratch[0] == 1:
+            continue
+        visited += 1
+        if scratch[0] == 3:
+            break
+    assert(visited == 2)
+    while false with scratch = allocate[int, location=memory.heap](1):
+        visited += 1
+    assert(visited == 2)
+
+
+test "return cleans the while with initializer":
+    def first() -> int:
+        while true with scratch = allocate[int, location=memory.heap](1):
+            scratch[0] = 42
+            return scratch[0]
+        return 0
+    assert(first() == 42)
+
+
+test with compiler "while with binding cannot escape the loop":
+    reject "unknown binding 'position'":
+        def invalid():
+            while position < 2 with position = 0:
+                position += 1
+            assert(position == 2)
+
+
+test "repeated iterator expansions give stores unique MLIR temporaries":
+    class Pair:
+        value: int
+        grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+            scratch = allocate[int](1)
+            scratch[0] = self.value
+            yield scratch[0]
+            scratch[0] += 1
+            yield scratch[0]
+    class Last:
+        value: int
+    pair = Pair(4)
+    last = Last(0)
+    output = allocate[int](1)
+    for value in pair:
+        output[0] += value
+        last.value = value
+    assert(output[0] == 9)
+    assert(last.value == 5)
+    for value in pair:
+        output[0] += value
+        last.value = value
+    assert(output[0] == 18)
+    assert(last.value == 5)

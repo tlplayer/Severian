@@ -16,6 +16,7 @@ class Operation:
     payload: object
     span: object
     atom: object = None
+    lowering_position: tuple[int, int] | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
