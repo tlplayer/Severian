@@ -12,13 +12,13 @@ class Vector[T = int]:
     def capacity(self: view Self) -> int:
         return len(self.items)
 
-    def get(self: view Self, position: int) -> T with {-self.count <= position < self.count}:
+    def get(self: view Self, position: int) -> T with -self.count <= position < self.count:
         if position < 0:
             position += self.count
         value = copy self.items[position]
         return value
 
-    def set(self: borrow Self, position: int, value: T) with {-self.count <= position < self.count}:
+    def set(self: borrow Self, position: int, value: T) with -self.count <= position < self.count:
         if position < 0:
             position += self.count
         self.items[position] = value
@@ -78,12 +78,12 @@ trait VectorSort[T]:
 # These domains partition initialized length, not allocated capacity. The cutoff
 # is a lab policy, not a claim that 32 is optimal for every element type/target.
 class TrivialVectorSort[T]: VectorSort[T]:
-    def sort(values: borrow Vector[T]) -> borrow Vector[T] with {values.count <= 1}:
+    def sort(values: borrow Vector[T]) -> borrow Vector[T] with values.count <= 1:
         return borrow values
 
 
 class InsertionVectorSort[T]: VectorSort[T]:
-    def sort(values: borrow Vector[T]) -> borrow Vector[T] with {1 < values.count <= 32}:
+    def sort(values: borrow Vector[T]) -> borrow Vector[T] with 1 < values.count <= 32:
         position = 1
         while position < values.size():
             value = values.get(position)
@@ -100,7 +100,7 @@ class InsertionVectorSort[T]: VectorSort[T]:
 
 
 class MergeVectorSort[T]: VectorSort[T]:
-    def sort(values: borrow Vector[T]) -> borrow Vector[T] with {values.count > 32}:
+    def sort(values: borrow Vector[T]) -> borrow Vector[T] with values.count > 32:
         count = values.size()
         scratch = Vector[T]()
         scratch.reserve(count)
@@ -217,14 +217,19 @@ test "sort reevaluates length after mutation and preserves duplicates":
 
 test "direct trait calls and vector methods preserve generic element types":
     values = Vector[i32]()
-    values.push(i32(9))
-    values.push(i32(-2))
+    values.push(i64(9))
+    values.push(-2)
     sorted_values = VectorSort[i32].sort(values)
-    assert(sorted_values.get(0) == i32(-2))
-    sorted_values.set(1, i32(4))
-    assert(values.get(1) == i32(4))
+    assert(sorted_values.get(0) == -2)
+    sorted_values.set(1, 4)
+    assert(values.get(1) == 4)
     values.sort()
-    assert(values.get(0) == i32(-2))
+    assert(values.get(0) == -2)
+    wide = Vector[i64]()
+    wide.push(values.get(0))
+    wide.push(values.get(1))
+    assert(wide.get(0) == -2)
+    assert(wide.get(1) == 4)
 
 
 test "insertion and merge sorting preserve the order of equal keys":
@@ -260,7 +265,7 @@ test "insertion and merge sorting preserve the order of equal keys":
 test with compiler "another matching sorter is ambiguity rather than an override":
     reject:
         class OverlappingVectorSort: VectorSort[int]:
-            def sort(values: borrow Vector[int]) -> borrow Vector[int] with {values.count > 1}:
+            def sort(values: borrow Vector[int]) -> borrow Vector[int] with values.count > 1:
                 return borrow values
 
         def invalid():
@@ -526,7 +531,7 @@ test "class grammar preserves logical bounds checks":
         values[0] = 42
 
 
-test "iterator values match indexed access with loop local counter":
+test "iterator values match indexed access with existing counter":
     X = Vector()
     X.push(42)
     X.push(7)
@@ -537,7 +542,7 @@ test "iterator values match indexed access with loop local counter":
         i += 1
         visited += 1
     assert(visited == 2)
-    assert(i == 99)
+    assert(i == 2)
     X.push(11)
 
 
@@ -636,22 +641,6 @@ test "nested consumers have independent continuations":
     assert(total == 9)
 
 
-test "with initializer runs once before iteration":
-    class Counter:
-        count: int
-        def increment(self: borrow Self) -> int:
-            self.count += 1
-            return 0
-    counter = Counter(0)
-    values = Vector()
-    values.push(5)
-    values.push(8)
-    for x in values with i = counter.increment():
-        assert(x == values[i])
-        i += 1
-    assert(counter.count == 1)
-
-
 test "conditional yields preserve continuation":
     class Choices:
         enabled: bool
@@ -678,79 +667,6 @@ test with compiler "yield enforces the iterator element type":
             values = Items(1)
             for x in values:
                 assert(x == 1)
-
-
-test "while with initializes once and shadows the outer binding":
-    class Counter:
-        calls: int
-        def start(self: borrow Self) -> int:
-            self.calls += 1
-            return 0
-    counter = Counter(0)
-    position = 99
-    visited = 0
-    while position < 3 with position = counter.start():
-        visited += 1
-        position += 1
-    assert(visited == 3)
-    assert(counter.calls == 1)
-    assert(position == 99)
-    while false with position = counter.start():
-        visited += 1
-    assert(counter.calls == 2)
-    assert(visited == 3)
-
-
-test "while with initializer can read the shadowed binding":
-    i = 2
-    visited = 0
-    while i < 4 with i = i:
-        visited += 1
-        i += 1
-    assert(visited == 2)
-    assert(i == 2)
-
-
-test "nested while with bindings remain independent":
-    visited = 0
-    while i < 2 with i = 0:
-        while i < 2 with i = 0:
-            visited += 1
-            i += 1
-        i += 1
-    assert(visited == 4)
-
-
-test "while with owned initializer survives continue and cleans up on break":
-    visited = 0
-    while scratch[0] < 4 with scratch = allocate[int, location=memory.heap](1):
-        scratch[0] += 1
-        if scratch[0] == 1:
-            continue
-        visited += 1
-        if scratch[0] == 3:
-            break
-    assert(visited == 2)
-    while false with scratch = allocate[int, location=memory.heap](1):
-        visited += 1
-    assert(visited == 2)
-
-
-test "return cleans the while with initializer":
-    def first() -> int:
-        while true with scratch = allocate[int, location=memory.heap](1):
-            scratch[0] = 42
-            return scratch[0]
-        return 0
-    assert(first() == 42)
-
-
-test with compiler "while with binding cannot escape the loop":
-    reject "unknown binding 'position'":
-        def invalid():
-            while position < 2 with position = 0:
-                position += 1
-            assert(position == 2)
 
 
 test "repeated iterator expansions give stores unique MLIR temporaries":
@@ -904,11 +820,10 @@ test "class vector growth copies and negative indexing":
     while i < 32 with 
     {
         i = 0,
-        suffix i += 1
+        suffix i += 1,
     }:
         point = Point(i, i + 1)
         values.push(point)
-        i += 1
     head = values.get(-33)
     tail = values.get(-1)
     assert(head.x == 42)
@@ -1071,3 +986,15 @@ test "char vector preserves Unicode growth copies and moves":
     moved = move values
     pointer = moved.pointer_view()
     assert(pointer[2] == 'z')
+
+
+test "known wider integer values fit a narrower vector":
+    values = Vector[i32]()
+    values.push(i64(6))
+    known = i64(-2)
+    values.push(known)
+    values.push(i64(3) + i64(4))
+    values.sort()
+    assert(values.get(0) == -2)
+    assert(values.get(1) == 6)
+    assert(values.get(2) == 7)

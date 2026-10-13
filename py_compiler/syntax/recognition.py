@@ -1,3 +1,4 @@
+from functools import cached_property
 from dataclasses import dataclass
 from py_compiler.syntax.keywords.keyword import KEYWORDS
 from py_compiler.syntax.symbol.catalog import SYMBOLS
@@ -10,22 +11,22 @@ class Syntax:
     symbols: tuple = SYMBOLS
     include_tests: bool = True
 
-    @property
+    @cached_property
     def block_providers(self):
         from py_compiler.syntax.prelude import block_providers
         return block_providers()
 
-    @property
+    @cached_property
     def sentence_providers(self):
         from py_compiler.syntax.prelude import sentence_providers
         return sentence_providers()
 
-    @property
+    @cached_property
     def expression_providers(self):
         from py_compiler.syntax.prelude import expression_providers
         return expression_providers()
 
-    @property
+    @cached_property
     def scope_providers(self):
         from importlib import import_module
         from py_compiler.syntax.block.function import Function
@@ -33,10 +34,15 @@ class Syntax:
                   import_module('py_compiler.syntax.block.class').Class())
         return {owner.scope_kind: owner for owner in owners}
 
-    @property
+    @cached_property
     def expansions(self):
         from py_compiler.syntax.grammar.expansion import standard_expansions
         return standard_expansions()
+
+    @cached_property
+    def grammar_catalog(self):
+        from py_compiler.syntax.catalog import collect_grammars
+        return collect_grammars(self)
 
     def recognition_order(self):
         from py_compiler.syntax.grammar.lexical import providers
@@ -45,12 +51,12 @@ class Syntax:
         from py_compiler.syntax.grammar.literals import LiteralModuleGrammar
         return (*providers(self), ExpressionGrammar(self), SourceGrammar(self), LiteralModuleGrammar(self))
 
-    @property
+    @cached_property
     def registry(self):
         from py_compiler.syntax.generic.grammar import Registry
         return Registry(self.recognition_order())
 
-    @property
+    @cached_property
     def types(self):
         from py_compiler.syntax.prelude import type_definitions
         return type_definitions(self.pointer_bits)

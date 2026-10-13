@@ -1,4 +1,4 @@
-"""Explicit scalar conversion edges; annotations do not request conversions."""
+"""Scalar conversion edges, including implicit lossless integer conversions."""
 from dataclasses import dataclass
 from decimal import Decimal
 from py_compiler.syntax.generic.constructor import Constructor
@@ -7,6 +7,55 @@ from py_compiler.syntax.generic.constructor import Constructor
 def bounds(owner):
     return (-(1 << (owner.bits - 1)) if owner.signed else 0,
             (1 << (owner.bits - int(owner.signed))) - 1)
+
+
+def lossless_integer_conversion(source, target):
+    if source.family != 'integer' or target.family != 'integer':
+        return False
+    source_low, source_high = bounds(source)
+    target_low, target_high = bounds(target)
+    return target_low <= source_low and source_high <= target_high
+
+
+def known_integer(value, cfg):
+    """Prove constants from SSA definitions; mutable storage and phi inputs are unknown."""
+    definitions = {op.result.identity: op for block in cfg.body.blocks for op in block.operations
+                   if op.result is not None}
+    def evaluate(value):
+        if value.type.family != 'integer':
+            return None
+        operation = definitions.get(value.identity)
+        if operation is None:
+            return None
+        if operation.kind == 'constant':
+            return operation.payload.value
+        operands = [evaluate(v) for v in operation.operands]
+        if not operands or any(v is None for v in operands):
+            return None
+        if operation.kind == 'convert' and isinstance(operation.payload, ScalarConversion):
+            result = operands[0]
+        else:
+            spelling = getattr(operation.payload, 'spelling', None)
+            if len(operands) == 2 and spelling in ('+', '-', '*'):
+                left, right = operands
+                result = {'+': lambda: left + right, '-': lambda: left - right,
+                          '*': lambda: left * right}[spelling]()
+            else:
+                return None
+        low, high = bounds(value.type)
+        return result if low <= result <= high else None
+    return evaluate(value)
+
+
+def integer_conversion_rank(value, target, cfg):
+    if lossless_integer_conversion(value.type, target):
+        return 1
+    if value.type.family == target.family == 'integer':
+        constant = known_integer(value, cfg)
+        low, high = bounds(target)
+        if constant is not None and low <= constant <= high:
+            return 2
+    return None
 
 
 def literal_conversion(target, source, value):
@@ -58,7 +107,8 @@ class ScalarConversion:
 
     def atom(self, operation):
         from py_compiler.syntax.generic.atom import Atom
-        return Atom(self.target, (self.source,), self.target, ('view',), ('panic',), self)
+        effects = () if lossless_integer_conversion(self.source, self.target) else ('panic',)
+        return Atom(self.target, (self.source,), self.target, ('view',), effects, self)
 
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name
@@ -145,10 +195,83 @@ import unittest
 
 
 class ConversionTests(unittest.TestCase):
+    def test_known_integers_narrow_without_runtime_checks(self):
+        from py_compiler.mlir.src.lib import lower, render
+        for term in ('i64(6)', 'i64(3) + i64(3)', 'i64(-2147483648)', 'i64(2147483647)'):
+            result = self.compile('def take(value: i32) -> i32:\n    return value\n'
+                                  f'def work() -> i32:\n    value = {term}\n    return take(value)\n')
+            self.assertFalse(result.diagnostics, str(result.diagnostics))
+            self.assertNotIn('cf.assert', render(lower(result.program)))
+        for term in ('i64(2147483648)', 'i64(-2147483649)'):
+            result = self.compile(f'def work() -> i32:\n    return {term}\n')
+            self.assertTrue(result.diagnostics)
+            self.assertIn('outside i32 range', str(result.diagnostics[0]))
+
+    def test_constant_proof_does_not_follow_unknown_loop_values(self):
+        result = self.compile('def take(value: i8):\n    return\n'
+                              'def work(n: i64):\n    value = i64(6)\n'
+                              '    while value < n:\n        take(value)\n        value += 1\n')
+        self.assertTrue(result.diagnostics)
+        self.assertIn('explicit conversion', str(result.diagnostics[0]))
+
     def compile(self, source):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax
         return compile_source('conversions.sev', source, Syntax())
+
+    def test_implicit_integer_conversion_uses_the_entire_source_range(self):
+        from py_compiler.mlir.src.lib import lower, render
+        for source, target, opcode in (('i32', 'i64', 'arith.extsi'),
+                                       ('u32', 'i64', 'arith.extui'),
+                                       ('u32', 'u64', 'arith.extui'),
+                                       ('i64', 'i128', 'arith.extsi')):
+            with self.subTest(source=source, target=target):
+                result = self.compile(f'def accept(value: {target}) -> {target}:\n    return value\n'
+                                      f'def work(value: {source}) -> {target}:\n'
+                                      f'    assigned: {target} = value\n    return accept(value)\n')
+                self.assertFalse(result.diagnostics, str(result.diagnostics))
+                text = render(lower(result.program))
+                self.assertIn(opcode, text)
+                self.assertNotIn('cf.assert', text)
+        for source, target in (('i64', 'i32'), ('i32', 'u64'), ('u64', 'i64')):
+            with self.subTest(source=source, target=target):
+                result = self.compile(f'def work(value: {source}) -> {target}:\n    return value\n')
+                self.assertTrue(result.diagnostics)
+                self.assertIn('explicit conversion', str(result.diagnostics[0]))
+
+    def test_integer_expression_results_widen_at_the_destination(self):
+        result = self.compile('class Item:\n    value: i32\n'
+                              'def small(value: i32) -> i32:\n    return value\n'
+                              'def work(values: array[i32], item: Item) -> i64:\n'
+                              '    indexed: i64 = values[0]\n'
+                              '    field: i64 = item.value\n'
+                              '    called: i64 = small(9)\n'
+                              '    expression: i64 = small(2) + small(3)\n'
+                              '    return indexed + field + called + expression\n')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+
+    def test_contextual_integer_literals_check_both_i32_bounds(self):
+        declaration = 'def accept(value: i32) -> i32:\n    return value\n'
+        for value in (-2147483648, 2147483647):
+            result = self.compile(declaration + f'def work() -> i32:\n    return accept({value})\n')
+            self.assertFalse(result.diagnostics, str(result.diagnostics))
+        for value in (-2147483649, 2147483648):
+            result = self.compile(declaration + f'def work() -> i32:\n    return accept({value})\n')
+            self.assertTrue(result.diagnostics)
+            self.assertIn('outside i32 range', str(result.diagnostics[0]))
+
+    def test_integer_overloads_prefer_exact_and_reject_equal_conversion_ranks(self):
+        declarations = ('def choose(value: i32) -> i32:\n    return value\n'
+                        'def choose(value: i64) -> i64:\n    return value\n')
+        result = self.compile(declarations + 'def work(value: i32) -> i32:\n    return choose(value)\n')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        result = self.compile(declarations + 'def work(value: i16) -> i64:\n    return choose(value)\n')
+        self.assertTrue(result.diagnostics)
+        self.assertIn('ambiguous callable overload', str(result.diagnostics[0]))
+        result = self.compile('def choose(value: string) -> i64:\n    return 0\n'
+                              'def choose(value: i64) -> i64:\n    return value\n'
+                              'def work(value: i32) -> i64:\n    return choose(value)\n')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
 
     def test_explicit_literal_constructors_and_annotation_boundaries(self):
         for source, expected in (('value = char(128512)\n', 128512), ('value = bool(2)\n', True),

@@ -21,6 +21,10 @@ class Return:
             if not sources or value.identity in cfg.stack_values:
                 raise ValueError('returned borrow escapes the lifetime of its source binding')
             cfg.body.result_sources = tuple(sorted(set(cfg.body.result_sources) | sources))
+            for loop in reversed(cfg.loops):
+                leave = getattr(loop, 'leave', None)
+                if leave:
+                    leave(cfg)
             if cfg.phases:
                 cfg.phases.leave()
             cfg.cleanup_memory((b for scope in cfg.active_scopes for b in scope.values()), node.span)
@@ -68,6 +72,10 @@ class Return:
                 raise ValueError('memory return requires ownership')
             elif term.operands[0].kind == 'index' and term.operands[0].operands[0].token.text == 'pointer' and not cfg.value_sources.get(value.identity):
                 raise ValueError('returning a pointer view requires a result lifetime contract')
+        for loop in reversed(cfg.loops):
+            leave = getattr(loop, 'leave', None)
+            if leave:
+                leave(cfg)
         if cfg.phases:
             cfg.phases.leave()
         cfg.cleanup_memory((binding for scope in cfg.active_scopes for binding in scope.values()), node.span)

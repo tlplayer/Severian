@@ -5,6 +5,17 @@ from py_compiler.syntax.primitive.numeric.grammar import NumericLiteral, scalar_
 
 class Integer(Primitive):
     conversion_sources = frozenset(('integer', 'float', 'bool', 'char', 'byte', 'pointer'))
+
+    def from_value(self, value, cfg, span):
+        from py_compiler.syntax.primitive.numeric.conversion import lossless_integer_conversion, ScalarConversion, known_integer
+        if not lossless_integer_conversion(value.type, self):
+            constant = known_integer(value, cfg)
+            if constant is not None:
+                from py_compiler.syntax.function.calls import literal_value
+                return literal_value(self.accept_literal(value.type, constant), self, cfg, span)
+            raise ValueError(f'{value.type.name} does not satisfy {self.name}; use an explicit conversion')
+        return cfg.emit('convert', self, (value,), ScalarConversion(value.type, self), span)
+
     def render_constant(self, value, symbol):
         return [], [f'%value = arith.constant {int(value)} : {self.mlir}']
 

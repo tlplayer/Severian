@@ -62,6 +62,22 @@ class ContractPhases:
         self.check(self.entry.suffix, 'suffix')
 
 
+class NestedPhases:
+    """Loop fixes share sentence hooks; loop exits own their suffix actions."""
+    def __init__(self, parent, current):
+        self.parent, self.current = parent, current
+
+    def during(self):
+        if self.parent:
+            self.parent.during()
+        self.current.during()
+
+    def leave(self):
+        # Return lowering exits active loops before leaving the callable.
+        if self.parent:
+            self.parent.leave()
+
+
 import unittest
 
 
@@ -118,7 +134,7 @@ class ContractPhaseTests(unittest.TestCase):
 
     def test_callbacks_can_take_the_current_value(self):
         program = self.compile('def failed(value: int):\n    assert(value < 0)\n'
-                               'def work(x: int) -> int with {fix x >= 0 -> failed(x)}:\n'
+                               'def work(x: int) -> int with {fix x >= 0 -> failed(x),}:\n'
                                '    x = -1\n    x = 1\n    return x\n')
         body = next(body for body in program.bodies if body.declaration == 'work')
         calls = [op for block in body.blocks for op in block.operations if op.kind == 'call']

@@ -138,19 +138,11 @@ def signature(node, owner=""):
             cursor += 1
         result = ''.join(t.text for t in items[start:cursor])
     if cursor < len(items):
-        if items[cursor].text != "with" or cursor + 2 >= len(items) or items[cursor + 1].text != "{" or items[-1].text != "}":
-            raise ValueError("with requires a braced acceptance contract")
-        current, depth = [], 0
-        for token in items[cursor + 2:-1]:
-            if token.text == "," and depth == 0:
-                if current:
-                    add_clause(current, guards, obligations, complexity, suffix, failure_actions)
-                    current = []
-            else:
-                current.append(token)
-                depth += (token.text in ('(', '[', '{')) - (token.text in (')', ']', '}'))
-        if current:
-            add_clause(current, guards, obligations, complexity, suffix, failure_actions)
+        if items[cursor].text != 'with':
+            raise ValueError('expected with before acceptance clauses')
+        from importlib import import_module
+        for clause in import_module('py_compiler.syntax.block.with').clause_groups(items[cursor + 1:]):
+            add_clause(clause, guards, obligations, complexity, suffix, failure_actions)
     for index, token in enumerate(items):
         if token.text == "complexity" and index >= 2 and items[index - 1].text == "." and items[index - 2].text not in (items[0].text, "F"):
             raise ValueError("complexity contract must name its declaring function")

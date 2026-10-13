@@ -1,4 +1,5 @@
 """With expansions contribute imports and grammar to a bounded lexical scope."""
+from functools import cached_property
 from dataclasses import dataclass
 
 
@@ -16,7 +17,7 @@ class ScopedSyntax:
     def __getattr__(self, name):
         return getattr(self.parent, name)
 
-    @property
+    @cached_property
     def block_providers(self):
         result = dict(self.parent.block_providers)
         for imported in self.imports:
@@ -26,6 +27,11 @@ class ScopedSyntax:
                 result[grammar.spelling] = grammar
         return result
 
+    @cached_property
+    def grammar_catalog(self):
+        from py_compiler.syntax.catalog import collect_grammars
+        return collect_grammars(self)
+
     def recognition_order(self):
         from py_compiler.syntax.grammar.lexical import providers
         from py_compiler.syntax.function.grammar import ExpressionGrammar
@@ -33,7 +39,7 @@ class ScopedSyntax:
         from py_compiler.syntax.grammar.literals import LiteralModuleGrammar
         return (*providers(self), ExpressionGrammar(self), SourceGrammar(self), LiteralModuleGrammar(self))
 
-    @property
+    @cached_property
     def registry(self):
         from py_compiler.syntax.generic.grammar import Registry
         return Registry(self.recognition_order())

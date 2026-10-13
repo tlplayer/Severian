@@ -65,18 +65,32 @@ def select(entries, arguments, cfg, env, explicit=()):
     candidates = realized
     if not candidates:
         raise ValueError('; '.join(failures))
-    def accepts(entry):
+    def ranks(entry):
+        from py_compiler.syntax.primitive.numeric.conversion import integer_conversion_rank
+        result = []
         for value, (_, annotation) in zip(values, entry.parameters):
             if annotation is None:
+                result.append(0)
                 continue
             target = cfg.context.type(annotation)
             if value.type == target:
+                result.append(0)
+                continue
+            conversion_rank = integer_conversion_rank(value, target, cfg)
+            if conversion_rank is not None:
+                result.append(conversion_rank)
                 continue
             if value.type.family == 'record' and target.name in cfg.context.by_name[value.type.name].traits:
+                result.append(1)
                 continue
-            return False
-        return True
-    candidates = [e for e in candidates if accepts(e)]
+            return None
+        return tuple(result)
+    ranked = [(entry, rank) for entry in candidates if (rank := ranks(entry)) is not None]
+    # A candidate wins only when no argument has a worse conversion and at
+    # least one has a better one. Equally good paths remain ambiguous.
+    candidates = [entry for entry, rank in ranked if not any(
+        all(a <= b for a, b in zip(other, rank)) and any(a < b for a, b in zip(other, rank))
+        for _, other in ranked)]
     if not candidates:
         raise ValueError('no callable matches the argument types')
     if len(candidates) != 1:
@@ -462,10 +476,10 @@ class BorrowedTraitRoutingTests(unittest.TestCase):
 trait Sort[T]:
     def sort(values: borrow Values[T]) -> borrow Values[T]
 class Small[T]: Sort[T]:
-    def sort(values: borrow Values[T]) -> borrow Values[T] with {values.count <= 32}:
+    def sort(values: borrow Values[T]) -> borrow Values[T] with {values.count <= 32,}:
         return borrow values
 class Large[T]: Sort[T]:
-    def sort(values: borrow Values[T]) -> borrow Values[T] with {values.count > 32}:
+    def sort(values: borrow Values[T]) -> borrow Values[T] with {values.count > 32,}:
         return borrow values
 '''
 

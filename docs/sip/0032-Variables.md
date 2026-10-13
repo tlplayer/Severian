@@ -182,7 +182,56 @@ The Python None in my patch was an internal “no result” marker, not Severian
 '''
 
 ```
+### union
 
+the union type is handy when 1 or more types can be used in a return, a function or a type.
+
+```
+def add[T:float|int](a:T,b:T) -> T:
+    return a+b
+
+add(0,0)
+add(0.0,1.0)
+add(0.1,1) # invalid exception T cannot be inferred from T int and T2 float
+
+def fail() -> Error | int:
+    return 0 if true else throw Error("Failed to be true")
+
+#unions can comprise many other types
+union numeric:
+    i8
+    f8
+    ...
+    f128
+    i128
+    u128
+```
+
+### Enum
+
+The primary use case is destructuring enum variants:
+
+```sev
+enum Shape:
+    Circle(radius: float)
+    Rectangle(width: float, height: float)
+
+
+def area(shape: Shape) -> float:
+    match shape:
+        case Circle(radius):
+            return 3.1415926 * radius ** 2
+
+        case Rectangle(width, height):
+            return width * height
+```
+
+Unlike Python structural matching, Severian does not attempt to inspect arbitrary objects, invoke user-defined matching protocols, or infer object structure at runtime.
+
+A pattern may only inspect structure already present in the static type.
+
+Enums in match statements are exhaustive and cannoted default to _ they must all be enumerated. The lint step can replace _ with all the other cases for convenience and ease of future compilation but then the failure will propogate with a new enum value (THIS IS GOOD) because unaccounted for values in the match could lead to bugs. adding V1 |...Vn | _ would result in the same expansion 
+of appending Vn+1 to the end as new enums come and replace the _
 ## Problem(s)
 
 - Conversion of types how to avoid making a new conversion when the conversion path can be inferred?

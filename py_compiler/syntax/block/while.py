@@ -7,32 +7,106 @@ from py_compiler.mir.ownership.flow import FlowState
 from py_compiler.syntax.keywords.keyword import Keyword
 
 
-def split_loop_initializer(tokens, spelling):
+@dataclass(frozen=True)
+class LoopClauses:
+    initializers: tuple
+    suffix: tuple
+    fix: tuple = ()
+
+
+def split_loop_initializer(tokens, spelling, *, clauses=False):
     """A loop owns the meaning of its optional, once-only with initializer."""
     depth = 0
     for index, token in enumerate(tokens):
         depth += (token.text in ('(', '[', '{')) - (token.text in (')', ']', '}'))
         if depth == 0 and token.text == 'with':
             initializer = tuple(tokens[index + 1:])
-            if (len(initializer) < 3 or initializer[0].kind != 'IDENTIFIER'
-                    or initializer[1].text not in ('=', ':=')):
-                raise ValueError(f'{spelling} with requires a loop-local initializer')
-            expression(initializer[2:])
+            if clauses:
+                from importlib import import_module
+                parts = import_module('py_compiler.syntax.block.with').clause_groups(initializer)
+                initializers, suffix, obligations = [], [], []
+                for part in parts:
+                    if part[0].text == 'prefix':
+                        part = part[1:]
+                        if not part:
+                            raise ValueError('prefix requires a loop clause')
+                    elif part[0].text == 'fix':
+                        if len(part) < 2:
+                            raise ValueError('fix requires a condition')
+                        obligations.append(part[1:])
+                        continue
+                    if part[0].text in ('suffix', 'defer'):
+                        if len(part) < 2 or part[1].text in ('return', 'break', 'continue'):
+                            raise ValueError('loop suffix requires a non-transferring sentence')
+                        suffix.append(part[1:])
+                    else:
+                        if is_initializer(part) and any(is_initializer(previous) and previous[0].text == part[0].text for previous in initializers):
+                            raise ValueError('duplicate loop-local initializer')
+                        initializers.append(part)
+                return tuple(tokens[:index]), LoopClauses(tuple(initializers), tuple(suffix), tuple(obligations))
+            validate_initializer(initializer, spelling)
             return tuple(tokens[:index]), initializer
     return tuple(tokens), ()
+
+
+def validate_initializer(initializer, spelling):
+    if (len(initializer) < 3 or initializer[0].kind != 'IDENTIFIER'
+            or initializer[1].text not in ('=', ':=')):
+        raise ValueError(f'{spelling} with requires a loop-local initializer')
+    expression(initializer[2:])
+
+
+def is_initializer(tokens):
+    return len(tokens) >= 3 and tokens[0].kind == 'IDENTIFIER' and tokens[1].text in ('=', ':=')
+
+
+def emit_clause(node, cfg, env, phase):
+    from py_compiler.syntax.catalog import assignment_spellings
+    depth, assignment = 0, False
+    assignments = assignment_spellings(cfg.syntax)
+    for token in node.tokens:
+        if depth == 0 and token.text in assignments:
+            assignment = True
+        depth += (token.text in ('(', '[', '{')) - (token.text in (')', ']', '}'))
+    if assignment:
+        cfg.scope((node,), dict(env))
+        return
+    from py_compiler.syntax.block.phases import ContractPhases
+    from py_compiler.syntax.function.contracts import Callable, add_clause
+    guards, obligations, suffix, actions = [], [], [], []
+    add_clause(node.tokens, guards, obligations, {}, suffix, actions)
+    entry = Callable(node, 'while', (), None, tuple(guards), failure_actions=tuple(actions))
+    checker = ContractPhases(entry, cfg, env)
+    term = guards[0]
+    # An action call may return absent; predicates must produce bool.
+    if term.kind == 'call' and not actions:
+        value = cfg.expr(term, env)
+        if value is None:
+            return
+        if value.type != cfg.syntax.types['bool']:
+            raise ValueError('loop clause requires a condition or a no-result action')
+        from py_compiler.syntax.complex.object import Assert
+        cfg.effect('assert', (value,), Assert(f'{phase} contract failed in while'), node.span)
+    else:
+        checker.check(entry.guards, phase)
 
 
 def initialize_loop(node, initializer, cfg, env):
     from py_compiler.syntax.grammar.assignment import Assignment
     loop_env, local_names = dict(env), set()
-    if initializer:
-        # Retain a shadowed outer binding on SSA backedges. The RHS still sees it.
-        old = loop_env.get(initializer[0].text)
-        if old is not None:
-            loop_env[':with-outer:' + old.identity] = old
-        init = replace(node, identity=node.identity + ':with', tokens=initializer,
+    initializers = initializer.initializers if isinstance(initializer, LoopClauses) else ((initializer,) if initializer else ())
+    for index, initializer in enumerate(initializers):
+        init = replace(node, identity=node.identity + ':with:' + str(index), tokens=initializer,
                        children=[], provider=None)
-        Assignment().lower(init, cfg, loop_env, local_names, declare_local=True)
+        if not is_initializer(initializer):
+            emit_clause(init, cfg, loop_env, 'prefix')
+            continue
+        # A prefix assignment updates an existing binding, just like the body.
+        # Only an absent name introduces a new binding.
+        existing = cfg.lookup(expression(initializer[:1]), loop_env)
+        if existing is not None and initializer[1].text == ':=':
+            raise ValueError(f'binding {initializer[0].text!r} already exists in this scope')
+        Assignment().lower(init, cfg, loop_env, local_names, declare_local=existing is None)
     return loop_env, local_names
 
 
@@ -45,12 +119,61 @@ class Loop:
     live: set
     scope_depth: int
     exits: list = field(default_factory=list)
+    suffix: tuple = ()
+    env: object = None
+    contract: object = None
+    controls: tuple = ()
+    builder: object = None
+    checking: bool = False
+    leaving: bool = False
+
+    def during(self):
+        cfg = self.builder
+        if self.contract:
+            self.contract.during()
+        if self.checking or self.leaving:
+            return
+        self.checking = True
+        try:
+            for term, action in self.controls:
+                condition = cfg.expr(term, self.env, cfg.syntax.types['bool'])
+                taken, following = cfg.block(), cfg.block()
+                cfg.current.terminator = Terminator('conditional',
+                    (Edge(taken.identity), Edge(following.identity)), condition)
+                values, flow = dict(cfg.values), cfg.flow.fork()
+                cfg.current = taken
+                # A guard belongs to its declaring loop, including when checked
+                # inside nested blocks. Exit any entered inner loops first.
+                for inner in reversed(cfg.loops):
+                    if inner is self:
+                        break
+                    leave = getattr(inner, 'leave', None)
+                    if leave:
+                        leave(cfg)
+                self.jump(cfg, term.token.span, exit_loop=action == 'break')
+                cfg.current, cfg.values, cfg.flow = following, values, flow
+        finally:
+            self.checking = False
+
+    def leave(self, cfg):
+        previous = self.leaving
+        self.leaving = True
+        try:
+            if self.contract:
+                self.contract.during()
+            for node in self.suffix:
+                emit_clause(node, cfg, self.env, 'suffix')
+                if self.contract:
+                    self.contract.during()
+        finally:
+            self.leaving = previous
 
     def jump(self, cfg, span, *, exit_loop=False):
         locals_ = [binding for scope in cfg.active_scopes[self.scope_depth:] for binding in scope.values()
                    if binding.identity not in self.live]
         cfg.cleanup_memory(locals_, span)
         cfg.flow.end_scope(self.live)
+        self.leave(cfg)
         # The condition can exit before the first iteration. Ownership on every
         # continuing edge must therefore agree with the entry state.
         if not exit_loop and cfg.flow.moved != self.initial_flow.moved:
@@ -100,7 +223,7 @@ class While(BlockProvider):
     spelling = 'while'
 
     def parse_header(self, items):
-        condition, initializer = split_loop_initializer(super().parse_header(items), self.spelling)
+        condition, initializer = split_loop_initializer(super().parse_header(items), self.spelling, clauses=True)
         expression(condition)
         return condition, initializer
 
@@ -109,9 +232,13 @@ class While(BlockProvider):
         if not initializer:
             return self.lower_loop(replace(node, header=condition), cfg, env)
         loop_env, local_names = initialize_loop(node, initializer, cfg, env)
+        suffix = tuple(replace(node, identity=node.identity + ':suffix:' + str(index),
+                               tokens=tokens, children=[], provider=None)
+                       for index, tokens in enumerate(initializer.suffix)) if isinstance(initializer, LoopClauses) else ()
         cfg.active_scopes.append(loop_env)
         try:
-            result = self.lower_loop(replace(node, header=condition), cfg, loop_env)
+            result = self.lower_loop(replace(node, header=condition), cfg, loop_env, suffix,
+                                     initializer.fix if isinstance(initializer, LoopClauses) else ())
             if cfg.current.terminator is None:
                 cfg.cleanup_memory((loop_env[name] for name in local_names), node.span)
         finally:
@@ -120,7 +247,18 @@ class While(BlockProvider):
                            {b.identity for scope in cfg.active_scopes for b in scope.values()})
         return result
 
-    def lower_loop(self, node, cfg, env):
+    def lower_loop(self, node, cfg, env, suffix=(), obligations=()):
+        from py_compiler.syntax.block.phases import ContractPhases, NestedPhases
+        from py_compiler.syntax.function.contracts import Callable, add_clause
+        conditions, actions, controls = [], [], []
+        for tokens in obligations:
+            if len(tokens) >= 3 and tokens[-2].text == '->' and tokens[-1].text in ('continue', 'break'):
+                controls.append((expression(tokens[:-2]), tokens[-1].text))
+            else:
+                add_clause(tokens, conditions, [], {}, [], actions)
+        entry = Callable(node, 'while', (), None, (), obligations=tuple(conditions), failure_actions=tuple(actions))
+        contract = ContractPhases(entry, cfg, env)
+        contract.enter()
         carried = tuple(binding for binding in env.values()
                         if binding.identity not in cfg.storage and binding.identity not in cfg.flow.moved)
         initial_values, initial_flow = dict(cfg.values), cfg.flow.fork()
@@ -140,14 +278,19 @@ class While(BlockProvider):
         cfg.current.terminator = Terminator('conditional',
                                            (Edge(body.identity), Edge(exhausted.identity)), condition)
         live = cfg.live_binding_ids(env) | {b.identity for scope in cfg.active_scopes for b in scope.values()}
-        loop = Loop(header, following, carried, initial_flow, live, len(cfg.active_scopes))
+        loop = Loop(header, following, carried, initial_flow, live, len(cfg.active_scopes),
+                    suffix=suffix, env=env, contract=contract, controls=tuple(controls), builder=cfg)
         cfg.current = body
         cfg.loops.append(loop)
+        previous_phases = cfg.phases
+        cfg.phases = NestedPhases(previous_phases, loop)
         try:
+            loop.during()
             cfg.scope(node.children, dict(env))
             if cfg.current.terminator is None:
                 loop.jump(cfg, node.span)
         finally:
+            cfg.phases = previous_phases
             cfg.loops.pop()
         exits = [(exhausted, dict(header_values), initial_flow.fork()), *loop.exits]
         from py_compiler.mir.ownership.flow import reconcile_owners
@@ -164,6 +307,7 @@ class While(BlockProvider):
             cfg.value_sources.setdefault(value.identity, set()).update(cfg.value_sources.get(source.identity, ()))
             if source.identity in cfg.stack_values:
                 cfg.stack_values.add(value.identity)
+        contract.during()
         return 1
 
 
@@ -171,6 +315,68 @@ import unittest
 
 
 class WhileTests(unittest.TestCase):
+    def test_braced_loop_clause_requires_a_final_comma(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('missing-comma.sev',
+                                'def work():\n    while false with {i = 0}:\n        assert(false)\n', Syntax())
+        self.assertTrue(result.diagnostics)
+        self.assertIn("with clauses must end with ','", str(result.diagnostics[0]))
+
+    def test_fix_control_guards_compile_to_loop_edges(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.mlir.src.lib import lower, render
+        source = ('def work() -> int:\n    i = 0\n    while i < 5 with\n'
+                  '    {fix i == 1 -> continue, fix i == 3 -> break, suffix i += 1,}:\n'
+                  '        assert(i != 1)\n    return i\n')
+        result = compile_source('loop-guards.sev', source, Syntax())
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        render(lower(result.program))
+
+    def test_prefix_reuses_the_existing_binding(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        for header in ('i = 0', '{i = 0, suffix i += 1,}'):
+            result = compile_source('existing-loop-variable.sev',
+                                    'def work() -> int:\n    i = 99\n'
+                                    f'    while i < 3 with {header}:\n'
+                                    '        i += 1\n    return i\n', Syntax())
+            self.assertFalse(result.diagnostics, str(result.diagnostics))
+            body = next(body for body in result.program.bodies if body.declaration == 'work')
+            self.assertEqual(len([binding for binding in body.bindings if binding.name == 'i']), 1)
+            returned = [block.terminator.value for block in body.blocks if block.terminator.kind == 'finish']
+            self.assertIn(returned[0], [value for block in body.blocks for value in block.parameters])
+
+    def test_prefix_cannot_hide_or_rebind_an_existing_constant(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        for declaration, initializer, diagnostic in (
+            ('i := 99', 'i = 0', 'cannot rebind constant'),
+            ('i = 99', 'i := 0', 'already exists'),
+        ):
+            result = compile_source('constant-loop-variable.sev',
+                                    f'def work():\n    {declaration}\n'
+                                    f'    while false with {initializer}:\n        assert(false)\n', Syntax())
+            self.assertTrue(result.diagnostics)
+            self.assertIn(diagnostic, str(result.diagnostics[0]))
+
+    def test_braced_suffix_is_emitted_on_continue_break_and_return(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.mlir.src.lib import lower, render
+        for end in ('continue', 'break', 'return i'):
+            source = ('def tick(value: int):\n    return\n'
+                      'def work() -> int:\n    while i < 3 with\n'
+                      '    {i = 0, suffix tick(i), suffix i += 1,}:\n'
+                      f'        {end}\n    return 9\n')
+            result = compile_source('suffix.sev', source, Syntax())
+            self.assertFalse(result.diagnostics, str(result.diagnostics))
+            body = next(b for b in result.program.bodies if b.declaration == 'work')
+            calls = [op for block in body.blocks for op in block.operations if op.kind == 'call']
+            self.assertEqual(len(calls), 1)
+            render(lower(result.program))
+
     def test_jumps_release_locals_before_their_edges(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax

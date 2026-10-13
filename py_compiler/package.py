@@ -227,11 +227,17 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
             raise ValueError("source symlink escapes the package")
         snapshots.append((path.relative_to(root).as_posix(), path.read_bytes().decode("utf-8")))
     lock = (root / "package.lock").read_text(encoding="utf-8") if (root / "package.lock").exists() else encode({"version": 1, "packages": []})
-    # Executor.map preserves source order while independent source units compile concurrently.
-    with ThreadPoolExecutor(max_workers=jobs) as executor:
-        results = list(executor.map(lambda pair: compile_source(pair[0], pair[1], syntax,
-                            stop_after=stop_after or 'mir', interface=package['name'], native_packages=packages,
-                            debug_path=str(root / pair[0])), snapshots))
+    def compile_snapshot(pair):
+        return compile_source(pair[0], pair[1], syntax, stop_after=stop_after or 'mir',
+                              interface=package['name'], native_packages=packages,
+                              debug_path=str(root / pair[0]))
+    # Keep single-source compilation on the interruptible main thread.
+    if len(snapshots) == 1 or jobs == 1:
+        results = [compile_snapshot(pair) for pair in snapshots]
+    else:
+        # Executor.map preserves source order for independent source units.
+        with ThreadPoolExecutor(max_workers=jobs) as executor:
+            results = list(executor.map(compile_snapshot, snapshots))
     errors = [diagnostic for result in results for diagnostic in result.diagnostics]
     if errors:
         report("\n\n".join(map(str, errors)) + "\n", True)
@@ -454,6 +460,23 @@ import unittest
 
 
 class PackageTests(unittest.TestCase):
+    def test_single_source_compiles_on_the_calling_thread(self):
+        from unittest.mock import patch
+        import threading
+        caller = threading.get_ident()
+        def interrupt(*args, **kwargs):
+            self.assertEqual(threading.get_ident(), caller)
+            raise KeyboardInterrupt
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/lib.sev').write_text('value = 1\n')
+            (root / 'package.json').write_text(encode({'package': {'name': 'interrupt', 'version': '0.1.0'}}))
+            with patch(__name__ + '.compile_source', side_effect=interrupt), patch(__name__ + '.ThreadPoolExecutor') as executor:
+                with self.assertRaises(KeyboardInterrupt):
+                    build(root, stop_after='mir')
+                executor.assert_not_called()
+
     def test_native_diamond_globals_and_initializers(self):
         from py_compiler.testing import test_package, build_package
         import contextlib

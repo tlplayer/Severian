@@ -44,7 +44,7 @@ def main(argv=None):
                        "syntax.primitive.bool.declarations", "syntax.primitive.char.declarations",
                        "syntax.primitive.byte.byte", "syntax.primitive.pointer.operations",
                        "syntax.primitive.numeric.conversion", "syntax.complex.array", "syntax.complex.generic", "syntax.function.contracts", "syntax.dynamic.dynamic", "syntax.complex.string", "syntax.operator.operation",
-                       "syntax.block.while", "syntax.block.grammar", "syntax.function.layout", "syntax.function.allocate", "syntax.grammar.expression", "syntax.grammar.call", "syntax.block.class", "syntax.block.trait", "syntax.block.unsafe", "syntax.block.test", "syntax.prelude", "mlir.src.lib", "mlir.src.cfg", "lir.src.lib", "package", "testing"]
+                       "syntax.block.while", "syntax.block.with", "syntax.block.grammar", "syntax.function.layout", "syntax.function.allocate", "syntax.grammar.expression", "syntax.grammar.call", "syntax.block.class", "syntax.block.trait", "syntax.block.unsafe", "syntax.block.test", "syntax.prelude", "mlir.src.lib", "mlir.src.cfg", "lir.src.lib", "package", "testing"]
             suite = unittest.defaultTestLoader.loadTestsFromNames(["py_compiler." + m for m in modules])
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
         if args.command == 'test':
@@ -72,8 +72,25 @@ def main(argv=None):
         print("\n\n".join(result["sample"]))
         print("Full log: " + result["log"])
         return 1
+    except KeyboardInterrupt:
+        print('Interrupted.', file=sys.stderr)
+        return 130
     except (OSError, ValueError, Diagnostic, subprocess.TimeoutExpired) as failure:
         print(str(failure), file=sys.stderr)
         if args.command == "build":
             print("Full log: " + str(Path(args.package).resolve() / "package.pkg/debug/build/log.txt"), file=sys.stderr)
         return 1
+
+
+import unittest
+
+
+class InterruptTests(unittest.TestCase):
+    def test_keyboard_interrupt_has_a_clean_exit(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+        output = io.StringIO()
+        with patch(__name__ + '.test_package', side_effect=KeyboardInterrupt), contextlib.redirect_stderr(output):
+            self.assertEqual(main(['test']), 130)
+        self.assertEqual(output.getvalue(), 'Interrupted.\n')

@@ -156,6 +156,10 @@ class Builder:
         if require_context is not None:
             require_context(self)
         value = self.expression_value(self.capture_expression(node), env, expected)
+        if (value is not None and expected is not None and value.type != expected
+                and value.type.family == expected.family == 'integer'):
+            from py_compiler.syntax.function.calls import coerce
+            value = coerce(value, expected, self, node.token.span)
         require_context = getattr(value.type, 'require_context', None) if value is not None else None
         if require_context is not None:
             require_context(self)

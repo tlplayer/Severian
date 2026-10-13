@@ -29,35 +29,35 @@ def contract_action_order() with
 }:
     return
 
-def default_contract(x: int) -> int with {x > 0 -> contract_failed()}:
+def default_contract(x: int) -> int with x > 0 -> contract_failed():
     x = -1
     return x
 
-def prefix_contract(x: int) -> int with {prefix x > 0 -> contract_failed()}:
+def prefix_contract(x: int) -> int with prefix x > 0 -> contract_failed():
     x = -1
     return x
 
-def fix_contract(x: int) -> int with {fix 0 <= x <= 100 -> contract_failed()}:
+def fix_contract(x: int) -> int with fix 0 <= x <= 100 -> contract_failed():
     x = 101
     x = 50
     x = -1
     x = 100
     return x
 
-def fix_entry_exit(x: int) -> int with {fix x > 0 -> contract_failed()}:
+def fix_entry_exit(x: int) -> int with fix x > 0 -> contract_failed():
     return x
 
-def fix_nested(x: int, change: bool) -> int with {fix x <= 100 -> contract_failed()}:
+def fix_nested(x: int, change: bool) -> int with fix x <= 100 -> contract_failed():
     if change:
         x = 101
         x = 50
     return x
 
-def suffix_contract(x: int) -> int with {suffix x > 0 -> contract_failed()}:
+def suffix_contract(x: int) -> int with suffix x > 0 -> contract_failed():
     x = -1
     return x
 
-def deferred_contract(x: int) with {defer x > 0 -> contract_failed()}:
+def deferred_contract(x: int) with defer x > 0 -> contract_failed():
     x = -1
 
 class ContractBox:
@@ -124,11 +124,227 @@ test "fix checks after a call without instrumenting the callee":
 
 test with compiler "contract arrows require a condition and a callable action":
     reject:
-        def missing_condition(x: int) with {fix -> contract_failed()}:
+        def missing_condition(x: int) with fix -> contract_failed():
             return
     reject:
-        def missing_action(x: int) with {fix x > 0 ->}:
+        def missing_action(x: int) with fix x > 0 ->:
             return
     reject:
-        def value_action(x: int) with {fix x > 0 -> 42}:
+        def value_action(x: int) with fix x > 0 -> 42:
             return
+
+
+test "with initializer runs once before iteration":
+    class Counter:
+        count: int
+        def increment(self: borrow Self) -> int:
+            self.count += 1
+            return 0
+    counter = Counter(0)
+    for x in [5, 8] with i = counter.increment():
+        assert(x == 5 + i * 3)
+        i += 1
+    assert(counter.count == 1)
+
+
+test "while with initializes the existing binding once":
+    class Counter:
+        calls: int
+        def start(self: borrow Self) -> int:
+            self.calls += 1
+            return 0
+    counter = Counter(0)
+    position = 99
+    visited = 0
+    while position < 3 with {position = counter.start(),}:
+        visited += 1
+        position += 1
+    assert(visited == 3)
+    assert(counter.calls == 1)
+    assert(position == 3)
+    while false with {position = counter.start(),}:
+        visited += 1
+    assert(counter.calls == 2)
+    assert(visited == 3)
+    assert(position == 0)
+
+
+test "while with initializer reads and updates the same binding":
+    i = 2
+    visited = 0
+    while i < 4 with {i = i,}:
+        visited += 1
+        i += 1
+    assert(visited == 2)
+    assert(i == 4)
+
+
+test "nested while counters use distinct names":
+    visited = 0
+    while row < 2 with {row = 0,}:
+        while column < 2 with {column = 0,}:
+            visited += 1
+            column += 1
+        row += 1
+    assert(visited == 4)
+
+
+test "while with owned initializer survives continue and cleans up on break":
+    visited = 0
+    while scratch[0] < 4 with {scratch = allocate[int, location=memory.heap](1),}:
+        scratch[0] += 1
+        if scratch[0] == 1:
+            continue
+        visited += 1
+        if scratch[0] == 3:
+            break
+    assert(visited == 2)
+    while false with {scratch = allocate[int, location=memory.heap](1),}:
+        visited += 1
+    assert(visited == 2)
+
+
+test "return cleans the while with initializer":
+    def first() -> int:
+        while true with {scratch = allocate[int, location=memory.heap](1),}:
+            scratch[0] = 42
+            return scratch[0]
+        return 0
+    assert(first() == 42)
+
+
+test with compiler "while with binding cannot escape the loop":
+    reject "unknown binding 'position'":
+        def invalid():
+            while position < 2 with {position = 0,}:
+                position += 1
+            assert(position == 2)
+
+
+test "braced while suffix runs once per entered iteration":
+    i = 0
+    visited = 0
+    visit_count = 0
+    suffixes = 0
+    while i < 5 with
+    {
+        suffix i += 1,
+        suffix suffixes += 1,
+    }:
+        if i == 1:
+            continue
+        visited = visited * 10 + i
+        visit_count += 1
+        if i == 3:
+            break
+    assert(i == 4)
+    assert(suffixes == 4)
+    assert(visit_count == 3)
+    assert(visited == 23)  # Visited 0, 2, 3.
+    while false with {i = 0, suffix suffixes += 1,}:
+        assert(false)
+    assert(suffixes == 4)
+    assert(i == 0)
+
+
+test "while prefix runs once and fix and suffix share loop scope":
+    entries = 0
+    visited = 0
+    while i < 3 with
+    {
+        prefix i = 0,
+        prefix entries += 1,
+        fix 0 <= i <= 3,
+        suffix i += 1,
+        suffix i <= 3,
+    }:
+        visited += 1
+        continue
+    assert(entries == 1)
+    assert(visited == 3)
+
+
+test "while fix detects a broken promise before it is repaired":
+    throws "fix contract failed in while":
+        while i < 3 with {i = 0, fix i >= 0, suffix i += 1,}:
+            i = -1
+            i = 0
+
+
+test "while prefix executes even when the condition is initially false":
+    entries = 0
+    exits = 0
+    while false with {prefix entries += 1, suffix exits += 1,}:
+        assert(false)
+    assert(entries == 1)
+    assert(exits == 0)
+
+
+test "loop fix guards skip one value and break before visiting three":
+    i = 0
+    visited = 0
+    visit_count = 0
+    suffixes = 0
+    while i < 5 with
+    {
+        fix i == 1 -> continue,
+        fix i == 3 -> break,
+        suffix i += 1,
+        suffix suffixes += 1,
+    }:
+        visited = visited * 10 + i
+        visit_count += 1
+    assert(visit_count == 2)
+    assert(visited == 2)  # Visited 0 and 2; the guard excludes 3.
+    assert(i == 4)  # The break at 3 exits through the suffix.
+    assert(suffixes == 4)
+
+
+test "loop fix guard checks a body mutation before the next sentence":
+    i = 0
+    suffixes = 0
+    while i < 5 with
+    {
+        fix i == 3 -> break,
+        suffix suffixes += 1,
+    }:
+        i = 3
+        assert(false)
+    assert(i == 3)
+    assert(suffixes == 1)
+
+
+test with compiler "braced with clauses require a final comma":
+    reject "with clauses must end with ','":
+        def missing_comma(value: int) with {value > 0}:
+            return
+
+
+def inline_contract_error(value: int) -> int with value == 0 -> Error("expected zero"):
+    return value
+
+
+test "single inline condition accepts an Error action":
+    assert(inline_contract_error(0) == 0)
+
+
+test "single inline condition reports its Error action":
+    throws "expected zero":
+        inline_contract_error(1)
+
+
+test "single inline loop suffix runs at each iteration exit":
+    i = 0
+    count = 0
+    while i < 3 with suffix i += 1:
+        count += 1
+    assert(i == 3)
+    assert(count == 3)
+
+
+test "single inline loop guard exits before the body":
+    i = 0
+    while i < 5 with fix i == 3 -> break:
+        assert(i < 3)
+        i += 1
+    assert(i == 3)

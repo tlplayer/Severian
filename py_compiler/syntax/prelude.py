@@ -137,7 +137,7 @@ class PreludeTests(unittest.TestCase):
         self.assertEqual(operation.atom.owner.name, 'byte')
 
     def test_phase_owners_attach_to_the_existing_execution_contract(self):
-        result = self.compile('def checked(x: int) -> int with {prefix x > 0, fix x > 0, suffix x > 0}:\n    return x\n')
+        result = self.compile('def checked(x: int) -> int with {prefix x > 0, fix x > 0, suffix x > 0,}:\n    return x\n')
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         assertions = [o for body in result.program.bodies for block in body.blocks for o in block.operations if o.kind == 'assert']
         self.assertGreaterEqual(len(assertions), 3)

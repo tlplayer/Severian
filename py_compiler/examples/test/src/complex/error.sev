@@ -22,8 +22,8 @@ test "valid contracts do not execute Error failure actions":
 
 test with compiler "Error contract actions require a diagnostic message":
     reject:
-        def missing_message(x: int) with {fix x > 0 -> Error()}:
+        def missing_message(x: int) with {fix x > 0 -> Error(),}:
             return
     reject:
-        def wrong_message(x: int) with {fix x > 0 -> Error(123)}:
+        def wrong_message(x: int) with {fix x > 0 -> Error(123),}:
             return
