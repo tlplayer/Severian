@@ -28,9 +28,70 @@ In the following order:
 
 ## Appendix
 
--- all terms, file formats, variables, classes, functions, traits in a table
 
-
+- Prelude traits: 
+-- Generics: (T,C,N,G, Y, K, V, N)
+-- Primitives: Equatable, Comparable, Formattable, Convert[T], Default, Arithmetic, BitArithmetic
+-- Util traits: Hash, Sortable, Ownership, Printable, Numeric, Formattable, Serde, Share
+-- Callable
+prelude/
+├── generic/
+│   ├── T, C, N, G, Y, K, V, W
+│   └── constraints
+│
+├── comparison/
+│   ├── Equal
+│   ├── Compare
+│   └── Hash
+│
+├── numeric/
+│   ├── Numeric
+│   ├── Integer
+│   ├── Floating
+│   ├── Signed
+│   └── BitArithmitic
+│
+├── collection/
+│   ├── Iterable
+│   ├── Sized
+│   ├── Indexable
+│   ├── Contains
+│   ├── Sortable
+│   └── MutableCollection
+│
+├── conversion/
+│   ├── Convertible
+│   ├── Printable
+│   ├── Formattable
+│   └── Parseable
+│
+├── ownership/
+│   ├── Ownership (Copy,Move,Borrow,Drop, abbreviation)
+│   ├── Copy
+│   ├── View
+│   ├── Borrow
+│   ├── Mirror
+│   ├── Move
+│   ├── Drop
+│   └── Share
+│
+├── callable/
+│   ├── Call
+│   ├── Await
+│   └── Generator
+│
+├── Error/
+│   ├── Diagnostic
+│   ├── Warning
+├── io/
+│   ├── Read
+│   ├── Write
+│   ├── Seek
+│   └── Close
+│
+└── introspection/
+    ├── Reflectable
+    └── Error
 
 ## Examples
 Examples
