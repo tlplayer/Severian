@@ -31,6 +31,13 @@ class Function(DeclarationProvider):
         entry.type_arguments = dict(context.template_types)
         if receiver:
             entry.type_arguments['Self'] = context.types[receiver.name]
+            if not entry.templates:
+                def concrete(annotation):
+                    if annotation == 'Self':
+                        return receiver.name
+                    return context.type(annotation).name if annotation else annotation
+                entry.parameters = tuple((name, concrete(annotation)) for name, annotation in entry.parameters)
+                entry.result = concrete(entry.result)
         imported = []
         active = node.syntax
         while hasattr(active, "parent"):
@@ -54,6 +61,8 @@ class Function(DeclarationProvider):
         builder.block_scope = context.callable_scope(entry)
         builder.declaration_scope = (*entry.scope, node.identity)
         builder.body.declaration = entry.name
+        builder.body.result_ownership = entry.result_ownership
+        builder.body.dispatch_guards = tuple(' '.join(token.text for token in guard.tokens) for guard in entry.guards)
         builder.body.source_span = node.span
         builder.declared_nodes = context.declared_nodes
         builder.namespaces["module"] = context.global_bindings
@@ -66,7 +75,10 @@ class Function(DeclarationProvider):
             entry.receiver.configure(builder, node, parameters)
             builder.receiver = entry.receiver
             builder.receiver_value = parameters[0]
-        builder.constructor = bool(entry.receiver and entry.name.rsplit(".", 1)[-1] == entry.receiver.name.rsplit(".", 1)[-1].split('[', 1)[0])
+        receiver_declaration = entry.receiver.declaration if entry.receiver else None
+        constructor_name = ((receiver_declaration.template_name or receiver_declaration.name.split('[', 1)[0]).rsplit('.', 1)[-1]
+                            if receiver_declaration else None)
+        builder.constructor = bool(entry.receiver and entry.name.rsplit('.', 1)[-1] == constructor_name)
         builder.uninitialized_fields = {b.identity for b in builder.namespaces.get("self", {}).values()} if builder.constructor else set()
         for parameter, annotation in entry.parameters:
             type_ = context.type(annotation) if annotation else None

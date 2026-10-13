@@ -29,6 +29,7 @@ class Callable:
     receiver_ownership: str | None = None
     declaration_signature: tuple | None = None
     symbol_namespace: str = ''
+    result_ownership: str = 'own'
 
     def __post_init__(self):
         # Inference rewrites parameters after compilation; names must stay stable
@@ -123,11 +124,15 @@ def signature(node, owner=""):
             raise ValueError('required parameter cannot follow a default parameter')
         parameters.append((name, annotation))
     cursor, result, guards = end + 1, None, []
+    result_ownership = 'own'
     complexity, obligations, suffix, failure_actions = {}, [], [], []
     if cursor < len(items) and items[cursor].text == "->":
         if cursor + 1 == len(items):
             raise ValueError("missing result annotation")
         cursor += 1
+        if items[cursor].text in ('borrow', 'view'):
+            result_ownership = items[cursor].text
+            cursor += 1
         start = cursor
         while cursor < len(items) and items[cursor].text != 'with':
             cursor += 1
@@ -149,8 +154,10 @@ def signature(node, owner=""):
     for index, token in enumerate(items):
         if token.text == "complexity" and index >= 2 and items[index - 1].text == "." and items[index - 2].text not in (items[0].text, "F"):
             raise ValueError("complexity contract must name its declaring function")
-    return Callable(node, (owner + "." if owner else "") + items[0].text,
+    entry = Callable(node, (owner + "." if owner else "") + items[0].text,
                     tuple(parameters), result, tuple(guards), complexity=complexity, obligations=tuple(obligations), suffix=tuple(suffix), failure_actions=tuple(failure_actions), parameter_ownership=parameter_ownership, templates=templates, defaults=defaults, receiver_ownership=receiver_ownership)
+    entry.result_ownership = result_ownership
+    return entry
 
 
 def pure_predicate(node, parameters):
@@ -175,6 +182,72 @@ def pure_predicate(node, parameters):
             pure_predicate(operand, parameters)
         return
     raise ValueError("dispatch predicate lacks a pure, terminating, stable-read provider")
+
+
+def integer_dispatch_domain(entry, context):
+    """Prove only conjunctions of integer bounds; unsupported predicates stay unknown."""
+    bounds = {}
+    names = {name: (index, annotation) for index, (name, annotation) in enumerate(entry.parameters)}
+
+    def path(term):
+        fields = []
+        while term.kind == 'member':
+            fields.insert(0, term.token.text)
+            term = term.operands[0]
+        if term.kind != 'name' or term.token.text not in names:
+            return None
+        index, annotation = names[term.token.text]
+        type_ = context.type(annotation)
+        for field in fields:
+            annotation = dict(getattr(type_.declaration, 'fields', ())).get(field) if hasattr(type_, 'declaration') else None
+            if annotation is None:
+                return None
+            type_ = context.type(annotation)
+        if type_.family != 'integer':
+            return None
+        key = (index, *fields)
+        minimum = -(1 << (type_.bits - 1)) if type_.signed else 0
+        maximum = (1 << (type_.bits - (1 if type_.signed else 0))) - 1
+        bounds.setdefault(key, [minimum, maximum])
+        return key
+
+    def number(term):
+        sign = 1
+        if term.kind == 'unary' and term.token.text in ('-', '+'):
+            sign = -1 if term.token.text == '-' else 1
+            term = term.operands[0]
+        if term.kind != 'literal' or term.token.kind != 'NUMBER':
+            return None
+        try:
+            return sign * int(term.token.text.replace('_', ''), 0)
+        except ValueError:
+            return None
+
+    def comparison(left, operator, right):
+        key, value = path(left), number(right)
+        if key is None or value is None:
+            key, value = path(right), number(left)
+            operator = {'<': '>', '<=': '>=', '>': '<', '>=': '<=', '==': '=='}.get(operator)
+        if key is None or value is None or operator not in ('<', '<=', '>', '>=', '=='):
+            return False
+        interval = bounds[key]
+        if operator in ('>', '>=', '=='):
+            interval[0] = max(interval[0], value + (operator == '>'))
+        if operator in ('<', '<=', '=='):
+            interval[1] = min(interval[1], value - (operator == '<'))
+        return True
+
+    def visit(term):
+        if term.kind == 'binary' and term.token.text == 'and':
+            return all(visit(child) for child in term.operands)
+        if term.kind == 'binary':
+            return comparison(term.operands[0], term.token.text, term.operands[1])
+        if term.kind == 'chain':
+            return all(comparison(term.operands[i - 1], term.operands[i].text, term.operands[i + 1])
+                       for i in range(1, len(term.operands), 2))
+        return False
+
+    return bounds if all(visit(guard) for guard in entry.guards) else None
 
 
 from py_compiler.syntax.complex.big_o import BigO

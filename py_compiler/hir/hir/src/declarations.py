@@ -193,4 +193,8 @@ class DeclarationContext:
         for operation in self.pending:
             operation()
         for entry in self.callables:
+            if entry.receiver and any(name != 'Self' for name in entry.type_arguments):
+                # Generic member bodies are obligations of actual calls, not
+                # of merely constructing the containing specialization.
+                continue
             self.compile(entry)

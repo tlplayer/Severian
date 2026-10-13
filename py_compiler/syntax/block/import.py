@@ -66,7 +66,7 @@ class Import(DeclarationProvider):
             if not hasattr(context, 'imported_template_origins'):
                 context.imported_template_origins = {}
             context.imported_template_origins[source.identity] = node.identity
-            if getattr(template.provider, 'spelling', '') != 'class' or template.header[0].text != contract['name']:
+            if getattr(template.provider, 'spelling', '') not in ('class', 'trait') or template.header[0].text != contract['name']:
                 raise ValueError('imported template identity does not match its declaration')
             previous = context.scope
             context.scope = (alias,)
@@ -98,7 +98,7 @@ class Import(DeclarationProvider):
         for contract in type_contracts.values():
             name = qualify(contract['name'])
             declaration = TypeDeclaration(node.identity + ':' + name, name, 'class',
-                tuple((field, qualify(type_)) for field, type_ in contract['fields']), (), (), node.span,
+                tuple((field, qualify(type_)) for field, type_ in contract['fields']), (), tuple(qualify(t) for t in contract.get('traits', ())), node.span,
                 defaults=tuple(contract['defaults']), memory_defaults=tuple(map(tuple, contract['memory-defaults'])))
             context.register(declaration)
             context.provider_by_name[name] = Class()
@@ -124,4 +124,48 @@ class Import(DeclarationProvider):
                                      parameter_ownership={p['name']: p['ownership'] for p in contract['parameters']},
                                      native_symbol=NativeSymbol(contract['symbol'], 'severian', tuple(package['objects'])))
             entry.body = SimpleNamespace(result_sources=tuple(contract['result-sources']))
+            entry.result_ownership = contract.get('result-ownership', 'own')
+            from py_compiler.syntax.grammar.expression import expression
+            from py_compiler.syntax.function.contracts import pure_predicate
+            guards = []
+            for text in contract.get('acceptance', ()):
+                source = SourceFile(name + ':acceptance', text)
+                guard = expression(tuple(t for t in lex(source, context.syntax) if t.kind not in ('NEWLINE', 'EOF', 'INDENT', 'DEDENT')))
+                pure_predicate(guard, {name for name, _ in parameters} | ({'self'} if entry.receiver else set()))
+                guards.append(guard)
+            entry.guards = tuple(guards)
             context.functions.setdefault(name, []).append(entry)
+
+
+import unittest
+
+
+class ImportedPredicateTests(unittest.TestCase):
+    def compile_import(self, *, receiver=True, predicate='-self.count <= position < self.count'):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        package = {
+            'package': {'name': 'checked-vector'}, 'objects': ['checked-vector.o'],
+            'types': [{'name': 'Vector', 'fields': [['count', 'int']], 'defaults': [None],
+                       'memory-defaults': []}],
+            'exports': [{'name': 'Vector.get' if receiver else 'get', 'symbol': 'checked_get',
+                         'receiver': 'Vector' if receiver else None, 'receiver-ownership': 'view',
+                         'parameters': [{'name': 'position', 'type': 'int', 'ownership': 'copy'}],
+                         'result': 'int', 'result-sources': [], 'acceptance': [predicate]}],
+        }
+        return compile_source('consumer.sev', 'import vector\n', Syntax(include_tests=False),
+                              native_packages={'vector': package})
+
+    def test_imported_method_predicate_can_read_its_receiver(self):
+        result = self.compile_import()
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+
+    def test_free_function_predicate_cannot_invent_a_receiver(self):
+        result = self.compile_import(receiver=False)
+        self.assertTrue(result.diagnostics)
+        self.assertIn('stable-read provider', str(result.diagnostics[0]))
+
+    def test_imported_method_predicate_still_rejects_arbitrary_calls(self):
+        result = self.compile_import(predicate='self.mutate()')
+        self.assertTrue(result.diagnostics)
+        self.assertIn('stable-read provider', str(result.diagnostics[0]))

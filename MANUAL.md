@@ -117,6 +117,7 @@ class A:
 
     _readable = 1 # can be read A._readable is fine, cannot write to it
     __hidden = 2 # cannot read/write outside the class
+    ___compiler = 3 # this is for compiler objects like int, string etc. which eventually become preludes. they fix point collapse at ___int as int thus overwriting what int is in this scenario
 
 
     def __hidden():
@@ -384,14 +385,14 @@ evaluate each implementation's constraints
 For `Add`:
 
 ```sev
-class PositiveAdd: Add:
+class PositiveAdd: Add
     operator +(left: int, right: int) -> int with 
     {
         left > 0,
         right > 0,
     }
 
-class BigAdd: Add:
+class BigAdd: Add
     operator +(left: int, right: int) -> int with 
     {
         left > 10_000,

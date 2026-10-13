@@ -121,6 +121,39 @@ class Consumer:
 class For(BlockProvider):
     spelling = 'for'
 
+    def lower_literal(self, node, cfg, env, source, initializer):
+        from py_compiler.syntax.grammar.expression import Expression
+        values = []
+        for term in source.operands:
+            values.append(cfg.expr(term, env, values[0].type if values else None))
+        loop_env, local_names = loop_syntax.initialize_loop(node, initializer, cfg, env)
+        carried = tuple(b for b in bindings(loop_env) if b.identity not in cfg.storage)
+        following = cfg.block(tuple(b.type for b in carried))
+        ambient = {b.identity for scope in cfg.active_scopes for b in scope.values()} | cfg.live_binding_ids(loop_env)
+        consumer = Consumer(node, cfg, loop_env, carried, following, ambient,
+                            values[0].type if values else cfg.context.type('int'))
+        originals = dict(cfg.values)
+        # Capture every element before executing the first loop body, as a list
+        # expression does. Consumer continuations preserve break/continue scope.
+        for index, value in enumerate(values):
+            if value.type != consumer.element:
+                raise ValueError('list elements must have one element type')
+            owner = Binding(node.identity + ':literal:' + str(index), ':literal', value.type, True, 'view', node.span)
+            cfg.values[owner.identity] = value
+            capture = Expression('capture', source.token, (FrozenCapture(value, owner),))
+            consumer.emit(capture, loop_env, node.span)
+        if cfg.current.terminator is None:
+            edge(cfg, following, carried, node.span)
+            consumer.exits.append((cfg.current, dict(cfg.values), cfg.flow.fork()))
+        cfg.current = following
+        cfg.values = originals
+        cfg.values.update({b.identity: v for b, v in zip(carried, following.parameters)})
+        cfg.flow = FlowState.join([flow for _, _, flow in consumer.exits]) if consumer.exits else consumer.flow
+        cfg.cleanup_memory((loop_env[n] for n in local_names), node.span)
+        return 1
+
+
+
     def parse_header(self, items):
         header = super().parse_header(items)
         if len(header) < 3 or header[0].kind != 'IDENTIFIER' or header[1].text != 'in':
@@ -136,6 +169,8 @@ class For(BlockProvider):
         from py_compiler.syntax.generic.place import expression_type
         from py_compiler.syntax.generic.storage import root_binding
         _, source, initializer = node.header
+        if source.kind == 'list':
+            return self.lower_literal(node, cfg, env, source, initializer)
         match = expression_grammar(source, cfg, env)
         if match is not None and match.provider.result.family == 'iterator':
             provider, captures = match.provider, match.captures
@@ -206,3 +241,28 @@ class For(BlockProvider):
         cfg.cleanup_memory((loop_env[n] for n in local_names), node.span)
         cfg.flow.end_scope(cfg.live_binding_ids(env) | {b.identity for scope in cfg.active_scopes for b in scope.values()})
         return 1
+
+
+import unittest
+
+
+class LiteralIterationTests(unittest.TestCase):
+    def test_literal_iteration_preserves_nested_continue_and_break_targets(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('literal-iteration.sev', '''def total() -> int:
+    result = 0
+    for value in [0, 1, 2, 31, 32, 33, 65, 128]:
+        if value == 0:
+            continue
+        for factor in [1, 2]:
+            result += value * factor
+            if factor == 2:
+                break
+        if value == 65:
+            break
+    return result
+''', Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        for body in result.program.bodies:
+            body.verify()

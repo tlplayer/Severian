@@ -204,7 +204,7 @@ def expand_sentence(node, cfg, env):
         return False
     providers = [BoundGrammar(declaration, cfg, env) for declaration in cfg.context.sentence_grammars
                  if declaration[3] is None and tuple(cfg.declaration_scope[:len(declaration[2])]) == declaration[2]]
-    window = SourceWindow(cfg.source, node.tokens[0].span.start, node.tokens[-1].span.end, node.tokens)
+    window = SourceWindow(node.tokens[0].lexeme.source, node.tokens[0].span.start, node.tokens[-1].span.end, node.tokens)
     match = Registry(providers).recognize('O.custom', window, optional=True)
     if match is None:
         return False
@@ -221,7 +221,7 @@ def expression_grammar(term, cfg, env):
                  and d[0].identity not in cfg.active_grammars]
     if not providers:
         return None
-    window = SourceWindow(cfg.source, tokens[0].span.start, tokens[-1].span.end, tokens)
+    window = SourceWindow(tokens[0].lexeme.source, tokens[0].span.start, tokens[-1].span.end, tokens)
     return Registry(providers).recognize('O.custom', window, optional=True)
 
 

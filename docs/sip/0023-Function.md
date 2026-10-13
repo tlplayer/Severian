@@ -12,9 +12,6 @@ Superseded by:
 
 -- all terms, file formats, variables, classes, functions, traits in a table
 
-## Context
-
-
 ## Goals
 
 1. Functions should be clean and extensible building blocks
@@ -81,6 +78,10 @@ def foobar(a:int) -> int | Error with
 ```
 
 ## Problem(s)
+
+- Initializing and evaluating expressions statically vs. dynamically
+- How to parse dynamic runtimes based on dominating or potentially dominating structure
+- 
 
 ## Examples
 

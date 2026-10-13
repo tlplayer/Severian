@@ -43,16 +43,22 @@ y := x
 # We increment x
 x += 1
 
-#  y is equal to 1
+#  y is equal to 1 because default assignment is not a reference to ints, it's a copy
 assert(y == 1)
 
 # So the := operator for int/int means constant binding to copy of value
 y: int := copy x
 
-# However, := on a complex object becomes a view of that object
+# However, := on a complex object becomes whatever the default of the object permits
 y: File := view file.open("file.txt")
+s: Server := share server()
+z: Server := s
+a: Server := s
 
-
+# The lifecycle of s stays until all the shares are dropped, similar to reference counters or atomic reference counters
+drop(s)
+drop(z)
+drop(a)
 ```
 
 ```
@@ -73,7 +79,7 @@ type("") -> string
 ```
 
 Types are defaulted to infer, meaning static types are inferred. If the type cannot be inferred this is a compiler error. 
-This is different from the runtime any which is to say any value can be used which is too permissive and is supposed to be used
+This is different from the runtime `any` which is to say `any` value can be used which is too permissive and is supposed to be used
 for dynamic runtime values.
 
 ```
@@ -81,6 +87,19 @@ class X:
     p: pointer
 
 a:infer = x().p
+
+```
+
+## Conversion
+
+Type conversion works as a graph problem. If there is a strong link between 2 types, many types can be used to traverse the type graph.
+for example
+
+```sev
+# Example
+class dint:
+
+
 
 ```
 

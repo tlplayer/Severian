@@ -58,6 +58,35 @@ def reverse(values: borrow vector.Vector) -> absent:
         right -= 1
 
 
+test "imported vector sort dispatches across the insertion merge boundary":
+    for count in [0, 1, 2, 32, 33, 65]:
+        values = vector.Vector[i32]()
+        position = 0
+        while position < count:
+            values.push(i32(count - position))
+            position += 1
+        ordered = values.sort()
+        assert(ordered.size() == count)
+        position = 0
+        while position < count:
+            assert(ordered.get(position) == i32(position + 1))
+            position += 1
+        values.push(i32(-1))
+        vector.VectorSort[i32].sort(values).set(0, i32(-2))
+        assert(values.get(0) == i32(-2))
+        assert(values.size() == count + 1)
+
+
+test with compiler "imported sort alias retains its owner lifetime":
+    reject:
+        def invalid() -> int:
+            values = vector.Vector[int]()
+            values.push(3)
+            ordered = values.sort()
+            drop values
+            return ordered.get(0)
+
+
 test "imported vector grows and preserves values":
     values = vector.Vector()
     i = 0

@@ -8,20 +8,6 @@ Target:
 Supersedes:
 Superseded by:
 
-## Dispatch correctness policy
-
-Selection requires exactly one admissible implementation. Cost hints may order
-safe ready checks but never establish precedence. A known overlap is a static
-ambiguity diagnostic; unresolved overlap requires exact-one-match runtime checks
-before executing any body. No matches produces a defined no-match failure.
-The SmallAdd/BigAdd example below leaves mixed small/large inputs unmatched.
-
-Reordering and sharing require pure, terminating, non-throwing predicates with
-stable reads and identical substitutions/value versions. Prerequisite guards
-must dominate unsafe accesses. Static-only Unknown is a diagnostic; a proof
-budget cannot turn Unknown into Proven. Candidate-set changes invalidate
-consumers even when existing signatures remain unchanged. Contracts on a selected
-body are obligations, not dispatch retries. See SIP-0008's normative contract.
 
 ## Summary
 
@@ -35,20 +21,16 @@ string comparison, if else, and maybe even ML to group language probabilities. Y
 What language does this string or can this language contain? That's where `with` comes in
 
 By establishing `with` on the interface we can dispatch to methods with a more complex contract
+In the following order:
+1. Type dispatch: Find implementations compatible with the argument types.
+2. Value dispatch: Evaluate each implementation's with predicates.
+3. Selection: If multiple implementations match, apply the interface's selection policy using implementation metadata.
 
 ## Appendix
 
 -- all terms, file formats, variables, classes, functions, traits in a table
 
-## Context
 
-## Problem(s)
-
-Dispatching to methods of implementers requires custom typing ontop of simple primitives in most scenarios leading to match/if statements and constriction on modification/addition of existing interfaces. 
-
-- Overlap of implementers, traditional type dispatch avoids this with rigid non type overlap we do this by erroring on conditions which pass for both dispatchers
-- Routing is type top level then value level
-- It progresses by complexity of checks, if 
 
 ## Examples
 Examples
@@ -326,7 +308,105 @@ for condition in implementation.conditions:
     if not condition(arguments):
         matches = false
         break
+## Problem(s)
 
+Dispatching to methods of implementers requires custom typing ontop of simple primitives in most scenarios leading to match/if statements and constriction on modification/addition of existing interfaces. 
+
+- Overlap of implementers, traditional type dispatch avoids this with rigid non type overlap, we do this by erroring on conditions which pass for both dispatchers
+- Routing is type top level then value level 
+```
+trait Foo:
+    def bar(x: Primitive) -> int
+
+def bar(x:int) -> int: Foo
+    return 1
+
+def bar(x:string) -> int: Foo
+    return 
+```
+
+- It progresses by complexity of checks using the function's declared complexity (see the Function sip)
+
+- It would be handy to sort the implementers if there is overlap, this allows a couple things
+When matches are ambiguous but meta params determine which one is optimal dynamic routing would be very nice
+
+```
+class NaiveMatMul: MatMul
+
+    def multiply(a: tensor, b: tensor) -> tensor with {
+        multiply.complexity.time = complexity.Cubic
+        multiply.complexity.space = complexity.Quadratic
+        a.ndim == 2,
+        b.ndim == 2,
+        a.shape[1] == b.shape[0]
+    }: MatMul
+        ...
+
+
+class BlockedMatMul: MatMul
+    def multiply(a: tensor, b: tensor) -> tensor with {
+        multiply.complexity.time = complexity.Cubic
+        multiply.complexity.space = complexity.Linear
+        a.ndim == 2,
+        b.ndim == 2,
+        a.shape[1] == b.shape[0]
+    }: MatMul
+        ...
+
+```
+
+### Dispatch Diagram
+```
+MatMul.multiply
+    |
+    +-- Type matching
+    |      NaiveMatMul     ✓
+    |      BlockedMatMul   ✓
+    |
+    +-- Value predicates
+    |      NaiveMatMul     ✓
+    |      BlockedMatMul   ✓
+    |
+    +-- Interface selection
+           min(F.complexity.space)
+                 |
+                 +-- NaiveMatMul    O(n²)
+                 +-- BlockedMatMul  O(n)
+                         |
+                         v
+                    BlockedMatMul
+```
+### static and dynamic costs
+
+```
+trait Foo:
+    def bar() -> int with {
+        min(F.complexity.space)
+    }
+```
+
+works when complexity metadata is comparable.
+
+However:
+Implementation A: O(n)
+Implementation B: O(n log n)
+
+requires a shared definition of n and valid bounds on the relevant input domain. For different variables or multivariate bounds, a total ordering may not exist.
+For instance:
+A: O(n²)
+B: O(n*m)
+
+Neither universally dominates without knowing the relationship between n and m.
+Severian could handle this by evaluating symbolic cost expressions against the argument shapes.
+trait Foo:
+    def bar(a: array[array[int]]) -> int with {
+        min(F.complexity.space(a.shape))
+    }
+
+Now the compiler can specialize the selection based on known shapes.
+If shapes are dynamic, the same selector can be evaluated at runtime, provided it is a valid runtime expression.
+```
+```
 ## Testing
 
 

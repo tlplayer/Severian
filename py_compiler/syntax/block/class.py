@@ -81,7 +81,8 @@ class Class(RecordProvider):
         layout = self.layout(declaration, cfg.context)
         value = cfg.emit("allocate", cfg.context.type(declaration.name), (), Allocate(layout, allocation_plan), span)
         cfg.stack_values.add(value.identity)
-        constructors = cfg.context.functions.get(declaration.name + "." + declaration.name.rsplit(".", 1)[-1].split('[', 1)[0], [])
+        constructor_name = (declaration.template_name or declaration.name.split('[', 1)[0]).rsplit('.', 1)[-1]
+        constructors = cfg.context.functions.get(declaration.name + "." + constructor_name, [])
         if constructors:
             entry, operands = select(constructors, arguments, cfg, env)
             invoke(entry, operands, cfg, span, value)
@@ -214,7 +215,7 @@ class ClassTests(unittest.TestCase):
         return result.program
 
     def test_generic_class_defaults_and_method_realizations(self):
-        program = self.valid('class Cell[T = int]:\n    value: T\n    def read(self: view Self) -> T:\n        return self.value\ndef work() -> int:\n    a = Cell(3)\n    b = Cell[i32](4)\n    return a.read()\n')
+        program = self.valid('class Cell[T = int]:\n    value: T\n    def read(self: view Self) -> T:\n        return self.value\ndef work() -> int:\n    a = Cell(3)\n    b = Cell[i32](4)\n    b.read()\n    return a.read()\n')
         self.assertEqual({d.name for d in program.declarations}, {'Cell[i64]', 'Cell[i32]'})
         methods = [body for body in program.bodies if body.declaration.endswith('.read')]
         self.assertEqual(len({body.name for body in methods}), 2)
@@ -222,6 +223,36 @@ class ClassTests(unittest.TestCase):
 
     def test_generic_constructor_and_explicit_receiver(self):
         self.valid('class Cell[T = int]:\n    value: T\n    def Cell(self: borrow Self, value: T):\n        self.value = value\n    def set(self: borrow Self, value: T):\n        self.value = value\ndef work() -> int:\n    a = Cell[int](2)\n    a.set(3)\n    return a.value\n')
+
+    def test_generic_constructor_with_a_locally_declared_element(self):
+        program = self.valid('''class Buffer[T]:
+    items: array[T]
+    def Buffer(self: borrow Self):
+        self.items = allocate[array[T]](0)
+def work():
+    class Entry:
+        key: int
+    values = Buffer[Entry]()
+''')
+        constructors = [body for body in program.bodies if body.declaration.endswith('.Buffer')]
+        self.assertEqual(len(constructors), 1)
+        self.assertIn('.Entry]', constructors[0].declaration)
+
+    def test_unused_generic_member_does_not_require_element_ordering(self):
+        source = '''class Cell[T]:
+    value: T
+    def less(self: view Self, other: T) -> bool:
+        return self.value < other
+class Point:
+    x: int
+def work():
+    point = Point(1)
+    cell = Cell[Point](point)
+'''
+        self.valid(source)
+        result = self.compile(source + '    cell.less(point)\n')
+        self.assertTrue(result.diagnostics)
+        self.assertIn("F.operator grammar for '<'", str(result.diagnostics[0]))
 
     def test_nested_records_have_inline_layout_and_independent_copy(self):
         from py_compiler.mlir.src.lib import lower, render

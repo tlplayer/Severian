@@ -133,11 +133,12 @@ class Assignment:
             owner = None
         if core.kind == 'call' and value.identity in cfg.call_result_owners:
             owner = cfg.call_result_owners[value.identity]
+            mode = mode or cfg.call_result_modes.get(value.identity)
         if expected and value.type != expected:
             raise ValueError(f"initializer {value.type.name} does not satisfy {expected.name}")
         if value is None:
             raise ValueError("a no-result call cannot initialize a binding")
-        if owner and callable(getattr(owner.type, 'release', None)) and not callable(getattr(value.type, 'release', None)) and mode in ('move', 'copy', 'mirror'):
+        if owner and callable(getattr(owner.type, 'release', None)) and (core.kind == 'address' or value.type.family == 'pointer') and mode in ('move', 'copy', 'mirror'):
             raise ValueError('address conversion cannot transfer array allocation ownership; use view or borrow')
         if mode in ("copy", "mirror") and callable(getattr(value.type, 'copy_value', None)):
             value = value.type.copy_value(value, cfg, node.span)

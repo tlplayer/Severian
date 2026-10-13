@@ -24,6 +24,13 @@ def binary(cfg, node, env, expected=None):
             if declaration is not None and declaration.type in (None, expected):
                 left_expected = expected
     left = cfg.expr(left_node, env, left_expected)
+    if left.type.family == 'record':
+        from py_compiler.syntax.function.calls import select as select_call, invoke
+        name = left.type.name + '.__operator_' + '_'.join(str(ord(c)) for c in node.token.text)
+        entries = cfg.context.functions.get(name, ())
+        if entries:
+            entry, values = select_call(entries, (node.operands[1],), cfg, env)
+            return invoke(entry, values, cfg, node.token.span, left)
     grammar = select(left.type, 'F.operator', node.token.text)
     right = cfg.expr(node.operands[1], env, left.type)
     return grammar.expand(cfg, left, right, node.token.span)

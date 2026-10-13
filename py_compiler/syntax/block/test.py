@@ -66,6 +66,17 @@ import unittest
 
 
 class TestScopeTests(unittest.TestCase):
+    def test_expected_failure_body_resolves_its_local_record_type(self):
+        result = self.compile('''test "uninitialized record":
+    throws "read of uninitialized array element":
+        class Point:
+            x: int
+        values = allocate[array[Point]](1)
+        point = values[0]
+        assert(point.x == 0)
+''', True)
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+
     def test_location_points_to_indented_test_header(self):
         result = self.compile('class Item:\n    value: int\n    test "location":\n        assert(true)\n', True)
         self.assertFalse(result.diagnostics, str(result.diagnostics))

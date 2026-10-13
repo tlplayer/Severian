@@ -294,7 +294,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                         "complexity": body.complexity, "test": body.test,
                         "bindings": [{"id": b.identity, "name": b.name, "type": b.type.name,
                                       "constant": b.constant, "ownership": b.ownership} for b in body.bindings]})
-    types = [{'name': d.name, 'fields': list(d.fields), 'defaults': list(d.defaults),
+    types = [{'name': d.name, 'fields': list(d.fields), 'defaults': list(d.defaults), 'traits': list(d.traits),
               'memory-defaults': list(d.memory_defaults)}
              for d in program.declarations if d.kind == 'class' and '.' not in d.name]
     type_names = {t['name'] for t in types}
@@ -309,7 +309,8 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                             'receiver': receiver.type.name if receiver else None,
                             'receiver-ownership': receiver.ownership if receiver else None,
                             'parameters': [{'name': b.name, 'type': b.type.name, 'ownership': b.ownership} for b in parameters],
-                            'result': body.result_type.name, 'result-sources': list(body.result_sources)})
+                            'result': body.result_type.name, 'result-sources': list(body.result_sources),
+                            'result-ownership': body.result_ownership, 'acceptance': list(body.dispatch_guards)})
     globals_ = []
     for body in program.bodies:
         if body.declaration:

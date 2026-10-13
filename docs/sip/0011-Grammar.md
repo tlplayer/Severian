@@ -18,7 +18,6 @@ Proposed forms and interfaces describe the design; they do not claim existing co
 | `grammar` | Proposed declaration | Defines how source is recognized and given meaning through the common grammar contract. |
 | `G` | Trait / compiler term | Universal syntax-definition contract, from atomic symbols through complex blocks. |
 | `Y` | Trait / compiler term | Symbol or atomic recognized term, with source and semantic identity. |
-| `S` / `Sentence` | Trait / compiler term | Sentence semantic contract; sentences operate within blocks. |
 | `B` | Trait / compiler term | Block structure and scope contract. |
 | `T` | Compiler term | Type required or produced by a declaration or capture. |
 | `V` | Compiler term | Value. |
@@ -38,7 +37,7 @@ Proposed forms and interfaces describe the design; they do not claim existing co
 | Recognition | Compiler operation | Determines a match, its consumed range, captures, and remaining requirements. |
 | Construction | Compiler operation | Produces the selected grammar's compiler representation after applicable requirements are satisfied. |
 | CFG | Representation | Control-flow graph, manipulated by the applicable semantic/lowering behavior. |
-| `Grammar` | Existing class | Sentence-specific representation of literal fields, captures, and repetitions. |
+| `Grammar` | Existing class | Grammar-specific representation of literal fields, captures, and repetitions. |
 | `GrammarDeclaration` | Existing class | Stores grammar declarations, bodies, and a program of lowering instructions. |
 | `OperatorSyntax` | Existing class | Stores operator spelling and binding metadata alongside additional grammar fields. |
 | `grammar()`, `resolve(captures)` | Existing sentence methods | Expose sentence structure and its resolution behavior. |
@@ -55,8 +54,8 @@ The original distinctions describe useful levels of composition:
 
 - `Y` covers simple symbols such as `!` and `|`.
 - Operators provide lightweight grammar, including operands conventionally named `left` and `right`.
-- Sentences describe arrangements such as `async foobar() with self` within a block.
-- Grammar can describe complex forms, including blocks and behavior that eventually manipulates the CFG.
+- Grammars describe arrangements such as `async foobar() with self` within a block having n-ary operators in that composition.
+- Grammar `G` can describe complex forms, including blocks and behavior that eventually manipulates the CFG allowing n-ary language decomposition.
 
 These forms should share one syntax-definition interface. Their complexity determines how much grammar they supply. Symbols, sentences, operators, and blocks retain meaningful result and semantic contracts.
 
@@ -67,17 +66,6 @@ The bracket form supplies an arrangement from which recognition behavior is deri
 This draft keeps the distinctions explicit for discussion. Their representation may be collapsed further after the common contract is established.
 
 ## Problem(s)
-
-### Current overlap
-
-| Definition | Current makeup | Problem |
-|---|---|---|
-| `Y` in `syntax/generic/symbol.sev` | Optional lexeme, token, resolved definition, scope, and type identity. | Describes source/semantic metadata without supplying recognition behavior. |
-| `G` in `syntax/generic/grammar.sev` | Symbol, arity, precedence, left/right operands, result, effects, conversions, overflow, control flow, scalar operations, and `valid`/`semantic` methods. | Its interface is shaped around binary operations while also representing blocks and control flow. |
-| `Sentence` in `syntax/sentence/sentence.sev` | `grammar()` and `resolve(captures)`, with a separate `Grammar` class. | Introduces another grammar representation and matching path. |
-| `Operator` in `syntax/function/syntax.sev` | `Y`, spelling, fixity, precedence, and associativity. | Operator syntax also appears in `G` and `OperatorSyntax`. |
-
-There is additional overlap between `syntax/grammar/contracts.sev`, which defines operator and CFG behavior, and block classes containing their own sentence declarations and lowering methods. Conditional behavior appears in both places.
 
 ### One required grammar contract
 
@@ -121,11 +109,10 @@ The roles remain:
 
 - `G`: universal syntax-definition contract.
 - `Y`: symbol or atomic recognized term.
-- `S`: sentence semantic contract.
 - `B`: block structure and scope contract.
 - Operator: optional operation and expression-binding capabilities on a grammar.
 
-This avoids expanding `Y` into the interface for every level of syntactic complexity. Sentences and operators can remain useful declaration conveniences while sharing the same underlying grammar machinery.
+This avoids expanding `Y` into the interface for every level of syntactic complexity. Grammars and operators can remain useful declaration conveniences while sharing the same underlying grammar machinery.
 
 ## Examples
 
@@ -133,8 +120,9 @@ These forms are schematic proposals. Their exact syntax and concrete interface s
 
 ### Atomic symbol
 
+Note, the grammar implements Y's contract meaning it provides the function needed for Y("!") -> Y of BANG type. 
 ```sev
-grammar bang["!"]() -> Y:
+grammar bang["!"]() -> Y:Y
     ...
 ```
 
@@ -142,14 +130,21 @@ The same grammar interface handles a single spelling and larger arrangements. Th
 
 ### Infix operator
 
+grammar default implements the G on the function so G("left+right") would tokenize it it then attempt to match the grammar on the resolved Types. 
 ```sev
 grammar +[left: int, "+", right: int]() -> int:
     ...
 ```
 
+At times, it's convenient to not expose the full arity functionality so for arity<3 we provide operators
+
+```
+grammar operator[left:Numeric,"+",right:Numeric]
+```
+
 `left` and `right` are named captures. Their type requirements participate in resolution. This grammar supplies expression-binding properties and the behavior associated with the resulting addition expression.
 
-### Sentence
+### Grammar
 
 ```sev
 grammar launch["async", operation: F, "with", owner: V]() -> F:

@@ -63,6 +63,18 @@ def parse_expression(tokens, syntax):
             if cursor[0] == len(tokens) or tokens[cursor[0]].text != ")":
                 raise ValueError("expected closing parenthesis")
             cursor[0] += 1
+        elif token.text == '[':
+            elements = []
+            while cursor[0] < len(tokens) and tokens[cursor[0]].text != ']':
+                elements.append(parse())
+                if cursor[0] < len(tokens) and tokens[cursor[0]].text == ',':
+                    cursor[0] += 1
+                else:
+                    break
+            if cursor[0] == len(tokens) or tokens[cursor[0]].text != ']':
+                raise ValueError('expected closing list bracket')
+            cursor[0] += 1
+            left = Expression('list', token, tuple(elements))
         elif token.text == '{':
             entries = []
             while cursor[0] < len(tokens) and tokens[cursor[0]].text != '}':

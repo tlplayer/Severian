@@ -53,6 +53,7 @@ class Builder:
         self.loops = []
         self.value_sources = {}
         self.call_result_owners = {}
+        self.call_result_modes = {}
         self.parameter_bindings = {}
         self.grammar_captures = {}
         self.active_grammars = set()
@@ -292,10 +293,13 @@ class Builder:
     def scope(self, nodes, env, declarations=False, local_names=None):
         local_names = set() if local_names is None else local_names
         previous_scope = self.declaration_scope
+        previous_context_scope = self.context.scope if self.context else None
         if nodes and nodes[0].parent:
             parent = nodes[0].parent
             if self.context and parent not in self.declaration_scope and parent != self.body.identity and not parent.endswith(":root"):
                 self.declaration_scope = (*self.declaration_scope, parent)
+        if self.context:
+            self.context.scope = self.declaration_scope
         previous = self.local_names
         self.local_names = local_names
         index = 0
@@ -307,7 +311,7 @@ class Builder:
                     return {token.text for term in terms for token in term.tokens} | set().union(*(referenced_names(term.children) for term in terms))
                 remaining = referenced_names(nodes[index:])
                 for binding in env.values():
-                    if (binding.name in local_names and binding.type and binding.type.family == 'pointer'
+                    if (binding.name in local_names and binding.type and (binding.type.family == 'pointer' or binding.ownership == 'borrow')
                             and binding.name not in remaining):
                         self.flow.loans.pop(binding.identity, None)
                 if self.current.terminator:
@@ -329,6 +333,8 @@ class Builder:
             self.active_scopes.pop()
             self.local_names = previous
             self.declaration_scope = previous_scope
+            if self.context:
+                self.context.scope = previous_context_scope
 
     def finish(self):
         if self.body.result_type is None:
@@ -337,7 +343,7 @@ class Builder:
             if self.body.result_type.mlir:
                 raise ValueError("not every path returns the declared result")
             self.current.terminator = Terminator("finish")
-        if self.body.result_type.family == 'record':
+        if self.body.result_type.family == 'record' and self.body.result_ownership == 'own':
             provider = self.context.provider_by_name[self.body.result_type.name]
             self.body.result_layout = provider.layout(self.body.result_type.declaration, self.context)
         from py_compiler.mir.memory import resolve

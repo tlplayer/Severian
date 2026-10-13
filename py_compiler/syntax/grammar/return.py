@@ -7,6 +7,25 @@ class Return:
         return node.tokens[0].text == "return"
 
     def lower(self, node, cfg, env, local_names):
+        if cfg.body.result_ownership in ('borrow', 'view'):
+            term = expression(node.tokens[1:])
+            explicit = term.token.text if term.kind == 'unary' else None
+            if explicit in ('borrow', 'view'):
+                term = term.operands[0]
+            value = cfg.expr(term, env, cfg.body.result_type)
+            binding = cfg.lookup(term, env) if term.kind in ('name', 'reference') else cfg.call_result_owners.get(value.identity)
+            mode = explicit or cfg.call_result_modes.get(value.identity) or (binding.ownership if binding else None)
+            if cfg.body.result_ownership == 'borrow' and (mode == 'view' or (binding and binding.ownership == 'view')):
+                raise ValueError('cannot return a mutable borrow through a view')
+            sources = cfg.value_sources.get(value.identity, set())
+            if not sources or value.identity in cfg.stack_values:
+                raise ValueError('returned borrow escapes the lifetime of its source binding')
+            cfg.body.result_sources = tuple(sorted(set(cfg.body.result_sources) | sources))
+            if cfg.phases:
+                cfg.phases.leave()
+            cfg.cleanup_memory((b for scope in cfg.active_scopes for b in scope.values()), node.span)
+            cfg.current.terminator = Terminator('finish', value=value, span=node.span)
+            return
         expected = cfg.body.result_type
         if expected is None:
             value = cfg.expr(expression(node.tokens[1:]), env) if len(node.tokens) > 1 else None
@@ -14,6 +33,8 @@ class Return:
         else:
             value = cfg.expr(expression(node.tokens[1:]), env, expected) if len(node.tokens) > 1 else None
         if value and value.type.family == 'record':
+            if value.identity in cfg.call_result_modes:
+                raise ValueError('returning a borrowed result by value requires an explicit copy')
             term = expression(node.tokens[1:])
             binding = cfg.lookup(term, env) if term.kind in ('name', 'reference') else None
             if binding and binding.ownership in ('view', 'borrow'):

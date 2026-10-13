@@ -141,6 +141,24 @@ class RecordTemplate:
             suffix = '[' + ','.join(bindings[p.name].name for p in self.parameters) + ']'
             name = self.name + suffix
             if name in context.types:
+                existing = context.types[name]
+                if self.provider.spelling == 'class' and not existing.declaration.template_name:
+                    # Native exports can contain only the members realized in
+                    # the producer. Supply other members from its template.
+                    hydrated = getattr(context, 'hydrated_records', None)
+                    if hydrated is None:
+                        hydrated = context.hydrated_records = set()
+                    if name not in hydrated:
+                        hydrated.add(name)
+                        from importlib import import_module
+                        receiver = import_module('py_compiler.syntax.block.class').Receiver(existing.declaration)
+                        clone = record_clone(self.node, bindings, suffix)
+                        for member in clone.children:
+                            if member.provider is None:
+                                continue
+                            member_name = member.header[0].text if member.header and hasattr(member.header[0], 'text') else ''
+                            if name + '.' + member_name not in context.functions:
+                                member.provider.declare_member(member, context, receiver)
                 return context.types[name]
             if name in context.realizing_records:
                 raise ValueError('recursive record storage requires an indirection contract')

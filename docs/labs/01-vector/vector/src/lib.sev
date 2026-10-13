@@ -66,6 +66,239 @@ class Vector[T = int]:
     def pointer_view(self: view Self) -> pointer[T]:
         return pointer[T](self.items)
 
+    # The result keeps a loan on this vector; sorting does not transfer storage.
+    def sort(self: borrow Self) -> borrow Vector[T]:
+        return VectorSort[T].sort(self)
+
+
+trait VectorSort[T]:
+    def sort(values: borrow Vector[T]) -> borrow Vector[T]
+
+
+# These domains partition initialized length, not allocated capacity. The cutoff
+# is a lab policy, not a claim that 32 is optimal for every element type/target.
+class TrivialVectorSort[T]: VectorSort[T]:
+    def sort(values: borrow Vector[T]) -> borrow Vector[T] with {values.count <= 1}:
+        return borrow values
+
+
+class InsertionVectorSort[T]: VectorSort[T]:
+    def sort(values: borrow Vector[T]) -> borrow Vector[T] with {1 < values.count <= 32}:
+        position = 1
+        while position < values.size():
+            value = values.get(position)
+            destination = position
+            while destination > 0:
+                previous = values.get(destination - 1)
+                if not (value < previous):
+                    break
+                values.set(destination, previous)
+                destination -= 1
+            values.set(destination, value)
+            position += 1
+        return borrow values
+
+
+class MergeVectorSort[T]: VectorSort[T]:
+    def sort(values: borrow Vector[T]) -> borrow Vector[T] with {values.count > 32}:
+        count = values.size()
+        scratch = Vector[T]()
+        scratch.reserve(count)
+        position = 0
+        while position < count:
+            scratch.push(values.get(position))
+            position += 1
+
+        # Bottom-up stable merges need no recursion. Every scratch slot is
+        # initialized before replacement, including owned class elements.
+        width = 1
+        while width < count:
+            start = 0
+            while start < count:
+                middle = start + width
+                if middle > count:
+                    middle = count
+                end = middle + width
+                if end > count:
+                    end = count
+                left = start
+                right = middle
+                destination = start
+                while left < middle and right < end:
+                    left_value = values.get(left)
+                    right_value = values.get(right)
+                    if right_value < left_value:
+                        scratch.set(destination, right_value)
+                        right += 1
+                    else:
+                        scratch.set(destination, left_value)
+                        left += 1
+                    destination += 1
+                while left < middle:
+                    scratch.set(destination, values.get(left))
+                    left += 1
+                    destination += 1
+                while right < end:
+                    scratch.set(destination, values.get(right))
+                    right += 1
+                    destination += 1
+                start = end
+
+            position = 0
+            while position < count:
+                values.set(position, scratch.get(position))
+                position += 1
+            if width >= count - width:
+                break
+            width *= 2
+        return borrow values
+
+
+test "sort covers empty singleton and both sides of the dispatch boundary":
+    for count in [0, 1, 2, 31, 32, 33, 65, 128]:
+        values = Vector[int]()
+        values.reserve(256)
+        position = 0
+        while position < count:
+            values.push(count - position)
+            position += 1
+        values.sort()
+        assert(values.size() == count)
+        assert(values.capacity() == 256)
+        position = 0
+        while position < count:
+            assert(values.get(position) == position + 1)
+            position += 1
+
+
+test "sort returns a mutable alias and preserves the original owner":
+    values = Vector[int]()
+    values.push(3)
+    values.push(1)
+    values.push(2)
+    sorted_values = values.sort()
+    assert(sorted_values.get(0) == 1)
+    sorted_values.set(0, -7)
+    assert(values.get(0) == -7)
+    values.push(4)
+    assert(values.size() == 4)
+
+
+test "sort alias can be forwarded and chained":
+    def ordered(values: borrow Vector[int]) -> borrow Vector[int]:
+        return values.sort()
+    values = Vector[int]()
+    values.push(3)
+    values.push(1)
+    ordered(values).sort().set(0, -1)
+    assert(values.get(0) == -1)
+    assert(values.get(1) == 3)
+
+
+test "sort reevaluates length after mutation and preserves duplicates":
+    values = Vector[int]()
+    position = 0
+    while position < 32:
+        values.push(1)
+        position += 1
+    values.sort()
+    values.push(-4)
+    values.sort()
+    assert(values.get(0) == -4)
+    position = 1
+    while position < values.size():
+        assert(values.get(position) == 1)
+        position += 1
+    values.sort()
+    assert(values.size() == 33)
+    assert(values.get(0) == -4)
+    assert(values.get(-1) == 1)
+
+
+test "direct trait calls and vector methods preserve generic element types":
+    values = Vector[i32]()
+    values.push(i32(9))
+    values.push(i32(-2))
+    sorted_values = VectorSort[i32].sort(values)
+    assert(sorted_values.get(0) == i32(-2))
+    sorted_values.set(1, i32(4))
+    assert(values.get(1) == i32(4))
+    values.sort()
+    assert(values.get(0) == i32(-2))
+
+
+test "insertion and merge sorting preserve the order of equal keys":
+    class Entry:
+        key: int
+        ordinal: int
+
+        operator <(right: Entry) -> bool:
+            return self.key < right.key
+
+    for count in [6, 65]:
+        values = Vector[Entry]()
+        position = 0
+        while position < count:
+            values.push(Entry(position % 3, position))
+            position += 1
+        values.sort()
+        position = 0
+        key = 0
+        while key < 3:
+            ordinal = key
+            while ordinal < count:
+                item = values.get(position)
+                assert(item.key == key)
+                assert(item.ordinal == ordinal)
+                position += 1
+                ordinal += 3
+            key += 1
+        assert(position == count)
+        assert(values.size() == count)
+
+
+test with compiler "another matching sorter is ambiguity rather than an override":
+    reject:
+        class OverlappingVectorSort: VectorSort[int]:
+            def sort(values: borrow Vector[int]) -> borrow Vector[int] with {values.count > 1}:
+                return borrow values
+
+        def invalid():
+            values = Vector[int]()
+            values.push(2)
+            values.push(1)
+            values.sort()
+
+
+test with compiler "sort result cannot escape its local owner":
+    reject:
+        def invalid() -> borrow Vector[int]:
+            values = Vector[int]()
+            values.push(2)
+            return values.sort()
+
+
+test with compiler "sort result is a loan rather than an owned vector":
+    reject:
+        def invalid(values: borrow Vector[int]) -> Vector[int]:
+            return values.sort()
+
+
+test with compiler "live sort result prevents destruction of its owner":
+    reject:
+        def invalid() -> int:
+            values = Vector[int]()
+            values.push(2)
+            sorted_values = values.sort()
+            drop values
+            return sorted_values.get(0)
+
+
+test with compiler "sort requires mutable access to its input":
+    reject:
+        def invalid(values: view Vector[int]):
+            values.sort()
+
 
 test "owning vector acceptance":
     values = Vector()
@@ -668,9 +901,14 @@ test "class vector growth copies and negative indexing":
     first = Point(42, 7)
     values.push(first)
     first.x = 99
-    while i < 32 with i = 0:
+    while i < 32 with 
+    {
+        i = 0,
+        suffix i += 1
+    }:
         point = Point(i, i + 1)
         values.push(point)
+        i += 1
     head = values.get(-33)
     tail = values.get(-1)
     assert(head.x == 42)

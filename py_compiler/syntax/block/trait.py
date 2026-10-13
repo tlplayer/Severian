@@ -20,6 +20,12 @@ class Trait(RecordProvider):
         self.context = context
         methods = tuple(signature(member, ".".join((*context.scope, node.header[0].text))) for member in members)
         for method in methods:
+            method.scope = context.scope
+            if not method.templates:
+                method.parameters = tuple((name, context.type(annotation).name if annotation and annotation != 'Self' else annotation)
+                                          for name, annotation in method.parameters)
+                if method.result and method.result != 'Self':
+                    method.result = context.type(method.result).name
             if any(annotation is None for _, annotation in method.parameters):
                 raise ValueError("trait parameter contracts require type annotations")
         context.register(TypeDeclaration(node.identity, ".".join((*context.scope, node.header[0].text)), self.spelling,
@@ -49,6 +55,8 @@ class Trait(RecordProvider):
                     raise ValueError(f"{implementation.name} is missing {target.name}.{name}")
             matches = []
             for entry in candidates:
+                if entry.result_ownership != method.result_ownership:
+                    continue
                 actual = tuple(resolved(t) for _, t in entry.parameters)
                 if actual == expected and resolved(entry.result or "absent") == resolved(method.result or "absent"):
                     if any(entry.parameter_ownership.get(n, 'view') != method.parameter_ownership.get(m, 'view') for (n, _), (m, _) in zip(entry.parameters, method.parameters)):

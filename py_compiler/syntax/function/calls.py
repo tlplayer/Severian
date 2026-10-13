@@ -87,6 +87,10 @@ def select(entries, arguments, cfg, env, explicit=()):
     for index, (argument, value, (parameter, _)) in enumerate(zip(arguments, values, entry.parameters)):
         mode = entry.parameter_ownership.get(parameter, getattr(value.type, 'parameter_ownership', 'view'))
         binding = cfg.lookup(argument, env) if argument.kind in ('name', 'reference') else None
+        if binding is None and value is not None:
+            binding = cfg.call_result_owners.get(value.identity)
+            if mode == 'borrow' and cfg.call_result_modes.get(value.identity) == 'view':
+                raise ValueError('cannot pass a returned view as a mutable borrow')
         if binding is None and mode in ('view', 'borrow') and callable(getattr(value.type, 'release', None)):
             raise ValueError('memory arguments passed by view or borrow require a live binding')
         if mode == 'borrow' and value.type.family == 'shared':
@@ -137,7 +141,7 @@ def invoke(entry, values, cfg, span, receiver=None):
                   for mode, value in zip(modes, values))
     receiver_modes = (entry.receiver_ownership or 'borrow',) if entry.receiver else ()
     layout = (cfg.context.provider_by_name[result.name].layout(result.declaration, cfg.context)
-              if result.family == 'record' else '')
+              if result.family == 'record' and entry.result_ownership == 'own' else '')
     operation = Invoke(entry.symbol, result, receiver_modes + modes, layout)
     if getattr(entry, 'native_symbol', None) is not None:
         from py_compiler.syntax.generic.atom import Atom
@@ -147,6 +151,10 @@ def invoke(entry, values, cfg, span, receiver=None):
         cfg.effect('call', operands, operation, span)
         return None
     value = cfg.emit('call', result, operands, operation, span)
+    if entry.result_ownership in ('borrow', 'view'):
+        # Only the declared return dependencies determine the loan lifetime;
+        # a temporary stateless dispatch provider is not the returned owner.
+        cfg.stack_values.discard(value.identity)
     if layout:
         cfg.stack_values.add(value.identity)
     sources = entry.body.result_sources if entry.body is not None else ()
@@ -163,6 +171,22 @@ def dispatch(receiver, method, arguments, cfg, env, span, contract_name=None):
     contract = context.by_name[receiver.type.name if receiver else contract_name]
     methods = [m for m in contract.methods if m.name.rsplit('.', 1)[-1] == method]
     specification, values = select(methods, arguments, cfg, env)
+    # Realize providers from their declared trait contract, even when no provider
+    # instance has been constructed by the caller.
+    from py_compiler.syntax.block.record import record_header
+    from py_compiler.syntax.complex.generic import split_arguments
+    for template in tuple(context.record_templates.values()):
+        if template.provider.spelling != 'class':
+            continue
+        for pattern in record_header(template.node.header)[2]:
+            base = pattern.split('[', 1)[0]
+            qualified = context.declaration_name(base, template.scope)
+            if qualified != contract.template_name:
+                continue
+            terms = split_arguments(pattern.split('[', 1)[1][:-1]) if '[' in pattern else ()
+            inferred = dict(zip(terms, contract.arguments))
+            if all(p.name in inferred or p.default is not None for p in template.parameters):
+                template.realize(tuple(inferred[p.name].name if p.name in inferred else p.default for p in template.parameters), context)
     pointer = cfg.emit('extract', context.type('pointer'), (receiver,), Extract(0), span) if receiver else None
     tag = cfg.emit('extract', context.type('i32'), (receiver,), Extract(1), span) if receiver else None
     candidates = []
@@ -173,6 +197,19 @@ def dispatch(receiver, method, arguments, cfg, env, span, contract_name=None):
                     candidates.append((declaration, entry))
     if not candidates:
         raise ValueError('trait method has no implementation')
+    if receiver is None:
+        from py_compiler.syntax.function.contracts import integer_dispatch_domain
+        domains = [integer_dispatch_domain(entry, context) for _, entry in candidates]
+        for index, left in enumerate(domains):
+            if left is None:
+                continue
+            for right in domains[index + 1:]:
+                if right is None:
+                    continue
+                if any(low > high for low, high in (*left.values(), *right.values())):
+                    continue
+                if all(max(left[key][0], right[key][0]) <= min(left[key][1], right[key][1]) for key in left.keys() & right.keys()):
+                    raise ValueError('statically ambiguous trait dispatch: overlapping integer domains')
     if receiver is None and sum(not entry.guards for _, entry in candidates) > 1:
         raise ValueError('statically ambiguous trait dispatch: multiple unconditional implementations')
     flags = []
@@ -202,6 +239,8 @@ def dispatch(receiver, method, arguments, cfg, env, span, contract_name=None):
     cfg.effect('assert', (valid,), Assert(f'trait dispatch requires exactly one match: {contract.name}.{method} at {cfg.source.path}:{span.start}'), span)
     result_type = context.type(specification.result or 'absent')
     join = cfg.block((result_type,) if result_type.mlir else ())
+    result_sources = set()
+    result_stack = False
     for index, ((declaration, entry), flag) in enumerate(zip(candidates, flags)):
         chosen = cfg.block()
         following = cfg.block() if index + 1 < len(candidates) else None
@@ -213,11 +252,31 @@ def dispatch(receiver, method, arguments, cfg, env, span, contract_name=None):
             provider = context.provider_by_name[declaration.name]
             selected_receiver = provider.instantiate(declaration, (), cfg, env, span)
         value = invoke(entry, values, cfg, span, selected_receiver)
+        if value is not None:
+            result_sources.update(cfg.value_sources.get(value.identity, ()))
+            result_stack = result_stack or value.identity in cfg.stack_values
         cfg.current.terminator = Terminator('jump', (Edge(join.identity, (value,) if value else ()),))
         if following:
             cfg.current = following
     cfg.current = join
-    if join.parameters and result_type.family in ("record", "trait", "union") and (receiver is None or receiver.identity in cfg.stack_values):
+    if join.parameters and specification.result_ownership in ('borrow', 'view'):
+        result = join.parameters[0]
+        cfg.value_sources[result.identity] = result_sources
+        if result_stack:
+            cfg.stack_values.add(result.identity)
+        owners = []
+        for _, entry in candidates:
+            for index in entry.body.result_sources:
+                if index >= 0:
+                    argument = arguments[index]
+                    owner = cfg.lookup(argument, env) if argument.kind in ('name', 'reference') else cfg.call_result_owners.get(values[index].identity)
+                    if owner is not None:
+                        owners.append(owner)
+        if not owners or len({owner.identity for owner in owners}) != 1:
+            raise ValueError('returned trait borrow requires one source owner')
+        cfg.call_result_owners[result.identity] = owners[0]
+        cfg.call_result_modes[result.identity] = specification.result_ownership
+    elif join.parameters and result_type.family in ("record", "trait", "union") and (receiver is None or receiver.identity in cfg.stack_values):
         cfg.stack_values.add(join.parameters[0].identity)
     return join.parameters[0] if join.parameters else None
 
@@ -323,6 +382,12 @@ def lower_expression(node, cfg, env, expected=None):
         receiver = cfg.receiver_value
     elif callee.kind == 'member':
         subject = callee.operands[0]
+        if subject.kind == 'index':
+            from py_compiler.syntax.grammar.expression import type_spelling
+            declared = context.type(type_spelling(subject))
+            if declared.family == 'trait':
+                value = dispatch(None, callee.token.text, arguments, cfg, env, span, declared.name)
+                return coerce(value, expected, cfg, span) if expected else value
         if subject.kind == 'name':
             name = context.declaration_name(subject.token.text, cfg.declaration_scope)
             declared = context.types.get(name)
@@ -332,6 +397,11 @@ def lower_expression(node, cfg, env, expected=None):
         from py_compiler.syntax.generic.storage import root_binding
         receiver_binding = root_binding(subject, cfg, env)
         receiver = cfg.expr(subject, env)
+        receiver_binding = receiver_binding or cfg.call_result_owners.get(receiver.identity)
+        returned_mode = cfg.call_result_modes.get(receiver.identity)
+        if receiver_binding is not None and returned_mode == 'view':
+            from dataclasses import replace
+            receiver_binding = replace(receiver_binding, ownership='view')
         if receiver_binding is None and callable(getattr(receiver.type, 'release', None)):
             raise ValueError('owning method receiver must be bound before use')
         method = getattr(receiver.type, 'call_method', None)
@@ -350,6 +420,8 @@ def lower_expression(node, cfg, env, expected=None):
     if receiver is not None and receiver_binding is None:
         receiver_binding = getattr(cfg, 'self_binding', None)
     if receiver_binding and (entry.receiver_ownership or 'borrow') == 'borrow':
+        if cfg.call_result_modes.get(receiver.identity) == 'view':
+            raise ValueError('cannot call a mutating method through a returned view')
         if receiver_binding.ownership == 'view':
             raise ValueError('cannot call a mutating method through a view')
         from py_compiler.syntax.generic.storage import BindingPlace
@@ -373,4 +445,74 @@ def lower_expression(node, cfg, env, expected=None):
             if len({owner.identity for owner in owners}) != 1:
                 raise ValueError('returned view has multiple possible owners')
             cfg.call_result_owners[value.identity] = owners[0]
+            if entry.result_ownership in ('borrow', 'view'):
+                cfg.call_result_modes[value.identity] = entry.result_ownership
     return coerce(value, expected, cfg, span) if expected else value
+
+
+import unittest
+
+
+class BorrowedTraitRoutingTests(unittest.TestCase):
+    source = '''class Values[T]:
+    item: T
+    count: int
+    def sort(self: borrow Self) -> borrow Values[T]:
+        return Sort[T].sort(self)
+trait Sort[T]:
+    def sort(values: borrow Values[T]) -> borrow Values[T]
+class Small[T]: Sort[T]:
+    def sort(values: borrow Values[T]) -> borrow Values[T] with {values.count <= 32}:
+        return borrow values
+class Large[T]: Sort[T]:
+    def sort(values: borrow Values[T]) -> borrow Values[T] with {values.count > 32}:
+        return borrow values
+'''
+
+    def compile(self, source, **options):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        return compile_source('routing.sev', source, Syntax(include_tests=False), **options)
+
+    def test_realizes_both_providers_and_preserves_borrowed_abi(self):
+        result = self.compile(self.source + '''def route(count: int) -> int:
+    values = Values[int](7, count)
+    alias = values.sort()
+    alias.item = 9
+    return values.item
+''')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        providers = [body for body in result.program.bodies if body.declaration in ('Small[i64].sort', 'Large[i64].sort')]
+        self.assertEqual(len(providers), 2)
+        for body in providers:
+            self.assertEqual(body.result_sources, (0,))
+            self.assertEqual(body.result_ownership, 'borrow')
+            self.assertEqual(body.result_layout, '')
+
+    def test_imported_trait_templates_keep_their_namespace(self):
+        producer = self.compile(self.source)
+        self.assertFalse(producer.diagnostics, str(producer.diagnostics))
+        package = {'package': {'name': 'routing'}, 'templates': producer.templates,
+                   'types': [], 'exports': [], 'objects': []}
+        result = self.compile('''import routing
+def route() -> int:
+    values = routing.Values[int](7, 33)
+    alias = routing.Sort[int].sort(values)
+    alias.item = 9
+    return values.item
+''', native_packages={'routing': package})
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+
+    def test_known_overlap_is_a_static_diagnostic(self):
+        source = self.source.replace('values.count > 32', 'values.count >= 32')
+        result = self.compile(source + 'def route():\n    values = Values[int](7, 32)\n    values.sort()\n')
+        self.assertTrue(result.diagnostics)
+        self.assertIn('overlapping integer domains', str(result.diagnostics[0]))
+
+    def test_local_owner_cannot_escape_through_trait_dispatch(self):
+        result = self.compile(self.source + '''def invalid() -> borrow Values[int]:
+    values = Values[int](7, 2)
+    return values.sort()
+''')
+        self.assertTrue(result.diagnostics)
+        self.assertIn('lifetime', str(result.diagnostics[0]))

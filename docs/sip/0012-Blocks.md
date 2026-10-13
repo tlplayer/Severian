@@ -74,7 +74,7 @@ test with profile "golden path profile" with
 ```
 
 ### Global scope blocks
-The global block holds global variables and other blocks
+The module block holds module variables and other blocks
 ```sev
 i = 1
 block
@@ -82,7 +82,7 @@ block
 ```
 ### Main Block
 
-Main is a sub block of global 
+Main is a sub block of module 
 
 ```sev
 
@@ -97,6 +97,7 @@ def main():
 def foobar():
     return 0
 ```
+
 ### Class blocks
 
 ```sev
@@ -111,7 +112,7 @@ class Point:
 
 Scenario
 If a class has a variable, it's assumed always to be self.x essentially. If it conflicts with global, 
-if needs to index into the global block for the variable
+it needs to index into the global block for the variable
 
 ```sev
 x = 1
@@ -123,8 +124,8 @@ class Point:
     def coordinates() -> tuple(int,int):
         return (x,y)
     
-    def global_x() -> int:
-        return global.x
+    def module_x() -> int:
+        return module.x
 
 ```
 
@@ -157,7 +158,7 @@ if condition:
     block
 elif condition:
     block
-else condition:
+else condition: #both elif and else are allowed to allow easier reading/cross compatibility with python
     block
 else:
     block
@@ -166,7 +167,7 @@ else:
 
 ## With
 
-With blocks have access to some really nice hooking/properties of the block
+With blocks have access to some really nice wrapping/hooking/properties of the block
 
 prefix: happens before the block. This is the default behavior in a with block
 suffix: happens after the block is done

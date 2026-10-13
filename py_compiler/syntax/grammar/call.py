@@ -27,7 +27,7 @@ class Call:
         if term.kind != 'call':
             raise ValueError('expression statement requires a call')
         value = cfg.expr(term, env)
-        if value and callable(getattr(value.type, 'release', None)):
+        if value and callable(getattr(value.type, 'release', None)) and value.identity not in cfg.call_result_modes:
             raise ValueError('owning memory result must be bound or returned')
 
 
