@@ -360,6 +360,8 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     types = [{'name': d.name, 'fields': list(d.fields), 'defaults': list(d.defaults), 'traits': list(d.traits),
               'memory-defaults': list(d.memory_defaults)}
              for d in program.declarations if d.kind == 'class' and '.' not in d.name]
+    types += [{'name': d.name, 'kind': 'union', 'variants': list(d.variants)}
+              for d in program.declarations if d.kind == 'union' and '.' not in d.name]
     type_names = {t['name'] for t in types}
     exports = []
     for body in program.bodies:
@@ -373,6 +375,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                             'receiver-ownership': receiver.ownership if receiver else None,
                             'parameters': [{'name': b.name, 'type': b.type.name, 'ownership': b.ownership} for b in parameters],
                             'result': body.result_type.name, 'result-sources': list(body.result_sources),
+                            'defaults': body.parameter_defaults,
                             'result-ownership': body.result_ownership, 'acceptance': list(body.dispatch_guards)})
     globals_ = []
     for body in program.bodies:
@@ -533,6 +536,36 @@ import unittest
 
 
 class PackageTests(unittest.TestCase):
+    def test_native_generic_defaults_and_class_grammars(self):
+        from py_compiler.testing import test_package
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ('library', 'consumer'):
+                path = root / name
+                (path / 'src').mkdir(parents=True)
+                manifest = {'package': {'name': name, 'version': '0.1.0'}}
+                if name == 'consumer':
+                    manifest['dependencies'] = {'library': {'path': '../library'}}
+                (path / 'package.json').write_text(encode(manifest))
+            (root / 'library/src/lib.sev').write_text(
+                'def identity[T](value: T) -> T:\n    return value\n'
+                'def answer(value: int = 42) -> int:\n    return value\n'
+                'class Cell:\n    value: int\n'
+                '    grammar read[self, "[", index: int, "]"]() -> int:\n        return self.value\n'
+                '    grammar write[self, "[", index: int, "]", "=", value: int]():\n        self.value = value\n'
+                'class GenericCell[T = int]:\n    value: T\n'
+                '    grammar read[self, "[", index: int, "]"]() -> T:\n        return self.value\n'
+                '    grammar write[self, "[", index: int, "]", "=", value: T]():\n        self.value = value\n')
+            (root / 'consumer/src/lib.sev').write_text(
+                'import library\ntest "native interface preserves callable and grammar contracts":\n'
+                '    assert(library.identity(i32(42)) == i32(42))\n'
+                '    assert(library.identity(f64(3.5)) == f64(3.5))\n'
+                '    assert(library.answer() == 42)\n    assert(library.answer(7) == 7)\n'
+                '    cell = library.Cell(1)\n    cell[0] = 42\n    assert(cell[0] == 42)\n'
+                '    generic = library.GenericCell[i32](i32(5))\n    generic[0] = i32(9)\n    assert(generic[0] == i32(9))\n')
+            result = test_package(root / 'consumer')
+            self.assertTrue(result['success'], result)
+
     def test_single_source_compiles_on_the_calling_thread(self):
         from unittest.mock import patch
         import threading

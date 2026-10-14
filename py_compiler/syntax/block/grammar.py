@@ -199,11 +199,18 @@ class BoundGrammar(GrammarContract):
             cfg.grammar_captures = previous
 
 
+def visible(declaration, cfg):
+    node, _, scope, _ = declaration
+    source = node.tokens[0].lexeme.source
+    return (tuple(cfg.declaration_scope[:len(scope)]) == scope or
+            source.identity in getattr(cfg.context, 'imported_template_origins', {}))
+
+
 def expand_sentence(node, cfg, env):
     if not cfg.context.sentence_grammars:
         return False
     providers = [BoundGrammar(declaration, cfg, env) for declaration in cfg.context.sentence_grammars
-                 if declaration[3] is None and tuple(cfg.declaration_scope[:len(declaration[2])]) == declaration[2]]
+                 if declaration[3] is None and visible(declaration, cfg)]
     window = SourceWindow(node.tokens[0].lexeme.source, node.tokens[0].span.start, node.tokens[-1].span.end, node.tokens)
     match = Registry(providers).recognize('O.custom', window, optional=True)
     if match is None:
@@ -217,7 +224,7 @@ def expression_grammar(term, cfg, env):
     if not tokens or term.kind == 'capture':
         return None
     providers = [BoundGrammar(d, cfg, env) for d in cfg.context.sentence_grammars
-                 if d[3] is not None and tuple(cfg.declaration_scope[:len(d[2])]) == d[2]
+                 if d[3] is not None and visible(d, cfg)
                  and d[0].identity not in cfg.active_grammars]
     if not providers:
         return None
@@ -289,10 +296,10 @@ test:
         self.assertIn('memory index outside allocation', text)
 
     def test_custom_store_cannot_mutate_a_view(self):
-        source = self.source.replace('    buffer[1] = 42', '    alias = view buffer\n    alias[1] = 42')
+        source = self.source.replace('        buffer[1] = 42', '        alias = view buffer\n        alias[1] = 42')
         result = self.compile(source)
         self.assertTrue(result.diagnostics)
-        self.assertIn('view', str(result.diagnostics))
+        self.assertIn('indexed mutation requires an owner or borrow parameter', str(result.diagnostics))
 
     def test_ambiguous_grammars_do_not_execute_either_body(self):
         duplicate = ('    grammar duplicate[self, "[", index: int, "]", "=", value: int]():\n'

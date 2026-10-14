@@ -27,6 +27,15 @@ def resolve(body):
     roots = {key: {key} for key in allocations}
     fresh = {op.result.identity for op in operations if op.result and op.result.type.family in ('array', 'pointer') and op.kind in ('call', 'memory-copy')}
     fresh.update(value.identity for value in body.blocks[0].parameters if value.type.family in ('array', 'pointer'))
+    from py_compiler.syntax.generic.storage import FieldPlace
+    # Owned field buffers are separate allocations, not the record's backing
+    # slab. Their destructors must not be replaced by an end-of-slab marker.
+    fresh.update(op.result.identity for op in operations
+                 if op.result and op.kind == 'read' and isinstance(op.payload, FieldPlace)
+                 and (op.result.type.family == 'string' or callable(getattr(op.result.type, 'release', None))))
+    fresh.update(op.result.identity for op in operations if op.result
+                 and isinstance(op.payload, RecordMemory) and op.payload.kind == 'load'
+                 and op.result.type.family != 'record')
     roots.update({key: {key} for key in fresh})
     changed = True
     while changed:
@@ -49,7 +58,9 @@ def resolve(body):
         for op in block.operations:
             from py_compiler.syntax.generic.storage import FieldPlace
             owns_field = isinstance(op.payload, FieldPlace) and op.kind == 'write' and callable(getattr(op.payload.type, 'release', None))
-            if op.kind in ('call', 'share-create') or owns_field:
+            from py_compiler.syntax.complex.shared import SharedOperation
+            shared_create = isinstance(op.payload, SharedOperation) and op.payload.kind == 'create'
+            if op.kind in ('call', 'share-create') or owns_field or shared_create:
                 for value in op.operands:
                     escapes.update(roots.get(value.identity, ()))
     def repeated(start):
@@ -93,12 +104,10 @@ def resolve(body):
         count = constants.get(op.operands[0].identity)
         size = op.payload.stride if isinstance(op.payload, RecordMemory) else max(1, (op.result.type.element.bits + 7) // 8)
         if plan.strategy in ('arena', 'pool'):
-            if isinstance(op.payload, RecordMemory):
-                raise ValueError('record array arena/pool requires initialized region element cleanup')
             if identity in escapes:
                 raise ValueError('function arena/pool allocation cannot escape or transfer to shared ownership')
-            if not isinstance(count, int) or count < 0 or len(body.blocks) != 1:
-                raise ValueError('function arena/pool requires fixed counts in a straight-line region')
+            if not isinstance(count, int) or count < 0 or identity in cyclic_allocations:
+                raise ValueError('function arena/pool requires fixed counts outside repeated allocation sites')
             groups.setdefault((plan.strategy, plan.alignment), []).append((identity, op, count, size))
         elif plan.location == 'infer':
             placement = 'stack' if identity not in forced_heap and isinstance(count, int) and 0 <= count * size <= 4096 else 'heap'
@@ -113,14 +122,18 @@ def resolve(body):
             required = max(1, count * size)
             start = positions[id(op)]
             end = max((positions[id(candidate)] for candidate in operations if any(identity in roots.get(v.identity, ()) for v in candidate.operands)), default=start)
-            available = next((slot for slot in slots if slot[2] < start and slot[1] >= required), None) if strategy == 'pool' else None
+            available = (next((slot for slot in slots if slot[2] < start and slot[1] >= required), None)
+                         if strategy == 'pool' and len(body.blocks) == 1 else None)
             if available:
                 offset = available[0]; available[2] = end
             else:
                 offset = (cursor + alignment - 1) // alignment * alignment
                 cursor = offset + required
                 slots.append([offset, required, end])
-            replacements[identity] = MemoryOperation('allocate', replace(op.payload.plan, location='heap'), region, offset)
+            if isinstance(op.payload, RecordMemory):
+                replacements[identity] = replace(op.payload, plan=replace(op.payload.plan, location='heap'), region=region, region_offset=offset)
+            else:
+                replacements[identity] = MemoryOperation('allocate', replace(op.payload.plan, location='heap'), region, offset)
             local.add(identity)
         regions.append(Slab(region, cursor, alignment))
     body.memory_regions = tuple(regions)
@@ -138,6 +151,102 @@ import unittest
 
 
 class PlacementTests(unittest.TestCase):
+    def test_native_regions_temporaries_and_loop_replacement(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.testing import test_package
+        source = '''class Buffer:
+    data: array[int]
+    def size(self: view Self) -> int:
+        return len(self.data)
+    def values(self: view Self) -> view array[int]:
+        return self.data
+
+test "temporary owners retain saved views":
+    assert(Buffer(array[int,2]()).size() == 2)
+    saved = Buffer(array[int,3]()).values()
+    assert(len(saved) == 3)
+
+test "loop replacement reaches continue and break with live storage":
+    owner = array[int,1]()
+    position = 0
+    while position < 5:
+        drop owner
+        owner = array[int,2]()
+        owner[0] = position
+        position += 1
+        if position < 4:
+            continue
+        break
+    assert(owner[0] == 3)
+    assert(len(owner) == 2)
+
+test with compiler "a backedge still requires a replacement owner":
+    reject "loop cannot consume":
+        def invalid():
+            owner = array[int,1]()
+            while true:
+                drop owner
+                continue
+
+test "arena destroys initialized records and retains inner owned buffers":
+    unsafe:
+        slots = allocate[array[Buffer],strategy=memory.arena](2)
+        source = Buffer(array[int,1]())
+        source.data[0] = 42
+        slots[1] = source
+        saved = copy slots[1]
+        drop slots
+        assert(saved.data[0] == 42)
+
+test "pool keeps simultaneously live branch allocations separate":
+    unsafe:
+        a = allocate[int,strategy=memory.pool](8)
+        a[0] = 42
+        if true:
+            b = allocate[int,strategy=memory.pool](8)
+            b[0] = 7
+            assert(a[0] == 42)
+        assert(a[0] == 42)
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/lib.sev').write_text(source)
+            (root / 'package.json').write_text(json.dumps({'package': {'name': 'memory-regressions', 'version': '0.1.0'}}))
+            result = test_package(root)
+            self.assertTrue(result['success'], result)
+
+    def test_record_regions_preserve_owned_field_cleanup(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.mlir.src.lib import lower, render, verify_native
+        for strategy in ('arena', 'pool'):
+            source = ('class Buffer:\n    data: array[int]\n'
+                      f'def work(flag: bool) -> int:\n    unsafe:\n        values = allocate[array[Buffer],strategy=memory.{strategy}](2)\n'
+                      '        if flag:\n            values[0] = Buffer(array[int,1]())\n'
+                      '        values[1] = Buffer(array[int,2]())\n        return 42\n')
+            result = compile_source('record-region.sev', source, Syntax())
+            self.assertFalse(result.diagnostics, str(result.diagnostics))
+            text = render(lower(result.program))
+            self.assertIn('memref.view %memory_region_0', text)
+            self.assertIn('read of uninitialized array element', text)
+            self.assertGreaterEqual(text.count('memref.dealloc'), 3)
+            verify_native(text)
+
+    def test_branches_have_distinct_pool_slots(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = ('def work(flag: bool) -> int:\n    unsafe:\n'
+                  '        a = allocate[int,strategy=memory.pool](8)\n'
+                  '        if flag:\n            b = allocate[int,strategy=memory.pool](8)\n            b[0] = 7\n'
+                  '        a[0] = 42\n        return a[0]\n')
+        result = compile_source('branch-region.sev', source, Syntax())
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'work')
+        self.assertEqual(body.memory_regions[0].size, 128)
+
     def test_local_stack_and_escaping_heap(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax

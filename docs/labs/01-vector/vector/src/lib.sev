@@ -644,14 +644,12 @@ test "owning class return transfers its fields":
     assert(result.data[0] == 42)
 
 
-test with compiler "temporary owning receiver requires a binding":
-    reject "owning method receiver must be bound before use":
-        class Buffer:
-            data: array[int]
-            def size(self: view Self) -> int:
-                return len(self.data)
-        def invalid() -> int:
-            return Buffer(array[int, 1]()).size()
+test "temporary owning receiver is cleaned after its use":
+    class Buffer:
+        data: array[int]
+        def size(self: view Self) -> int:
+            return len(self.data)
+    assert(Buffer(array[int, 1]()).size() == 1)
 
 
 test with compiler "partial field moves require replacement semantics":
@@ -1064,13 +1062,16 @@ test "record array rejects reads before initialization":
         assert(point.x == 0)
 
 
-test with compiler "record array arena regions need initialized cleanup":
-    reject "record array arena/pool":
-        class Point:
-            x: int
-        def unsupported():
-            unsafe:
-                values = allocate[array[Point], strategy=memory.arena](2)
+test "record array arena regions clean initialized slots":
+    class Buffer:
+        data: array[int]
+    unsafe:
+        values = allocate[array[Buffer], strategy=memory.arena](2)
+        source = Buffer(array[int, 1]())
+        source.data[0] = 42
+        values[1] = source
+        result = values[1]
+        assert(result.data[0] == 42)
 
 
 test "class element iteration owns independent snapshots":
@@ -1286,7 +1287,7 @@ test "insertion sort completes, preserves counts, and returns an alias":
         while position < 7:
             assert(before[position] == after[position])
             position += 1
-        if count > 0:
+        if count > 0 and count < 1000000:
             ordered.set(0, -99)
             assert(values.get(0) == -99)
     for count in [2, 6, 31, 32]:

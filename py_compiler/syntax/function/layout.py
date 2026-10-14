@@ -31,6 +31,22 @@ def layout_of(type_, context, active=()):
             raise ValueError('dynamic array has no fixed inline element layout')
         element = layout_of(type_.element, context, active)
         return Layout(element.size * type_.count, element.alignment)
+    if type_.family == 'union':
+        offset, alignment = 4, 4
+        for member in type_.variants:
+            layout = storage_layout(member, context, active)
+            offset = (offset + layout.alignment - 1) // layout.alignment * layout.alignment + layout.size
+            alignment = max(alignment, layout.alignment)
+        return Layout((offset + alignment - 1) // alignment * alignment, alignment)
+    if type_.family == 'dynamic':
+        word = context.type('usize').bits // 8
+        return Layout(2 * word, word)
+    if type_.family == 'shared':
+        word = context.type('usize').bits // 8
+        return Layout(10 * word, word)
+    if type_.mlir == '!llvm.ptr':
+        word = context.type('usize').bits // 8
+        return Layout(word, word)
     if type_.mlir.startswith('i') and type_.mlir[1:].isdigit():
         size = max(1, (int(type_.mlir[1:]) + 7) // 8)
         if size & (size - 1):
@@ -40,6 +56,13 @@ def layout_of(type_, context, active=()):
         size = 2 if type_.mlir in ('f16', 'bf16') else int(type_.mlir[1:]) // 8
         return Layout(size, size)
     raise ValueError(f'{type_.name} has no supported native layout contract')
+
+
+def storage_layout(type_, context, active=()):
+    if type_.mlir.startswith('memref'):
+        word = context.type('usize').bits // 8
+        return Layout(5 * word, word)
+    return layout_of(type_, context, active)
 
 
 @dataclass(frozen=True)

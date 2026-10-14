@@ -1,5 +1,6 @@
 from py_compiler.syntax.block.record import RecordProvider, TypeDeclaration, record_header, register_template
 from py_compiler.syntax.complex.object import ObjectType
+from py_compiler.syntax.generic.storage import owns_storage, copy_storage, release_storage, stored_type
 
 
 class Class(RecordProvider):
@@ -37,7 +38,7 @@ class Class(RecordProvider):
         declaration = replace(declaration, memory_defaults=tuple(defaults.items()))
         context.register(declaration)
         context.types[declaration.name] = ObjectType(declaration.name, "record", "!llvm.ptr", declaration=declaration,
-            owns_fields=any(callable(getattr(context.type(t), "release", None)) for _, t in fields))
+            owns_fields=any(owns_storage(context.type(t)) for _, t in fields))
         context.tags[declaration.name] = len(context.tags) + 1
         for trait_name in traits:
             context.require(trait_name, lambda provider, target: provider.satisfy(target, declaration))
@@ -49,14 +50,9 @@ class Class(RecordProvider):
         return "!llvm.struct<(" + ", ".join(self.storage_type(t, context) for t in types) + ")>"
 
     def storage_type(self, type_, context):
-        if type_.family == 'record':
-            return context.provider_by_name[type_.name].layout(type_.declaration, context)
-        if type_.mlir.startswith('memref') and type_.family in ('array', 'pointer'):
-            bits = context.type('usize').bits
-            return f'!llvm.struct<(!llvm.ptr, !llvm.ptr, i{bits}, !llvm.array<1 x i{bits}>, !llvm.array<1 x i{bits}>)>'
-        if not type_.mlir or type_.mlir.startswith('memref') or type_.mlir == 'index':
+        if not type_.mlir or type_.mlir == 'index':
             raise ValueError('field type requires an aggregate storage/lifetime contract')
-        return type_.mlir
+        return stored_type(type_, context)
 
     def field_place(self, value, field, cfg, span, write=False):
         from py_compiler.syntax.generic.storage import FieldPlace
@@ -93,12 +89,14 @@ class Class(RecordProvider):
             type_ = cfg.context.type(type_name)
             if index < len(arguments):
                 place = FieldPlace(value, index, layout, type_, self.storage_type(type_, cfg.context))
-                if callable(getattr(type_, "release", None)):
+                if owns_storage(type_):
                     store_field(place, arguments[index], cfg, env, span, initialized=False)
                     continue
                 field = cfg.expr(arguments[index], env, type_)
             elif default is not None:
                 field = literal_value(default, type_, cfg, span)
+                if type_.family == "string":
+                    field = copy_storage(field, cfg, span)
             else:
                 raise ValueError(f"constructor requires field {declaration.fields[index][0]!r}")
             FieldPlace(value, index, layout, type_, self.storage_type(type_, cfg.context)).write(cfg, field, span)
@@ -115,8 +113,8 @@ class Class(RecordProvider):
             type_ = cfg.context.type(name)
             storage = self.storage_type(type_, cfg.context)
             field = FieldPlace(value, index, layout, type_, storage).read(cfg, span)
-            if callable(getattr(type_, "release", None)):
-                field = type_.copy_value(field, cfg, span)
+            if owns_storage(type_):
+                field = copy_storage(field, cfg, span)
             FieldPlace(result, index, layout, type_, storage).write(cfg, field, span)
         return result
 
@@ -127,12 +125,11 @@ class Class(RecordProvider):
         layout = self.layout(declaration, cfg.context)
         for index in reversed(range(len(declaration.fields))):
             type_ = cfg.context.type(declaration.fields[index][1])
-            release = getattr(type_, 'release', None)
-            if release:
+            if owns_storage(type_):
                 field = FieldPlace(value, index, layout, type_, self.storage_type(type_, cfg.context)).read(cfg, span)
                 # An inline record lives on the stack; its owned buffer does not.
                 cfg.stack_values.discard(field.identity)
-                release(field, cfg, span)
+                release_storage(field, cfg, span)
 
 
 def store_field(place, expression, cfg, env, span, owner=None, initialized=True, value=None):
@@ -147,7 +144,11 @@ def store_field(place, expression, cfg, env, span, owner=None, initialized=True,
         from py_compiler.syntax.generic.storage import BindingPlace
         with BindingPlace(owner, rebind=False).capture(cfg, 'borrow'):
             pass
-    if callable(getattr(place.type, 'release', None)):
+    if place.type.family == 'string':
+        value = copy_storage(value, cfg, span)
+        if initialized:
+            release_storage(place.read(cfg, span), cfg, span)
+    elif callable(getattr(place.type, 'release', None)):
         if mode in ('copy', 'mirror'):
             value = value.type.copy_value(value, cfg, span)
         else:

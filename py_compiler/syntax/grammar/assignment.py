@@ -119,7 +119,7 @@ class Assignment:
                 raise ValueError('shared reference atomicity cannot change through sharing')
             value = value.type.copy_value(value, cfg, node.span)
             mode, owner = 'own', None
-        if core.kind in ('member', 'index') and value is not None and value.identity not in getattr(cfg, 'owned_results', ()) and value.type.family in ('record', 'array', 'pointer', 'shared'):
+        if core.kind in ('member', 'index') and value is not None and value.identity not in getattr(cfg, 'owned_results', ()) and value.type.family in ('record', 'array', 'pointer', 'shared', 'string', 'union'):
             owner = root_binding(core, cfg, env)
         if owner and owner.identity in cfg.storage:
             from py_compiler.syntax.generic.storage import FieldPlace
@@ -129,7 +129,7 @@ class Assignment:
                 owner = cfg.self_binding
         if value is None:
             raise ValueError("a no-result call cannot initialize a binding")
-        if owner and value.type.family == 'dynamic' and owner.type != value.type:
+        if value.identity in cfg.owned_results and (owner is None or owner.type != value.type):
             owner = None
         if core.kind == 'call' and value.identity in cfg.call_result_owners:
             owner = cfg.call_result_owners[value.identity]

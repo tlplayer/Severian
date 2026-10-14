@@ -54,6 +54,7 @@ class Builder:
         self.value_sources = {}
         self.call_result_owners = {}
         self.call_result_modes = {}
+        self.owned_results = set()
         self.parameter_bindings = {}
         self.grammar_captures = {}
         self.active_grammars = set()
@@ -122,7 +123,7 @@ class Builder:
         if identity in self.storage:
             return self.storage[identity].read(self, span)
         value = self.values[identity]
-        if binding.type.family in ('record', 'array', 'shared') and binding.identity in self.values and binding.type != value.type:
+        if binding.type.family in ('record', 'array', 'shared', 'string', 'union', 'dynamic') and binding.identity in self.values and binding.type != value.type:
             # A nested record view borrows the containing binding's lifetime,
             # but retains the address and type of its own field.
             value = self.values[binding.identity]

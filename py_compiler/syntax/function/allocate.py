@@ -18,7 +18,7 @@ class AllocationPlan:
 
 
 def resolve_plan(type_, overrides, context):
-    from py_compiler.syntax.function.layout import layout_of
+    from py_compiler.syntax.function.layout import layout_of, storage_layout
     defaults = dict(getattr(getattr(type_, 'declaration', None), 'memory_defaults', ()))
     constraints = {**defaults, **{k: v for k, v in overrides.items() if v != 'infer'}}
     values = {key: value.removeprefix('memory.') if isinstance(value, str) else value
@@ -30,7 +30,7 @@ def resolve_plan(type_, overrides, context):
                          ('lifetime', ('infer', 'function'))):
         if values.get(key, 'infer') not in allowed:
             raise ValueError(f'allocation {key}={values[key]} has no supported lowering contract')
-    natural = layout_of(type_, context).alignment if type_.family != 'array' else layout_of(type_.element, context).alignment
+    natural = layout_of(type_, context).alignment if type_.family != 'array' else storage_layout(type_.element, context).alignment
     alignment = values.get('alignment', 'infer')
     alignment = natural if alignment == 'infer' else int(alignment)
     if alignment < natural or alignment & (alignment - 1):
@@ -85,7 +85,7 @@ class Allocate:
         count = (select(cfg.context.type('index'), 'F.constructor', 'construct').expand(cfg, arguments, env)
                  if arguments else literal_value(count_hint if count_hint is not None else 1, cfg.context.type('index'), cfg, span))
         from py_compiler.syntax.complex.array import record_operation
-        operation = record_operation(result, 'allocate', cfg).with_plan(plan) if element.family == 'record' else MemoryOperation('allocate', plan)
+        operation = record_operation(result, 'allocate', cfg).with_plan(plan) if result.aggregate else MemoryOperation('allocate', plan)
         value = cfg.emit('allocate-array', result, (count,), operation, span)
         if plan.location == 'stack':
             cfg.stack_values.add(value.identity)

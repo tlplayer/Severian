@@ -20,7 +20,16 @@ def coerce(value, expected, cfg, span):
         return value
     if expected.family == "union" and value.type in expected.variants:
         from py_compiler.syntax.complex.object import UnionBox
-        return cfg.emit("union", expected, (value,), UnionBox(expected.variants.index(value.type)), span)
+        from py_compiler.syntax.generic.storage import copy_storage
+        result = cfg.emit('memory-copy', expected, (copy_storage(value, cfg, span),), UnionBox(expected.variants.index(value.type)), span)
+        cfg.owned_results.add(result.identity)
+        return result
+    if expected.family == 'union' and value.type.family == 'union' and expected.accepts_type(value.type):
+        from py_compiler.syntax.block.union import UnionWiden
+        copied = value.type.copy_value(value, cfg, span)
+        result = cfg.emit('memory-copy', expected, (copied,), UnionWiden(), span)
+        cfg.owned_results.add(result.identity)
+        return result
     if value.type.family == 'record' and expected.family == 'trait':
         declaration = cfg.context.by_name[value.type.name]
         if expected.name in declaration.traits:
@@ -419,7 +428,15 @@ def lower_expression(node, cfg, env, expected=None):
             from dataclasses import replace
             receiver_binding = replace(receiver_binding, ownership='view')
         if receiver_binding is None and callable(getattr(receiver.type, 'release', None)):
-            raise ValueError('owning method receiver must be bound before use')
+            # Retain an implicit owner in this lexical scope. Returned views can
+            # borrow it, while the ordinary scope/return cleanup destroys it.
+            temporary = f'<temporary receiver {receiver.identity}>'
+            receiver_binding = Binding(cfg.body.identity + ':' + temporary, temporary,
+                                       receiver.type, False, 'own', span)
+            env[temporary] = receiver_binding
+            cfg.local_names.add(temporary)
+            cfg.values[receiver_binding.identity] = receiver
+            cfg.body.bindings.append(receiver_binding)
         method = getattr(receiver.type, 'call_method', None)
         if method is not None:
             value = method(receiver, callee.token.text, arguments, cfg, env, span, receiver_binding)
@@ -470,6 +487,27 @@ import unittest
 
 
 class BorrowedTraitRoutingTests(unittest.TestCase):
+    def test_owning_temporary_receivers_live_through_saved_views(self):
+        source = ('class Buffer:\n    data: array[int]\n'
+                  '    def size(self: view Self) -> int:\n        return len(self.data)\n'
+                  '    def values(self: view Self) -> view array[int]:\n        return self.data\n'
+                  'def work() -> int:\n    count = Buffer(array[int,2]()).size()\n'
+                  '    saved = Buffer(array[int,3]()).values()\n    return count + len(saved)\n')
+        result = self.compile(source)
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        from py_compiler.mlir.src.lib import lower, render, verify_native
+        text = render(lower(result.program))
+        self.assertEqual(text.count('memref.dealloc'), 2)
+        verify_native(text)
+
+    def test_view_of_temporary_cannot_escape_its_scope(self):
+        source = ('class Buffer:\n    data: array[int]\n'
+                  '    def values(self: view Self) -> view array[int]:\n        return self.data\n'
+                  'def invalid() -> view array[int]:\n    return Buffer(array[int,1]()).values()\n')
+        result = self.compile(source)
+        self.assertTrue(result.diagnostics)
+        self.assertIn('lifetime', str(result.diagnostics))
+
     def test_owned_array_result_is_freed_with_a_stack_callable_argument(self):
         result = self.compile('class Provider:\n    marker: int\ndef create(provider: Provider) -> array[int]:\n    unsafe:\n        return allocate[int](2)\ndef work():\n    provider = Provider(0)\n    values = create(provider)\n')
         self.assertFalse(result.diagnostics, str(result.diagnostics))

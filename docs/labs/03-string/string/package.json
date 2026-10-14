@@ -1,0 +1,6 @@
+{
+  "package": {"name": "lab-string", "version": "0.1.0"},
+  "dependencies": {
+    "vector": {"package": "lab-vector", "path": "../../01-vector/vector"}
+  }
+}

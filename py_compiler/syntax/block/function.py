@@ -63,6 +63,8 @@ class Function(DeclarationProvider):
         builder.body.declaration = entry.name
         builder.body.result_ownership = entry.result_ownership
         builder.body.dispatch_guards = tuple(' '.join(token.text for token in guard.tokens) for guard in entry.guards)
+        builder.body.parameter_defaults = {name: ' '.join(token.text for token in value.tokens)
+                                           for name, value in entry.defaults.items()}
         builder.body.source_span = node.span
         builder.declared_nodes = context.declared_nodes
         builder.namespaces["module"] = context.global_bindings

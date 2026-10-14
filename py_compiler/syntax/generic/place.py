@@ -37,6 +37,8 @@ def expression_type(node, cfg, env, expected=None):
                 raise ValueError('package has no exported global ' + node.token.text)
             return place.type
         receiver = expression_type(subject, cfg, env)
+        if receiver.family == 'shared':
+            receiver = receiver.payload
         for field, name in getattr(getattr(receiver, 'declaration', None), 'fields', ()):
             if field == node.token.text:
                 return cfg.context.type(name)

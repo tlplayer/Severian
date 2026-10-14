@@ -39,7 +39,7 @@ class Array:
         if result.count is not None:
             cfg.effect('array-extent', (count,), ArrayExtent(result.count), span)
         plan = resolve_plan(result, {'location': 'heap'}, cfg.context)
-        operation = record_operation(result, 'allocate', cfg).with_plan(plan) if element.family == 'record' else MemoryOperation('allocate', plan)
+        operation = record_operation(result, 'allocate', cfg).with_plan(plan) if result.aggregate else MemoryOperation('allocate', plan)
         return cfg.emit('allocate-array', result, (count,), operation, span)
 
 
@@ -72,8 +72,12 @@ class ArrayType:
         return ()
 
     def __post_init__(self):
-        if self.element.family != 'record' and not (self.element.mlir.startswith('i') and self.element.mlir[1:].isdigit() or self.element.mlir in ('f16', 'bf16', 'f32', 'f64')):
+        if not self.aggregate and not (self.element.mlir.startswith('i') and self.element.mlir[1:].isdigit() or self.element.mlir in ('f16', 'bf16', 'f32', 'f64')):
             raise ValueError('array element requires a supported scalar memory representation')
+
+    @property
+    def aggregate(self):
+        return self.element.family in ('record', 'string', 'array', 'union', 'dynamic', 'shared')
 
     @property
     def name(self):
@@ -82,7 +86,7 @@ class ArrayType:
 
     @property
     def mlir(self):
-        return 'memref<?xi8>' if self.element.family == 'record' else f'memref<?x{self.element.mlir}>'
+        return 'memref<?xi8>' if self.aggregate else f'memref<?x{self.element.mlir}>'
 
     def require_context(self, cfg):
         # Access is bounded by this array's memref descriptor.
@@ -92,16 +96,16 @@ class ArrayType:
         self.require_context(cfg)
         from py_compiler.syntax.generic.owned import select
         index = select(cfg.context.type('index'), 'F.constructor', 'construct').expand(cfg, (index,), env)
-        return RecordElementPlace(receiver, index, self.element) if self.element.family == 'record' else ElementPlace(receiver, index, self.element)
+        return RecordElementPlace(receiver, index, self.element) if self.aggregate else ElementPlace(receiver, index, self.element)
 
     def copy_value(self, value, cfg, span):
         from dataclasses import replace
-        if self.element.family == 'record':
+        if self.aggregate:
             return copy_records(self, value, cfg, span)
         return cfg.emit('memory-copy', replace(self, location='heap'), (value,), MemoryOperation('copy'), span)
 
     def release(self, value, cfg, span):
-        if self.element.family == 'record':
+        if self.aggregate:
             record_loop(value, cfg, span, lambda place: place.destroy(cfg, span))
         if value.identity not in cfg.stack_values and value.type.location != 'stack':
             cfg.effect('deallocate', (value,), MemoryOperation('release'), span)
@@ -184,19 +188,21 @@ class MemoryOperation:
 
 
 def record_storage(type_, context):
-    from py_compiler.syntax.function.layout import layout_of
+    from py_compiler.syntax.function.layout import storage_layout
+    from py_compiler.syntax.generic.storage import stored_type
     element = type_.element
     def check_fields(record):
+        if record.family != 'record':
+            return
         for _, name in record.declaration.fields:
             member = context.type(name)
-            if member.family in ('pointer', 'trait', 'dynamic'):
+            if member.family in ('pointer', 'trait'):
                 raise ValueError('record array borrowed fields require element lifetime contracts')
-            if member.family == 'record':
-                check_fields(member)
+            check_fields(member)
     check_fields(element)
-    layout = layout_of(element, context)
-    # One initialized flag, followed by an aligned inline record.
-    return layout.alignment + layout.size, layout.alignment, context.provider_by_name[element.name].layout(element.declaration, context)
+    layout = storage_layout(element, context)
+    # Every owning slot has a flag, including a slot containing a union.
+    return layout.alignment + layout.size, layout.alignment, stored_type(element, context)
 
 
 def record_operation(type_, kind, cfg):
@@ -263,18 +269,15 @@ class RecordElementPlace:
         cfg.current = done
 
     def destroy(self, cfg, span):
-        release = getattr(self.type, 'release', None)
-        if release:
-            def destroy():
-                value = self.read(cfg, span)
-                cfg.stack_values.discard(value.identity)
-                release(value, cfg, span)
-            self.when_initialized(cfg, span, destroy)
+        from py_compiler.syntax.generic.storage import owns_storage, release_storage
+        if owns_storage(self.type):
+            self.when_initialized(cfg, span, lambda: release_storage(self.read(cfg, span), cfg, span))
         cfg.effect('element-clear', (self.receiver, self.index), self.operation('clear', cfg), span)
 
     def write(self, cfg, value, span):
         # Copy before replacement so a[i] = a[i] remains valid.
-        copied = self.type.copy_value(value, cfg, span)
+        from py_compiler.syntax.generic.storage import copy_storage
+        copied = copy_storage(value, cfg, span)
         self.destroy(cfg, span)
         cfg.effect('element-store', (self.receiver, self.index, copied), self.operation('store', cfg), span)
 
@@ -287,6 +290,8 @@ class RecordMemory:
     layout: str
     bits: int
     plan: object = None
+    region: str = ''
+    region_offset: int = 0
 
     def with_plan(self, plan):
         from dataclasses import replace
@@ -315,6 +320,12 @@ class RecordMemory:
                       f'{v("empty")} = arith.constant 0 : i8',
                       f'scf.for {v("init")} = {v("zero")} to {v("bytes")} step {v("stride")} {{',
                       f'  memref.store {v("empty")}, {name(operation.result)}[{v("init")}] : memref<?xi8>', '}']
+            if self.region:
+                allocation = next(index for index, line in enumerate(lines)
+                                  if line.startswith(name(operation.result) + ' ='))
+                lines[allocation:allocation + 1] = [
+                    f'{v("region_offset")} = arith.constant {self.region_offset} : index',
+                    f'{name(operation.result)} = memref.view %{self.region}[{v("region_offset")}][{v("bytes")}] : memref<?xi8> to memref<?xi8>']
             return lines
         memory = name(operands[0])
         index = name(operands[1])
@@ -339,10 +350,14 @@ class RecordMemory:
                   f'{v("base")} = memref.extract_aligned_pointer_as_index {memory} : memref<?xi8> -> index',
                   f'{v("address")} = arith.addi {v("base")}, {v("position")} : index',
                   f'{v("bits")} = arith.index_cast {v("address")} : index to {width}',
-                  f'{name(operation.result) if self.kind == "load" else v("pointer")} = llvm.inttoptr {v("bits")} : {width} to !llvm.ptr']
+                  f'{name(operation.result) if self.kind == "load" and operation.result.type.family == "record" else v("pointer")} = llvm.inttoptr {v("bits")} : {width} to !llvm.ptr']
+        from py_compiler.syntax.generic.storage import pack_value, unpack_value
+        if self.kind == 'load' and operation.result.type.family != 'record':
+            lines.append(f'{v("value")} = llvm.load {v("pointer")} : !llvm.ptr -> {self.layout}')
+            unpack_value(lines, v('value'), operation.result.type, self.layout, name(operation.result))
         if self.kind == 'store':
-            lines += [f'{v("value")} = llvm.load {name(operands[2])} : !llvm.ptr -> {self.layout}',
-                      f'llvm.store {v("value")}, {v("pointer")} : {self.layout}, !llvm.ptr',
+            stored = pack_value(lines, name(operands[2]), operands[2].type, self.layout, v('value'))
+            lines += [f'llvm.store {stored}, {v("pointer")} : {self.layout}, !llvm.ptr',
                       f'{v("full")} = arith.constant 1 : i8',
                       f'memref.store {v("full")}, {memory}[{v("slot")}] : memref<?xi8>']
         return lines
@@ -426,3 +441,68 @@ class ArrayTypeTests(unittest.TestCase):
         self.assertIn('cannot transfer array allocation ownership', str(result.diagnostics))
         result = self.compile('def work():\n    unsafe:\n        a = allocate[int,location=memory.heap]()\n        p: pointer[int] = move a\n        deallocate(a)\n')
         self.assertTrue(result.diagnostics)
+
+    def test_native_aggregate_storage_copies_and_destroys_initialized_slots(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.testing import test_package
+        source = '''union Value:
+    string
+    array[int]
+    int
+class Text:
+    value: string
+
+def boxed() -> Value:
+    return "escaped"
+
+test "string slots survive replacement and copying":
+    values = array[string,3]()
+    values[1] = "first"
+    saved = copy values
+    values[1] = "second"
+    drop values
+    assert(len(saved[1]) == 5)
+    assert(saved[1][0] == u8(102))
+
+test "nested arrays have independent owners":
+    values = array[array[int],2]()
+    inner = array[int,1]()
+    inner[0] = 42
+    values[0] = inner
+    inner[0] = 7
+    saved = copy values
+    drop inner
+    drop values
+    assert(saved[0][0] == 42)
+
+test "class string fields own their storage":
+    text = Text("hello")
+    texts = array[Text,2]()
+    texts[0] = text
+    copy_text = copy texts[0]
+    drop texts
+    assert(len(copy_text.value) == 5)
+
+test "unions own and destroy only their active variant":
+    values = array[Value,3]()
+    text: Value = "hello"
+    numbers = array[int,2]()
+    numbers[0] = 42
+    wrapped: Value = numbers
+    values[0] = text
+    values[1] = wrapped
+    saved = copy values
+    values[0] = boxed()
+    drop values
+    drop saved
+    assert(numbers[0] == 42)
+'''
+        with tempfile.TemporaryDirectory(prefix='sev-aggregate-storage-') as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'package.json').write_text(json.dumps({'package': {'name': 'aggregate-storage', 'version': '0.1.0'}}))
+            (root / 'src/lib.sev').write_text(source)
+            result = test_package(root)
+            self.assertTrue(result['success'], str(result))

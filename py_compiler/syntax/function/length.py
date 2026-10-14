@@ -11,10 +11,12 @@ class Length:
         if type_ is not None or len(arguments) != 1:
             raise ValueError('len requires one bounded array or pointer')
         value = cfg.expr(arguments[0], env)
+        if callable(getattr(value.type, 'length', None)):
+            return value.type.length(value, cfg, span)
         if value.type.family not in ('array', 'pointer') or not value.type.mlir.startswith('memref<'):
             raise ValueError('len requires bounded memory')
         from py_compiler.syntax.complex.array import record_storage
-        stride = record_storage(value.type, cfg.context)[0] if value.type.element.family == 'record' else 1
+        stride = record_storage(value.type, cfg.context)[0] if getattr(value.type, 'aggregate', False) else 1
         return cfg.emit('length', cfg.context.type('int'), (value,), Length(stride), span)
 
     def atom(self, operation):

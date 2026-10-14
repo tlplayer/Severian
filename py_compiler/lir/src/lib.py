@@ -169,6 +169,7 @@ def compile_object(lir, optimizer=None):
                    '--convert-arith-to-llvm', '--reconcile-unrealized-casts',
                    '--ensure-debug-info-scope-on-llvm-func', '--mlir-print-debuginfo'], lir.text())
     llvm_ir = run([translator, '--mlir-to-llvmir'], dialect)
+    llvm_ir = flush_before_abort(llvm_ir)
     with tempfile.TemporaryDirectory(prefix='sev-object-') as directory:
         destination = Path(directory) / 'partition.o'
         run([compiler, '-O0', '--frame-pointer=all', '-filetype=obj', '-relocation-model=pic', '-mtriple=' + lir.target,
@@ -179,10 +180,43 @@ def compile_object(lir, optimizer=None):
     return ObjectArtifact(dialect, llvm_ir, object_bytes, lir.dependencies)
 
 
+def flush_before_abort(llvm_ir):
+    """The cf.assert runtime prints to stdout; preserve it when stdout is piped."""
+    import re
+    pattern = r'(?m)^([ \t]*)(call void @abort\(\).*)$'
+    if not re.search(pattern, llvm_ir):
+        return llvm_ir
+    from itertools import count
+    identifiers = count()
+    llvm_ir = re.sub(pattern, lambda match:
+        f'{match[1]}%sev_flush_before_abort_{next(identifiers)} = call i32 @fflush(ptr null)\n{match[1]}{match[2]}', llvm_ir)
+    if not re.search(r'(?m)^(?:declare|define)\s+.*@fflush\(', llvm_ir):
+        llvm_ir += '\ndeclare i32 @fflush(ptr)\n'
+    return llvm_ir
+
+
 import unittest
 
 
 class DebugInfoTests(unittest.TestCase):
+    def test_assertion_diagnostic_survives_redirected_stdout(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        import signal
+        source = 'def crash() -> int:\n    assert(false)\n    return 0\n'
+        result = compile_source('assert-flush.sev', source, Syntax())
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        artifact = compile_object(lower(result.program, 'x86_64-unknown-linux-gnu', 64))
+        symbol = next(body.name for body in result.program.bodies if body.declaration == 'crash')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / 'crash.o').write_bytes(artifact.object_bytes)
+            import json
+            (path / 'main.c').write_text('extern long crash(void) __asm__(' + json.dumps('"' + symbol + '"') + ');\nint main(void) { return crash(); }\n')
+            subprocess.run(['cc', str(path / 'main.c'), str(path / 'crash.o'), '-o', str(path / 'crash')], check=True, capture_output=True)
+            process = subprocess.run([str(path / 'crash')], capture_output=True, text=True)
+            self.assertEqual(process.returncode, -signal.SIGABRT)
+            self.assertIn('assertion failed', process.stdout)
     def test_source_locations_survive_lowering_into_dwarf(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax

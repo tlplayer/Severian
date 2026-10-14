@@ -57,9 +57,11 @@ class Body:
     result_sources: tuple = ()
     result_ownership: str = 'own'
     dispatch_guards: tuple = ()
+    parameter_defaults: dict = field(default_factory=dict)
     result_layout: str = ""
     source_snapshot: object = None
     source_span: object = None
+    memory_regions: tuple = ()
 
     def verify(self):
         if not self.blocks:

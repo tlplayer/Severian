@@ -60,7 +60,7 @@ class FlowState:
     def loan(self, binding, owner):
         self.read(owner)
         captures_storage = (getattr(binding.type, 'family', None) == 'pointer' or
-                            (getattr(binding.type, 'family', None) in ('array', 'record', 'shared') and binding.type != owner.type))
+                            (getattr(binding.type, 'family', None) in ('array', 'record', 'shared', 'string', 'union', 'dynamic') and binding.type != owner.type))
         if binding.ownership == 'borrow' or (captures_storage and getattr(owner.type, 'binding_ownership', None) != 'copy'):
             self.loans[binding.identity] = self.resolve(owner.identity)
         self.views[binding.identity] = owner.identity

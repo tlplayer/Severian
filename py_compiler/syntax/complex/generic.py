@@ -102,6 +102,8 @@ def check_constraints(parameters, bindings, context):
             contract = context.type(required)
             if actual == contract:
                 continue
+            if callable(getattr(contract, 'accepts_type', None)) and contract.accepts_type(actual):
+                continue
             declaration = context.by_name.get(actual.name)
             if contract.family != 'trait' or declaration is None or contract.name not in declaration.traits:
                 raise ValueError(f'{actual.name} does not satisfy {required}')
@@ -223,6 +225,14 @@ class GenericRealizationTests(unittest.TestCase):
         result = self.compile(text)
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         return result.program
+
+    def test_union_constraint_accepts_each_member_and_rejects_other_types(self):
+        source = ('class Buffer[T: u8 | u32 = u8]:\n    value: T\n'
+                  'def work():\n    byte = Buffer(u8(1))\n    wide = Buffer[u32](u32(955))\n')
+        self.valid(source)
+        result = self.compile(source + 'def invalid():\n    value = Buffer[u16](u16(1))\n')
+        self.assertTrue(result.diagnostics)
+        self.assertIn('does not satisfy', str(result.diagnostics))
 
     def test_integer_string_object_and_dynamic_realizations(self):
         program = self.valid(self.identity + 'class Point:\n    x: int\n    y: int\ndef work():\n    integer = identity(42)\n    text = identity("hello")\n    original = Point(10, 20)\n    point = identity(original)\n    value: dynamic = 42\n    erased = identity(value)\n')

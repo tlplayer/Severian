@@ -62,7 +62,9 @@ class Return:
         if value and callable(getattr(value.type, 'release', None)):
             term = expression(node.tokens[1:])
             binding = cfg.lookup(term, env) if term.kind in ('name', 'reference') else None
-            if binding:
+            if value.identity in cfg.owned_results and (binding is None or binding.type != value.type):
+                pass
+            elif binding:
                 if binding.ownership in ('view', 'borrow'):
                     if not cfg.value_sources.get(value.identity):
                         raise ValueError('returning a memory view requires a result lifetime contract')

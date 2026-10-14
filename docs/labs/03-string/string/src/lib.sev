@@ -1,0 +1,360 @@
+import vector
+
+
+def unit_bytes(value: u8) -> int:
+    return 1
+
+
+def unit_bytes(value: u32) -> int:
+    return 4
+
+
+# C owns its storage and supplies size/capacity/reserve/get/push/pop.
+# Public append/pop operate on characters. Size and capacity count encoding
+# units, matching core.string; indexing and slice bounds count characters.
+class String[T: u8 | u32 = u8, C = vector.Vector[T]]:
+    storage: C
+
+    def String(self: borrow Self):
+        self.storage = C()
+
+    def size(self: view Self) -> int:
+        return self.storage.size()
+
+    def len(self: view Self) -> int:
+        return self.storage.size()
+
+    def empty(self: view Self) -> bool:
+        return self.storage.size() == 0
+
+    def capacity(self: view Self) -> int:
+        return self.storage.capacity()
+
+    def byte_length(self: view Self) -> int:
+        return self.storage.size() * unit_bytes(T(0))
+
+    def reserve(self: borrow Self, required: int):
+        self.storage.reserve(required)
+
+    def width(self: view Self, offset: int) -> int:
+        first = int(self.storage.get(offset))
+        if unit_bytes(T(0)) == 4 or first < 128:
+            return 1
+        if first >= 194 and first <= 223:
+            return 2
+        if first >= 224 and first <= 239:
+            return 3
+        assert(first >= 240 and first <= 244)
+        return 4
+
+    def decode(self: view Self, offset: int) -> char:
+        width = self.width(offset)
+        value = int(self.storage.get(offset))
+        if width == 1:
+            return char(value)
+        if width == 2:
+            value -= 192
+        elif width == 3:
+            value -= 224
+        else:
+            value -= 240
+        position = 1
+        while position < width:
+            next = int(self.storage.get(offset + position))
+            assert(next >= 128 and next <= 191)
+            value = value * 64 + next - 128
+            position += 1
+        if width == 2:
+            assert(value >= 128)
+        elif width == 3:
+            assert(value >= 2048)
+        else:
+            assert(value >= 65536)
+        return char(value)
+
+    def character_count(self: view Self) -> int:
+        offset = 0
+        count = 0
+        while offset < self.size():
+            offset += self.width(offset)
+            count += 1
+        return count
+
+    def offset(self: view Self, position: int) -> int:
+        assert(position >= 0)
+        offset = 0
+        index = 0
+        while index < position:
+            assert(offset < self.size())
+            offset += self.width(offset)
+            index += 1
+        return offset
+
+    def get(self: view Self, position: int) -> char:
+        if position < 0:
+            position += self.character_count()
+        return self.decode(self.offset(position))
+
+    grammar get[self, "[", index: int, "]"]() -> char:
+        return self.get(index)
+
+    def append(self: borrow Self, value: char) -> borrow Self:
+        codepoint = int(value)
+        if unit_bytes(T(0)) == 4 or codepoint < 128:
+            self.storage.push(T(codepoint))
+        elif codepoint < 2048:
+            self.storage.push(T(192 + codepoint // 64))
+            self.storage.push(T(128 + codepoint % 64))
+        elif codepoint < 65536:
+            self.storage.push(T(224 + codepoint // 4096))
+            self.storage.push(T(128 + (codepoint // 64) % 64))
+            self.storage.push(T(128 + codepoint % 64))
+        else:
+            self.storage.push(T(240 + codepoint // 262144))
+            self.storage.push(T(128 + (codepoint // 4096) % 64))
+            self.storage.push(T(128 + (codepoint // 64) % 64))
+            self.storage.push(T(128 + codepoint % 64))
+        return borrow self
+
+    def append(self: borrow Self, value: string) -> borrow Self:
+        # Literal strings provide UTF-8 bytes; decode before converting to T.
+        source = String[u8]()
+        position = 0
+        while position < len(value):
+            source.storage.push(value[position])
+            position += 1
+        position = 0
+        while position < source.size():
+            self.append(source.decode(position))
+            position += source.width(position)
+        return borrow self
+
+    def append(self: borrow Self, value: Self) -> borrow Self:
+        position = 0
+        while position < value.size():
+            self.append(value.decode(position))
+            position += value.width(position)
+        return borrow self
+
+    def pop(self: borrow Self) -> char:
+        assert(not self.empty())
+        offset = self.offset(self.character_count() - 1)
+        value = self.decode(offset)
+        while self.size() > offset:
+            self.storage.pop()
+        return value
+
+    def resize(self: borrow Self, required: int):
+        assert(required >= 0)
+        # Reject a partial UTF-8 character before changing the storage.
+        position = 0
+        while position < required and position < self.size():
+            position += self.width(position)
+        assert(position <= required)
+        while self.size() > required:
+            self.storage.pop()
+        self.reserve(required)
+        while self.size() < required:
+            self.storage.push(T(0))
+
+    def clone(self: view Self) -> Self:
+        result = String[T, C]()
+        result.reserve(self.size())
+        position = 0
+        while position < self.size():
+            result.storage.push(self.storage.get(position))
+            position += 1
+        return result
+
+    def slice(self: view Self, first: int, stop: int) -> Self:
+        assert(first >= 0 and first <= stop)
+        start = self.offset(first)
+        end = self.offset(stop)
+        result = String[T, C]()
+        while start < end:
+            result.append(self.decode(start))
+            start += self.width(start)
+        return result
+
+
+test "append and pop preserve complete UTF-8 characters":
+    value = String()
+    assert(value.empty())
+    value.append("aλ中😀")
+    assert(value.size() == 10)
+    assert(value.byte_length() == 10)
+    assert(value.character_count() == 4)
+    assert(value[1] == 'λ')
+    assert(value[-1] == '😀')
+    assert(value.pop() == '😀')
+    assert(value.pop() == '中')
+    assert(value.pop() == 'λ')
+    assert(value.pop() == 'a')
+    assert(value.empty())
+
+
+test "UTF-32 selects Vector u32 and counts four bytes per unit":
+    value = String[u32]()
+    value.append('λ')
+    value.append("😀!")
+    assert(value.size() == 3)
+    assert(value.byte_length() == 12)
+    assert(value.character_count() == 3)
+    assert(value.pop() == '!')
+    assert(value.pop() == '😀')
+    assert(value[0] == 'λ')
+
+
+test "owned slices and clones survive source mutation and destruction":
+    original = String[u8, vector.Vector[u8]]()
+    original.append("aλ😀z")
+    snapshot = original.clone()
+    piece = original.slice(1, 3)
+    original.resize(1)
+    original.append('!')
+    drop original
+    assert(snapshot.character_count() == 4)
+    assert(piece.character_count() == 2)
+    assert(piece[0] == 'λ')
+    assert(piece[1] == '😀')
+    snapshot.append(piece)
+    assert(snapshot.character_count() == 6)
+
+
+test "reserve preserves contents and resize pads with NUL":
+    value = String()
+    value.append('λ')
+    value.reserve(32)
+    assert(value.capacity() >= 32)
+    assert(value.size() == 2)
+    value.resize(4)
+    assert(value.character_count() == 3)
+    assert(value.pop() == char(0))
+    assert(value.pop() == char(0))
+    assert(value.pop() == 'λ')
+
+
+test "resize rejects splitting a UTF-8 character":
+    throws "assertion failed":
+        value = String()
+        value.append('λ')
+        value.resize(1)
+
+
+test "empty pop rejects underflow":
+    throws "assertion failed":
+        value = String()
+        value.pop()
+
+
+test with compiler "String permits only u8 or u32 encoding units":
+    reject "does not satisfy":
+        import vector
+        class String[T: u8 | u32 = u8, C = vector.Vector[T]]:
+            storage: C
+        def invalid():
+            value = String[u16](vector.Vector[u16]())
+
+
+test "recursive palindrome works on characters instead of UTF-8 bytes":
+    def palindrome(value: String, first: int, stop: int) -> bool:
+        if stop - first <= 1:
+            return true
+        if value[first] != value[stop - 1]:
+            return false
+        return palindrome(value, first + 1, stop - 1)
+    value = String()
+    assert(palindrome(value, 0, 0))
+    value.append("aλ😀λa")
+    assert(palindrome(value, 0, value.character_count()))
+    value.append('!')
+    assert(not palindrome(value, 0, value.character_count()))
+
+
+test "balanced brackets use string append and pop as a stack":
+    def balanced(value: String) -> bool:
+        stack = String()
+        position = 0
+        while position < value.character_count():
+            current = value[position]
+            if current == '(' or current == '[' or current == '{':
+                stack.append(current)
+            elif current == ')' or current == ']' or current == '}':
+                if stack.empty():
+                    return false
+                opening = stack.pop()
+                if current == ')' and opening != '(':
+                    return false
+                if current == ']' and opening != '[':
+                    return false
+                if current == '}' and opening != '{':
+                    return false
+            position += 1
+        return stack.empty()
+    value = String()
+    assert(balanced(value))
+    value.append("{λ[()😀]}")
+    assert(balanced(value))
+    value.append(')')
+    assert(not balanced(value))
+    crossed = String()
+    crossed.append("([)]")
+    assert(not balanced(crossed))
+    unclosed = String()
+    unclosed.append("((")
+    assert(not balanced(unclosed))
+
+
+test "regex DP matches whole strings with dot and star":
+    # LC 10 subset: dot matches one character, star repeats the preceding
+    # atom zero or more times. No escaping, classes, or search semantics.
+    def matches(text: String, pattern: String) -> bool:
+        rows = text.character_count() + 1
+        columns = pattern.character_count() + 1
+        position = 0
+        while position < columns - 1:
+            if pattern[position] == '*':
+                if position == 0:
+                    return false
+                if pattern[position - 1] == '*':
+                    return false
+            position += 1
+        states = array[bool, rows * columns]()
+        states[0] = true
+        column = 2
+        while column < columns:
+            if pattern[column - 1] == '*':
+                states[column] = states[column - 2]
+            column += 1
+        row = 1
+        while row < rows:
+            column = 1
+            while column < columns:
+                atom = pattern[column - 1]
+                if atom == '*':
+                    previous = pattern[column - 2]
+                    same = previous == '.' or previous == text[row - 1]
+                    states[row * columns + column] = states[row * columns + column - 2] or (same and states[(row - 1) * columns + column])
+                else:
+                    same = atom == '.' or atom == text[row - 1]
+                    states[row * columns + column] = same and states[(row - 1) * columns + column - 1]
+                column += 1
+            row += 1
+        return states[rows * columns - 1]
+    text = String()
+    pattern = String()
+    assert(matches(text, pattern))
+    pattern.append("a*")
+    assert(matches(text, pattern))
+    text.append("aab")
+    pattern.resize(0)
+    pattern.append("c*a*b")
+    assert(matches(text, pattern))
+    text.append('!')
+    assert(not matches(text, pattern))
+    pattern.resize(0)
+    pattern.append(".*")
+    text.append("λ😀")
+    assert(matches(text, pattern))
+    pattern.append('*')
+    assert(not matches(text, pattern))

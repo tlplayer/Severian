@@ -4,7 +4,7 @@ from importlib import import_module
 
 BLOCKS = (
     ('block.for', 'For'), ('block.while', 'While'), ('block.import', 'Import'), ('block.if', 'Conditional'), ('block.elif', 'Elif'), ('block.else', 'Else'),
-    ('block.class', 'Class'), ('block.trait', 'Trait'), ('block.enum', 'Enum'),
+    ('block.class', 'Class'), ('block.trait', 'Trait'), ('block.enum', 'Enum'), ('block.union', 'UnionDeclaration'),
     ('block.function', 'Function'), ('block.test', 'Test'), ('block.grammar', 'Grammar'),
     ('block.operator', 'Operator'), ('block.extend', 'Extend'), ('block.match', 'Match'),
     ('block.with', 'With'), ('block.unsafe', 'Unsafe'), ('block.select', 'Select'),
@@ -48,6 +48,8 @@ def type_definitions(pointer_bits):
     from py_compiler.syntax.complex.array import Array
     result['array'] = Array()
     result.update((owner.name, owner) for owner in instantiate(TYPES))
+    from dataclasses import replace
+    result['dynamic'] = replace(result['dynamic'], bits=pointer_bits)
     return result
 
 

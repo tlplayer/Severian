@@ -68,6 +68,18 @@ def compile_source(path, text, syntax, *, stop_after='mir', interface=None, nati
                            'source': '\n' * (source.position(t.node.span.start)[0] - 1) + source.text[t.node.span.start:t.node.span.end] + '\n'}
                           for t in module.context.record_templates.values()
                           if not t.scope and not t.node.scope.development)
+        templates += tuple({'name': entry.name, 'kind': 'function', 'path': source.path,
+                            'source': '\n' * (source.position(entry.node.span.start)[0] - 1)
+                                      + source.text[entry.node.span.start:entry.node.span.end] + '\n'}
+                           for entry in module.context.callables
+                           if entry.templates and not entry.scope and not entry.node.scope.development)
+        templates += tuple({'name': node.header[0].text, 'kind': 'class-grammars', 'path': source.path,
+                            'source': '\n' * (source.position(node.span.start)[0] - 1)
+                                      + source.text[node.span.start:node.span.end] + '\n'}
+                           for node in root.children
+                           if getattr(node.provider, 'spelling', '') == 'class'
+                           and node.header[0].text not in module.context.record_templates
+                           and any(getattr(child.provider, 'spelling', '') == 'grammar' for child in node.children))
         mir = register(typed)
         return FrontendResult(source, Program(constants, module.submodules, mir.bodies, typed.declarations,
                                               (typed,), (mir,), 'mir'), (), templates)

@@ -122,7 +122,7 @@ class DeclarationContext:
             return result
         if '|' in name:
             from py_compiler.syntax.block.union import Union
-            union = Union().resolve(self.type(part.strip()) for part in name.split('|'))
+            union = Union().resolve((self.type(part.strip()) for part in name.split('|')), self)
             if union.name not in self.types:
                 self.types[union.name] = union
             return self.types[union.name]

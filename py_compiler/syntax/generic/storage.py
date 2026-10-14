@@ -3,6 +3,62 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 
+def descriptor_type(bits):
+    return f'!llvm.struct<(!llvm.ptr, !llvm.ptr, i{bits}, !llvm.array<1 x i{bits}>, !llvm.array<1 x i{bits}>)>'
+
+
+def stored_type(type_, context):
+    if type_.family == 'record':
+        return context.provider_by_name[type_.name].layout(type_.declaration, context)
+    if type_.mlir.startswith('memref'):
+        return descriptor_type(context.type('usize').bits)
+    return type_.mlir
+
+
+def owns_storage(type_):
+    return type_.family == 'string' or callable(getattr(type_, 'release', None))
+
+
+def copy_storage(value, cfg, span):
+    if value.type.family == 'string':
+        from py_compiler.syntax.complex.array import MemoryOperation
+        return cfg.emit('memory-copy', value.type, (value,), MemoryOperation('copy'), span)
+    copy = getattr(value.type, 'copy_value', None)
+    return copy(value, cfg, span) if copy else value
+
+
+def release_storage(value, cfg, span):
+    if value.type.family == 'string':
+        from py_compiler.syntax.complex.array import MemoryOperation
+        cfg.effect('deallocate', (value,), MemoryOperation('release'), span)
+    else:
+        release = getattr(value.type, 'release', None)
+        if release:
+            cfg.stack_values.discard(value.identity)
+            release(value, cfg, span)
+
+
+def pack_value(lines, value, type_, storage, label):
+    if type_.family == 'record':
+        lines.append(f'{label} = llvm.load {value} : !llvm.ptr -> {storage}')
+    elif type_.mlir.startswith('memref'):
+        lines.append(f'{label} = builtin.unrealized_conversion_cast {value} : {type_.mlir} to {storage}')
+    else:
+        return value
+    return label
+
+
+def unpack_value(lines, value, type_, storage, label):
+    if type_.family == 'record':
+        lines.extend([f'{label}_one = arith.constant 1 : i64',
+                      f'{label} = llvm.alloca {label}_one x {storage} : (i64) -> !llvm.ptr',
+                      f'llvm.store {value}, {label} : {storage}, !llvm.ptr'])
+    elif type_.mlir.startswith('memref'):
+        lines.append(f'{label} = builtin.unrealized_conversion_cast {value} : {storage} to {type_.mlir}')
+    else:
+        lines.append(f'{label} = builtin.unrealized_conversion_cast {value} : {storage} to {type_.mlir}')
+
+
 def root_binding(node, cfg, env):
     while node.kind in ('member', 'index'):
         node = node.operands[0]

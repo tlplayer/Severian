@@ -34,22 +34,85 @@ class Shared:
     def from_value(self, value, cfg, span):
         if value.type == self:
             return value
-        if not self.payload.mlir.startswith('memref'):
-            raise ValueError('shared class ownership requires an owning aggregate handle')
-        if value.type != self.payload or not callable(getattr(value.type, 'release', None)):
-            raise ValueError('share requires a matching owning memory value')
-        if value.identity in cfg.stack_values:
+        if value.type != self.payload:
+            raise ValueError('share requires a matching owning value')
+        if self.payload.family == 'record':
+            from py_compiler.syntax.complex.array import ArrayType, record_operation, RecordElementPlace
+            from py_compiler.syntax.function.allocate import resolve_plan
+            from py_compiler.syntax.function.calls import literal_value
+            from py_compiler.syntax.generic.storage import release_storage
+            backing = ArrayType(self.payload)
+            count = literal_value(1, cfg.context.type('index'), cfg, span)
+            plan = resolve_plan(backing, {'location': 'heap'}, cfg.context)
+            storage = cfg.emit('allocate-array', backing, (count,), record_operation(backing, 'allocate', cfg).with_plan(plan), span)
+            zero = literal_value(0, count.type, cfg, span)
+            RecordElementPlace(storage, zero, self.payload).write(cfg, value, span)
+            release_storage(value, cfg, span)
+            value = storage
+        elif not self.payload.mlir.startswith('memref') or not callable(getattr(value.type, 'release', None)):
+            raise ValueError('share requires an owning class or memory value')
+        elif value.identity in cfg.stack_values:
             raise ValueError('cannot share explicitly stack-owned storage')
-        return cfg.emit('share-create', self, (value,), SharedOperation('create', self), span)
+        return cfg.emit('memory-copy', self, (value,), SharedOperation('create', self), span)
+
+    @property
+    def backing(self):
+        from py_compiler.syntax.complex.array import ArrayType
+        return ArrayType(self.payload) if self.payload.family == 'record' else self.payload
+
+    def data(self, receiver, cfg, span):
+        value = cfg.emit('share-data', self.backing, (receiver,), SharedOperation('data', self), span)
+        if self.payload.family == 'record':
+            from py_compiler.syntax.complex.array import RecordElementPlace
+            from py_compiler.syntax.function.calls import literal_value
+            zero = literal_value(0, cfg.context.type('index'), cfg, span)
+            return RecordElementPlace(value, zero, self.payload).read(cfg, span)
+        return value
+
+    def field_place(self, receiver, field, cfg, span, write=False):
+        if write:
+            raise ValueError('shared references expose read-only payloads')
+        provider = cfg.context.provider_by_name[self.payload.name]
+        return SharedPlace(provider.field_place(self.data(receiver, cfg, span), field, cfg, span))
+
+    def call_method(self, receiver, method, arguments, cfg, env, span, binding):
+        from py_compiler.syntax.function.calls import select, invoke
+        if method.startswith('__'):
+            raise ValueError('private method is inaccessible outside its receiver')
+        entries = cfg.context.functions.get(self.payload.name + '.' + method, ())
+        entry, operands = select(entries, arguments, cfg, env)
+        if entry.receiver_ownership != 'view':
+            raise ValueError('shared references expose read-only payloads')
+        result = invoke(entry, operands, cfg, span, self.data(receiver, cfg, span))
+        if result and entry.body and entry.body.result_sources and binding:
+            cfg.call_result_owners[result.identity] = binding
+            cfg.call_result_modes[result.identity] = 'view'
+        return result
 
     def copy_value(self, value, cfg, span):
         return cfg.emit('share-retain', self, (value,), SharedOperation('retain', self), span)
 
     def release(self, value, cfg, span):
-        cfg.effect('share-release', (value,), SharedOperation('release', self), span)
+        from py_compiler.mir.cfg.cfg import Edge, Terminator
+        last = cfg.emit('share-release', cfg.context.type('bool'), (value,), SharedOperation('release', self), span)
+        destroy, done = cfg.block(), cfg.block()
+        cfg.current.terminator = Terminator('conditional', (Edge(destroy.identity), Edge(done.identity)), last)
+        cfg.current = destroy
+        payload = cfg.emit('share-data', self.backing, (value,), SharedOperation('data', self), span)
+        cfg.stack_values.discard(payload.identity)
+        self.backing.release(payload, cfg, span)
+        cfg.effect('share-counter-free', (value,), SharedOperation('counter-free', self), span)
+        cfg.current.terminator = Terminator('jump', (Edge(done.identity),))
+        cfg.current = done
+        from py_compiler.mir.memory import EndLocal
+        cfg.effect('share-end', (value,), EndLocal(), span)
+
+    @property
+    def element(self):
+        return self.payload.element
 
     def element_place(self, receiver, index, cfg, env, span):
-        payload = cfg.emit('share-data', self.payload, (receiver,), SharedOperation('data', self), span)
+        payload = self.data(receiver, cfg, span)
         return SharedPlace(self.payload.element_place(payload, index, cfg, env, span))
 
 
@@ -75,13 +138,13 @@ class SharedOperation:
 
     def atom(self, operation):
         return Atom(self, tuple(v.type for v in operation.operands), operation.result.type if operation.result else None,
-                    ('move',) if self.kind in ('create', 'release') else ('view',),
+                    ('move',) if self.kind == 'create' else ('view',),
                     ('destruction',) if self.kind == 'release' else ('read',), self)
 
     def render_operation(self, operation):
         source = name(operation.operands[0])
         tag = temporary_suffix(operation)
-        desc, shared, data = self.type.descriptor, self.type.mlir, self.type.payload.mlir
+        desc, shared, data = self.type.descriptor, self.type.mlir, self.type.backing.mlir
         result = name(operation.result) if operation.result else ''
         if self.kind == 'create':
             return [f'%rc_{tag} = memref.alloc() : memref<1xi64>',
@@ -95,6 +158,10 @@ class SharedOperation:
         if self.kind == 'data':
             return [f'%data_{tag} = llvm.extractvalue {source}[0] : {shared}',
                     f'{result} = builtin.unrealized_conversion_cast %data_{tag} : {desc} to {data}']
+        if self.kind == 'counter-free':
+            return [f'%counter_{tag} = llvm.extractvalue {source}[1] : {shared}',
+                    f'%rc_{tag} = builtin.unrealized_conversion_cast %counter_{tag} : {desc} to memref<1xi64>',
+                    f'memref.dealloc %rc_{tag} : memref<1xi64>']
         delta = 1 if self.kind == 'retain' else -1
         lines = [f'%counter_{tag} = llvm.extractvalue {source}[1] : {shared}',
                  f'%rc_{tag} = builtin.unrealized_conversion_cast %counter_{tag} : {desc} to memref<1xi64>',
@@ -112,10 +179,7 @@ class SharedOperation:
                       f'{result} = llvm.insertvalue %counter_{tag}, {source}[1] : {shared}']
         else:
             lines += [f'%one_{tag} = arith.constant 1 : i64',
-                      f'%last_{tag} = arith.cmpi eq, %old_{tag}, %one_{tag} : i64',
-                      f'scf.if %last_{tag} {{', f'  %data_{tag} = llvm.extractvalue {source}[0] : {shared}',
-                      f'  %payload_{tag} = builtin.unrealized_conversion_cast %data_{tag} : {desc} to {data}',
-                      f'  memref.dealloc %payload_{tag} : {data}', f'  memref.dealloc %rc_{tag} : memref<1xi64>', '}']
+                      f'{result} = arith.cmpi eq, %old_{tag}, %one_{tag} : i64']
         return lines
 
 
@@ -165,3 +229,44 @@ class SharedTests(unittest.TestCase):
             function = library[next(body.name for body in result.program.bodies if body.declaration == 'work')]
             function.restype = ctypes.c_int64
             self.assertEqual(function(), 84)
+
+    def test_native_shared_classes_destroy_owned_fields_at_last_handle(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.testing import test_package
+        source = '''class Buffer:
+    data: array[int]
+    label: string
+    def size(self: view Self) -> int:
+        return len(self.data)
+    def values(self: view Self) -> view array[int]:
+        return self.data
+
+test "class handles survive the original owner":
+    owner = Buffer(array[int,2](), "shared")
+    owner.data[0] = 42
+    first = share owner
+    last = share first
+    drop owner
+    drop first
+    assert(last.size() == 2)
+    assert(last.data[0] == 42)
+    assert(len(last.label) == 6)
+    values = last.values()
+    assert(values[0] == 42)
+
+test "shared aggregate arrays run element destructors":
+    values = array[string,2]()
+    values[0] = "owned"
+    saved = share values
+    drop values
+    assert(len(saved[0]) == 5)
+'''
+        with tempfile.TemporaryDirectory(prefix='sev-shared-class-') as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/lib.sev').write_text(source)
+            (root / 'package.json').write_text(json.dumps({'package': {'name': 'shared-class', 'version': '0.1.0'}}))
+            result = test_package(root)
+            self.assertTrue(result['success'], result)

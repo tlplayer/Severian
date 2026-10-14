@@ -58,6 +58,8 @@ class Import(DeclarationProvider):
         from py_compiler.frontend.parser.blocks import parse_blocks
         from py_compiler.syntax.block.record import register_template
         for contract in package.get('templates', ()):
+            if contract.get('kind') == 'class-grammars':
+                continue
             source = SourceFile(package['package']['name'] + '/' + contract['path'], contract['source'])
             root, errors = parse_blocks(source, lex(source, context.syntax), context.syntax)
             if errors or len(root.children) != 1:
@@ -66,12 +68,14 @@ class Import(DeclarationProvider):
             if not hasattr(context, 'imported_template_origins'):
                 context.imported_template_origins = {}
             context.imported_template_origins[source.identity] = node.identity
-            if getattr(template.provider, 'spelling', '') not in ('class', 'trait') or template.header[0].text != contract['name']:
+            if getattr(template.provider, 'spelling', '') not in ('class', 'trait', 'def') or template.header[0].text != contract['name']:
                 raise ValueError('imported template identity does not match its declaration')
             previous = context.scope
             context.scope = (alias,)
             try:
-                if not register_template(template.provider, template, context):
+                if contract.get('kind') == 'function':
+                    template.provider.declare(template, context)
+                elif not register_template(template.provider, template, context):
                     raise ValueError('imported class template requires generic parameters')
             finally:
                 context.scope = previous
@@ -96,6 +100,8 @@ class Import(DeclarationProvider):
         def qualify(name):
             return alias + '.' + name if name in type_contracts or name.split('[', 1)[0] in template_names else name
         for contract in type_contracts.values():
+            if contract.get('kind') == 'union':
+                continue
             name = qualify(contract['name'])
             declaration = TypeDeclaration(node.identity + ':' + name, name, 'class',
                 tuple((field, qualify(type_)) for field, type_ in contract['fields']), (), tuple(qualify(t) for t in contract.get('traits', ())), node.span,
@@ -103,15 +109,48 @@ class Import(DeclarationProvider):
             context.register(declaration)
             context.provider_by_name[name] = Class()
             context.types[name] = ObjectType(name, 'record', '!llvm.ptr', declaration=declaration)
+        from py_compiler.syntax.block.union import UnionType, UnionDeclaration
+        for contract in type_contracts.values():
+            if contract.get('kind') != 'union':
+                continue
+            name = qualify(contract['name'])
+            variants = tuple(qualify(member) for member in contract['variants'])
+            declaration = TypeDeclaration(node.identity + ':' + name, name, 'union',
+                                          (), variants, (), node.span)
+            context.register(declaration)
+            context.provider_by_name[name] = UnionDeclaration()
+            context.types[name] = UnionType(tuple(context.type(member) for member in variants), name).with_layout(context)
         from dataclasses import replace
         def owned(name, active=()):
             if name in active:
                 raise ValueError('recursive inline class layout')
+            if type_contracts[name].get('kind') == 'union':
+                return False
             return any(owned(t, (*active, name)) if t in type_contracts else
                        callable(getattr(context.type(t), 'release', None))
                        for _, t in type_contracts[name]['fields'])
         for name in type_contracts:
+            if type_contracts[name].get('kind') == 'union':
+                continue
             context.types[qualify(name)] = replace(context.types[qualify(name)], owns_fields=owned(name))
+        for contract in package.get('templates', ()):
+            if contract.get('kind') != 'class-grammars':
+                continue
+            source = SourceFile(package['package']['name'] + '/' + contract['path'], contract['source'])
+            root, errors = parse_blocks(source, lex(source, context.syntax), context.syntax)
+            if errors or len(root.children) != 1 or root.children[0].header[0].text != contract['name']:
+                raise ValueError('invalid imported class grammar interface')
+            owner = Receiver(context.by_name[qualify(contract['name'])])
+            previous = context.scope
+            context.scope = (alias,)
+            try:
+                for member in root.children[0].children:
+                    if getattr(member.provider, 'spelling', '') == 'grammar':
+                        member.provider.declare_member(member, context, owner)
+                        node_, captures, _, result = context.sentence_grammars[-1]
+                        context.sentence_grammars[-1] = (node_, captures, (), result)
+            finally:
+                context.scope = previous
         for contract in package['exports']:
             name = alias + '.' + contract['name']
             parameters = tuple((p['name'], qualify(p['type'])) for p in contract['parameters'])
@@ -126,6 +165,12 @@ class Import(DeclarationProvider):
             entry.body = SimpleNamespace(result_sources=tuple(contract['result-sources']))
             entry.result_ownership = contract.get('result-ownership', 'own')
             from py_compiler.syntax.grammar.expression import expression
+            for parameter, spelling in contract.get('defaults', {}).items():
+                if parameter not in dict(parameters):
+                    raise ValueError('imported default has no matching parameter')
+                source = SourceFile(name + ':default:' + parameter, spelling)
+                entry.defaults[parameter] = expression(tuple(t for t in lex(source, context.syntax)
+                    if t.kind not in ('NEWLINE', 'EOF', 'INDENT', 'DEDENT')))
             from py_compiler.syntax.function.contracts import pure_predicate
             guards = []
             for text in contract.get('acceptance', ()):
@@ -141,6 +186,16 @@ import unittest
 
 
 class ImportedPredicateTests(unittest.TestCase):
+    def test_imported_union_is_a_named_constraint_and_value_type(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        package = {'package': {'name': 'units'}, 'objects': ['units.o'], 'exports': [],
+                   'types': [{'name': 'Unit', 'kind': 'union', 'variants': ['u8', 'u32']}]}
+        source = ('import units\ndef identity[T: units.Unit](value: T) -> T:\n    return value\n'
+                  'def work() -> units.Unit:\n    return identity(u32(955))\n')
+        result = compile_source('consumer.sev', source, Syntax(), native_packages={'units': package})
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+
     def compile_import(self, *, receiver=True, predicate='-self.count <= position < self.count'):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax
