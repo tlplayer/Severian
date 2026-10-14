@@ -325,6 +325,8 @@ def lower_expression(node, cfg, env, expected=None):
     from py_compiler.syntax.prelude import builtin_call_providers
     base, argument = (callee.operands if callee.kind == 'index' else (callee, None))
     definition = context.types.get(base.token.text) if base.kind == 'name' else None
+    if callable(getattr(definition, 'construct_expression', None)):
+        return coerce(definition.construct_expression(argument, arguments, cfg, env, span, expected), expected, cfg, span)
     if callable(getattr(definition, 'construct', None)):
         from py_compiler.syntax.grammar.expression import type_spelling
         terms = argument.operands if argument and argument.kind == 'template_arguments' else ((argument,) if argument else ())
@@ -489,10 +491,10 @@ class BorrowedTraitRoutingTests(unittest.TestCase):
         return Sort[T].sort(self)
 trait Sort[T]:
     def sort(values: borrow Values[T]) -> borrow Values[T]
-class Small[T]: Sort[T]:
+class Small[T]: Sort[T]
     def sort(values: borrow Values[T]) -> borrow Values[T] with {values.count <= 32,}:
         return borrow values
-class Large[T]: Sort[T]:
+class Large[T]: Sort[T]
     def sort(values: borrow Values[T]) -> borrow Values[T] with {values.count > 32,}:
         return borrow values
 '''

@@ -46,7 +46,10 @@ def compile_source(path, text, syntax, *, stop_after='mir', interface=None, nati
         if stored_globals:
             try:
                 for constant in program.constants:
-                    constant.type.module_storage('__check_module_storage')
+                    storage = getattr(constant.type, 'module_storage', None)
+                    if storage is None:
+                        raise ValueError('literal type has no module storage contract')
+                    storage('__check_module_storage')
             except ValueError:
                 stored_globals = False
         if not stored_globals:

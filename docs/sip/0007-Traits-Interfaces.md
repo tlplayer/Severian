@@ -105,13 +105,13 @@ trait Add:
 
 Implementers may provide different behavior for different types:
 
-class IntAdd: Add:
+class IntAdd: Add
 
     operator +(left: int, right: int) -> int:
         return intrinsic.add(left, right)
 
 
-class StringAdd: Add:
+class StringAdd: Add
 
     operator +(left: string, right: string) -> string:
         return string.concat(left, right)
@@ -146,7 +146,7 @@ trait Add:
 
     operator +(left: T, right: T) -> T
 
-class SmallAdd: Add:
+class SmallAdd: Add
 
     operator +(left: int, right: int) -> int with {
         left <= 10_000,
@@ -155,7 +155,7 @@ class SmallAdd: Add:
         return intrinsic.add(left, right)
 
 
-class BigAdd: Add:
+class BigAdd: Add
 
     operator +(left: int, right: int) -> int with {
         left > 10_000,
@@ -191,7 +191,7 @@ Ambiguous dispatch
 
 Value domains may not overlap.
 
-class PositiveAdd: Add:
+class PositiveAdd: Add
 
     operator +(left: int, right: int) -> int with {
         left > 0,
@@ -199,7 +199,7 @@ class PositiveAdd: Add:
     }
 
 
-class BigAdd: Add:
+class BigAdd: Add
 
     operator +(left: int, right: int) -> int with {
         left > 10_000,
@@ -230,7 +230,7 @@ values satisfy multiple implementations:
 
 The programmer must refine the domains:
 
-class PositiveAdd: Add:
+class PositiveAdd: Add
 
     operator +(left: int, right: int) -> int with {
         0 < left <= 10_000,
@@ -274,7 +274,7 @@ trait Language:
 
 Implementers define their own acceptance contract:
 
-class French: Language:
+class French: Language
 
     def language(text: string) -> string with {
         contains(text, "bonjour")
@@ -284,7 +284,7 @@ class French: Language:
         return "french"
 
 
-class Spanish: Language:
+class Spanish: Language
 
     def language(text: string) -> string with {
         contains(text, "hola")
@@ -315,7 +315,7 @@ Predicates may depend on any dispatched argument.
 trait Transfer:
 
     def transfer(source: Account, destination: Account, amount: int) -> Result
-class SmallTransfer: Transfer:
+class SmallTransfer: Transfer
 
     def transfer(
         source: Account,
@@ -328,7 +328,7 @@ class SmallTransfer: Transfer:
         ...
 
 
-class LargeTransfer: Transfer:
+class LargeTransfer: Transfer
 
     def transfer(
         source: Account,
@@ -349,7 +349,7 @@ Variadic conditions
 
 with may contain multiple conditions.
 
-class BigAdder: Add:
+class BigAdder: Add
 
     operator +(left: int, right: int) -> int with {
         left > 10_000,

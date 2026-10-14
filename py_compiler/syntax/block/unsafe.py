@@ -114,7 +114,7 @@ class UnsafeTests(unittest.TestCase):
                 self.assertIn('help: use array[T, N] instead', str(result.diagnostics))
 
     def test_explicit_unsafe_allows_allocation_and_typed_pointers(self):
-        result = self.compile('def work() -> int:\n    unsafe:\n        a = allocate[int](3)\n        p = pointer[int](a)\n        unsafe:\n            p[0] = 7\n        return p[0]\n')
+        result = self.compile('def work() -> int:\n    unsafe:\n        a = allocate[int](3)\n        a[0] = 7\n        p = pointer[int](a)\n        unsafe:\n            value = p[0]\n        return p[0]\n')
         self.assertFalse(result.diagnostics, str(result.diagnostics))
 
     def test_array_access_does_not_require_unsafe(self):

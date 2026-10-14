@@ -127,7 +127,7 @@ union float:
 has one. The compiler uses this metadata when classifying float-to-float
 conversion edges.
 '''
-class f8e4m3fn: Floating :
+class f8e4m3fn: Floating
     identity: PrimitiveId = F8E4M3FnPrimitive().identity
     mlir: MlirTypeBinding = F8E4M3FnPrimitive().mlir
     id: TypeId = F8E4M3FnPrimitive().id
@@ -149,7 +149,7 @@ class f8e4m3fn: Floating :
     default_literal: bool = F8E4M3FnPrimitive().default_literal
 
 
-class f8e5m2: Floating :
+class f8e5m2: Floating
     identity: PrimitiveId = F8E5M2Primitive().identity
     mlir: MlirTypeBinding = F8E5M2Primitive().mlir
     id: TypeId = F8E5M2Primitive().id
@@ -171,7 +171,7 @@ class f8e5m2: Floating :
     default_literal: bool = F8E5M2Primitive().default_literal
 
 
-class bf16: Floating :
+class bf16: Floating
     identity: PrimitiveId = BF16Primitive().identity
     mlir: MlirTypeBinding = BF16Primitive().mlir
     id: TypeId = BF16Primitive().id
@@ -193,7 +193,7 @@ class bf16: Floating :
     default_literal: bool = BF16Primitive().default_literal
 
 
-class f16: Floating :
+class f16: Floating
     identity: PrimitiveId = F16Primitive().identity
     mlir: MlirTypeBinding = F16Primitive().mlir
     id: TypeId = F16Primitive().id
@@ -215,7 +215,7 @@ class f16: Floating :
     default_literal: bool = F16Primitive().default_literal
 
 
-class f32: Floating :
+class f32: Floating
     identity: PrimitiveId = F32Primitive().identity
     mlir: MlirTypeBinding = F32Primitive().mlir
     id: TypeId = F32Primitive().id
@@ -237,7 +237,7 @@ class f32: Floating :
     default_literal: bool = F32Primitive().default_literal
 
 
-class f64: Floating :
+class f64: Floating
     identity: PrimitiveId = F64Primitive().identity
     mlir: MlirTypeBinding = F64Primitive().mlir
     id: TypeId = F64Primitive().id
@@ -259,7 +259,7 @@ class f64: Floating :
     default_literal: bool = F64Primitive().default_literal
 
 
-class f128: Floating :
+class f128: Floating
     identity: PrimitiveId = F128Primitive().identity
     mlir: MlirTypeBinding = F128Primitive().mlir
     id: TypeId = F128Primitive().id
@@ -313,7 +313,7 @@ Formatting and parsing remain ordinary library behavior because they are not
 single MLIR primitive operations.
 '''
 
-class float: Floating:
+class float: Floating
     identity: PrimitiveId = F64Primitive().identity
     mlir: MlirTypeBinding = F64Primitive().mlir
     id: TypeId = F64Primitive().id

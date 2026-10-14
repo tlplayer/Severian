@@ -73,7 +73,7 @@ trait Character:
     def utf8_len(self) -> usize
 
 
-class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]:
+class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]
     identity: PrimitiveId = CharPrimitive().identity
     mlir: MlirTypeBinding = CharPrimitive().mlir
     id: TypeId = CharPrimitive().id

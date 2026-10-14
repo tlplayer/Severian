@@ -3,7 +3,7 @@
 trait Readable[T]:
     def get() -> T
 
-class Slot[T]: Readable[T]:
+class Slot[T]: Readable[T]
     value: T
     def get() -> T:
         return value

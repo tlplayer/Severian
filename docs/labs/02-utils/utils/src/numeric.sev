@@ -124,7 +124,7 @@ test "numeric algorithms handle signs and ties":
 
 
 test "array reductions use every element":
-    values = allocate[int](4)
+    values = array[int, 4]()
     values[0] = 4
     values[1] = -2
     values[2] = 9
@@ -132,13 +132,13 @@ test "array reductions use every element":
     assert(sum(values) == 12)
     assert(min(values) == -2)
     assert(max(values) == 9)
-    empty = allocate[int](0)
+    empty = array[int, 0]()
     assert(sum(empty) == 0)
 
 
 test "minimum rejects empty input":
     throws "assertion failed":
-        empty = allocate[int](0)
+        empty = array[int, 0]()
         value = min(empty)
 
 

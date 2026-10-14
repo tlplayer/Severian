@@ -431,7 +431,7 @@ values:
 I prefer this over specificity ordering. The language does not guess author intent. If domains overlap, the programmer must make them disjoint:
 
 ```sev
-class PositiveAdd: Add:
+class PositiveAdd: Add
     operator +(left: int, right: int) -> int with {
         0 < left <= 10_000,
         0 < right <= 10_000,

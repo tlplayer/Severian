@@ -303,24 +303,24 @@ trait Node:
 trait Container: Node:
     children: list[Node]
 
-class Library: Container:
+class Library: Container
     modules: list[Module]
 
-class Module: Container:
+class Module: Container
     submodules: list[Submodule]
 
-class Submodule: Container:
+class Submodule: Container
     blocks: list[Block]
     imports: list[Submodule]
     exports: list[Symbol]
     dependencies: list[Node]
 
-class Block: Container:
+class Block: Container
     sentences: list[Sentence]
     symbols: list[Symbol]
     blocks: list[Block]
 
-class Sentence: Node:
+class Sentence: Node
     symbols: list[Symbol]
     operators: list[Operator]
     operations: list[Operation]

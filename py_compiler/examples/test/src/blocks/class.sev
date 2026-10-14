@@ -1,7 +1,7 @@
 trait Named:
     name: string
 
-class Label: Named:
+class Label: Named
     name: string
 
 # Scope qualifiers select distinct bindings. The receiver is passed by reference.
@@ -25,7 +25,7 @@ class foo:
 trait Measured:
     def measure() -> int
 
-class Meter: Measured:
+class Meter: Measured
     value: int = 1
     def measure() -> int:
         return self.value

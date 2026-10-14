@@ -65,8 +65,11 @@ def main(argv=None):
             if args.stop_after:
                 print('Metadata: ' + result['metadata'])
                 return 0
-            print("MLIR: " + result["ir"])
-            print("Object: " + result["object"])
+            for path in result['irs']:
+                print("MLIR: " + path)
+            for path in result['objects']:
+                print("Object: " + path)
+            print(f"Partitions: {len(result['partitions'])}; reused: {sum(p['reused'] for p in result['partitions'])}")
             return 0
         print(f"Build failed: {result['diagnostics']} diagnostics; showing {len(result['sample'])}.")
         print("\n\n".join(result["sample"]))

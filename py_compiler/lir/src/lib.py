@@ -79,6 +79,81 @@ def companion(name, optimizer):
     return found
 
 
+@dataclass(frozen=True)
+class Partition:
+    module: str
+    submodule: str
+    source: str
+    stem: str
+    symbols: tuple
+    dependencies: tuple
+    lir: Lir
+    constant_symbols: tuple = ()
+
+
+def partitions(program, lir):
+    """Emit registered semantic submodules, independent of source snapshots."""
+    from dataclasses import replace
+    from hashlib import sha256
+    import json
+    import re
+    from py_compiler.hir.hir.src.program import Constant
+    from py_compiler.mlir.src.lib import MlirProgram, MlirFunction
+    def key(value):
+        return sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+    def readable(value):
+        return re.sub(r'[^A-Za-z0-9_.-]+', '_', value).strip('._') or 'initializer'
+    output = []
+    owned = set()
+    for module in program.mir_modules:
+        typed_module = next(item for item in program.typed_modules if item.identity == module.identity)
+        source = typed_module.source.path
+        module_name = readable(module.interface + '.' + str(Path(source).with_suffix('')).replace('/', '.'))
+        for submodule in module.submodules:
+            sub = submodule.typed
+            symbols = tuple(sorted(call.body.name for call in sub.callables))
+            descriptors = symbols or tuple((c.name, c.type.name, c.span.start) for c in sub.constants)
+            stable = key((module.interface, source, descriptors))
+            labels = [('test.' + (call.body.test['label'] or 'line_' + str(typed_module.source.position(call.body.source_span.start)[0])))
+                      if call.body.test else
+                      (call.name + '_' + '_'.join(t.name for t in call.parameters)).replace(typed_module.source.identity + ':', 'scope_') if call.name else 'initializer'
+                      for call in sub.callables] or [c.name or 'literal' for c in sub.constants]
+            stem = module_name + '/' + readable('+'.join(sorted(labels)))[:100] + '-' + stable[:16]
+            constants, bodies, mappings = {}, [], []
+            for call in sub.callables:
+                body = call.body
+                if body.name in owned:
+                    raise ValueError('native partition contains a duplicate callable')
+                owned.add(body.name)
+                blocks = []
+                for block in body.blocks:
+                    operations = []
+                    for operation in block.operations:
+                        if isinstance(operation.payload, Constant):
+                            old = operation.payload
+                            constant = replace(old, identity=stable + ':' + body.name + ':' + str(operation.result.identity))
+                            constants[constant.identity] = constant
+                            mappings.append((old.identity, '__sev_constant_' + sha256(constant.identity.encode()).hexdigest()))
+                            operation = replace(operation, payload=constant, atom=constant.atom(operation))
+                        operations.append(operation)
+                    blocks.append(replace(block, operations=operations))
+                bodies.append(replace(body, blocks=blocks))
+            for position, old in enumerate(sub.constants):
+                constant = replace(old, identity=stable + ':literal:' + str(position))
+                constants[constant.identity] = constant
+                mappings.append((old.identity, '__sev_constant_' + sha256(constant.identity.encode()).hexdigest()))
+            functions = tuple(MlirFunction('__sev_constant_' + sha256(c.identity.encode()).hexdigest(), c) for c in constants.values())
+            globals_ = tuple(place.identity for body in bodies if not body.declaration
+                             for place in body.storage if not getattr(place, 'external_symbol', ''))
+            mlir = MlirProgram(functions, tuple(bodies), (), globals_)
+            native = replace(lir, mlir=mlir, atoms=submodule.atoms)
+            output.append(Partition(module.identity, sub.identity, source, stem, (*symbols, *(f.symbol for f in functions)),
+                                    sub.dependencies, native, tuple(mappings)))
+    if owned != {body.name for body in program.bodies}:
+        raise ValueError('native partitions do not cover all registered callables')
+    return tuple(output)
+
+
 def compile_object(lir, optimizer=None):
     optimizer = optimizer or verifier_path()
     translator, compiler = companion('mlir-translate', optimizer), companion('llc', optimizer)
@@ -95,7 +170,7 @@ def compile_object(lir, optimizer=None):
                    '--ensure-debug-info-scope-on-llvm-func', '--mlir-print-debuginfo'], lir.text())
     llvm_ir = run([translator, '--mlir-to-llvmir'], dialect)
     with tempfile.TemporaryDirectory(prefix='sev-object-') as directory:
-        destination = Path(directory) / 'package.o'
+        destination = Path(directory) / 'partition.o'
         run([compiler, '-O0', '--frame-pointer=all', '-filetype=obj', '-relocation-model=pic', '-mtriple=' + lir.target,
              '-o', str(destination)], llvm_ir)
         object_bytes = destination.read_bytes()

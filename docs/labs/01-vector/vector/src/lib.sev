@@ -3,7 +3,7 @@ class Vector[T = int]:
     count: int
 
     def Vector(self: borrow Self):
-        self.items = allocate[array[T]](0)
+        self.items = array[T,0]
         self.count = 0
 
     def size(self: view Self) -> int:
@@ -27,9 +27,8 @@ class Vector[T = int]:
         assert(requested >= 0)
         assert(requested <= 1152921504606846975)
         if requested > len(self.items):
-            grown = allocate[array[T]](requested)
-            i = 0
-            while i < self.count:
+            grown = array[T, requested]()
+            while i < self.count with i = 0:
                 grown[i] = self.items[i]
                 i += 1
             self.items = move grown
@@ -64,7 +63,8 @@ class Vector[T = int]:
         return value
 
     def pointer_view(self: view Self) -> pointer[T]:
-        return pointer[T](self.items)
+        unsafe:
+            return pointer[T](self.items)
 
     # The result keeps a loan on this vector; sorting does not transfer storage.
     def sort(self: borrow Self) -> borrow Vector[T]:
@@ -77,12 +77,12 @@ trait VectorSort[T]:
 
 # These domains partition initialized length, not allocated capacity. The cutoff
 # is a lab policy, not a claim that 32 is optimal for every element type/target.
-class TrivialVectorSort[T]: VectorSort[T]:
+class TrivialVectorSort[T]: VectorSort[T]
     def sort(values: borrow Vector[T]) -> borrow Vector[T] with values.count <= 1:
         return borrow values
 
 
-class InsertionVectorSort[T]: VectorSort[T]:
+class InsertionVectorSort[T]: VectorSort[T]
     def sort(values: borrow Vector[T]) -> borrow Vector[T] with 1 < values.count <= 32:
         position = 1
         while position < values.size():
@@ -96,10 +96,11 @@ class InsertionVectorSort[T]: VectorSort[T]:
                 destination -= 1
             values.set(destination, value)
             position += 1
+        module.insertion_sort_completed = true
         return borrow values
 
 
-class MergeVectorSort[T]: VectorSort[T]:
+class MergeVectorSort[T]: VectorSort[T]
     def sort(values: borrow Vector[T]) -> borrow Vector[T] with values.count > 32:
         count = values.size()
         scratch = Vector[T]()
@@ -109,48 +110,203 @@ class MergeVectorSort[T]: VectorSort[T]:
             scratch.push(values.get(position))
             position += 1
 
-        # Bottom-up stable merges need no recursion. Every scratch slot is
-        # initialized before replacement, including owned class elements.
-        width = 1
-        while width < count:
-            start = 0
-            while start < count:
-                middle = start + width
-                if middle > count:
-                    middle = count
-                end = middle + width
-                if end > count:
-                    end = count
-                left = start
-                right = middle
-                destination = start
-                while left < middle and right < end:
-                    left_value = values.get(left)
-                    right_value = values.get(right)
-                    if right_value < left_value:
-                        scratch.set(destination, right_value)
-                        right += 1
-                    else:
-                        scratch.set(destination, left_value)
-                        left += 1
-                    destination += 1
-                while left < middle:
-                    scratch.set(destination, values.get(left))
-                    left += 1
-                    destination += 1
-                while right < end:
-                    scratch.set(destination, values.get(right))
-                    right += 1
-                    destination += 1
-                start = end
+        merge(values, scratch, 0, count)
+        module.merge_sort_completed = true
+        return borrow values
 
+    # Stable recursive merge; O(N log N) time, O(N) scratch plus O(log N) stack.
+    def merge(values: borrow Vector[T], scratch: borrow Vector[T], start: int, end: int) -> absent:
+        if end - start <= 1:
+            return
+        middle = start + (end - start) // 2
+        merge(values, scratch, start, middle)
+        merge(values, scratch, middle, end)
+        left = start
+        right = middle
+        destination = start
+        while left < middle and right < end:
+            left_value = values.get(left)
+            right_value = values.get(right)
+            if right_value < left_value:
+                scratch.set(destination, right_value)
+                right += 1
+            else:
+                scratch.set(destination, left_value)
+                left += 1
+            destination += 1
+        while left < middle:
+            scratch.set(destination, values.get(left))
+            left += 1
+            destination += 1
+        while right < end:
+            scratch.set(destination, values.get(right))
+            right += 1
+            destination += 1
+        position = start
+        while position < end:
+            values.set(position, scratch.get(position))
+            position += 1
+
+# Direct algorithms are explicit choices; VectorSort's length dispatch stays
+# unambiguous. Flags are written only after the algorithm finishes.
+bubble_sort_completed: bool = false
+selection_sort_completed: bool = false
+insertion_sort_completed: bool = false
+merge_sort_completed: bool = false
+quick_sort_completed: bool = false
+heap_sort_completed: bool = false
+counting_sort_completed: bool = false
+
+
+# Stable; best O(N), worst O(N*N); O(1) auxiliary elements.
+class BubbleVectorSort[T]:
+    def sort(values: borrow Vector[T]) -> borrow Vector[T]:
+        end = values.size()
+        while end > 1:
+            changed = false
+            position = 1
+            while position < end:
+                left = values.get(position - 1)
+                right = values.get(position)
+                if right < left:
+                    values.set(position - 1, right)
+                    values.set(position, left)
+                    changed = true
+                position += 1
+            if not changed:
+                break
+            end -= 1
+        module.bubble_sort_completed = true
+        return borrow values
+
+
+# Unstable; O(N*N) comparisons; O(1) auxiliary elements.
+class SelectionVectorSort[T]:
+    def sort(values: borrow Vector[T]) -> borrow Vector[T]:
+        start = 0
+        while start < values.size():
+            smallest = start
+            position = start + 1
+            while position < values.size():
+                if values.get(position) < values.get(smallest):
+                    smallest = position
+                position += 1
+            if smallest != start:
+                value = values.get(start)
+                values.set(start, values.get(smallest))
+                values.set(smallest, value)
+            start += 1
+        module.selection_sort_completed = true
+        return borrow values
+
+
+# Unstable; average O(N log N), worst O(N*N). Recurse into the smaller
+# partition and iterate over the larger one: O(log N) call-stack space.
+class QuickVectorSort[T]:
+    def partition(values: borrow Vector[T], first: int, stop: int) -> absent:
+        low = first
+        high = stop
+        while high - low > 1:
+            pivot = values.get(high - 1)
+            boundary = low
+            position = low
+            while position < high - 1:
+                if values.get(position) < pivot:
+                    value = values.get(boundary)
+                    values.set(boundary, values.get(position))
+                    values.set(position, value)
+                    boundary += 1
+                position += 1
+            value = values.get(boundary)
+            values.set(boundary, pivot)
+            values.set(high - 1, value)
+            if boundary - low < high - boundary - 1:
+                partition(values, low, boundary)
+                low = boundary + 1
+            else:
+                partition(values, boundary + 1, high)
+                high = boundary
+
+    def sort(values: borrow Vector[T]) -> borrow Vector[T]:
+        partition(values, 0, values.size())
+        module.quick_sort_completed = true
+        return borrow values
+
+
+# Unstable; O(N log N) time; iterative sift keeps auxiliary space O(1).
+class HeapVectorSort[T]:
+    def sift(values: borrow Vector[T], start: int, stop: int):
+        root = start
+        while root < stop // 2:
+            child = root * 2 + 1
+            if child + 1 < stop:
+                if values.get(child) < values.get(child + 1):
+                    child += 1
+            if not (values.get(root) < values.get(child)):
+                break
+            value = values.get(root)
+            values.set(root, values.get(child))
+            values.set(child, value)
+            root = child
+
+    def sort(values: borrow Vector[T]) -> borrow Vector[T]:
+        count = values.size()
+        start = count // 2
+        while start > 0:
+            start -= 1
+            sift(values, start, count)
+        stop = count
+        while stop > 1:
+            stop -= 1
+            value = values.get(0)
+            values.set(0, values.get(stop))
+            values.set(stop, value)
+            sift(values, 0, stop)
+        module.heap_sort_completed = true
+        return borrow values
+
+
+# Stable integer counting sort; O(N + K) time and auxiliary space.
+# K is maximum - minimum + 1. Negative keys use an offset.
+class CountingVectorSort:
+    def sort(values: borrow Vector[int]) -> borrow Vector[int]:
+        count = values.size()
+        if count > 0:
+            minimum = values.get(0)
+            maximum = minimum
+            position = 1
+            while position < count:
+                value = values.get(position)
+                if value < minimum:
+                    minimum = value
+                if value > maximum:
+                    maximum = value
+                position += 1
+            width = i128(maximum) - i128(minimum) + 1
+            assert(width <= 1152921504606846975)
+            buckets = array[int, int(width)]()
             position = 0
             while position < count:
-                values.set(position, scratch.get(position))
+                key = int(i128(values.get(position)) - i128(minimum))
+                buckets[key] += 1
                 position += 1
-            if width >= count - width:
-                break
-            width *= 2
+            key = 1
+            while key < int(width):
+                buckets[key] += buckets[key - 1]
+                key += 1
+            output = array[int, count]()
+            position = count
+            while position > 0:
+                position -= 1
+                value = values.get(position)
+                key = int(i128(value) - i128(minimum))
+                buckets[key] -= 1
+                output[buckets[key]] = value
+            position = 0
+            while position < count:
+                values.set(position, output[position])
+                position += 1
+        module.counting_sort_completed = true
         return borrow values
 
 
@@ -264,7 +420,7 @@ test "insertion and merge sorting preserve the order of equal keys":
 
 test with compiler "another matching sorter is ambiguity rather than an override":
     reject:
-        class OverlappingVectorSort: VectorSort[int]:
+        class OverlappingVectorSort: VectorSort[int]
             def sort(values: borrow Vector[int]) -> borrow Vector[int] with values.count > 1:
                 return borrow values
 
@@ -341,23 +497,24 @@ test "reserve pop mutation and independent copy":
 
 
 test "move transfers destruction and pointer observes storage":
-    values = Vector()
-    values.push(42)
-    moved = move values
-    pointer = moved.pointer_view()
-    assert(pointer[0] == 42)
-    moved.push(7)
-    assert(moved.size() == 2)
+    unsafe:
+        values = Vector()
+        values.push(42)
+        moved = move values
+        pointer = moved.pointer_view()
+        assert(pointer[0] == 42)
+        moved.push(7)
+        assert(moved.size() == 2)
 
 
 test "owned field replacement destroys the previous allocation":
     class Buffer:
         data: array[int]
-    original = allocate[int, location=memory.heap](8)
+    original = array[int, 8]()
     original[0] = 42
     buffer = Buffer(original)
     snapshot = copy buffer
-    buffer.data = allocate[int, location=memory.heap](16)
+    buffer.data = array[int, 16]()
     assert(len(buffer.data) == 16)
     buffer.data[0] = 9
     assert(buffer.data[0] == 9)
@@ -406,10 +563,11 @@ test with compiler "live pointers prevent field replacement":
         class Buffer:
             data: array[int]
         def invalid() -> int:
-            buffer = Buffer(allocate[int, location=memory.heap](1))
-            pointer = pointer[int](buffer.data)
-            buffer.data = allocate[int, location=memory.heap](2)
-            return pointer[0]
+            unsafe:
+                buffer = Buffer(array[int, 1]())
+                pointer = pointer[int](buffer.data)
+                buffer.data = array[int, 2]()
+                return pointer[0]
 
 
 test with compiler "borrowed storage cannot initialize owned fields":
@@ -425,8 +583,9 @@ test with compiler "stack storage cannot initialize owned fields":
         class Buffer:
             data: array[int]
         def invalid():
-            data = allocate[int, location=memory.stack](1)
-            buffer = Buffer(data)
+            unsafe:
+                data = allocate[int, location=memory.stack](1)
+                buffer = Buffer(data)
 
 
 test with compiler "view cannot become owner":
@@ -438,19 +597,20 @@ test with compiler "view cannot become owner":
 test with compiler "pointer cannot escape stack":
     reject "storage belongs to this callable":
         def invalid() -> pointer[int]:
-            values = allocate[int, location=memory.stack](4)
-            return pointer[int](values)
+            unsafe:
+                values = allocate[int, location=memory.stack](4)
+                return pointer[int](values)
 
 
 test "inferred field allocation survives constructor return":
     class Buffer:
         data: array[int]
         def Buffer(self: borrow Self):
-            self.data = allocate[int](8)
+            self.data = array[int, 8]()
             self.data[0] = 42
     value = Buffer()
     assert(value.data[0] == 42)
-    value.data = allocate[int](16)
+    value.data = array[int, 16]()
     assert(len(value.data) == 16)
 
 
@@ -460,7 +620,7 @@ test with compiler "field views constrain receiver mutation":
             data: array[int]
             def replace(self: borrow Self) -> int:
                 saved = self.data
-                self.data = allocate[int](8)
+                self.data = array[int, 8]()
                 return saved[0]
 
 
@@ -469,7 +629,7 @@ test with compiler "shared class ownership needs an aggregate handle":
         class Buffer:
             data: array[int]
         def invalid():
-            value = Buffer(allocate[int](1))
+            value = Buffer(array[int, 1]())
             shared = share value
 
 
@@ -477,7 +637,7 @@ test "owning class return transfers its fields":
     class Buffer:
         data: array[int]
     def make() -> Buffer:
-        value = Buffer(allocate[int](1))
+        value = Buffer(array[int, 1]())
         value.data[0] = 42
         return value
     result = make()
@@ -491,7 +651,7 @@ test with compiler "temporary owning receiver requires a binding":
             def size(self: view Self) -> int:
                 return len(self.data)
         def invalid() -> int:
-            return Buffer(allocate[int](1)).size()
+            return Buffer(array[int, 1]()).size()
 
 
 test with compiler "partial field moves require replacement semantics":
@@ -499,7 +659,7 @@ test with compiler "partial field moves require replacement semantics":
         class Buffer:
             data: array[int]
         def invalid():
-            buffer = Buffer(allocate[int](1))
+            buffer = Buffer(array[int, 1]())
             data = move buffer.data
 
 
@@ -508,11 +668,12 @@ test with compiler "borrowed class alias cannot replace a pinned field":
         class Buffer:
             data: array[int]
         def invalid() -> int:
-            buffer = Buffer(allocate[int](1))
-            alias = borrow buffer
-            pointer = pointer[int](buffer.data)
-            alias.data = allocate[int](2)
-            return pointer[0]
+            unsafe:
+                buffer = Buffer(array[int, 1]())
+                alias = borrow buffer
+                pointer = pointer[int](buffer.data)
+                alias.data = array[int, 2]()
+                return pointer[0]
 
 
 test "class grammar reuses checked vector mutation":
@@ -561,7 +722,7 @@ test "iterator continue resumes producer and break releases view":
     values.push(3)
     total = 0
     for x in iterator(values):
-        scratch = allocate[int](1)
+        scratch = array[int, 1]()
         if x == 1:
             continue
         total += x
@@ -575,7 +736,7 @@ test "iterator return cleans producer and consumer locals":
         values = Vector()
         values.push(42)
         for x in values:
-            scratch = allocate[int](8)
+            scratch = array[int, 8]()
             return x
         return 0
     assert(first() == 42)
@@ -585,7 +746,7 @@ test "multiple yields preserve producer locals":
     class Pairs:
         value: int
         grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
-            scratch = allocate[int](1)
+            scratch = array[int, 1]()
             scratch[0] = self.value
             yield scratch[0]
             scratch[0] += 1
@@ -673,7 +834,7 @@ test "repeated iterator expansions give stores unique MLIR temporaries":
     class Pair:
         value: int
         grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
-            scratch = allocate[int](1)
+            scratch = array[int, 1]()
             scratch[0] = self.value
             yield scratch[0]
             scratch[0] += 1
@@ -682,7 +843,7 @@ test "repeated iterator expansions give stores unique MLIR temporaries":
         value: int
     pair = Pair(4)
     last = Last(0)
-    output = allocate[int](1)
+    output = array[int, 1]()
     for value in pair:
         output[0] += value
         last.value = value
@@ -762,27 +923,28 @@ test "iterator break reconciles consumed outer owner":
 test with compiler "consumption on either branch forbids later use":
     reject "moved or dropped":
         def invalid(take: bool):
-            data = allocate[int](1)
+            data = array[int, 1]()
             if take:
                 drop data
             assert(data[0] == 0)
 
 
 test "returned owners survive branches and forwarded calls":
-    def choose(first: bool) -> Vector[int]:
-        left = make_vector(42)
-        right = make_vector(7)
-        if first:
-            return left
-        return right
-    def forward() -> Vector[int]:
-        return choose(true)
-    first = forward()
-    second = choose(false)
-    assert(first.get(0) == 42)
-    assert(second.get(0) == 7)
-    pointer = first.pointer_view()
-    assert(pointer[0] == 42)
+    unsafe:
+        def choose(first: bool) -> Vector[int]:
+            left = make_vector(42)
+            right = make_vector(7)
+            if first:
+                return left
+            return right
+        def forward() -> Vector[int]:
+            return choose(true)
+        first = forward()
+        second = choose(false)
+        assert(first.get(0) == 42)
+        assert(second.get(0) == 7)
+        pointer = first.pointer_view()
+        assert(pointer[0] == 42)
 
 
 test "replaced owner survives a continuing loop edge":
@@ -800,13 +962,14 @@ test with compiler "returned owner cannot invalidate a live pointer":
         class Buffer:
             data: array[int]
         def invalid() -> Buffer:
-            data = allocate[int](1)
-            value = Buffer(move data)
-            pointer = pointer[int](value.data)
-            if pointer[0] == 0:
+            unsafe:
+                data = array[int, 1]()
+                value = Buffer(move data)
+                pointer = pointer[int](value.data)
+                if pointer[0] == 0:
+                    return value
+                assert(pointer[0] == 0)
                 return value
-            assert(pointer[0] == 0)
-            return value
 
 
 test "class vector growth copies and negative indexing":
@@ -841,7 +1004,7 @@ test "class vector growth copies and negative indexing":
 test "owning class elements copy their arrays independently":
     class Buffer:
         items: array[int]
-    data = allocate[int](2)
+    data = array[int, 2]()
     data[0] = 42
     buffer = Buffer(move data)
     values = Vector[Buffer]()
@@ -874,10 +1037,10 @@ test "negative index outside count fails the parameter contract":
 
 
 test "loop owner replacement infers one compatible placement":
-    values = allocate[int](1)
+    values = array[int, 1]()
     while i < 128 with i = 0:
         drop values
-        values = allocate[int](i + 1)
+        values = array[int, i + 1]()
         values[0] = i
         i += 1
         continue
@@ -885,10 +1048,10 @@ test "loop owner replacement infers one compatible placement":
 
 
 test "loop owner replacement handles an empty loop":
-    values = allocate[int](1)
+    values = array[int, 1]()
     while false:
         drop values
-        values = allocate[int](8192)
+        values = array[int, 8192]()
     assert(values[0] == 0)
 
 
@@ -896,7 +1059,7 @@ test "record array rejects reads before initialization":
     throws "read of uninitialized array element":
         class Point:
             x: int
-        values = allocate[array[Point]](1)
+        values = array[Point, 1]()
         point = values[0]
         assert(point.x == 0)
 
@@ -906,7 +1069,8 @@ test with compiler "record array arena regions need initialized cleanup":
         class Point:
             x: int
         def unsupported():
-            values = allocate[array[Point], strategy=memory.arena](2)
+            unsafe:
+                values = allocate[array[Point], strategy=memory.arena](2)
 
 
 test "class element iteration owns independent snapshots":
@@ -925,7 +1089,7 @@ test "class element iteration owns independent snapshots":
 test "record slots support replacement and reuse after pop":
     class Buffer:
         items: array[int]
-    data = allocate[int](1)
+    data = array[int, 1]()
     data[0] = 42
     buffer = Buffer(move data)
     values = Vector[Buffer]()
@@ -943,7 +1107,7 @@ test with compiler "borrowed class elements pin their containing allocation":
         class Point:
             x: int
         def invalid():
-            values = allocate[array[Point]](1)
+            values = array[Point, 1]()
             original = Point(42)
             values[0] = original
             point = values[0]
@@ -956,13 +1120,13 @@ test with compiler "record array borrowed fields require a lifetime contract":
         class Handle:
             value: pointer[int]
         def unsupported():
-            values = allocate[array[Handle]](1)
+            values = array[Handle, 1]()
 
 
 test with compiler "string array elements need a storage contract":
     reject "supported scalar memory representation":
         def unsupported():
-            values = allocate[array[string]](1)
+            values = array[string, 1]()
 
 
 def make_char_vector(value: char) -> Vector[char]:
@@ -972,20 +1136,21 @@ def make_char_vector(value: char) -> Vector[char]:
 
 
 test "char vector preserves Unicode growth copies and moves":
-    values = make_char_vector('a')
-    values.push('λ')
-    values.push('😀')
-    assert(values.size() == 3)
-    assert(values.get(0) == 'a')
-    assert(values.get(-2) == 'λ')
-    assert(values.get(-1) == '😀')
-    snapshot = copy values
-    values.set(-1, 'z')
-    assert(snapshot.pop() == '😀')
-    assert(snapshot.get(-1) == 'λ')
-    moved = move values
-    pointer = moved.pointer_view()
-    assert(pointer[2] == 'z')
+    unsafe:
+        values = make_char_vector('a')
+        values.push('λ')
+        values.push('😀')
+        assert(values.size() == 3)
+        assert(values.get(0) == 'a')
+        assert(values.get(-2) == 'λ')
+        assert(values.get(-1) == '😀')
+        snapshot = copy values
+        values.set(-1, 'z')
+        assert(snapshot.pop() == '😀')
+        assert(snapshot.get(-1) == 'λ')
+        moved = move values
+        pointer = moved.pointer_view()
+        assert(pointer[2] == 'z')
 
 
 test "known wider integer values fit a narrower vector":
@@ -998,3 +1163,416 @@ test "known wider integer values fit a narrower vector":
     assert(values.get(0) == -2)
     assert(values.get(1) == 6)
     assert(values.get(2) == 7)
+
+
+test "bubble sort completes, preserves counts, and returns an alias":
+    def check(count: int, pattern: int):
+        module.bubble_sort_completed = false
+        values = Vector[int]()
+        values.reserve(128)
+        before = array[int, 7]()
+        position = 0
+        while position < count:
+            key = (count - position) % 7
+            if pattern == 1:
+                key = position % 7
+            if pattern == 2:
+                key = 3
+            if pattern == 3:
+                key = position * 7 // count
+            values.push(key - 3)
+            before[key] += 1
+            position += 1
+        assert(not module.bubble_sort_completed)
+        ordered = BubbleVectorSort[int]().sort(values)
+        assert(module.bubble_sort_completed)
+        assert(ordered.size() == count)
+        assert(values.capacity() == 128)
+        after = array[int, 7]()
+        position = 0
+        while position < count:
+            key = ordered.get(position)
+            after[key + 3] += 1
+            if position > 0:
+                assert(ordered.get(position - 1) <= key)
+            position += 1
+        position = 0
+        while position < 7:
+            assert(before[position] == after[position])
+            position += 1
+        if count > 0:
+            ordered.set(0, -99)
+            assert(values.get(0) == -99)
+    for count in [0, 1, 2, 6, 31, 65]:
+        for pattern in [0, 1, 2, 3]:
+            check(count, pattern)
+
+
+test "selection sort completes, preserves counts, and returns an alias":
+    def check(count: int, pattern: int):
+        module.selection_sort_completed = false
+        values = Vector[int]()
+        values.reserve(128)
+        before = array[int, 7]()
+        position = 0
+        while position < count:
+            key = (count - position) % 7
+            if pattern == 1:
+                key = position % 7
+            if pattern == 2:
+                key = 3
+            if pattern == 3:
+                key = position * 7 // count
+            values.push(key - 3)
+            before[key] += 1
+            position += 1
+        assert(not module.selection_sort_completed)
+        ordered = SelectionVectorSort[int]().sort(values)
+        assert(module.selection_sort_completed)
+        assert(ordered.size() == count)
+        assert(values.capacity() == 128)
+        after = array[int, 7]()
+        position = 0
+        while position < count:
+            key = ordered.get(position)
+            after[key + 3] += 1
+            if position > 0:
+                assert(ordered.get(position - 1) <= key)
+            position += 1
+        position = 0
+        while position < 7:
+            assert(before[position] == after[position])
+            position += 1
+        if count > 0:
+            ordered.set(0, -99)
+            assert(values.get(0) == -99)
+    for count in [0, 1, 2, 6, 31, 65]:
+        for pattern in [0, 1, 2, 3]:
+            check(count, pattern)
+
+
+test "insertion sort completes, preserves counts, and returns an alias":
+    def check(count: int, pattern: int):
+        module.insertion_sort_completed = false
+        values = Vector[int]()
+        values.reserve(128)
+        before = array[int, 7]()
+        position = 0
+        while position < count:
+            key = (count - position) % 7
+            if pattern == 1:
+                key = position % 7
+            if pattern == 2:
+                key = 3
+            if pattern == 3:
+                key = position * 7 // count
+            values.push(key - 3)
+            before[key] += 1
+            position += 1
+        assert(not module.insertion_sort_completed)
+        ordered = InsertionVectorSort[int]().sort(values)
+        assert(module.insertion_sort_completed)
+        assert(ordered.size() == count)
+        assert(values.capacity() == 128)
+        after = array[int, 7]()
+        position = 0
+        while position < count:
+            key = ordered.get(position)
+            after[key + 3] += 1
+            if position > 0:
+                assert(ordered.get(position - 1) <= key)
+            position += 1
+        position = 0
+        while position < 7:
+            assert(before[position] == after[position])
+            position += 1
+        if count > 0:
+            ordered.set(0, -99)
+            assert(values.get(0) == -99)
+    for count in [2, 6, 31, 32]:
+        for pattern in [0, 1, 2, 3]:
+            check(count, pattern)
+
+
+test "merge sort completes, preserves counts, and returns an alias":
+    def check(count: int, pattern: int):
+        module.merge_sort_completed = false
+        values = Vector[int]()
+        values.reserve(128)
+        before = array[int, 7]()
+        position = 0
+        while position < count:
+            key = (count - position) % 7
+            if pattern == 1:
+                key = position % 7
+            if pattern == 2:
+                key = 3
+            if pattern == 3:
+                key = position * 7 // count
+            values.push(key - 3)
+            before[key] += 1
+            position += 1
+        assert(not module.merge_sort_completed)
+        ordered = MergeVectorSort[int]().sort(values)
+        assert(module.merge_sort_completed)
+        assert(ordered.size() == count)
+        assert(values.capacity() == 128)
+        after = array[int, 7]()
+        position = 0
+        while position < count:
+            key = ordered.get(position)
+            after[key + 3] += 1
+            if position > 0:
+                assert(ordered.get(position - 1) <= key)
+            position += 1
+        position = 0
+        while position < 7:
+            assert(before[position] == after[position])
+            position += 1
+        if count > 0:
+            ordered.set(0, -99)
+            assert(values.get(0) == -99)
+    for count in [33, 65, 128]:
+        for pattern in [0, 1, 2, 3]:
+            check(count, pattern)
+
+
+test "quick sort completes, preserves counts, and returns an alias":
+    def check(count: int, pattern: int):
+        module.quick_sort_completed = false
+        values = Vector[int]()
+        values.reserve(128)
+        before = array[int, 7]()
+        position = 0
+        while position < count:
+            key = (count - position) % 7
+            if pattern == 1:
+                key = position % 7
+            if pattern == 2:
+                key = 3
+            if pattern == 3:
+                key = position * 7 // count
+            values.push(key - 3)
+            before[key] += 1
+            position += 1
+        assert(not module.quick_sort_completed)
+        ordered = QuickVectorSort[int]().sort(values)
+        assert(module.quick_sort_completed)
+        assert(ordered.size() == count)
+        assert(values.capacity() == 128)
+        after = array[int, 7]()
+        position = 0
+        while position < count:
+            key = ordered.get(position)
+            after[key + 3] += 1
+            if position > 0:
+                assert(ordered.get(position - 1) <= key)
+            position += 1
+        position = 0
+        while position < 7:
+            assert(before[position] == after[position])
+            position += 1
+        if count > 0:
+            ordered.set(0, -99)
+            assert(values.get(0) == -99)
+    for count in [0, 1, 2, 6, 31, 65]:
+        for pattern in [0, 1, 2, 3]:
+            check(count, pattern)
+
+
+test "heap sort completes, preserves counts, and returns an alias":
+    def check(count: int, pattern: int):
+        module.heap_sort_completed = false
+        values = Vector[int]()
+        values.reserve(128)
+        before = array[int, 7]()
+        position = 0
+        while position < count:
+            key = (count - position) % 7
+            if pattern == 1:
+                key = position % 7
+            if pattern == 2:
+                key = 3
+            if pattern == 3:
+                key = position * 7 // count
+            values.push(key - 3)
+            before[key] += 1
+            position += 1
+        assert(not module.heap_sort_completed)
+        ordered = HeapVectorSort[int]().sort(values)
+        assert(module.heap_sort_completed)
+        assert(ordered.size() == count)
+        assert(values.capacity() == 128)
+        after = array[int, 7]()
+        position = 0
+        while position < count:
+            key = ordered.get(position)
+            after[key + 3] += 1
+            if position > 0:
+                assert(ordered.get(position - 1) <= key)
+            position += 1
+        position = 0
+        while position < 7:
+            assert(before[position] == after[position])
+            position += 1
+        if count > 0:
+            ordered.set(0, -99)
+            assert(values.get(0) == -99)
+    for count in [0, 1, 2, 6, 31, 65]:
+        for pattern in [0, 1, 2, 3]:
+            check(count, pattern)
+
+
+test "counting sort completes, preserves counts, and returns an alias":
+    def check(count: int, pattern: int):
+        module.counting_sort_completed = false
+        values = Vector[int]()
+        values.reserve(128)
+        before = array[int, 7]()
+        position = 0
+        while position < count:
+            key = (count - position) % 7
+            if pattern == 1:
+                key = position % 7
+            if pattern == 2:
+                key = 3
+            if pattern == 3:
+                key = position * 7 // count
+            values.push(key - 3)
+            before[key] += 1
+            position += 1
+        assert(not module.counting_sort_completed)
+        ordered = CountingVectorSort().sort(values)
+        assert(module.counting_sort_completed)
+        assert(ordered.size() == count)
+        assert(values.capacity() == 128)
+        after = array[int, 7]()
+        position = 0
+        while position < count:
+            key = ordered.get(position)
+            after[key + 3] += 1
+            if position > 0:
+                assert(ordered.get(position - 1) <= key)
+            position += 1
+        position = 0
+        while position < 7:
+            assert(before[position] == after[position])
+            position += 1
+        if count > 0:
+            ordered.set(0, -99)
+            assert(values.get(0) == -99)
+    for count in [0, 1, 2, 6, 31, 65]:
+        for pattern in [0, 1, 2, 3]:
+            check(count, pattern)
+
+
+test "bubble sort preserves equal-key record order":
+    class Entry:
+        key: int
+        ordinal: int
+        operator <(right: Entry) -> bool:
+            return self.key < right.key
+    values = Vector[Entry]()
+    position = 0
+    while position < 9:
+        values.push(Entry(position % 3, position))
+        position += 1
+    module.bubble_sort_completed = false
+    assert(not module.bubble_sort_completed)
+    BubbleVectorSort[Entry]().sort(values)
+    assert(module.bubble_sort_completed)
+    position = 1
+    while position < values.size():
+        previous = values.get(position - 1)
+        current = values.get(position)
+        assert(previous.key <= current.key)
+        if previous.key == current.key:
+            assert(previous.ordinal < current.ordinal)
+        position += 1
+
+
+test "insertion sort preserves equal-key record order":
+    class Entry:
+        key: int
+        ordinal: int
+        operator <(right: Entry) -> bool:
+            return self.key < right.key
+    values = Vector[Entry]()
+    position = 0
+    while position < 9:
+        values.push(Entry(position % 3, position))
+        position += 1
+    module.insertion_sort_completed = false
+    assert(not module.insertion_sort_completed)
+    InsertionVectorSort[Entry]().sort(values)
+    assert(module.insertion_sort_completed)
+    position = 1
+    while position < values.size():
+        previous = values.get(position - 1)
+        current = values.get(position)
+        assert(previous.key <= current.key)
+        if previous.key == current.key:
+            assert(previous.ordinal < current.ordinal)
+        position += 1
+
+
+test "merge sort preserves equal-key record order":
+    class Entry:
+        key: int
+        ordinal: int
+        operator <(right: Entry) -> bool:
+            return self.key < right.key
+    values = Vector[Entry]()
+    position = 0
+    while position < 65:
+        values.push(Entry(position % 3, position))
+        position += 1
+    module.merge_sort_completed = false
+    assert(not module.merge_sort_completed)
+    MergeVectorSort[Entry]().sort(values)
+    assert(module.merge_sort_completed)
+    position = 1
+    while position < values.size():
+        previous = values.get(position - 1)
+        current = values.get(position)
+        assert(previous.key <= current.key)
+        if previous.key == current.key:
+            assert(previous.ordinal < current.ordinal)
+        position += 1
+
+
+test "counting sort rejects an overflowing key range":
+    throws "assertion failed":
+        values = Vector[int]()
+        values.push(-9223372036854775807)
+        values.push(9223372036854775807)
+        CountingVectorSort().sort(values)
+
+
+test "safe arrays own returned storage and initialize scalar elements":
+    def make(count: int) -> array[int]:
+        values = array[int, count]()
+        return values
+    values = make(4)
+    assert(len(values) == 4)
+    assert(values[0] == 0)
+    assert(values[3] == 0)
+    values[0] = 7
+    snapshot = copy values
+    drop values
+    assert(snapshot[0] == 7)
+
+
+test "safe arrays reject negative counts":
+    throws "allocation count must be nonnegative":
+        values = array[int, -1]()
+
+
+test "safe arrays reject byte size overflow":
+    throws "allocation byte size overflow":
+        values = array[int, 9223372036854775807]()
+
+
+test "safe arrays check fixed count annotations":
+    throws "array element count does not match annotation":
+        values: array[int, 3] = array[int, 2]()

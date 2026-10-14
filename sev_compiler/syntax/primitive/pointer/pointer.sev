@@ -18,7 +18,7 @@ trait Pointer[T]: Primitive
     operator address(self) -> u64
 
 
-class pointer[T]: Pointer:
+class pointer[T]: Pointer
     identity: PrimitiveId = PointerPrimitive().identity
     mlir: MlirTypeBinding = PointerPrimitive().mlir
     id: TypeId = PointerPrimitive().id

@@ -191,11 +191,12 @@ def test_package(root, *, sanitize=None, timeout=30, backtrace=False, **options)
         if process.returncode:
             raise ValueError(f'{command[0]} failed:\n{process.stdout}{process.stderr}')
 
-    objects = [result['object'], *result['dependencies']]
+    objects = [*result['objects'], *result['dependencies']]
+    original_objects = list(objects)
     if sanitize:
         instrumented = []
         for index, obj in enumerate(objects):
-            llvm = Path(obj).parent.parent / 'ir/package.ll'
+            llvm = Path(str(obj).replace('/object/', '/ir/')).with_suffix('.ll')
             text = re.sub(r'^(define [^\n]*?)( !dbg ![0-9]+)? \{$',
                           r'\1 sanitize_address\2 {', llvm.read_text(), flags=re.MULTILINE)
             source, lowered, destination = (output / f'asan-{index}{suffix}' for suffix in ('.ll', '.instrumented.ll', '.o'))
@@ -204,6 +205,9 @@ def test_package(root, *, sanitize=None, timeout=30, backtrace=False, **options)
             tool([companion('llc', optimizer), '-filetype=obj', '-relocation-model=pic', '-mtriple=' + target, lowered, '-o', destination])
             instrumented.append(str(destination))
         objects = instrumented
+    linked_objects = dict(zip(original_objects, objects))
+    partitions = {part['submodule']: part for part in metadata.get('partitions', [])}
+    symbol_owners = {name: key for key, part in partitions.items() for name in part['symbols']}
     for index, symbol in enumerate(s for s in symbols if s.get('test')):
         test = symbol['test']
         stem = output / f'test-{index:04}'
@@ -213,7 +217,18 @@ def test_package(root, *, sanitize=None, timeout=30, backtrace=False, **options)
         stem.with_suffix('.o').write_bytes(artifact.object_bytes)
         # LLVM lowers floating-point operations such as trunc to libm calls.
         # Native package tests already require a Linux host above.
-        tool([linker, *(['-fsanitize=address'] if sanitize else []), stem.with_suffix('.o'), *objects, '-lm', '-o', stem])
+        roots = [symbol['entry'], *metadata['initializers']]
+        pending = [symbol_owners[name] for name in roots if name in symbol_owners]
+        selected = set()
+        while pending:
+            owner = pending.pop()
+            if owner not in selected:
+                selected.add(owner)
+                pending.extend(partitions[owner]['dependencies'])
+        local = [str(package / part['object']) for key, part in partitions.items() if key in selected]
+        selected_objects = [*local, *result['dependencies']] if partitions else original_objects
+        tool([linker, *(['-fsanitize=address'] if sanitize else []), stem.with_suffix('.o'),
+              *(linked_objects[obj] for obj in selected_objects), '-lm', '-o', stem])
         expected = test.get('expected-failure')
         env = {**os.environ, **({'ASAN_OPTIONS': 'detect_leaks=1:halt_on_error=1'} if sanitize else {})}
         try:
@@ -232,6 +247,7 @@ def test_package(root, *, sanitize=None, timeout=30, backtrace=False, **options)
         except subprocess.TimeoutExpired:
             record = {'label': test['label'], 'mode': test['mode'], 'passed': False, 'error': 'test timed out'}
         record['location'] = test_location(root, test)
+        record['objects'] = selected_objects
         report['tests'].append(record)
         write_atomic(report_path, encode(report))
         print(format_test_result(record, symbol['entry']))

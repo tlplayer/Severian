@@ -69,7 +69,7 @@ def slice[T](values: array[T], start: int, stop: int, step: int = 1) -> array[T]
     length: i128 = 0
     if distance > 0:
         length = (distance - 1) // stride + 1
-    result = allocate[T](int(length))
+    result = array[T, int(length)]()
     position = 0
     cursor = first
     while position < int(length):
@@ -94,7 +94,7 @@ def range(start: int, stop: int, step: int = 1) -> array[int]:
     if distance > 0:
         count = (distance - 1) // stride + 1
     assert(count <= 9223372036854775807)
-    result = allocate[int](int(count))
+    result = array[int, int(count)]()
     position = 0
     cursor = i128(start)
     while position < int(count):
@@ -105,10 +105,10 @@ def range(start: int, stop: int, step: int = 1) -> array[int]:
 
 
 test "truth reductions and sorting preserve input":
-    empty = allocate[int](0)
+    empty = array[int, 0]()
     assert(all(empty))
     assert(not any(empty))
-    values = allocate[int](3)
+    values = array[int, 3]()
     values[0] = 3
     values[1] = 0
     values[2] = 1
@@ -147,5 +147,5 @@ test "range rejects zero step":
 
 test "slice rejects zero step":
     throws "assertion failed":
-        values = allocate[int](0)
+        values = array[int, 0]()
         result = slice(values, 0, 0, 0)

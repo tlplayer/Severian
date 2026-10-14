@@ -73,7 +73,7 @@ import unittest
 
 class GenericTraitTests(unittest.TestCase):
     source = ('trait Readable[T]:\n    def read(self: view Self) -> T\n'
-              'class Cell[T = int]: Readable[T]:\n    value: T\n'
+              'class Cell[T = int]: Readable[T]\n    value: T\n'
               '    def read(self: view Self) -> T:\n        return self.value\n')
 
     def compile(self, source):
@@ -96,7 +96,7 @@ class GenericTraitTests(unittest.TestCase):
 
     def test_generic_trait_default_method(self):
         source = ('trait Default[T]:\n    def value(self: view Self) -> T:\n        return T(1)\n'
-                  'class Item: Default[int]:\n    unused: int\n'
+                  'class Item: Default[int]\n    unused: int\n'
                   'def work() -> int:\n    item = Item(0)\n    return item.value()\n')
         result = self.compile(source)
         self.assertFalse(result.diagnostics, str(result.diagnostics))

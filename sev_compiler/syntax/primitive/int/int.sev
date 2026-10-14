@@ -150,7 +150,7 @@ union int:
 Only representation metadata differs between the concrete types. Behavior is
 specified once by the `Integer` contracts and generated conversion relations below.
 '''
-class i8: SignedInteger :
+class i8: SignedInteger
     identity: PrimitiveId = I8Primitive().identity
     mlir: MlirTypeBinding = I8Primitive().mlir
     id: TypeId = I8Primitive().id
@@ -169,7 +169,7 @@ class i8: SignedInteger :
     default_literal: bool = I8Primitive().default_literal
 
 
-class i16: SignedInteger :
+class i16: SignedInteger
     identity: PrimitiveId = I16Primitive().identity
     mlir: MlirTypeBinding = I16Primitive().mlir
     id: TypeId = I16Primitive().id
@@ -188,7 +188,7 @@ class i16: SignedInteger :
     default_literal: bool = I16Primitive().default_literal
 
 
-class i32: SignedInteger :
+class i32: SignedInteger
     identity: PrimitiveId = I32Primitive().identity
     mlir: MlirTypeBinding = I32Primitive().mlir
     id: TypeId = I32Primitive().id
@@ -207,7 +207,7 @@ class i32: SignedInteger :
     default_literal: bool = I32Primitive().default_literal
 
 
-class i64: SignedInteger :
+class i64: SignedInteger
     identity: PrimitiveId = I64Primitive().identity
     mlir: MlirTypeBinding = I64Primitive().mlir
     id: TypeId = I64Primitive().id
@@ -226,7 +226,7 @@ class i64: SignedInteger :
     default_literal: bool = I64Primitive().default_literal
 
 
-class i128: SignedInteger :
+class i128: SignedInteger
     identity: PrimitiveId = I128Primitive().identity
     mlir: MlirTypeBinding = I128Primitive().mlir
     id: TypeId = I128Primitive().id
@@ -245,7 +245,7 @@ class i128: SignedInteger :
     default_literal: bool = I128Primitive().default_literal
 
 
-class isize: SignedInteger :
+class isize: SignedInteger
     identity: PrimitiveId = I64Primitive().identity
     mlir: MlirTypeBinding = I64Primitive().mlir
     id: TypeId = I64Primitive().id
@@ -264,7 +264,7 @@ class isize: SignedInteger :
     default_literal: bool = I64Primitive().default_literal
 
 
-class u8: UnsignedInteger :
+class u8: UnsignedInteger
     identity: PrimitiveId = U8Primitive().identity
     mlir: MlirTypeBinding = U8Primitive().mlir
     id: TypeId = U8Primitive().id
@@ -283,7 +283,7 @@ class u8: UnsignedInteger :
     default_literal: bool = U8Primitive().default_literal
 
 
-class u16: UnsignedInteger :
+class u16: UnsignedInteger
     identity: PrimitiveId = U16Primitive().identity
     mlir: MlirTypeBinding = U16Primitive().mlir
     id: TypeId = U16Primitive().id
@@ -302,7 +302,7 @@ class u16: UnsignedInteger :
     default_literal: bool = U16Primitive().default_literal
 
 
-class u32: UnsignedInteger :
+class u32: UnsignedInteger
     identity: PrimitiveId = U32Primitive().identity
     mlir: MlirTypeBinding = U32Primitive().mlir
     id: TypeId = U32Primitive().id
@@ -321,7 +321,7 @@ class u32: UnsignedInteger :
     default_literal: bool = U32Primitive().default_literal
 
 
-class u64: UnsignedInteger :
+class u64: UnsignedInteger
     identity: PrimitiveId = U64Primitive().identity
     mlir: MlirTypeBinding = U64Primitive().mlir
     id: TypeId = U64Primitive().id
@@ -340,7 +340,7 @@ class u64: UnsignedInteger :
     default_literal: bool = U64Primitive().default_literal
 
 
-class u128: UnsignedInteger :
+class u128: UnsignedInteger
     identity: PrimitiveId = U128Primitive().identity
     mlir: MlirTypeBinding = U128Primitive().mlir
     id: TypeId = U128Primitive().id
@@ -359,7 +359,7 @@ class u128: UnsignedInteger :
     default_literal: bool = U128Primitive().default_literal
 
 
-class usize: UnsignedInteger :
+class usize: UnsignedInteger
     identity: PrimitiveId = U64Primitive().identity
     mlir: MlirTypeBinding = U64Primitive().mlir
     id: TypeId = U64Primitive().id
@@ -420,7 +420,7 @@ Formatting, parsing, hashing, and other library behavior are not disguised as
 compiler intrinsics. They remain ordinary Severian/library operations unless
 they have a real MLIR operation to bind to.
 '''
-class int: Integer:
+class int: Integer
     # The family supplies behavior; each concrete integer owns its storage
     # metadata. A family grammar must not introduce an i64 instance layout.
 

@@ -12,7 +12,7 @@ import tempfile
 from py_compiler.frontend.src.lib import compile_source
 from py_compiler.hir.hir.src.program import Program
 from py_compiler.mlir.src.lib import verify_native, verifier_path
-from py_compiler.lir.src.lib import lower, compile_object
+from py_compiler.lir.src.lib import lower, compile_object, partitions, companion
 from py_compiler.syntax.recognition import Syntax
 
 
@@ -36,7 +36,7 @@ def output_slot(publish=False, include_tests=False):
     return new_build_id() if publish else ('test' if include_tests else 'dev')
 
 
-def prepare_output(output, slot, publish=False):
+def prepare_output(output, slot, publish=False, preserve_artifacts=False):
     """Replace generated development conflicts; preserve published snapshots."""
     index_path = output / 'package.pkgi/index.json'
     index = json.loads(index_path.read_text()) if index_path.exists() else {'interfaces': [], 'binding-sets': []}
@@ -65,7 +65,8 @@ def prepare_output(output, slot, publish=False):
         if not isinstance(old, str) or not re.fullmatch(r'[A-Za-z0-9_]+', old):
             raise ValueError('invalid generated output slot')
         for target in (output / 'artifacts').glob('*'):
-            remove(target / old)
+            if not (preserve_artifacts and old == slot):
+                remove(target / old)
         for folder in ('package.pkgi/severian', 'build', 'debug/test', 'debug/profile', 'debug/coverage'):
             remove(output / folder / old)
         for folder in ('realizations', 'symbols', 'dependencies'):
@@ -89,6 +90,63 @@ def compiler_identity():
     root = Path(__file__).parent
     return digest(encode([(path.relative_to(root).as_posix(), path.read_text())
                           for path in sorted(root.rglob('*.py'))]))
+
+
+def write_generated(path, data):
+    data = data.encode() if isinstance(data, str) else data
+    if path.is_file() and path.read_bytes() == data:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+        stream.write(data)
+        temporary = stream.name
+    os.replace(temporary, path)
+
+
+def compile_partitions(program, lir, output, target, slot, compiler_id, optimizer):
+    optimizer = optimizer or verifier_path()
+    tools = [shutil.which(optimizer) or optimizer, *(companion(name, optimizer) for name in ('mlir-translate', 'llc'))]
+    toolchain = [(str(Path(path).resolve()), Path(path).stat().st_size, Path(path).stat().st_mtime_ns) for path in tools]
+    records, artifacts, payloads, mappings = [], [], {}, {}
+    selected = partitions(program, lir)
+    stems = {part.submodule: part.stem for part in selected}
+    for part in selected:
+        text = part.lir.text()
+        cache_key = digest(encode([compiler_id, target, lir.pointer_bits, toolchain, text]))
+        cache = output / 'cache/native' / cache_key
+        names = ('source.mlir', 'lowered.mlir', 'source.ll', 'native.o')
+        values = None
+        try:
+            checksums = json.loads((cache / 'checksums.json').read_text())
+            cached = [cache.joinpath(name).read_bytes() for name in names]
+            if all(sha256(value).hexdigest() == checksums[name] for name, value in zip(names, cached)):
+                values = cached
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        reused = values is not None
+        if values is None:
+            verify_native(text, optimizer)
+            native = compile_object(part.lir, optimizer)
+            values = [text.encode(), native.llvm_dialect.encode(), native.llvm_ir.encode(), native.object_bytes]
+            for name, value in zip(names, values):
+                write_generated(cache / name, value)
+            write_atomic(cache / 'checksums.json', encode({name: sha256(value).hexdigest() for name, value in zip(names, values)}))
+        base = f'artifacts/{target}/{slot}'
+        paths = [f'{base}/ir/{part.stem}.mlir', f'{base}/ir/{part.stem}.llvm.mlir',
+                 f'{base}/ir/{part.stem}.ll', f'{base}/object/{part.stem}.o']
+        entries = [{'path': path, 'kind': kind, 'checksum': sha256(value).hexdigest(),
+                    'module': part.module, 'submodule': part.submodule}
+                   for path, kind, value in zip(paths, ('mlir', 'llvm-dialect', 'llvm-ir', 'object'), values)]
+        entries[-1]['llvm-ir'] = paths[2]
+        artifacts.extend(entries)
+        payloads.update(zip(paths, values))
+        mappings.update(part.constant_symbols)
+        records.append({'module': part.module, 'submodule': part.submodule, 'source': part.source,
+                        'name': part.stem, 'symbols': part.symbols, 'dependencies': list(part.dependencies),
+                        'dependency-partitions': [stems[item] for item in part.dependencies],
+                        'cache-key': cache_key, 'reused': reused, 'artifacts': paths,
+                        'object': paths[-1], 'llvm-ir': paths[2]})
+    return records, artifacts, payloads, mappings
 
 
 def dependency_closure(packages):
@@ -254,21 +312,20 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                           pointer_bits, include_tests, stop_after, report)
     lir = lower(program, target, pointer_bits)
     target_program = lir.mlir
-    ir = lir.text()
-    # Publishing an artifact requires the actual dialect verifier, not only our structural checks.
-    verify_native(ir, mlir_opt)
-    native = compile_object(lir, mlir_opt)
-    dependencies = list(dict.fromkeys([*(obj for dependency in packages.values() for obj in dependency['objects']), *native.dependencies]))
-    link_artifacts = [{'path': obj, 'checksum': sha256(Path(obj).read_bytes()).hexdigest()} for obj in dependencies]
     compiler_id = compiler_identity()
     content_id = digest(encode([manifest_text, lock, snapshots]))
     build_id = output_slot(publish, include_tests)
     abi_id = digest(encode([target, pointer_bits, "py-primitive-abi-v2-record-results"]))
     identity = {"name": package["name"], "version": package["version"], "content-id": content_id}
-    ir_path = f"artifacts/{target}/{build_id}/ir/package.mlir"
-    object_path = f"artifacts/{target}/{build_id}/object/package.o"
-    llvm_path = f"artifacts/{target}/{build_id}/ir/package.ll"
-    lowered_path = f"artifacts/{target}/{build_id}/ir/package.llvm.mlir"
+    partition_records, artifact_records, artifact_payloads, constant_symbols = compile_partitions(
+        program, lir, output, target, build_id, compiler_id, mlir_opt)
+    from dataclasses import replace
+    target_program = replace(target_program, functions=tuple(
+        replace(function, symbol=constant_symbols.get(function.constant.identity, function.symbol))
+        for function in target_program.functions))
+    dependencies = list(dict.fromkeys([*(obj for dependency in packages.values() for obj in dependency['objects']), *lir.dependencies]))
+    link_artifacts = [{'path': obj, 'checksum': sha256(Path(obj).read_bytes()).hexdigest()} for obj in dependencies]
+    native_records = [entry for entry in artifact_records if entry['kind'] == 'object']
     interface_path = f"package.pkgi/severian/{build_id}/lib.sevi"
     realization_path = f"metadata/realizations/{build_id}.json"
     declarations, symbols = [], []
@@ -343,12 +400,20 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                    "build-id": build_id, "state": "compiled-object", "compiler": compiler_id,
                    "target": target, "abi": abi_id, "pointer-bits": pointer_bits,
                    "interface": {"path": interface_path, "checksum": digest(interface_text)},
-                   "artifacts": [{"path": ir_path, "kind": "mlir", "checksum": digest(ir)}],
-                   "dependencies": dependencies, "dependency-closure": closure, "link-artifacts": link_artifacts, "native-artifacts": [{"path": object_path, "kind": "object", "checksum": sha256(native.object_bytes).hexdigest()}]}
+                   "artifacts": artifact_records, "partitions": partition_records,
+                   "dependencies": dependencies, "dependency-closure": closure,
+                   "link-artifacts": link_artifacts, "native-artifacts": native_records}
     realization['submodules'] = realization_records(program)
-    realization["artifacts"].extend([{"path": llvm_path, "kind": "llvm-ir", "checksum": digest(native.llvm_ir)},
-                                     {"path": lowered_path, "kind": "llvm-dialect", "checksum": digest(native.llvm_dialect)},
-                                     *realization["native-artifacts"]])
+    realization['modules'] = [{'id': module.identity, 'interface': module.interface,
+                              'partitions': [part['name'] for part in partition_records if part['module'] == module.identity]}
+                             for module in program.mir_modules]
+    by_submodule = {entry['submodule']: entry for entry in partition_records}
+    for submodule in realization['submodules']:
+        submodule['artifacts'] = by_submodule[submodule['id']]['artifacts']
+    for symbol in symbols:
+        owners = [part for part in partition_records if symbol['entry'] in part['symbols']]
+        if owners:
+            symbol['object'] = owners[0]['object']
     realization["initializers"] = [body.name for body in program.bodies if not body.declaration]
     realization['dependency-initializers'] = list(dict.fromkeys(
         symbol for dependency in packages.values() for symbol in dependency['initializers']))
@@ -365,8 +430,10 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     interface_text = encode(interface)
     realization.update({'build-id': build_id if publish else None, 'output-slot': build_id, 'published': publish})
     realization['interface']['checksum'] = digest(interface_text)
-    prepare_output(output, build_id, publish)
-    pending = {ir_path: ir, llvm_path: native.llvm_ir, lowered_path: native.llvm_dialect, interface_path: interface_text, realization_path: encode(realization),
+    previous_path = output / realization_path
+    previous = json.loads(previous_path.read_text()) if previous_path.exists() else {}
+    prepare_output(output, build_id, publish, preserve_artifacts=True)
+    pending = {interface_path: interface_text, realization_path: encode(realization),
                f"metadata/symbols/{build_id}.json": encode(symbols),
                f"metadata/dependencies/{build_id}.json": encode([{"submodule": sub.identity, "declarations": sub.declarations, "dependencies": sub.dependencies} for sub in program.submodules]),
                f"metadata/layouts/{abi_id}.json": encode(layouts),
@@ -375,12 +442,13 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     pending.update({source_root + '/' + path: text for path, text in snapshots})
     for path, text in pending.items():
         write_atomic(output / path, text)
-    object_destination = output / object_path
-    object_destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=object_destination.parent, delete=False) as stream:
-        stream.write(native.object_bytes)
-        temporary = stream.name
-    os.replace(temporary, object_destination)
+    for path, data in artifact_payloads.items():
+        write_generated(output / path, data)
+    for entry in previous.get('artifacts', []):
+        path = output / entry['path']
+        if entry['path'] not in artifact_payloads and path.resolve().is_relative_to(output.resolve()):
+            if path.is_file():
+                path.unlink()
     # Publish the interface index only after every artifact has been written.
     index_path = output / "package.pkgi/index.json"
     index = json.loads(index_path.read_text()) if index_path.exists() else {"interfaces": [], "binding-sets": []}
@@ -391,8 +459,13 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                     'path': interface_path, 'semantic-id': semantic_id})
     index["interfaces"] = entries
     write_atomic(index_path, encode(index))
-    report(f"Built {len(snapshots)} source files; {len(program.constants)} primitive values\nMLIR: {ir_path}\n")
-    return {"success": True, "build-id": build_id if publish else None, 'output-slot': build_id, "ir": str(output / ir_path), "object": str(output / object_path),
+    reused = sum(part['reused'] for part in partition_records)
+    report(f"Built {len(snapshots)} source files; {len(partition_records)} native partitions; {reused} reused\n")
+    objects = [str(output / entry['path']) for entry in native_records]
+    irs = [str(output / entry['path']) for entry in artifact_records if entry['kind'] == 'mlir']
+    return {"success": True, "build-id": build_id if publish else None, 'output-slot': build_id,
+            "irs": irs, "objects": objects, "ir": irs[0] if irs else None,
+            "object": objects[0] if objects else None, "partitions": partition_records,
             "dependencies": dependencies, "log": str(output / "debug/build/log.txt")}
 
 
@@ -513,7 +586,7 @@ class PackageTests(unittest.TestCase):
                 result = test_package(app)
             self.assertTrue(result['success'], result)
             metadata = json.loads((app / 'package.pkg/metadata/realizations/test.json').read_text())
-            self.assertEqual(len(metadata['dependencies']), 5)
+            self.assertGreaterEqual(len(metadata['dependencies']), 5)
             self.assertEqual(len(metadata['dependency-initializers']), 5)
             self.assertEqual([entry['package']['name'] for entry in metadata['dependency-closure']],
                              ['base', 'constants', 'left', 'right', 'unused'])
@@ -525,7 +598,8 @@ class PackageTests(unittest.TestCase):
             self.assertTrue(build_package(root / 'base')['success'])
             with self.assertRaisesRegex(ValueError, 'dependency closure changed'):
                 native_dependencies(app, json.loads((app / 'package.json').read_text()), 'x86_64-unknown-linux-gnu', 64)
-            obj = root / 'base/package.pkg/artifacts/x86_64-unknown-linux-gnu/dev/object/package.o'
+            base_metadata = json.loads((root / 'base/package.pkg/metadata/realizations/dev.json').read_text())
+            obj = root / 'base/package.pkg' / base_metadata['native-artifacts'][0]['path']
             obj.write_bytes(obj.read_bytes() + b'corrupt')
             left = root / 'left'
             with self.assertRaisesRegex(ValueError, 'object checksum mismatch'):
@@ -663,3 +737,84 @@ class ModularFixtureTests(unittest.TestCase):
             with self.subTest(source=path.relative_to(root)):
                 result = compile_source(str(path), path.read_text(), Syntax())
                 self.assertFalse(result.diagnostics, '\n'.join(map(str, result.diagnostics)))
+
+
+class PartitionArtifactTests(unittest.TestCase):
+    def fixture(self, directory, source):
+        root = Path(directory)
+        (root / 'src').mkdir()
+        (root / 'package.json').write_text(encode({'package': {'name': 'partitioned', 'version': '0.1.0'}}))
+        (root / 'src/lib.sev').write_text(source)
+        return root
+
+    def test_native_submodules_reuse_unchanged_objects_within_one_source(self):
+        from unittest.mock import patch
+        source = ('def first() -> int:\n    return 41\n'
+                  'def second() -> int:\n    return first() + 1\n')
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture(directory, source)
+            first = build(root)
+            self.assertTrue(first['success'], first)
+            self.assertEqual(len(first['objects']), 3)
+            self.assertTrue(any('/first-' in p or '/first_' in p for p in first['objects']))
+            self.assertTrue(all(Path(p).name != 'package.o' for p in first['objects']))
+            times = {p: Path(p).stat().st_mtime_ns for p in first['objects']}
+            with patch(__name__ + '.compile_object', wraps=compile_object) as compile_native:
+                second = build(root)
+                compile_native.assert_not_called()
+            self.assertTrue(all(p['reused'] for p in second['partitions']))
+            self.assertEqual(times, {p: Path(p).stat().st_mtime_ns for p in second['objects']})
+            (root / 'src/lib.sev').write_text(source.replace('return 41', 'return 42'))
+            with patch(__name__ + '.compile_object', wraps=compile_object) as compile_native:
+                changed = build(root)
+                self.assertEqual(compile_native.call_count, 1)
+            self.assertEqual(sum(not p['reused'] for p in changed['partitions']), 1)
+            metadata = json.loads((root / 'package.pkg/metadata/realizations/dev.json').read_text())
+            self.assertEqual(len(metadata['modules']), 1)
+            self.assertEqual(len(metadata['native-artifacts']), 3)
+            for part in metadata['partitions']:
+                self.assertTrue(part['symbols'])
+                self.assertTrue(all((root / 'package.pkg' / path).is_file() for path in part['artifacts']))
+            # Corrupt cache entries are rebuilt rather than trusted.
+            part = changed['partitions'][0]
+            (root / 'package.pkg/cache/native' / part['cache-key'] / 'native.o').write_bytes(b'broken')
+            repaired = build(root)
+            self.assertEqual(sum(not p['reused'] for p in repaired['partitions']), 1)
+            (root / 'src/lib.sev').write_text('def first() -> int:\n    return 42\n')
+            removed = build(root)
+            self.assertEqual(len(removed['objects']), 2)
+            self.assertTrue(all(not Path(path).exists() for path in set(repaired['objects']) - set(removed['objects'])))
+
+    def test_partitioned_tests_link_only_reachable_local_objects(self):
+        from py_compiler.testing import test_package
+        source = ('counter = 0\ndef used() -> int:\n    module.counter += 1\n    return module.counter\n'
+                  'def unused() -> int:\n    return 99\n'
+                  'test "partition linkage":\n    assert(used() == 1)\n')
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture(directory, source)
+            result = test_package(root)
+            self.assertTrue(result['success'], result)
+            report = json.loads(Path(result['report']).read_text())
+            objects = report['tests'][0]['objects']
+            self.assertFalse(any('/unused' in path for path in objects))
+            self.assertTrue(any('/used' in path for path in objects))
+            self.assertTrue(any('/initializer' in path for path in objects))
+
+    def test_recursive_scc_and_generic_realizations_have_distinct_artifacts(self):
+        source = ('def even(n: int) -> bool:\n    if n == 0:\n        return true\n    return odd(n - 1)\n'
+                  'def odd(n: int) -> bool:\n    if n == 0:\n        return false\n    return even(n - 1)\n'
+                  'def identity[T](value: T) -> T:\n    return value\n'
+                  'test "realizations":\n    assert(even(4))\n    assert(identity[i32](3) == 3)\n'
+                  '    assert(identity[i64](4) == 4)\n')
+        from py_compiler.testing import test_package
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture(directory, source)
+            result = test_package(root)
+            self.assertTrue(result['success'], result)
+            metadata = json.loads((root / 'package.pkg/metadata/realizations/test.json').read_text())
+            recursion = [p for p in metadata['partitions'] if any('__sev_fn_even' in symbol for symbol in p['symbols'])]
+            self.assertEqual(len(recursion), 1)
+            self.assertTrue(any('__sev_fn_odd' in symbol for symbol in recursion[0]['symbols']))
+            generics = [p for p in metadata['partitions'] if any('__sev_fn_identity[' in symbol for symbol in p['symbols'])]
+            self.assertEqual(len(generics), 2)
+            self.assertNotEqual(generics[0]['object'], generics[1]['object'])

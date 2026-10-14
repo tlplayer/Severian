@@ -24,6 +24,38 @@ class Array:
             raise ValueError('array count must be nonnegative')
         return ArrayType(context.type(arguments[0]), count=count)
 
+    def construct_expression(self, argument, arguments, cfg, env, span, expected=None):
+        from py_compiler.syntax.grammar.expression import type_spelling
+        from py_compiler.syntax.generic.owned import select
+        from py_compiler.syntax.function.allocate import resolve_plan
+        terms = argument.operands if argument and argument.kind == 'template_arguments' else ()
+        if len(terms) != 2 or arguments:
+            raise ValueError('use array[T, N]() with an element type and element count')
+        element = cfg.context.type(type_spelling(terms[0]))
+        result = ArrayType(element)
+        if isinstance(expected, ArrayType) and expected.element == element:
+            result = expected
+        count = select(cfg.context.type('index'), 'F.constructor', 'construct').expand(cfg, (terms[1],), env)
+        if result.count is not None:
+            cfg.effect('array-extent', (count,), ArrayExtent(result.count), span)
+        plan = resolve_plan(result, {'location': 'heap'}, cfg.context)
+        operation = record_operation(result, 'allocate', cfg).with_plan(plan) if element.family == 'record' else MemoryOperation('allocate', plan)
+        return cfg.emit('allocate-array', result, (count,), operation, span)
+
+
+@dataclass(frozen=True)
+class ArrayExtent:
+    count: int
+
+    def atom(self, operation):
+        return Atom(self, (operation.operands[0].type,), None, ('copy',), (), self)
+
+    def render_operation(self, operation):
+        tag = temporary_suffix(operation)
+        return [f'%extent_{tag} = arith.constant {self.count} : index',
+                f'%extent_ok_{tag} = arith.cmpi eq, {name(operation.operands[0])}, %extent_{tag} : index',
+                f'cf.assert %extent_ok_{tag}, "array element count does not match annotation"']
+
 
 @dataclass(frozen=True)
 class ArrayType:
@@ -337,6 +369,17 @@ class ArrayTypeTests(unittest.TestCase):
             self.assertIn(operation, text)
         self.assertEqual(text.count('memref.dealloc'), 1)
 
+    def test_safe_constructor_owns_runtime_sized_storage(self):
+        text = self.ir('def make(n: int) -> array[int]:\n    values = array[int,n]()\n    values[0] = 7\n    return values\ndef work() -> int:\n    values = make(3)\n    return values[0]\n')
+        self.assertIn('memref.alloc', text)
+        self.assertIn('memref.dealloc', text)
+        self.assertIn('allocation count must be nonnegative', text)
+        self.assertIn('allocation byte size overflow', text)
+
+    def test_safe_constructor_supports_bare_and_fixed_extent_forms(self):
+        text = self.ir('def work() -> int:\n    empty = array[int,0]\n    values: array[int,3] = array[int,3]()\n    return len(empty) + values[0]\n')
+        self.assertIn('array element count does not match annotation', text)
+
     def test_borrow_parameter_mutates_and_default_view_reads(self):
         text = self.ir('def write(a: borrow array[int]):\n    a[0] = 9\ndef read(a: array[int]) -> int:\n    return a[0]\ndef work() -> int:\n    unsafe:\n        a = allocate[int,location=memory.heap](1)\n        write(a)\n        return read(a)\n')
         self.assertIn('memref.store', text)
@@ -378,8 +421,8 @@ class ArrayTypeTests(unittest.TestCase):
         self.assertIn('memref.store', text)
         self.assertEqual(text.count('memref.dealloc'), 1)
 
-    def test_typed_pointer_can_take_array_ownership(self):
-        text = self.ir('def work() -> int:\n    unsafe:\n        a = allocate[int,location=memory.heap]()\n        p: pointer[int] = move a\n        p[0] = 9\n        return p[0]\n')
-        self.assertEqual(text.count('memref.dealloc'), 1)
+    def test_typed_pointer_cannot_take_array_ownership(self):
+        result = self.compile('def work() -> int:\n    unsafe:\n        a = allocate[int,location=memory.heap]()\n        p: pointer[int] = move a\n        p[0] = 9\n        return p[0]\n')
+        self.assertIn('cannot transfer array allocation ownership', str(result.diagnostics))
         result = self.compile('def work():\n    unsafe:\n        a = allocate[int,location=memory.heap]()\n        p: pointer[int] = move a\n        deallocate(a)\n')
         self.assertTrue(result.diagnostics)

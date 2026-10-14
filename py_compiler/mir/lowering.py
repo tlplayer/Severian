@@ -206,6 +206,10 @@ class Builder:
             from py_compiler.syntax.function.calls import coerce
             return coerce(self.expr(node, env), expected, self, token.span)
         if node.kind == "index":
+            subject, argument = node.operands
+            definition = self.context.types.get(subject.token.text) if subject.kind == 'name' else None
+            if callable(getattr(definition, 'construct_expression', None)):
+                return definition.construct_expression(argument, (), self, env, token.span, expected)
             receiver = self.expr(node.operands[0], env)
             place = receiver.type.element_place(receiver, node.operands[1], self, env, token.span)
             return place.read(self, token.span)
@@ -375,7 +379,9 @@ def resolve_bodies(module):
     context.initial_flow = FlowState()
     context.resolve_contracts()
     qualifier = '::package=' + context.interface if context.interface else ''
-    initializer = Builder(source, context.bound_syntax, root.identity + qualifier, "__sev_init_" + source.identity + qualifier, syntax.types["absent"])
+    from hashlib import sha256
+    initializer_symbol = sha256((source.path + qualifier).encode()).hexdigest()
+    initializer = Builder(source, context.bound_syntax, root.identity + qualifier, "__sev_init_" + initializer_symbol + qualifier, syntax.types["absent"])
     initializer.context = context
     initializer.block_scope = root.scope
     initializer.declared_nodes = context.declared_nodes

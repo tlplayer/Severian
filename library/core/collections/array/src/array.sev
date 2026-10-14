@@ -94,7 +94,7 @@ trait Array[T, N]: C
 The storage pointer is hidden because direct access would bypass bounds,
 ownership, and lifetime checks.
 '''
-class array[T: Copy + Default, N: usize]: Array[T, N]:
+class array[T: Copy + Default, N: usize]: Array[T, N]
 
     __memory: *[T]
     length: usize = N

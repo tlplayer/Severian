@@ -30,6 +30,7 @@ class MlirProgram:
     functions: tuple[MlirFunction, ...]
     bodies: tuple = ()
     declarations: tuple = ()
+    defined_globals: tuple | None = None
 
     def verify(self):
         symbols = set()
@@ -62,7 +63,24 @@ def render(program):
     program.verify()
     globals_, functions = [], []
     declarations = {place.identity: place for body in program.bodies for place in body.storage}
-    globals_.extend("  " + place.declaration() for place in declarations.values())
+    from py_compiler.syntax.generic.storage import GlobalPlace
+    declarations.update({operation.payload.identity: operation.payload for body in program.bodies
+                         for block in body.blocks for operation in block.operations
+                         if isinstance(operation.payload, GlobalPlace)})
+    if program.defined_globals is not None:
+        from py_compiler.syntax.generic.storage import GlobalPlace
+        used = {operation.payload.identity for body in program.bodies for block in body.blocks
+                for operation in block.operations if isinstance(operation.payload, GlobalPlace)}
+        declarations = {key: value for key, value in declarations.items()
+                        if key in used or key in program.defined_globals}
+    for place in declarations.values():
+        if program.defined_globals is None:
+            declaration = place.declaration()
+        elif place.identity in program.defined_globals:
+            declaration = place.declaration().replace('"private"', '"public"', 1)
+        else:
+            declaration = f'memref.global "public" @{place.symbol} : memref<{place.type.mlir}>'
+        globals_.append('  ' + declaration)
     for function in program.functions:
         c, symbol = function.constant, function.symbol
         type_ = c.type.mlir
@@ -75,6 +93,7 @@ def render(program):
                          "\n".join("    " + line for line in body) + "\n  }")
     from py_compiler.mlir.src.cfg import render_body
     from py_compiler.syntax.generic.atom import ExternalSymbol
+    from py_compiler.syntax.complex.object import Invoke
     external = {}
     owner_globals = set()
     defined = {body.name for body in program.bodies} | {f.symbol for f in program.functions}
@@ -88,13 +107,13 @@ def render(program):
                         if definition not in owner_globals:
                             owner_globals.add(definition)
                             globals_.append('  ' + definition)
-                if isinstance(implementation, ExternalSymbol):
+                if isinstance(implementation, (ExternalSymbol, Invoke)) and implementation.symbol not in defined:
                     signature = (tuple(t.mlir for t in operation.atom.inputs), (getattr(implementation, "result_layout", "") or operation.atom.result.mlir) if operation.atom.result else "")
-                    if implementation.symbol in defined:
-                        raise ValueError("external symbol conflicts with a local definition")
                     if implementation.symbol in external and external[implementation.symbol] != signature:
                         raise ValueError("conflicting external atom signatures")
                     external[implementation.symbol] = signature
+                elif isinstance(implementation, ExternalSymbol):
+                    raise ValueError("external symbol conflicts with a local definition")
     for symbol, (inputs, result) in sorted(external.items()):
         suffix = " -> " + result if result else ""
         functions.append(f"  func.func private {symbol_ref(symbol)}({', '.join(inputs)}){suffix}")

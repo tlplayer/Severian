@@ -1,6 +1,6 @@
 # Callable providers use the ordinary source-level call method contract.
 def apply[T, R, F](operation: borrow F, values: array[T]) -> array[R]:
-    result = allocate[R](len(values))
+    result = array[R, len(values)]()
     position = 0
     while position < len(values):
         result[position] = operation.call(values[position])
@@ -8,8 +8,8 @@ def apply[T, R, F](operation: borrow F, values: array[T]) -> array[R]:
     return result
 
 
-def filter[T, F](predicate: F, values: array[T]) -> array[T]:
-    selected = allocate[bool](len(values))
+def filter[T, F](predicate: borrow F, values: array[T]) -> array[T]:
+    selected = array[bool, len(values)]()
     count = 0
     position = 0
     while position < len(values):
@@ -18,7 +18,7 @@ def filter[T, F](predicate: F, values: array[T]) -> array[T]:
         if keep:
             count += 1
         position += 1
-    result = allocate[T](count)
+    result = array[T, count]()
     position = 0
     destination = 0
     while position < len(values):
@@ -36,7 +36,7 @@ test "apply and filter use source callable providers":
     class Positive:
         def call(value: int) -> bool:
             return value > 0
-    values = allocate[int](3)
+    values = array[int, 3]()
     values[0] = -2
     values[1] = 0
     values[2] = 3
