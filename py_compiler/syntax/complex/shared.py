@@ -128,7 +128,7 @@ class SharedTests(unittest.TestCase):
         from py_compiler.syntax.recognition import Syntax
         from py_compiler.mlir.src.lib import lower, render, verify_native
         for atomic in ('', 'atomic '):
-            source = f'def work() -> int:\n    a = allocate[int]()\n    a[0] = 42\n    b = share {atomic}a\n    drop a\n    return b[0]\n'
+            source = f'def work() -> int:\n    unsafe:\n        a = allocate[int]()\n        a[0] = 42\n        b = share {atomic}a\n        drop a\n        return b[0]\n'
             result = compile_source('share.sev', source, Syntax())
             self.assertFalse(result.diagnostics, str(result.diagnostics))
             text = render(lower(result.program))
@@ -138,7 +138,7 @@ class SharedTests(unittest.TestCase):
     def test_shared_payload_cannot_mutate(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax
-        result = compile_source('share.sev', 'def work():\n    a = allocate[int]()\n    b = share atomic a\n    b[0] = 2\n', Syntax())
+        result = compile_source('share.sev', 'def work():\n    unsafe:\n        a = allocate[int]()\n        b = share atomic a\n        b[0] = 2\n', Syntax())
         self.assertTrue(result.diagnostics)
         self.assertIn('read-only', str(result.diagnostics))
 
@@ -153,10 +153,7 @@ class SharedTests(unittest.TestCase):
         from py_compiler.lir.src.lib import lower, compile_object
         if not shutil.which('cc'):
             self.skipTest('native linker unavailable')
-        source = ('def read(value: share atomic array[int]) -> int:\n    return value[0]\n'
-                  'def work() -> int:\n    a = allocate[int]()\n    a[0] = 42\n'
-                  '    b = share atomic a\n    c = share atomic b\n    drop a\n    drop b\n'
-                  '    return read(c) + c[0]\n')
+        source = ('def read(value: share atomic array[int]) -> int:\n    return value[0]\ndef work() -> int:\n    unsafe:\n        a = allocate[int]()\n        a[0] = 42\n        b = share atomic a\n        c = share atomic b\n        drop a\n        drop b\n        return read(c) + c[0]\n')
         result = compile_source('shared-native.sev', source, Syntax())
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         artifact = compile_object(lower(result.program, 'x86_64-unknown-linux-gnu', 64))

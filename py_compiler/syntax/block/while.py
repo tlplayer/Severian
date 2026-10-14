@@ -383,11 +383,7 @@ class WhileTests(unittest.TestCase):
         from py_compiler.mlir.src.lib import lower, render, verify_native
         for jump in ('break', 'continue'):
             with self.subTest(jump=jump):
-                source = ('def work(n: int) -> int:\n    i = 0\n    while i < n:\n'
-                          '        scratch = allocate[int, location=memory.heap](1)\n'
-                          '        i += 1\n        if i > 0:\n'
-                          '            nested = allocate[int, location=memory.heap](1)\n'
-                          f'            {jump}\n    return i\n')
+                source = (f'def work(n: int) -> int:\n    unsafe:\n        i = 0\n        while i < n:\n            scratch = allocate[int, location=memory.heap](1)\n            i += 1\n            if i > 0:\n                nested = allocate[int, location=memory.heap](1)\n                {jump}\n        return i\n')
                 result = compile_source('jumps.sev', source, Syntax())
                 self.assertFalse(result.diagnostics, str(result.diagnostics))
                 body = next(body for body in result.program.bodies if body.declaration == 'work')
@@ -405,8 +401,7 @@ class WhileTests(unittest.TestCase):
                 (f'def work():\n    while true:\n        {jump} 1\n', 'does not accept a value or label'),
                 (f'def work():\n    while true:\n        def helper():\n            {jump}\n', 'requires an enclosing while loop'),
                 (f'def work():\n    while true:\n        {jump}\n        value = 1\n', 'unreachable sentence'),
-                *([('def work():\n    owner = allocate[int](1)\n    while true:\n'
-                    '        drop owner\n        continue\n', 'cannot consume an outer binding')] if jump == 'continue' else []),
+                *([('def work():\n    unsafe:\n        owner = allocate[int](1)\n        while true:\n            drop owner\n            continue\n', 'cannot consume an outer binding')] if jump == 'continue' else []),
             ):
                 with self.subTest(jump=jump, source=source):
                     result = compile_source('invalid-jump.sev', source, Syntax())
@@ -417,6 +412,6 @@ class WhileTests(unittest.TestCase):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax
         from py_compiler.mlir.src.lib import lower, render, verify_native
-        result = compile_source('while.sev', 'def sum_to(n: int) -> int:\n    i = 0\n    total = 0\n    while i < n:\n        value = allocate[int]()\n        value[0] = i\n        total += value[0]\n        i += 1\n    return total\n', Syntax())
+        result = compile_source('while.sev', 'def sum_to(n: int) -> int:\n    unsafe:\n        i = 0\n        total = 0\n        while i < n:\n            value = allocate[int]()\n            value[0] = i\n            total += value[0]\n            i += 1\n        return total\n', Syntax())
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         verify_native(render(lower(result.program)))

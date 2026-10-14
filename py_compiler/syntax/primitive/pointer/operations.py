@@ -106,21 +106,21 @@ class TypedPointerTests(unittest.TestCase):
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         return render(lower(result.program))
 
-    def test_safe_pointer_load_and_store_are_bounded(self):
-        text = self.ir('def read(p: pointer[f64], i: isize) -> f64:\n    return p[i]\ndef write(p: borrow pointer[f64]):\n    p[0] = 1.0\n')
+    def test_unsafe_pointer_load_and_store_are_bounded(self):
+        text = self.ir('def read(p: pointer[f64], i: isize) -> f64:\n    unsafe:\n        return p[i]\ndef write(p: borrow pointer[f64]):\n    unsafe:\n        p[0] = 1.0\n')
         self.assertIn('memref.load', text)
         self.assertIn('memref.store', text)
         self.assertIn('memory index outside allocation', text)
 
     def test_address_infers_view_and_preserves_owner(self):
-        text = self.ir('def work() -> int:\n    value = 42\n    p = &value\n    value = 43\n    return p[0] + value\n')
+        text = self.ir('def work() -> int:\n    unsafe:\n        value = 42\n        p = &value\n        value = 43\n        return p[0] + value\n')
         self.assertIn('memref.alloca', text)
         self.assertNotIn('memref.dealloc', text)
-        result = self.compile('def work() -> pointer[int]:\n    value = 42\n    return &value\n')
+        result = self.compile('def work() -> pointer[int]:\n    unsafe:\n        value = 42\n        return &value\n')
         self.assertTrue(result.diagnostics)
 
     def test_view_cannot_release_storage(self):
-        result = self.compile('def work():\n    a = allocate[int]()\n    p: pointer[int] = a\n    deallocate(p)\n')
+        result = self.compile('def work():\n    unsafe:\n        a = allocate[int]()\n        p: pointer[int] = a\n        deallocate(p)\n')
         self.assertTrue(result.diagnostics)
         self.assertIn('cannot deallocate a view', str(result.diagnostics))
 
@@ -129,7 +129,7 @@ class TypedPointerTests(unittest.TestCase):
         from py_compiler.mlir.src.lib import verify_native, verifier_path
         if not shutil.which(verifier_path()):
             self.skipTest('install mlir-opt to verify pointer lowering')
-        verify_native(self.ir('def work() -> int:\n    a = allocate[int]()\n    p: pointer[int] = a\n    return p[0]\n'))
+        verify_native(self.ir('def work() -> int:\n    unsafe:\n        a = allocate[int]()\n        p: pointer[int] = a\n        return p[0]\n'))
 
 
 @dataclass(frozen=True)

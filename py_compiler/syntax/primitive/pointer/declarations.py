@@ -16,8 +16,8 @@ class Pointer(Primitive):
         return (*super().grammars(), *grammars(self))
 
     def require_context(self, context):
-        if not getattr(context, 'unsafe_depth', 0):
-            raise ValueError('pointer values require an unsafe block')
+        from py_compiler.syntax.block.unsafe import require_unsafe
+        require_unsafe(context, 'pointer values')
 
     def render_constant(self, value, symbol):
         if value == 0:
@@ -42,7 +42,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class TypedPointer:
-    """A bounded typed handle; binding effects decide owner, view, or borrow."""
+    """An unsafe typed handle; binding effects decide owner, view, or borrow."""
     element: object
     bits: int
     family: str = 'pointer'
@@ -64,12 +64,14 @@ class TypedPointer:
         return 'memref<?xi8>' if self.element.family == 'record' else f'memref<?x{self.element.mlir}>'
 
     def require_context(self, cfg):
-        pass
+        from py_compiler.syntax.block.unsafe import require_unsafe
+        require_unsafe(cfg, 'pointer[T] values')
 
     def grammars(self):
         return ()
 
     def from_value(self, value, cfg, span):
+        self.require_context(cfg)
         if value.type == self:
             return value
         from py_compiler.syntax.complex.array import ArrayType

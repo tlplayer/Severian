@@ -1,0 +1,147 @@
+# Algorithms belong to source; scalar arithmetic and casts are compiler atoms.
+def abs[T](value: T) -> T:
+    if value < 0:
+        result: T = 0 - value
+        assert(result >= 0)
+        return result
+    return value
+
+
+def min[T](left: T, right: T) -> T:
+    if right < left:
+        return right
+    return left
+
+
+def max[T](left: T, right: T) -> T:
+    if right > left:
+        return right
+    return left
+
+
+def sum[T](values: array[T]) -> T:
+    total: T = 0
+    position = 0
+    while position < len(values):
+        total += values[position]
+        position += 1
+    return total
+
+
+def min[T](values: array[T]) -> T:
+    assert(len(values) > 0)
+    result = values[0]
+    position = 1
+    while position < len(values):
+        if values[position] < result:
+            result = values[position]
+        position += 1
+    return result
+
+
+def max[T](values: array[T]) -> T:
+    assert(len(values) > 0)
+    result = values[0]
+    position = 1
+    while position < len(values):
+        if values[position] > result:
+            result = values[position]
+        position += 1
+    return result
+
+
+def round(value: int) -> int:
+    return value
+
+
+# Ties to even. Every finite f64 of this magnitude is already integral.
+def round(value: float) -> float:
+    if value != value:
+        return value
+    if value >= 4503599627370496.0 or value <= -4503599627370496.0:
+        return value
+    whole = int(value)
+    fraction = value - float(whole)
+    if fraction > 0.5:
+        return float(whole + 1)
+    if fraction < -0.5:
+        return float(whole - 1)
+    if whole % 2 != 0:
+        if fraction == 0.5:
+            return float(whole + 1)
+        if fraction == -0.5:
+            return float(whole - 1)
+    # Preserve the sign of a result that rounds to zero.
+    if whole == 0:
+        return value * 0.0
+    return float(whole)
+
+
+def round(value: float, digits: int) -> float:
+    if digits > 308:
+        return value
+    if value - value != 0.0:
+        return value
+    if digits < -308:
+        return value * 0.0
+    scale = 1.0
+    remaining = digits
+    if remaining < 0:
+        remaining = -remaining
+    while remaining > 0:
+        scale *= 10.0
+        remaining -= 1
+    if digits < 0:
+        return round(value / scale) * scale
+    scaled = value * scale
+    if scaled - scaled != 0.0:
+        return value
+    return round(scaled) / scale
+
+
+def approximate(actual: float, expected: float, rtol: float = 1e-5, atol: float = 1e-8) -> bool:
+    assert(rtol >= 0.0 and atol >= 0.0)
+    if actual == expected:
+        return true
+    if actual - actual != 0.0 or expected - expected != 0.0:
+        return false
+    return abs(actual - expected) <= atol + rtol * abs(expected)
+
+
+test "numeric algorithms handle signs and ties":
+    assert(abs(-7) == 7)
+    assert(abs(-1.25) == 1.25)
+    assert(min(4, 2) == 2)
+    assert(max(4, 2) == 4)
+    assert(round(2.5) == 2.0)
+    assert(round(3.5) == 4.0)
+    assert(round(-2.5) == -2.0)
+    assert(round(-3.5) == -4.0)
+    assert(round(1234.0, -2) == 1200.0)
+    assert(approximate(round(1.236, 2), 1.24))
+    assert(approximate(0.1 + 0.2, 0.3, 0.0, 1e-12))
+    assert(not approximate(1.0, 2.0, 0.0, 0.1))
+
+
+test "array reductions use every element":
+    values = allocate[int](4)
+    values[0] = 4
+    values[1] = -2
+    values[2] = 9
+    values[3] = 1
+    assert(sum(values) == 12)
+    assert(min(values) == -2)
+    assert(max(values) == 9)
+    empty = allocate[int](0)
+    assert(sum(empty) == 0)
+
+
+test "minimum rejects empty input":
+    throws "assertion failed":
+        empty = allocate[int](0)
+        value = min(empty)
+
+
+test "approximate rejects a negative tolerance":
+    throws "assertion failed":
+        result = approximate(1.0, 1.0, -1.0, 0.0)

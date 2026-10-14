@@ -228,7 +228,8 @@ class ClassTests(unittest.TestCase):
         program = self.valid('''class Buffer[T]:
     items: array[T]
     def Buffer(self: borrow Self):
-        self.items = allocate[array[T]](0)
+        unsafe:
+            self.items = allocate[array[T]](0)
 def work():
     class Entry:
         key: int
@@ -289,4 +290,12 @@ def work():
         self.assertEqual({d.name for d in program.declarations}, {'Cell[i32]', 'Cell[i64]'})
 
     def test_allocate_uses_class_defaults_without_adding_fields(self):
-        self.valid('class Item:\n    _memory_location = memory.stack\n    _memory_alignment = 16\n    value: i32 = 0\ndef work() -> i32:\n    item = allocate[Item]()\n    return item.value\n')
+        self.valid('''class Item:
+    _memory_location = memory.stack
+    _memory_alignment = 16
+    value: i32 = 0
+def work() -> i32:
+    unsafe:
+        item = allocate[Item]()
+        return item.value
+''')

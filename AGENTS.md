@@ -1,7 +1,7 @@
 DO
 1. Implement all functionality first
 2. Only after 1 can you build to make sure it builds
-DONT RUN TESTS, give me the test to run
+Try not to RUN TESTS, give me the test to run if they take longer than 1 min. 
 NEVER NEVER NEVER UNDO if you do something wrong. I CAN DO THAT. YOU DO WHAT I SAY.
 PUT TESTS in the same file they test against with test blocks following the code. NOT A NEW FILE.
 NO TASK SHOULD TAKE LONGER THAN 10 MINUTES if builds hold it back that's a problem of not implementing and handing off the build to the human. Humans build/run/create regression tests not agents. 

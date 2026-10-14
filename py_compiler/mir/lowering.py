@@ -82,7 +82,7 @@ class Builder:
         operation = replace(operation, atom=payload.atom(operation))
         operation.atom.verify(operation)
         self.current.operations.append(operation)
-        if type_ and type_.binding_ownership != 'copy':
+        if kind != 'memory-copy' and type_ and type_.binding_ownership != 'copy':
             self.value_sources[result.identity] = set().union(*(self.value_sources.get(v.identity, set()) for v in operands))
         if kind != "memory-copy" and type_ and type_.family in ("record", "trait", "union", "dynamic", "array", "pointer") and any(v.identity in self.stack_values for v in operands):
             self.stack_values.add(result.identity)
@@ -519,6 +519,13 @@ class LoweringTests(unittest.TestCase):
 
 
 class AtomPipelineTests(unittest.TestCase):
+    def test_returned_array_copy_does_not_borrow_its_input(self):
+        program = self.compile('def snapshot(values: array[int]) -> array[int]:\n'
+                               '    result = copy values\n    return result\n')
+        body = next(body for body in program.bodies if body.declaration == 'snapshot')
+        self.assertEqual(body.result_sources, ())
+        self.assertTrue(any(operation.kind == 'memory-copy' for block in body.blocks for operation in block.operations))
+
     def compile(self, text):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax

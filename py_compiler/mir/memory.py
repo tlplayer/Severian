@@ -143,7 +143,7 @@ class PlacementTests(unittest.TestCase):
         from py_compiler.syntax.recognition import Syntax
         from py_compiler.mlir.src.lib import lower, render
         for ending, allocator in (('return a[0]', 'memref.alloca'), ('return a', 'memref.alloc(')):
-            result = compile_source('place.sev', f'def work():\n    a = allocate[int]()\n    {ending}\n', Syntax())
+            result = compile_source('place.sev', f'def work():\n    unsafe:\n        a = allocate[int]()\n        {ending}\n', Syntax())
             self.assertFalse(result.diagnostics, str(result.diagnostics))
             self.assertIn(allocator, render(lower(result.program)))
 
@@ -152,7 +152,7 @@ class PlacementTests(unittest.TestCase):
         from py_compiler.syntax.recognition import Syntax
         from py_compiler.mlir.src.lib import lower, render, verify_native
         for strategy, size in (('arena', 128), ('pool', 64)):
-            result = compile_source('region.sev', f'def work():\n    a = allocate[int,strategy=memory.{strategy}](8)\n    drop a\n    b = allocate[int,strategy=memory.{strategy}](8)\n', Syntax())
+            result = compile_source('region.sev', f'def work():\n    unsafe:\n        a = allocate[int,strategy=memory.{strategy}](8)\n        drop a\n        b = allocate[int,strategy=memory.{strategy}](8)\n', Syntax())
             self.assertFalse(result.diagnostics, str(result.diagnostics))
             body = next(b for b in result.program.bodies if b.declaration == 'work')
             self.assertEqual(body.memory_regions[0].size, size)

@@ -66,6 +66,8 @@ class Allocate:
         return type_, resolve_plan(type_, overrides, context)
 
     def call(self, request, arguments, cfg, env, span):
+        from py_compiler.syntax.block.unsafe import require_unsafe
+        require_unsafe(cfg, 'allocate[T] calls')
         from py_compiler.syntax.function.calls import literal_value
         from py_compiler.syntax.generic.owned import select
         element, plan = request
@@ -101,7 +103,7 @@ class AllocationTests(unittest.TestCase):
 
     def test_named_constraints_reach_mlir(self):
         from py_compiler.mlir.src.lib import lower, render
-        result = self.compile('def work() -> i32:\n    a = allocate[array[i32,16],location=memory.stack,alignment=64]()\n    a[0] = 7\n    return a[0]\n')
+        result = self.compile('def work() -> i32:\n    unsafe:\n        a = allocate[array[i32,16],location=memory.stack,alignment=64]()\n        a[0] = 7\n        return a[0]\n')
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         text = render(lower(result.program))
         self.assertIn('memref.alloca', text)
@@ -112,8 +114,8 @@ class AllocationTests(unittest.TestCase):
         for override in ('location=memory.gpu.global', 'ownership=memory.arc',
                          'strategy=memory.missing', 'layout=memory.tiled', 'alignment=3',
                          'location=memory.heap,location=memory.stack'):
-            result = self.compile(f'def work():\n    a = allocate[i32,{override}]()\n')
+            result = self.compile(f'def work():\n    unsafe:\n        a = allocate[i32,{override}]()\n')
             self.assertTrue(result.diagnostics, override)
-        result = self.compile('def work() -> array[i32]:\n    a = allocate[i32,location=memory.stack]()\n    return a\n')
+        result = self.compile('def work() -> array[i32]:\n    unsafe:\n        a = allocate[i32,location=memory.stack]()\n        return a\n')
         self.assertTrue(result.diagnostics)
         self.assertIn('storage belongs to this callable', str(result.diagnostics))

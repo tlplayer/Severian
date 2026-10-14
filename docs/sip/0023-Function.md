@@ -1,4 +1,4 @@
-SIP-0000: Title
+Function
 
 Status: Draft | Accepted | Implementing | Implemented | Rejected | Superseded
 Type: Language | Compiler | Runtime | Tooling | Package | Interop | Process
@@ -19,7 +19,7 @@ Superseded by:
 3. Functions should have complexity definitions for time/space built into the function
 `F.complexity.time -> enum of complexities` sorting the functions should return the least complex first. 
 This is to allow complexity sorting 
-4. 
+4. Functions should allow compact operations square = lambda x: x*2 \n square([1,2,3])
 
 ## Structure
 
@@ -84,6 +84,56 @@ def foobar(a:int) -> int | Error with
 - 
 
 ## Examples
+
+### F describes the callable
+```py
+
+# Proposed explicit F contract:
+func: F[(int) -> int] = lambda x: x + 1
+
+# Existing signature notation can be shorthand:
+func: (int) -> int = lambda x: x + 1
+
+test:
+    assert(func(3) == 4)
+
+# Rejected: incompatible result type.
+bad: F[(int) -> int] = lambda x: "hello"
+
+# Variadic params
+def foobar(params...: int):
+    return params
+
+test:
+    assert(foobar() == ())
+    assert(foobar(1) == (1,))
+    assert(foobar(1, 2, 3) == (1, 2, 3))
+
+    a, b, c = foobar(1, 2, 3)
+    assert(a == 1)
+    assert(b == 2)
+    assert(c == 3)
+
+# Either an integer argument pack OR one list.
+def first(params: int... | list[int]):
+    return params
+
+# Each argument may independently be an integer OR a list.
+def second(params...: int | list[int]):
+    return params
+
+test:
+    assert(second(1, [2, 3]) == (1, [2, 3]))
+
+def foobar(params: int... | list[int]):
+    return params
+
+test:
+    assert(foobar(1, 2, 3) == (1, 2, 3))
+    assert(foobar([1, 2, 3]) == (1, 2, 3))
+    assert(foobar() == ())
+    assert(foobar([]) == ())
+```
 
 ## Testing
 

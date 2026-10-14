@@ -671,7 +671,7 @@ API ID: `prelude.function.assert`
 | Function    | Purpose                                          |
 | ----------- | ------------------------------------------------ |
 | `ascii()`   | Produce an ASCII representation                  |
-| `bin()`     | Convert an integer to binary representation      |
+| `binary()`     | Convert an integer to binary representation      |
 | `bool()`    | Convert to boolean                               |
 | `char()`     | Convert an integer to a character                |
 | `float()`   | Convert to floating point                        |
@@ -734,4 +734,5 @@ API ID: `prelude.function.assert`
 | `min(T...)`    | Get the minimum value of a list can take containers      |
 | `**`    | Raise a value to a power   |
 | `round()`  | Round a numeric value      |
+| `approximate()`  | approximate a value      |
 | `sum(T...)`    | Sum values                 |

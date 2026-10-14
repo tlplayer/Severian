@@ -12,7 +12,7 @@ Superseded by:
 
 primtives:    int | char | float | bool | byte | pointer | type | infer | None | none | absent | atom
 unit:         unit | duration | frequency | memory (byte) 
-complex:      class | trait | generics | enum | union  | with | callable (F)
+complex:      class | trait | generics | object (root of objects) | enum | union  | with | callable (F)
 generic:      T | V | K | F | B | G | Y | N | C | W | L | E | R | M
 collections:  list | map | dict | stack | heap | queue | chain | iterator
 lifetime:     static 

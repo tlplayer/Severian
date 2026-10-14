@@ -211,7 +211,9 @@ def test_package(root, *, sanitize=None, timeout=30, backtrace=False, **options)
         artifact = compile_object(TestEntry(source, target, options.get('pointer_bits', 64)), optimizer)
         stem.with_suffix('.mlir').write_text(source)
         stem.with_suffix('.o').write_bytes(artifact.object_bytes)
-        tool([linker, *(['-fsanitize=address'] if sanitize else []), stem.with_suffix('.o'), *objects, '-o', stem])
+        # LLVM lowers floating-point operations such as trunc to libm calls.
+        # Native package tests already require a Linux host above.
+        tool([linker, *(['-fsanitize=address'] if sanitize else []), stem.with_suffix('.o'), *objects, '-lm', '-o', stem])
         expected = test.get('expected-failure')
         env = {**os.environ, **({'ASAN_OPTIONS': 'detect_leaks=1:halt_on_error=1'} if sanitize else {})}
         try:

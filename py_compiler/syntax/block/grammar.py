@@ -265,13 +265,14 @@ class SentenceGrammarTests(unittest.TestCase):
         self.storage[index % len(self.storage)] = value
 
 test:
-    buffer = Buffer(allocate[int](4))
-    buffer[1] = 42
-    put 7 into buffer at 2
-    assert(buffer.storage[1] == 42)
-    assert(buffer.storage[2] == 7)
-    buffer[5] <- 11
-    assert(buffer.storage[1] == 11)
+    unsafe:
+        buffer = Buffer(allocate[int](4))
+        buffer[1] = 42
+        put 7 into buffer at 2
+        assert(buffer.storage[1] == 42)
+        assert(buffer.storage[2] == 7)
+        buffer[5] <- 11
+        assert(buffer.storage[1] == 11)
 '''
 
     def compile(self, source):
@@ -316,8 +317,9 @@ test:
 def rhs() -> int:
     return 7
 def work():
-    values = allocate[int](1)
-    values[index()] = rhs()
+    unsafe:
+        values = allocate[int](1)
+        values[index()] = rhs()
 '''
         result = self.compile(source)
         self.assertFalse(result.diagnostics, str(result.diagnostics))
@@ -329,16 +331,17 @@ def work():
 
     def test_nested_index_assignment_uses_common_target_resolution(self):
         source = '''test:
-    a = allocate[int](4)
-    b = allocate[int](4)
-    c = allocate[int](4)
-    a[0] = 1
-    b[1] = 2
-    c[2] = 42
-    c[0] = 3
-    b[3] = 2
-    a[b[c[0]]] = c[b[a[0]]]
-    assert(a[2] == 42)
+    unsafe:
+        a = allocate[int](4)
+        b = allocate[int](4)
+        c = allocate[int](4)
+        a[0] = 1
+        b[1] = 2
+        c[2] = 42
+        c[0] = 3
+        b[3] = 2
+        a[b[c[0]]] = c[b[a[0]]]
+        assert(a[2] == 42)
 '''
         result = self.compile(source)
         self.assertFalse(result.diagnostics, str(result.diagnostics))

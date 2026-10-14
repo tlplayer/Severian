@@ -2,6 +2,11 @@
 from py_compiler.syntax.generic.block import BlockProvider
 
 
+def require_unsafe(context, operation):
+    if not getattr(context, 'unsafe_depth', 0):
+        raise ValueError(f'{operation} require an unsafe block; help: use array[T, N] instead')
+
+
 class Unsafe(BlockProvider):
     spelling = 'unsafe'
 
@@ -77,3 +82,41 @@ class UnsafeTests(unittest.TestCase):
 
     def test_unsafe_header_rejects_operands(self):
         self.assertTrue(self.compile('unsafe true:\n    value = 1\n').diagnostics)
+
+    def test_allocation_requires_lexical_unsafe_with_array_help(self):
+        for source in (
+            'value = allocate[int](3)\n',
+            'def work():\n    value = allocate[int](3)\n',
+            'def work():\n    unsafe:\n        value = allocate[int](3)\n    other = allocate[int](1)\n',
+            'unsafe:\n    def work():\n        value = allocate[int](3)\n',
+            'def work():\n    value = allocate[int](3)\nunsafe:\n    work()\n',
+        ):
+            with self.subTest(source=source):
+                result = self.compile(source)
+                self.assertTrue(result.diagnostics)
+                self.assertIn('allocate[T] calls require an unsafe block', str(result.diagnostics))
+                self.assertIn('help: use array[T, N] instead', str(result.diagnostics))
+
+    def test_typed_pointer_operations_require_unsafe_with_array_help(self):
+        for source in (
+            'def read(p: pointer[int]) -> int:\n    return p[0]\n',
+            'def write(p: borrow pointer[int]):\n    p[0] = 1\n',
+            'def identity(p: pointer[int]) -> pointer[int]:\n    return p\n',
+            'def convert(a: array[int]):\n    p = pointer[int](a)\n',
+            'def convert(a: array[int]):\n    p: pointer[int] = a\n',
+            'def address():\n    value = 1\n    p = &value\n',
+            'def read(p: pointer[int]) -> int:\n    unsafe:\n        value = p[0]\n    return p[0]\n',
+        ):
+            with self.subTest(source=source):
+                result = self.compile(source)
+                self.assertTrue(result.diagnostics)
+                self.assertIn('pointer[T] values require an unsafe block', str(result.diagnostics))
+                self.assertIn('help: use array[T, N] instead', str(result.diagnostics))
+
+    def test_explicit_unsafe_allows_allocation_and_typed_pointers(self):
+        result = self.compile('def work() -> int:\n    unsafe:\n        a = allocate[int](3)\n        p = pointer[int](a)\n        unsafe:\n            p[0] = 7\n        return p[0]\n')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+
+    def test_array_access_does_not_require_unsafe(self):
+        result = self.compile('def read(a: array[int,3]) -> int:\n    return a[0]\ndef write(a: borrow array[int,3]):\n    a[0] = 7\n')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))

@@ -165,10 +165,10 @@ def invoke(entry, values, cfg, span, receiver=None):
         cfg.effect('call', operands, operation, span)
         return None
     value = cfg.emit('call', result, operands, operation, span)
-    if entry.result_ownership in ('borrow', 'view'):
-        # Only the declared return dependencies determine the loan lifetime;
-        # a temporary stateless dispatch provider is not the returned owner.
-        cfg.stack_values.discard(value.identity)
+    # Only declared return dependencies determine storage lifetime. A stack
+    # callable argument does not make an independently allocated result stack
+    # storage; retaining that flag suppresses the caller's deallocation.
+    cfg.stack_values.discard(value.identity)
     if layout:
         cfg.stack_values.add(value.identity)
     sources = entry.body.result_sources if entry.body is not None else ()
@@ -383,7 +383,7 @@ def lower_expression(node, cfg, env, expected=None):
         provider = context.provider_by_name.get(declaration_name)
         if hasattr(provider, 'instantiate'):
             return coerce(provider.instantiate(context.by_name[declaration_name], arguments, cfg, env, span), expected, cfg, span)
-        if name in context.bound_syntax.types:
+        if name in context.bound_syntax.types and not context.lookup_functions(name, getattr(cfg, 'declaration_scope', ())):
             from py_compiler.syntax.generic.owned import select as select_grammar
             grammar = select_grammar(context.type(name), 'F.constructor', 'construct')
             return coerce(grammar.expand(cfg, arguments, env), expected, cfg, span)
@@ -468,6 +468,20 @@ import unittest
 
 
 class BorrowedTraitRoutingTests(unittest.TestCase):
+    def test_owned_array_result_is_freed_with_a_stack_callable_argument(self):
+        result = self.compile('class Provider:\n    marker: int\ndef create(provider: Provider) -> array[int]:\n    unsafe:\n        return allocate[int](2)\ndef work():\n    provider = Provider(0)\n    values = create(provider)\n')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        from py_compiler.mlir.src.cfg import render_body
+        body = next(body for body in result.program.bodies if body.declaration == 'work')
+        self.assertIn('memref.dealloc', render_body(body))
+
+    def test_source_function_can_share_a_type_name(self):
+        result = self.compile('def any(value: int) -> bool:\n    return value != 0\n'
+                              'def check() -> bool:\n    return any(3)\n')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'check')
+        self.assertTrue(any(operation.kind == 'call' for block in body.blocks for operation in block.operations))
+
     source = '''class Values[T]:
     item: T
     count: int

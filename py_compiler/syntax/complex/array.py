@@ -373,13 +373,13 @@ class ArrayTypeTests(unittest.TestCase):
         self.assertEqual(type_definitions(64)['array'].family, 'array')
 
     def test_safe_allocation_initializes_elements(self):
-        text = self.ir('def work() -> int:\n    a = allocate[int,location=memory.heap]()\n    return a[0]\n')
+        text = self.ir('def work() -> int:\n    unsafe:\n        a = allocate[int,location=memory.heap]()\n        return a[0]\n')
         self.assertIn('scf.for', text)
         self.assertIn('memref.store', text)
         self.assertEqual(text.count('memref.dealloc'), 1)
 
     def test_typed_pointer_can_take_array_ownership(self):
-        text = self.ir('def work() -> int:\n    a = allocate[int,location=memory.heap]()\n    p: pointer[int] = move a\n    p[0] = 9\n    return p[0]\n')
+        text = self.ir('def work() -> int:\n    unsafe:\n        a = allocate[int,location=memory.heap]()\n        p: pointer[int] = move a\n        p[0] = 9\n        return p[0]\n')
         self.assertEqual(text.count('memref.dealloc'), 1)
-        result = self.compile('def work():\n    a = allocate[int,location=memory.heap]()\n    p: pointer[int] = move a\n    deallocate(a)\n')
+        result = self.compile('def work():\n    unsafe:\n        a = allocate[int,location=memory.heap]()\n        p: pointer[int] = move a\n        deallocate(a)\n')
         self.assertTrue(result.diagnostics)
