@@ -55,6 +55,8 @@ class Body:
     complexity: dict = field(default_factory=dict)
     test: dict | None = None
     result_sources: tuple = ()
+    retained_result_sources: tuple = ()
+    retained_parameter_sources: tuple = ()
     result_ownership: str = 'own'
     dispatch_guards: tuple = ()
     parameter_defaults: dict = field(default_factory=dict)

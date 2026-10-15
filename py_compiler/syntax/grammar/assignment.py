@@ -131,7 +131,7 @@ class Assignment:
             raise ValueError("a no-result call cannot initialize a binding")
         if value.identity in cfg.owned_results and (owner is None or owner.type != value.type):
             owner = None
-        if core.kind == 'call' and value.identity in cfg.call_result_owners:
+        if value.identity in cfg.call_result_owners:
             owner = cfg.call_result_owners[value.identity]
             mode = mode or cfg.call_result_modes.get(value.identity)
         if expected and value.type != expected:
@@ -192,6 +192,14 @@ class Assignment:
                 cfg.body.storage.append(place)
         cfg.uninitialized_fields.discard(binding.identity)
         cfg.values[binding.identity] = value
+        dependencies = cfg.value_dependencies.get(value.identity, set())
+        if ownership not in ('view', 'borrow'):
+            if owner and ownership in ('copy', 'mirror', 'move'):
+                cfg.flow.copy_retained(binding.identity, owner.identity)
+            else:
+                cfg.flow.retain(binding.identity, '*', dependencies)
+            if mode == 'move' and owner:
+                cfg.flow.end_retained(owner.identity)
         if binding.identity in cfg.storage:
             cfg.storage[binding.identity].write(cfg, value, node.span)
         if owner and ownership in ("view", "borrow"):

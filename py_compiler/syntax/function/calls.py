@@ -48,22 +48,40 @@ def select(entries, arguments, cfg, env, explicit=()):
         arguments = (*arguments, *(entry.defaults[name] for name, _ in entry.parameters[len(arguments):]))
     # Evaluate each argument once; use an expected type only when all candidates agree.
     values = []
-    for index, argument in enumerate(arguments):
-        from py_compiler.syntax.complex.generic import explicit_bindings, substitute, type_parameters
-        annotations = set()
-        for candidate in candidates:
-            annotation = candidate.parameters[index][1]
-            if candidate.templates:
-                types, _ = explicit_bindings(candidate, explicit, cfg.context)
-                annotation = substitute(annotation, types)
-                import re
-                if set(re.findall(r'\b[A-Za-z_]\w*\b', annotation or '')) & (type_parameters(candidate) - set(types)):
-                    annotation = None
-            elif explicit:
-                raise ValueError('callable does not declare template parameters')
-            annotations.add(annotation)
-        expected = cfg.context.type(next(iter(annotations))) if len(annotations) == 1 and None not in annotations else None
-        values.append(cfg.expr(argument, env, expected))
+    evaluation_loans = []
+    try:
+        for index, argument in enumerate(arguments):
+            from py_compiler.syntax.complex.generic import explicit_bindings, substitute, type_parameters
+            annotations = set()
+            for candidate in candidates:
+                annotation = candidate.parameters[index][1]
+                if candidate.templates:
+                    types, _ = explicit_bindings(candidate, explicit, cfg.context)
+                    annotation = substitute(annotation, types)
+                    import re
+                    if set(re.findall(r'\b[A-Za-z_]\w*\b', annotation or '')) & (type_parameters(candidate) - set(types)):
+                        annotation = None
+                elif explicit:
+                    raise ValueError('callable does not declare template parameters')
+                annotations.add(annotation)
+            expected = cfg.context.type(next(iter(annotations))) if len(annotations) == 1 and None not in annotations else None
+            value = cfg.expr(argument, env, expected)
+            values.append(value)
+            # Keep earlier argument storage alive until later arguments have been
+            # evaluated. A nested next()/mutation must not invalidate a yielded view.
+            from py_compiler.syntax.generic.storage import contains_borrowed_fields, owns_storage
+            if value is not None and (value.type.family == 'record' or owns_storage(value.type) or contains_borrowed_fields(value.type, cfg.context)):
+                owner = cfg.call_result_owners.get(value.identity)
+                sources = set(cfg.value_dependencies.get(value.identity, ()))
+                if owner is not None:
+                    sources.add(cfg.flow.resolve(owner.identity))
+                for source in sources:
+                    key = (id(values), index, source)
+                    cfg.flow.loans[key] = source
+                    evaluation_loans.append(key)
+    finally:
+        for key in evaluation_loans:
+            cfg.flow.loans.pop(key, None)
     from py_compiler.syntax.complex.generic import realize
     realized, failures = [], []
     for candidate in candidates:
@@ -170,6 +188,17 @@ def invoke(entry, values, cfg, span, receiver=None):
         from py_compiler.syntax.generic.atom import Atom
         from dataclasses import replace
         operation = Atom(entry, tuple(v.type for v in operands), result if result.mlir else None, receiver_modes + modes, ('call',), replace(entry.native_symbol, result_layout=layout))
+    if entry.body is not None:
+        for destination, sources in getattr(entry.body, 'retained_parameter_sources', ()):
+            target = receiver if destination == -1 else values[destination]
+            dependencies = set()
+            for index in sources:
+                source = receiver if index == -1 else values[index]
+                dependencies.update(cfg.value_origins.get(source.identity, ()))
+                dependencies.update(cfg.value_dependencies.get(source.identity, ()))
+            cfg.value_dependencies.setdefault(target.identity, set()).update(dependencies)
+            for owner in cfg.value_origins.get(target.identity, ()):
+                cfg.flow.retain(owner, '*', cfg.flow.sources(owner) | dependencies)
     if not result.mlir:
         cfg.effect('call', operands, operation, span)
         return None
@@ -186,6 +215,9 @@ def invoke(entry, values, cfg, span, receiver=None):
     cfg.value_sources[value.identity] = set().union(*(cfg.value_sources.get(source.identity, set()) for source in dependencies))
     if any(source.identity in cfg.stack_values for source in dependencies):
         cfg.stack_values.add(value.identity)
+    retained = entry.body.retained_result_sources if entry.body is not None else ()
+    cfg.value_dependencies[value.identity] = set().union(*(cfg.value_origins.get((receiver if i == -1 else values[i]).identity, set()) |
+        cfg.value_dependencies.get((receiver if i == -1 else values[i]).identity, set()) for i in retained))
     return value
 
 
@@ -322,7 +354,11 @@ def lower_expression(node, cfg, env, expected=None):
         provider = context.provider_by_name.get(receiver.type.name, receiver.type)
         if not hasattr(provider, 'field_place'):
             raise ValueError('type has no field access provider')
-        return coerce(provider.field_place(receiver, node.token.text, cfg, span).read(cfg, span), expected, cfg, span)
+        value = provider.field_place(receiver, node.token.text, cfg, span).read(cfg, span)
+        if receiver.identity in cfg.call_result_owners and value.type.binding_ownership != 'copy':
+            cfg.call_result_owners[value.identity] = cfg.call_result_owners[receiver.identity]
+            cfg.call_result_modes[value.identity] = cfg.call_result_modes.get(receiver.identity, 'view')
+        return coerce(value, expected, cfg, span)
     callee, *arguments = node.operands
     imported = callee.operands[0] if callee.kind == 'index' else callee
     if imported.kind == 'member' and imported.operands[0].kind == 'name' and imported.operands[0].token.text in context.package_imports:

@@ -624,13 +624,14 @@ test with compiler "field views constrain receiver mutation":
                 return saved[0]
 
 
-test with compiler "shared class ownership needs an aggregate handle":
-    reject "shared class ownership requires an owning aggregate handle":
-        class Buffer:
-            data: array[int]
-        def invalid():
-            value = Buffer(array[int, 1]())
-            shared = share value
+test "shared class handles retain owned fields":
+    class Buffer:
+        data: array[int]
+    value = Buffer(array[int, 1]())
+    value.data[0] = 42
+    shared = share value
+    drop value
+    assert(shared.data[0] == 42)
 
 
 test "owning class return transfers its fields":
@@ -778,15 +779,19 @@ test with compiler "yield requires an iterator context":
             yield 1
 
 
-test with compiler "stored iterator needs an independent frame":
-    reject "iterator values currently require direct for consumption":
-        class Items:
-            value: int
-            grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
-                yield self.value
-        def invalid():
-            values = Items(1)
-            cursor = iterator(values)
+test "stored iterators have independent frames and manual next":
+    values = Vector()
+    values.push(10)
+    values.push(20)
+    first = iterator(values)
+    second = iterator(values)
+    assert(next(first).value == 10)
+    assert(next(first).value == 20)
+    assert(next(second).value == 10)
+    assert(next(first) == None)
+    drop first
+    drop second
+    values.push(30)
 
 
 test "nested consumers have independent continuations":
@@ -1116,18 +1121,31 @@ test with compiler "borrowed class elements pin their containing allocation":
             assert(point.x == 42)
 
 
-test with compiler "record array borrowed fields require a lifetime contract":
-    reject "borrowed fields require element lifetime contracts":
-        class Handle:
-            value: pointer[int]
-        def unsupported():
-            values = array[Handle, 1]()
+test "record array borrowed fields preserve source lifetimes":
+    class Handle:
+        value: pointer[int]
+    unsafe:
+        source = array[int, 1]()
+        source[0] = 42
+        pointer = pointer[int](source)
+        handle = Handle(pointer)
+        values = array[Handle, 1]()
+        values[0] = handle
+        saved = copy values
+        drop values
+        assert(saved[0].value[0] == 42)
+        drop saved
+        drop handle
+        drop source
 
 
-test with compiler "string array elements need a storage contract":
-    reject "supported scalar memory representation":
-        def unsupported():
-            values = array[string, 1]()
+test "string array elements own their stored copies":
+    values = array[string, 1]()
+    values[0] = "hello"
+    saved = copy values
+    values[0] = "replacement"
+    drop values
+    assert(len(saved[0]) == 5)
 
 
 def make_char_vector(value: char) -> Vector[char]:

@@ -24,6 +24,10 @@ def binary(cfg, node, env, expected=None):
             if declaration is not None and declaration.type in (None, expected):
                 left_expected = expected
     left = cfg.expr(left_node, env, left_expected)
+    if (left.type.family == 'union' and node.token.text in ('==', '!=')
+            and node.operands[1].kind == 'literal' and node.operands[1].token.text in ('None', 'absent')):
+        present = left.type.field_place(left, 'has_value', cfg, node.token.span).read(cfg, node.token.span)
+        return present if node.token.text == '!=' else select(present.type, 'F.unary', 'not').expand(cfg, present, node.token.span)
     if left.type.family == 'record':
         from py_compiler.syntax.function.calls import select as select_call, invoke
         name = left.type.name + '.__operator_' + '_'.join(str(ord(c)) for c in node.token.text)

@@ -12,6 +12,8 @@ class Layout:
 def layout_of(type_, context, active=()):
     if type_.name in active:
         raise ValueError('recursive inline layout requires pointer indirection')
+    if not type_.mlir:
+        return Layout(1, 1)
     if type_.family == 'record':
         offset, alignment, fields = 0, 1, []
         for field, name in type_.declaration.fields:
@@ -44,7 +46,7 @@ def layout_of(type_, context, active=()):
     if type_.family == 'shared':
         word = context.type('usize').bits // 8
         return Layout(10 * word, word)
-    if type_.mlir == '!llvm.ptr':
+    if type_.mlir in ('!llvm.ptr', 'index'):
         word = context.type('usize').bits // 8
         return Layout(word, word)
     if type_.mlir.startswith('i') and type_.mlir[1:].isdigit():

@@ -59,6 +59,11 @@ class Grammar(DeclarationProvider):
 
     def parse_header(self, items):
         header = tuple(items[1:-1])
+        if len(header) >= 8 and header[0].kind == 'IDENTIFIER' and header[1].text == '(':
+            from py_compiler.syntax.block.procedural import Procedure
+            if tuple(t.text for t in header[3:7]) != (':', 'SourceWindow', ')', '->'):
+                raise ValueError('procedural grammar requires (input: SourceWindow) -> contract')
+            return header[0].text, Procedure(header[2].text), ''.join(t.text for t in header[7:])
         if len(header) < 5 or header[0].kind != 'IDENTIFIER' or header[1].text != '[':
             raise ValueError('expected grammar name[arrangement]():')
         depth, end = 1, None
@@ -99,24 +104,33 @@ class Grammar(DeclarationProvider):
         return header[0].text, tuple(arrangement), ''.join(tail[3:]) if len(tail) > 2 else None
 
     def declare(self, node, context):
-        raise ValueError('sentence grammar requires a class owner')
+        from py_compiler.syntax.block.procedural import Procedure
+        if not isinstance(node.header[1], Procedure):
+            raise ValueError('sentence grammar requires a class owner')
+        def returns(nodes):
+            return any(n.tokens[0].text == 'return' or returns(n.children) for n in nodes)
+        if not returns(node.children):
+            raise ValueError('procedural grammar requires an explicit recognition return')
+        if node.header[2] != 'B':
+            result = None if node.header[2] in ('O', 'S') else context.type(node.header[2])
+            context.sentence_grammars.append((node, node.header[1], context.scope, result))
+        context.declared_nodes.add(node.identity)
 
     def declare_member(self, node, context, owner):
         name, arrangement, result_name = node.header
+        from py_compiler.syntax.block.procedural import Procedure
+        if isinstance(arrangement, Procedure):
+            node.header = (name, replace(arrangement, owner=owner.name), owner.name if result_name == 'Self' else result_name)
+            return self.declare(node, context)
         result = context.type(result_name) if result_name else None
         if result == context.type('absent'):
             result = None
         iterator = result is not None and result.family == 'iterator'
-        if result is not None and not iterator:
-            if result.binding_ownership != 'copy' and result.family != 'record':
-                raise ValueError('value grammar results currently require copy value types')
-            if len(node.children) != 1 or node.children[0].tokens[0].text != 'return':
-                raise ValueError('value grammar requires a single return expression')
         def validate(nodes):
             for child in nodes:
                 if isinstance(child.provider, DeclarationProvider):
                     raise ValueError('grammar expansion cannot introduce declarations in this implementation')
-                if child.tokens[0].text in (('return',) if iterator else ('break', 'continue') if result else ('return', 'break', 'continue')):
+                if child.tokens[0].text in (('return',) if iterator or result is None else ()):
                     raise ValueError('grammar expansion requires structured local control flow')
                 validate(child.children)
         validate(node.children)
@@ -134,6 +148,31 @@ class BoundGrammar(GrammarContract):
         self.cfg, self.env = cfg, env
 
     def recognize(self, window):
+        from py_compiler.syntax.block.procedural import Procedure, Recognition
+        if isinstance(self.arrangement, Procedure):
+            selection = Recognition(self.node, window).run()
+            if selection is None:
+                return None
+            expected = 'expression' if self.result is not None else 'statement'
+            if selection.kind != expected or selection.end != window.end:
+                raise ValueError('procedural grammar must select a complete ' + expected)
+            captures = {}
+            for name, (contract, region) in selection.captures:
+                capture = CaptureTerm(expression(region.tokens), self.env, self.cfg.grammar_captures,
+                                      self.cfg.context.type(self.arrangement.owner if contract == 'Self' else contract),
+                                      frozenset((*self.cfg.active_grammars, self.node.identity)))
+                if capture.type(self.cfg) != capture.contract:
+                    return None
+                captures[name] = capture
+            if self.result is not None:
+                capture = CaptureTerm(expression(selection.window.tokens), self.env, self.cfg.grammar_captures,
+                                      self.result, frozenset((*self.cfg.active_grammars, self.node.identity)))
+                if capture.type(self.cfg) != self.result:
+                    return None
+                captures[':result'] = capture
+            else:
+                captures[':statement'] = selection.window
+            return Match(self, window, selection.end, captures)
         tokens = window.tokens
         solutions = []
         def match(part, position, captures):
@@ -180,6 +219,19 @@ class BoundGrammar(GrammarContract):
 
     def lower(self, captures):
         cfg = self.cfg
+        if not cfg.block_scope.allows(self.node.scope):
+            raise ValueError('production scope cannot use a test grammar')
+        if ':statement' in captures:
+            window = captures[':statement']
+            cfg.grammar_expansions += 1
+            node = replace(self.node, identity=self.node.identity + ':selected:' + str(cfg.grammar_expansions), provider=None,
+                           tokens=window.tokens, children=[], span=window.source.span(window.start, window.end))
+            cfg.active_grammars.add(self.node.identity)
+            try:
+                cfg.sentence(node, self.env, cfg.local_names)
+            finally:
+                cfg.active_grammars.remove(self.node.identity)
+            return
         if self.node.identity in cfg.active_grammars:
             raise ValueError('recursive grammar expansion requires a terminating lowering')
         if not cfg.block_scope.allows(self.node.scope):
@@ -210,7 +262,7 @@ def expand_sentence(node, cfg, env):
     if not cfg.context.sentence_grammars:
         return False
     providers = [BoundGrammar(declaration, cfg, env) for declaration in cfg.context.sentence_grammars
-                 if declaration[3] is None and visible(declaration, cfg)]
+                 if declaration[3] is None and visible(declaration, cfg) and declaration[0].identity not in cfg.active_grammars]
     window = SourceWindow(node.tokens[0].lexeme.source, node.tokens[0].span.start, node.tokens[-1].span.end, node.tokens)
     match = Registry(providers).recognize('O.custom', window, optional=True)
     if match is None:
@@ -234,27 +286,84 @@ def expression_grammar(term, cfg, env):
 
 def lower_result(match, cfg):
     provider = match.provider
-    if provider.result.family == 'iterator':
-        raise ValueError('iterator values currently require direct for consumption')
     if not cfg.block_scope.allows(provider.node.scope):
         raise ValueError('production scope cannot use a test grammar')
-    previous = cfg.grammar_captures
-    cfg.grammar_captures = match.captures
-    cfg.active_grammars.add(provider.node.identity)
-    try:
-        value = cfg.expr(expression(provider.node.children[0].tokens[1:]), {}, provider.result)
-        if value.type != provider.result:
+    if ':result' in match.captures:
+        return match.captures[':result'].lower(cfg, provider.result)
+    if provider.result.family == 'iterator':
+        from py_compiler.syntax.complex.iterator_frame import create
+        return create(match, cfg)
+    if not cfg.block_scope.allows(provider.node.scope):
+        raise ValueError('production scope cannot use a test grammar')
+    from py_compiler.mir.cfg.cfg import Edge, Terminator
+    from py_compiler.mir.ownership.flow import FlowState, reconcile_owners
+    from py_compiler.syntax.generic.storage import root_binding
+    depth = len(cfg.active_scopes)
+    initial_values, initial_flow = dict(cfg.values), cfg.flow.fork()
+    outer = tuple({b.identity: b for scope in cfg.active_scopes for b in scope.values()
+                   if b.identity not in cfg.storage and b.identity not in cfg.flow.moved}.values())
+    live = {b.identity for scope in cfg.active_scopes for b in scope.values()} | cfg.live_binding_ids(provider.env)
+    exits, results = [], []
+    def returned(node, env):
+        if len(node.tokens) == 1:
+            raise ValueError('value grammar return requires a result')
+        term = cfg.capture_expression(expression(node.tokens[1:]))
+        value = cfg.expr(term, env, provider.result)
+        if value is None or value.type != provider.result:
             raise ValueError('grammar result does not satisfy its declared type')
-        if value.type.family == 'record':
-            term = expression(provider.node.children[0].tokens[1:])
-            if term.kind != 'call' or cfg.value_sources.get(value.identity):
-                raise ValueError('class value grammar must return an owned callable result')
-            if not hasattr(cfg, 'owned_results'):
-                cfg.owned_results = set()
-            cfg.owned_results.add(value.identity)
+        binding = root_binding(term, cfg, env)
+        owned = callable(getattr(value.type, 'release', None)) or value.type.family == 'record'
+        if owned:
+            if binding and binding.type == value.type:
+                if binding.ownership in ('view', 'borrow') or binding.identity in live:
+                    raise ValueError('grammar result requires an owned local or explicit copy')
+                cfg.flow.move(binding)
+            elif value.identity in cfg.call_result_owners or cfg.value_sources.get(value.identity):
+                raise ValueError('grammar result cannot escape borrowed storage')
+            if value.type.family == 'record':
+                cfg.stack_values.discard(value.identity)
+        if any(source not in live for source in cfg.value_dependencies.get(value.identity, ())):
+            raise ValueError('grammar result cannot retain a borrow of local storage')
+        if value.identity in cfg.stack_values:
+            raise ValueError('grammar result cannot escape local stack storage')
+        for loop in reversed(cfg.loops):
+            leave = getattr(loop, 'leave', None)
+            if leave:
+                leave(cfg)
+        cfg.cleanup_memory((b for scope in cfg.active_scopes[depth:] for b in scope.values()), node.span)
+        cfg.flow.end_scope(live)
+        exits.append((cfg.current, dict(cfg.values), cfg.flow.fork()))
+        results.append(value)
+        # A placeholder marks this path terminated until all result edges join.
+        cfg.current.terminator = Terminator('panic', message='unresolved grammar return')
+    previous = cfg.grammar_captures, cfg.return_handler, cfg.loops, cfg.phases, cfg.yield_handler
+    cfg.grammar_captures, cfg.return_handler, cfg.loops, cfg.phases, cfg.yield_handler = match.captures, returned, [], None, None
+    cfg.active_grammars.add(provider.node.identity)
+    cfg.grammar_expansions += 1
+    suffix = ':result:' + str(cfg.grammar_expansions)
+    def clone(node):
+        return replace(node, identity=node.identity + suffix, children=[clone(child) for child in node.children])
+    try:
+        cfg.scope([clone(child) for child in provider.node.children], {}, local_names=set())
+        if cfg.current.terminator is None:
+            raise ValueError('not every grammar path returns the declared result')
+        if not exits:
+            raise ValueError('value grammar has no returning path')
+        reconcile_owners(cfg, exits, outer, provider.node.span)
+        retained = tuple(b for b in outer if not any(b.identity in flow.moved for _, _, flow in exits))
+        join = cfg.block((provider.result, *(b.type for b in retained)))
+        for (block, values, _), value in zip(exits, results):
+            block.terminator = Terminator('jump', (Edge(join.identity, (value, *(values[b.identity] for b in retained))),))
+        cfg.current, cfg.values = join, initial_values
+        cfg.values.update({b.identity: v for b, v in zip(retained, join.parameters[1:])})
+        cfg.flow = FlowState.join([flow for _, _, flow in exits])
+        value = join.parameters[0]
+        cfg.value_sources[value.identity] = set().union(*(cfg.value_sources.get(v.identity, set()) for v in results))
+        cfg.value_dependencies[value.identity] = set().union(*(cfg.value_dependencies.get(v.identity, set()) for v in results))
+        cfg.owned_results.add(value.identity)
         return value
     finally:
-        cfg.grammar_captures = previous
+        cfg.grammar_captures, cfg.return_handler, cfg.loops, cfg.phases, cfg.yield_handler = previous
         cfg.active_grammars.remove(provider.node.identity)
 
 
@@ -360,7 +469,7 @@ def work():
     def test_procedural_grammar_requires_a_recognition_contract(self):
         result = self.compile('grammar block(input: SourceWindow) -> B:\n    unimplemented\n')
         self.assertTrue(result.diagnostics)
-        self.assertIn('expected grammar name', str(result.diagnostics))
+        self.assertIn('procedural', str(result.diagnostics))
 
     def test_imported_grammar_requires_an_interface_definition(self):
         from py_compiler.frontend.src.lib import compile_source
@@ -372,3 +481,55 @@ def work():
             Syntax(include_tests=True), native_packages={'library': package})
         self.assertTrue(result.diagnostics)
         self.assertIn('no indexed storage contract', str(result.diagnostics))
+
+    def test_native_result_grammar_control_flow_and_owned_results(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.testing import test_package
+        source = '''class Numbers:
+    value: int
+    grammar sum[self, "[", count: int, "]"]() -> int:
+        temporary = array[int,2]()
+        if count < 0:
+            return self.value
+        total = 0
+        position = 0
+        while position < count:
+            position += 1
+            if position == 2:
+                continue
+            total += position
+            if position == 4:
+                break
+        return total + self.value
+    grammar buffer["buffer", "(", self, ")"]() -> array[int]:
+        result = array[int,2]()
+        result[0] = self.value
+        return result
+
+test "returns leave only the selected grammar":
+    value = Numbers(10)
+    assert(value[-1] == 10)
+    assert(value[5] == 18)
+    result = buffer(value)
+    assert(result[0] == 10)
+    assert(value[1] + value[3] == 25)
+'''
+        with tempfile.TemporaryDirectory(prefix='sev-result-grammar-') as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/lib.sev').write_text(source)
+            (root / 'package.json').write_text(json.dumps({'package': {'name': 'result-grammar', 'version': '0.1.0'}}))
+            result = test_package(root)
+            self.assertTrue(result['success'], result)
+
+    def test_result_grammar_rejects_missing_return_and_outer_loop_jump(self):
+        for body, message in [('if self.value > 0:\n            return 1', 'not every grammar path'),
+                              ('break', 'requires an enclosing while')]:
+            source = ('class Value:\n    value: int\n'
+                      '    grammar read[self, "[", index: int, "]"]() -> int:\n        ' + body + '\n'
+                      'test:\n    value = Value(1)\n    while true:\n        result = value[0]\n        break\n')
+            result = self.compile(source)
+            self.assertTrue(result.diagnostics)
+            self.assertIn(message, str(result.diagnostics))

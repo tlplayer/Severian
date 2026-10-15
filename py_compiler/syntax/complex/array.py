@@ -191,15 +191,6 @@ def record_storage(type_, context):
     from py_compiler.syntax.function.layout import storage_layout
     from py_compiler.syntax.generic.storage import stored_type
     element = type_.element
-    def check_fields(record):
-        if record.family != 'record':
-            return
-        for _, name in record.declaration.fields:
-            member = context.type(name)
-            if member.family in ('pointer', 'trait'):
-                raise ValueError('record array borrowed fields require element lifetime contracts')
-            check_fields(member)
-    check_fields(element)
     layout = storage_layout(element, context)
     # Every owning slot has a flag, including a slot containing a union.
     return layout.alignment + layout.size, layout.alignment, stored_type(element, context)
@@ -243,6 +234,7 @@ def copy_records(type_, value, cfg, span):
     def copy(place):
         place.when_initialized(cfg, span, lambda: RecordElementPlace(result, place.index, type_.element).write(cfg, place.read(cfg, span), span))
     record_loop(value, cfg, span, copy)
+    cfg.value_dependencies[result.identity] = set(cfg.value_dependencies.get(value.identity, ()))
     return result
 
 
@@ -506,3 +498,181 @@ test "unions own and destroy only their active variant":
             (root / 'src/lib.sev').write_text(source)
             result = test_package(root)
             self.assertTrue(result['success'], str(result))
+
+    def test_native_borrowed_record_slots_track_source_lifetimes(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.testing import test_package
+        source = '''class Handle:
+    value: pointer[int]
+
+def handle_for(source: array[int]) -> Handle:
+    unsafe:
+        pointer = pointer[int](source)
+        handle = Handle(pointer)
+        return handle
+
+test "scope destruction releases borrowers before later declared sources":
+    unsafe:
+        slots = array[Handle,1]()
+        source = array[int,1]()
+        source[0] = 19
+        slots[0] = handle_for(source)
+        assert(slots[0].value[0] == 19)
+
+test "stored borrowed fields retain sources through independent copies":
+    unsafe:
+        source = array[int,1]()
+        source[0] = 42
+        pointer = pointer[int](source)
+        handle = Handle(pointer)
+        slots = array[Handle,2]()
+        slots[0] = handle
+        saved = copy slots
+        drop slots
+        assert(saved[0].value[0] == 42)
+        drop saved[0]
+        drop handle
+        drop source
+
+test "replacing a slot releases its previous source dependency":
+    unsafe:
+        first = array[int,1]()
+        second = array[int,1]()
+        second[0] = 7
+        slots = array[Handle,1]()
+        p1 = pointer[int](first)
+        handle1 = Handle(p1)
+        slots[0] = handle1
+        p2 = pointer[int](second)
+        handle2 = Handle(p2)
+        slots[0] = handle2
+        drop handle1
+        drop handle2
+        drop first
+        assert(slots[0].value[0] == 7)
+        drop slots
+        drop second
+
+test with compiler "live slot prevents its borrowed source destruction":
+    reject "borrow is live":
+        class Handle:
+            value: pointer[int]
+        def invalid():
+            unsafe:
+                source = array[int,1]()
+                slots = array[Handle,1]()
+                if true:
+                    pointer = pointer[int](source)
+                    handle = Handle(pointer)
+                    slots[0] = handle
+                drop source
+                assert(slots[0].value[0] == 0)
+
+test with compiler "copied slots preserve dependencies":
+    reject "borrow is live":
+        class Handle:
+            value: pointer[int]
+        def invalid():
+            unsafe:
+                source = array[int,1]()
+                slots = array[Handle,1]()
+                if true:
+                    pointer = pointer[int](source)
+                    handle = Handle(pointer)
+                    slots[0] = handle
+                saved = copy slots
+                drop slots
+                drop source
+                assert(saved[0].value[0] == 0)
+
+test with compiler "an outer array cannot retain a scoped source":
+    reject "borrow":
+        class Handle:
+            value: pointer[int]
+        def invalid():
+            unsafe:
+                slots = array[Handle,1]()
+                if true:
+                    source = array[int,1]()
+                    pointer = pointer[int](source)
+                    handle = Handle(pointer)
+                    slots[0] = handle
+'''
+        with tempfile.TemporaryDirectory(prefix='sev-borrowed-slots-') as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/lib.sev').write_text(source)
+            (root / 'package.json').write_text(json.dumps({'package': {'name': 'borrowed-slots', 'version': '0.1.0'}}))
+            result = test_package(root)
+            self.assertTrue(result['success'], result)
+
+    def test_borrowed_slot_effects_cross_calls_and_loop_backedges(self):
+        source = '''class Handle:
+    value: pointer[int]
+def put(slots: borrow array[Handle], source: array[int]):
+    unsafe:
+        pointer = pointer[int](source)
+        handle = Handle(pointer)
+        slots[0] = handle
+'''
+        valid = source + '''def work():
+    slots = array[Handle,1]()
+    source = array[int,1]()
+    put(slots, source)
+    drop slots
+    drop source
+'''
+        result = self.compile(valid)
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        invalid = valid.replace('    drop slots\n    drop source', '    drop source\n    drop slots')
+        self.assertIn('borrow', str(self.compile(invalid).diagnostics))
+        loop = source + '''def work():
+    slots = array[Handle,1]()
+    source = array[int,1]()
+    position = 0
+    while position < 2:
+        drop source
+        source = array[int,1]()
+        put(slots, source)
+        position += 1
+'''
+        result = self.compile(loop)
+        self.assertTrue(result.diagnostics)
+        self.assertIn('control-flow path', str(result.diagnostics))
+
+        copied = source + '''def work():
+    slots = array[Handle,1]()
+    source = array[int,1]()
+    position = 0
+    while position < 2:
+        put(slots, source)
+        position += 1
+    saved = copy slots
+    drop slots
+    drop source
+'''
+        result = self.compile(copied)
+        self.assertTrue(result.diagnostics)
+        self.assertIn('control-flow path', str(result.diagnostics))
+
+    def test_field_updates_in_distinct_elements_preserve_both_sources(self):
+        source = '''class Handle:
+    value: pointer[int]
+def invalid():
+    unsafe:
+        first = array[int,1]()
+        second = array[int,1]()
+        third = array[int,1]()
+        fourth = array[int,1]()
+        slots = array[Handle,2]()
+        slots[0] = Handle(pointer[int](first))
+        slots[1] = Handle(pointer[int](second))
+        slots[0].value = pointer[int](third)
+        slots[1].value = pointer[int](fourth)
+        drop third
+'''
+        result = self.compile(source)
+        self.assertTrue(result.diagnostics)
+        self.assertIn('borrow', str(result.diagnostics))

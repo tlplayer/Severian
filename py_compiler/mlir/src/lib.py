@@ -101,6 +101,9 @@ def render(program):
         for block in body.blocks:
             for operation in block.operations:
                 implementation = operation.atom.implementation if operation.atom else None
+                for symbol, inputs, result in getattr(implementation, 'symbol_contracts', ()):
+                    if symbol not in defined:
+                        external[symbol] = (inputs, result)
                 definitions = getattr(implementation, 'global_definitions', None)
                 if definitions is not None:
                     for definition in definitions():

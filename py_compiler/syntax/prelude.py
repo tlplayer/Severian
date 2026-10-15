@@ -58,7 +58,8 @@ def builtin_call_providers():
     from py_compiler.syntax.function.deallocate import Deallocate
     from py_compiler.syntax.function.length import Length
     from py_compiler.syntax.function.layout import LayoutQuery
-    return {'allocate': Allocate(), 'deallocate': Deallocate(), 'len': Length(),
+    from py_compiler.syntax.complex.iterator import Next
+    return {'next': Next(), 'allocate': Allocate(), 'deallocate': Deallocate(), 'len': Length(),
             **{name: LayoutQuery(name) for name in ('bytes', 'alignment', 'offset')}}
 
 

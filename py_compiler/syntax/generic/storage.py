@@ -8,6 +8,10 @@ def descriptor_type(bits):
 
 
 def stored_type(type_, context):
+    if not type_.mlir:
+        return 'i1'
+    if type_.mlir == 'index':
+        return 'i' + str(context.type('usize').bits)
     if type_.family == 'record':
         return context.provider_by_name[type_.name].layout(type_.declaration, context)
     if type_.mlir.startswith('memref'):
@@ -16,10 +20,12 @@ def stored_type(type_, context):
 
 
 def owns_storage(type_):
-    return type_.family == 'string' or callable(getattr(type_, 'release', None))
+    return type_.family not in ('pointer', 'trait') and (type_.family == 'string' or callable(getattr(type_, 'release', None)))
 
 
 def copy_storage(value, cfg, span):
+    if value.type.family in ('pointer', 'trait'):
+        return value
     if value.type.family == 'string':
         from py_compiler.syntax.complex.array import MemoryOperation
         return cfg.emit('memory-copy', value.type, (value,), MemoryOperation('copy'), span)
@@ -28,6 +34,8 @@ def copy_storage(value, cfg, span):
 
 
 def release_storage(value, cfg, span):
+    if value.type.family in ('pointer', 'trait'):
+        return
     if value.type.family == 'string':
         from py_compiler.syntax.complex.array import MemoryOperation
         cfg.effect('deallocate', (value,), MemoryOperation('release'), span)
@@ -39,7 +47,9 @@ def release_storage(value, cfg, span):
 
 
 def pack_value(lines, value, type_, storage, label):
-    if type_.family == 'record':
+    if type_.mlir == 'index':
+        lines.append(f'{label} = arith.index_cast {value} : index to {storage}')
+    elif type_.family == 'record':
         lines.append(f'{label} = llvm.load {value} : !llvm.ptr -> {storage}')
     elif type_.mlir.startswith('memref'):
         lines.append(f'{label} = builtin.unrealized_conversion_cast {value} : {type_.mlir} to {storage}')
@@ -49,7 +59,9 @@ def pack_value(lines, value, type_, storage, label):
 
 
 def unpack_value(lines, value, type_, storage, label):
-    if type_.family == 'record':
+    if type_.mlir == 'index':
+        lines.append(f'{label} = arith.index_cast {value} : {storage} to index')
+    elif type_.family == 'record':
         lines.extend([f'{label}_one = arith.constant 1 : i64',
                       f'{label} = llvm.alloca {label}_one x {storage} : (i64) -> !llvm.ptr',
                       f'llvm.store {value}, {label} : {storage}, !llvm.ptr'])
@@ -57,6 +69,43 @@ def unpack_value(lines, value, type_, storage, label):
         lines.append(f'{label} = builtin.unrealized_conversion_cast {value} : {storage} to {type_.mlir}')
     else:
         lines.append(f'{label} = builtin.unrealized_conversion_cast {value} : {storage} to {type_.mlir}')
+
+
+def contains_borrowed_fields(type_, context, active=()):
+    if type_.name in active:
+        return False
+    if type_.family in ('pointer', 'trait'):
+        return True
+    active = (*active, type_.name)
+    if type_.family == 'record':
+        return any(contains_borrowed_fields(context.type(t), context, active) for _, t in type_.declaration.fields)
+    if type_.family == 'shared':
+        return contains_borrowed_fields(type_.payload, context, active)
+    if type_.family == 'array':
+        return contains_borrowed_fields(type_.element, context, active)
+    if type_.family == 'union':
+        return any(contains_borrowed_fields(t, context, active) for t in type_.variants)
+    return type_.family in ('iterator', 'dynamic')
+
+
+def slot_key(term):
+    if term.kind == 'literal' and term.token.kind == 'NUMBER':
+        try:
+            return int(term.token.text)
+        except ValueError:
+            pass
+    return '*'
+
+
+def element_slot(term):
+    """Keep nested constant projections distinct; unknown projections may alias."""
+    path = []
+    while term.kind in ('index', 'member'):
+        path.append(slot_key(term.operands[1]) if term.kind == 'index' else ('field', term.token.text))
+        term = term.operands[0]
+    if '*' in path:
+        return '*'
+    return path[0] if len(path) == 1 else tuple(reversed(path))
 
 
 def root_binding(node, cfg, env):
@@ -130,13 +179,23 @@ class FieldPlace:
         return cfg.emit("read", self.type, (self.receiver,), self, span)
 
     def write(self, cfg, value, span):
+        if contains_borrowed_fields(self.type, cfg.context):
+            dependencies = cfg.value_dependencies.get(value.identity, set())
+            cfg.value_dependencies.setdefault(self.receiver.identity, set()).update(dependencies)
+            for owner in cfg.value_origins.get(self.receiver.identity, ()):
+                # Receiver projections can alias distinct elements. Retain the
+                # union until container destruction rather than overwrite another
+                # element's dependency with the same record field index.
+                slot = ('field', self.index)
+                previous = cfg.flow.retained.get(owner, {}).get(slot, frozenset())
+                cfg.flow.retain(owner, slot, previous | dependencies)
         cfg.effect("write", (self.receiver, value), self, span)
 
     def atom(self, operation):
         from py_compiler.syntax.generic.atom import Atom
         if operation.result is not None:
             return Atom(self, (self.receiver.type,), self.type, ('view',), ('read',), self)
-        return Atom(self, (self.receiver.type, self.type), None, ('borrow', 'move' if callable(getattr(self.type, 'release', None)) else 'copy'), ('mutation',), self)
+        return Atom(self, (self.receiver.type, self.type), None, ('borrow', 'move' if owns_storage(self.type) else 'copy'), ('mutation',), self)
 
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name, temporary_suffix
@@ -180,8 +239,9 @@ class BindingPlace:
             if self.rebind and self.binding.constant and self.binding.ownership != "borrow":
                 raise ValueError('cannot update a constant binding')
             identity = cfg.flow.resolve(self.binding.identity)
+            cfg.record_lifetime('check', identity, self.binding.name)
             conflicts = [loan for loan, owner in cfg.flow.loans.items() if owner == identity and loan != self.binding.identity]
-            if conflicts:
+            if conflicts or cfg.flow.borrowers(identity):
                 raise ValueError('cannot acquire writable self while a borrow is live')
             key = self.binding.identity + ':grammar-borrow'
             cfg.flow.loans[key] = identity

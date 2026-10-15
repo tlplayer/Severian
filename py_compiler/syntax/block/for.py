@@ -154,6 +154,48 @@ class For(BlockProvider):
 
 
 
+    def lower_stored(self, node, cfg, env, source, initializer):
+        from py_compiler.syntax.generic.storage import root_binding
+        from py_compiler.syntax.grammar.expression import Expression
+        loop_env, local_names = loop_syntax.initialize_loop(node, initializer, cfg, env)
+        owner = root_binding(source, cfg, loop_env)
+        if owner is None:
+            raise ValueError('stored iterator consumption requires a live binding')
+        carried = tuple(b for b in bindings(loop_env) if b.identity not in cfg.storage and b.identity not in cfg.flow.moved)
+        initial_values, initial_flow = dict(cfg.values), cfg.flow.fork()
+        header, following = cfg.block(tuple(b.type for b in carried)), cfg.block(tuple(b.type for b in carried))
+        edge(cfg, header, carried, node.span)
+        cfg.current = header
+        cfg.values.update({b.identity: value for b, value in zip(carried, header.parameters)})
+        cursor = cfg.expr(source, loop_env)
+        output = cursor.type.call_method(cursor, 'next', (), cfg, loop_env, node.span, owner)
+        condition = output.type.field_place(output, 'has_value', cfg, node.span).read(cfg, node.span)
+        body, exhausted = cfg.block(), cfg.block()
+        cfg.current.terminator = Terminator('conditional', (Edge(body.identity), Edge(exhausted.identity)), condition)
+        header_values = dict(cfg.values)
+        ambient = {b.identity for scope in cfg.active_scopes for b in scope.values()} | cfg.live_binding_ids(loop_env)
+        consumer = Consumer(node, cfg, loop_env, carried, following, ambient, cursor.type.element)
+        cfg.current = body
+        item = output.type.field_place(output, 'value', cfg, node.span).read(cfg, node.span)
+        frozen = Binding(node.identity + ':next', ':next', item.type, True, 'view', node.span)
+        cfg.values[frozen.identity] = item
+        consumer.emit(Expression('capture', source.token, (FrozenCapture(item, frozen),)), loop_env, node.span)
+        if cfg.current.terminator is None:
+            edge(cfg, header, carried, node.span)
+        consumer.exits.append((exhausted, header_values, initial_flow))
+        from py_compiler.mir.ownership.flow import reconcile_owners
+        reconcile_owners(cfg, consumer.exits, carried, node.span)
+        moved = set.union(*(flow.moved for _, _, flow in consumer.exits))
+        retained = [(b, value) for b, value in zip(carried, following.parameters) if b.identity not in moved]
+        following.parameters = tuple(value for _, value in retained)
+        for block, values, _ in consumer.exits:
+            block.terminator = Terminator('jump', (Edge(following.identity, tuple(values[b.identity] for b, _ in retained)),))
+        cfg.current, cfg.values = following, initial_values
+        cfg.values.update({b.identity: value for b, value in retained})
+        cfg.flow = FlowState.join([flow for _, _, flow in consumer.exits])
+        cfg.cleanup_memory((loop_env[n] for n in local_names), node.span)
+        return 1
+
     def parse_header(self, items):
         header = super().parse_header(items)
         if len(header) < 3 or header[0].kind != 'IDENTIFIER' or header[1].text != 'in':
@@ -179,6 +221,8 @@ class For(BlockProvider):
             source = captures['self'].term
         else:
             type_ = expression_type(source, cfg, env)
+            if type_.family == 'iterator':
+                return self.lower_stored(node, cfg, env, source, initializer)
             candidates = [BoundGrammar(d, cfg, env) for d in cfg.context.sentence_grammars
                           if d[3] is not None and d[3].family == 'iterator'
                           and tuple(cfg.declaration_scope[:len(d[2])]) == d[2]

@@ -116,6 +116,7 @@ class Class(RecordProvider):
             if owns_storage(type_):
                 field = copy_storage(field, cfg, span)
             FieldPlace(result, index, layout, type_, storage).write(cfg, field, span)
+        cfg.value_dependencies[result.identity] = set(cfg.value_dependencies.get(value.identity, ()))
         return result
 
 
@@ -148,7 +149,7 @@ def store_field(place, expression, cfg, env, span, owner=None, initialized=True,
         value = copy_storage(value, cfg, span)
         if initialized:
             release_storage(place.read(cfg, span), cfg, span)
-    elif callable(getattr(place.type, 'release', None)):
+    elif owns_storage(place.type):
         if mode in ('copy', 'mirror'):
             value = value.type.copy_value(value, cfg, span)
         else:
@@ -188,6 +189,8 @@ class Receiver:
         builder.body.bindings.append(builder.self_binding)
         builder.values[builder.self_binding.identity] = self_value
         builder.value_sources[self_value.identity] = {-1}
+        builder.parameter_bindings[builder.self_binding.identity] = -1
+        builder.value_origins[self_value.identity] = {builder.self_binding.identity}
         fields = {}
         field_types = [builder.context.type(type_name) for _, type_name in self.declaration.fields]
         provider = builder.context.provider_by_name[self.declaration.name]

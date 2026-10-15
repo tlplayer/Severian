@@ -121,13 +121,14 @@ class Import(DeclarationProvider):
             context.provider_by_name[name] = UnionDeclaration()
             context.types[name] = UnionType(tuple(context.type(member) for member in variants), name).with_layout(context)
         from dataclasses import replace
+        from py_compiler.syntax.generic.storage import owns_storage
         def owned(name, active=()):
             if name in active:
                 raise ValueError('recursive inline class layout')
             if type_contracts[name].get('kind') == 'union':
                 return False
             return any(owned(t, (*active, name)) if t in type_contracts else
-                       callable(getattr(context.type(t), 'release', None))
+                       owns_storage(context.type(t))
                        for _, t in type_contracts[name]['fields'])
         for name in type_contracts:
             if type_contracts[name].get('kind') == 'union':
@@ -140,6 +141,9 @@ class Import(DeclarationProvider):
             root, errors = parse_blocks(source, lex(source, context.syntax), context.syntax)
             if errors or len(root.children) != 1 or root.children[0].header[0].text != contract['name']:
                 raise ValueError('invalid imported class grammar interface')
+            if not hasattr(context, 'imported_template_origins'):
+                context.imported_template_origins = {}
+            context.imported_template_origins[source.identity] = node.identity
             owner = Receiver(context.by_name[qualify(contract['name'])])
             previous = context.scope
             context.scope = (alias,)
@@ -162,7 +166,9 @@ class Import(DeclarationProvider):
                                      receiver_ownership=contract.get('receiver-ownership'),
                                      parameter_ownership={p['name']: p['ownership'] for p in contract['parameters']},
                                      native_symbol=NativeSymbol(contract['symbol'], 'severian', tuple(package['objects'])))
-            entry.body = SimpleNamespace(result_sources=tuple(contract['result-sources']))
+            entry.body = SimpleNamespace(result_sources=tuple(contract['result-sources']),
+                                         retained_result_sources=tuple(contract.get('retained-result-sources', ())),
+                                         retained_parameter_sources=tuple(contract.get('retained-parameter-sources', ())))
             entry.result_ownership = contract.get('result-ownership', 'own')
             from py_compiler.syntax.grammar.expression import expression
             for parameter, spelling in contract.get('defaults', {}).items():

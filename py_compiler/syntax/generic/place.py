@@ -39,6 +39,10 @@ def expression_type(node, cfg, env, expected=None):
         receiver = expression_type(subject, cfg, env)
         if receiver.family == 'shared':
             receiver = receiver.payload
+        if receiver.family == 'union' and node.token.text in ('has_value', 'value'):
+            members = [member for member in receiver.variants if member.mlir]
+            if len(members) == 1 and len(receiver.variants) == 2:
+                return cfg.context.type('bool') if node.token.text == 'has_value' else members[0]
         for field, name in getattr(getattr(receiver, 'declaration', None), 'fields', ()):
             if field == node.token.text:
                 return cfg.context.type(name)
@@ -143,6 +147,14 @@ def assign(target, rhs, operator, cfg, env, span):
         raise ValueError('this destination does not support an ownership modifier')
     address = place if isinstance(place, BindingPlace) else AddressPlace(place, owner)
     if operator == '=':
+        from py_compiler.syntax.generic.storage import contains_borrowed_fields, element_slot
+        if owner and target.term.kind == 'index' and contains_borrowed_fields(value.type, cfg.context):
+            identity = cfg.flow.resolve(owner.identity)
+            slot = element_slot(target.term)
+            dependencies = set(cfg.value_dependencies.get(value.identity, ()))
+            if slot == '*':
+                dependencies.update(cfg.flow.sources(identity))
+            cfg.flow.retain(identity, slot, dependencies)
         with address.capture(cfg, 'borrow'):
             address.write(cfg, value, span)
         from py_compiler.syntax.complex.array import RecordElementPlace

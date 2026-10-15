@@ -63,6 +63,11 @@ class TypedPointer:
     def mlir(self):
         return 'memref<?xi8>' if self.element.family == 'record' else f'memref<?x{self.element.mlir}>'
 
+    @property
+    def aggregate(self):
+        from py_compiler.syntax.complex.array import ArrayType
+        return ArrayType(self.element).aggregate
+
     def require_context(self, cfg):
         from py_compiler.syntax.block.unsafe import require_unsafe
         require_unsafe(cfg, 'pointer[T] values')

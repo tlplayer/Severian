@@ -55,11 +55,27 @@ class Builder:
         self.call_result_owners = {}
         self.call_result_modes = {}
         self.owned_results = set()
+        self.value_dependencies = {}
+        self.value_origins = {}
         self.parameter_bindings = {}
         self.grammar_captures = {}
         self.active_grammars = set()
         self.grammar_expansions = 0
         self.yield_handler = None
+        self.return_handler = None
+
+    @property
+    def flow(self):
+        return self._flow
+
+    @flow.setter
+    def flow(self, value):
+        self._flow = value
+        value.reporter = self.record_lifetime
+
+    def record_lifetime(self, kind, owner, slot='', sources=()):
+        from py_compiler.mir.ownership.flow import LifetimeEvent
+        self.effect('lifetime', (), LifetimeEvent(kind, owner, slot, frozenset(sources)), self.body.source_span)
 
     def value(self, type_):
         value = Value(self.next_value, type_)
@@ -83,6 +99,14 @@ class Builder:
         operation = replace(operation, atom=payload.atom(operation))
         operation.atom.verify(operation)
         self.current.operations.append(operation)
+        if type_:
+            from py_compiler.syntax.generic.storage import contains_borrowed_fields
+            dependencies = (set().union(*(self.value_dependencies.get(v.identity, set()) for v in operands))
+                            if contains_borrowed_fields(type_, self.context) or type_.family == 'string' else set())
+            if type_.family in ('pointer', 'trait'):
+                dependencies.update(set().union(*(self.value_origins.get(v.identity, set()) for v in operands)))
+            self.value_dependencies[result.identity] = dependencies
+            self.value_origins[result.identity] = set().union(*(self.value_origins.get(v.identity, set()) for v in operands)) if kind != 'memory-copy' else set()
         if kind != 'memory-copy' and type_ and type_.binding_ownership != 'copy':
             self.value_sources[result.identity] = set().union(*(self.value_sources.get(v.identity, set()) for v in operands))
         if kind != "memory-copy" and type_ and type_.family in ("record", "trait", "union", "dynamic", "array", "pointer") and any(v.identity in self.stack_values for v in operands):
@@ -115,6 +139,23 @@ class Builder:
         return None
 
     def read_binding(self, binding, span):
+        value = self._read_binding(binding, span)
+        identity = self.flow.resolve(binding.identity)
+        from py_compiler.syntax.generic.storage import FieldPlace
+        place = self.storage.get(identity)
+        origins = self.value_origins.get(place.receiver.identity, {identity}) if isinstance(place, FieldPlace) else {identity}
+        self.value_origins[value.identity] = set(origins)
+        dependencies = set().union(*(self.flow.sources(origin) for origin in origins)) | self.flow.sources(binding.identity)
+        if value.type.family in ('pointer', 'trait'):
+            dependencies.update(origins)
+        if identity in self.parameter_bindings:
+            from py_compiler.syntax.generic.storage import contains_borrowed_fields
+            if contains_borrowed_fields(value.type, self.context):
+                dependencies.add(identity)
+        self.value_dependencies[value.identity] = dependencies
+        return value
+
+    def _read_binding(self, binding, span):
         identity = self.flow.resolve(binding.identity)
         if identity in self.uninitialized_fields:
             raise ValueError("constructor reads a field before initialization")
@@ -123,7 +164,7 @@ class Builder:
         if identity in self.storage:
             return self.storage[identity].read(self, span)
         value = self.values[identity]
-        if binding.type.family in ('record', 'array', 'shared', 'string', 'union', 'dynamic') and binding.identity in self.values and binding.type != value.type:
+        if binding.type.family in ('record', 'array', 'shared', 'string', 'union', 'dynamic', 'iterator') and binding.identity in self.values and binding.type != value.type:
             # A nested record view borrows the containing binding's lifetime,
             # but retains the address and type of its own field.
             value = self.values[binding.identity]
@@ -213,7 +254,11 @@ class Builder:
                 return definition.construct_expression(argument, (), self, env, token.span, expected)
             receiver = self.expr(node.operands[0], env)
             place = receiver.type.element_place(receiver, node.operands[1], self, env, token.span)
-            return place.read(self, token.span)
+            value = place.read(self, token.span)
+            if receiver.identity in self.call_result_owners and value.type.binding_ownership != 'copy':
+                self.call_result_owners[value.identity] = self.call_result_owners[receiver.identity]
+                self.call_result_modes[value.identity] = self.call_result_modes.get(receiver.identity, 'view')
+            return value
         if node.kind in ("call", "member"):
             from py_compiler.syntax.function.calls import lower_expression
             value = lower_expression(node, self, env, expected)
@@ -288,16 +333,24 @@ class Builder:
         for binding in bindings:
             if binding.ownership in ("view", "borrow"):
                 self.flow.loans.pop(binding.identity, None)
-        seen = set()
-        for binding in reversed(list(bindings)):
-            if binding.identity in seen or binding.identity in self.flow.moved:
-                continue
-            seen.add(binding.identity)
+        pending = {binding.identity: binding for binding in bindings if binding.identity not in self.flow.moved}
+        order = {binding.identity: index for index, binding in enumerate(self.body.bindings)}
+        while pending:
+            # End contained borrows before destroying their sources. Declaration
+            # order alone is insufficient when a later source fills an older array.
+            ready = [binding for binding in pending.values()
+                     if not (self.flow.borrowers(binding.identity) & pending.keys())]
+            if not ready:
+                raise ValueError('cyclic stored borrows prevent scope destruction')
+            binding = max(ready, key=lambda b: order.get(b.identity, -1))
+            pending.pop(binding.identity)
             release = getattr(binding.type, 'release', None)
             if release is not None and binding.ownership in ('own', 'move', 'copy', 'mirror'):
                 value = self.read_binding(binding, span)
                 self.flow.drop(binding)
                 release(value, self, span)
+            if binding.identity not in self.parameter_bindings:
+                self.flow.end_retained(binding.identity)
 
     def scope(self, nodes, env, declarations=False, local_names=None):
         local_names = set() if local_names is None else local_names
@@ -331,7 +384,8 @@ class Builder:
                         self.phases.during()
                     index += 1
                 else:
-                    if self.constructor and self.uninitialized_fields and not isinstance(node.provider, DeclarationProvider):
+                    if (self.constructor and self.uninitialized_fields and not isinstance(node.provider, DeclarationProvider)
+                            and getattr(node.provider, 'spelling', '') != 'unsafe'):
                         raise ValueError("initialize constructor fields before control-flow blocks")
                     index += node.provider.lower(node, self, env, nodes, index)
                     if self.phases and self.current.terminator is None:
@@ -345,7 +399,20 @@ class Builder:
             if self.context:
                 self.context.scope = previous_context_scope
 
+    def record_retained_parameters(self):
+        effects = dict(self.body.retained_parameter_sources)
+        for owner in self.flow.retained:
+            if owner not in self.parameter_bindings:
+                continue
+            sources = self.flow.sources(owner)
+            if any(source not in self.parameter_bindings for source in sources):
+                raise ValueError('stored borrow escapes local storage through a parameter')
+            target = self.parameter_bindings[owner]
+            effects[target] = tuple(sorted(set(effects.get(target, ())) | {self.parameter_bindings[source] for source in sources}))
+        self.body.retained_parameter_sources = tuple(sorted(effects.items()))
+
     def finish(self):
+        self.record_retained_parameters()
         if self.body.result_type is None:
             self.body.result_type = self.syntax.types["absent"]
         if self.current.terminator is None:
@@ -355,6 +422,8 @@ class Builder:
         if self.body.result_type.family == 'record' and self.body.result_ownership == 'own':
             provider = self.context.provider_by_name[self.body.result_type.name]
             self.body.result_layout = provider.layout(self.body.result_type.declaration, self.context)
+        from py_compiler.mir.ownership.flow import verify_retained_lifetimes
+        verify_retained_lifetimes(self.body)
         from py_compiler.mir.memory import resolve
         resolve(self.body)
         self.body.verify()

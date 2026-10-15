@@ -149,6 +149,11 @@ def prepare(module, interface=None):
                         if target is None:
                             raise ValueError('THIR call has no typed realization: ' + operation.payload.symbol)
                         dependencies.add(target)
+                    for symbol, _, _ in getattr(operation.payload, 'symbol_contracts', ()):
+                        target = body_owners.get(symbol)
+                        if target is None:
+                            raise ValueError('THIR callback has no typed realization: ' + symbol)
+                        dependencies.add(target)
         result.append(TypedSubmodule(key, source.identity, source.declarations, substitution,
                                      tuple(callables), tuple(sorted(dependencies))))
     return TypedModule(module.identity, interface or module.source.path, module.source,

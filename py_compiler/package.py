@@ -365,7 +365,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
     type_names = {t['name'] for t in types}
     exports = []
     for body in program.bodies:
-        if body.declaration and not body.test and (('.' not in body.declaration and '[' not in body.declaration) or body.declaration.rsplit('.', 1)[0] in type_names):
+        if body.declaration and not body.declaration.startswith('__iterator_') and not body.test and (('.' not in body.declaration and '[' not in body.declaration) or body.declaration.rsplit('.', 1)[0] in type_names):
             parameters = body.bindings[:len(body.blocks[0].parameters)]
             receiver = parameters[0] if parameters and parameters[0].name == 'self' else None
             if receiver:
@@ -375,6 +375,8 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                             'receiver-ownership': receiver.ownership if receiver else None,
                             'parameters': [{'name': b.name, 'type': b.type.name, 'ownership': b.ownership} for b in parameters],
                             'result': body.result_type.name, 'result-sources': list(body.result_sources),
+                            'retained-result-sources': list(body.retained_result_sources),
+                            'retained-parameter-sources': list(body.retained_parameter_sources),
                             'defaults': body.parameter_defaults,
                             'result-ownership': body.result_ownership, 'acceptance': list(body.dispatch_guards)})
     globals_ = []
@@ -553,6 +555,7 @@ class PackageTests(unittest.TestCase):
                 'class Cell:\n    value: int\n'
                 '    grammar read[self, "[", index: int, "]"]() -> int:\n        return self.value\n'
                 '    grammar write[self, "[", index: int, "]", "=", value: int]():\n        self.value = value\n'
+                '    grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:\n        yield self.value\n'
                 'class GenericCell[T = int]:\n    value: T\n'
                 '    grammar read[self, "[", index: int, "]"]() -> T:\n        return self.value\n'
                 '    grammar write[self, "[", index: int, "]", "=", value: T]():\n        self.value = value\n')
@@ -562,6 +565,7 @@ class PackageTests(unittest.TestCase):
                 '    assert(library.identity(f64(3.5)) == f64(3.5))\n'
                 '    assert(library.answer() == 42)\n    assert(library.answer(7) == 7)\n'
                 '    cell = library.Cell(1)\n    cell[0] = 42\n    assert(cell[0] == 42)\n'
+                '    cursor = iterator(cell)\n    assert(next(cursor).value == 42)\n    assert(next(cursor) == None)\n'
                 '    generic = library.GenericCell[i32](i32(5))\n    generic[0] = i32(9)\n    assert(generic[0] == i32(9))\n')
             result = test_package(root / 'consumer')
             self.assertTrue(result['success'], result)

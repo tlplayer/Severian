@@ -49,6 +49,7 @@ def recognize_blocks(source, tokens, syntax=None):
         errors.append(Diagnostic("parser", "unclosed grammar delimiter", source, tokens[-1].span))
     stack = [(0, root)]
     pending = None
+    procedural = {}
     for line in lines:
         indentation = line[0].text if line[0].kind == "INDENT" else ""
         items = line[1:] if indentation else line
@@ -63,7 +64,18 @@ def recognize_blocks(source, tokens, syntax=None):
                     stack.append((depth, pending))
                 pending = None
             while depth < stack[-1][0]:
-                stack.pop()
+                _, completed = stack.pop()
+                from py_compiler.syntax.block.procedural import Procedure, ProceduralBlock
+                if (getattr(completed.provider, 'spelling', '') == 'grammar'
+                        and isinstance(completed.header[1], Procedure)):
+                    # Validate the interpreter's body independently of whether
+                    # any source later chooses this declaration.
+                    def returns(nodes):
+                        return any(n.tokens[0].text == 'return' or returns(n.children) for n in nodes)
+                    if not returns(completed.children):
+                        raise ValueError('procedural grammar requires an explicit recognition return')
+                    if completed.header[2] == 'B':
+                        procedural.setdefault(completed.parent, []).append(ProceduralBlock(completed, completed.syntax))
             if depth != stack[-1][0]:
                 raise ValueError("indentation does not match an enclosing block")
             parent = stack[-1][1]
@@ -73,7 +85,10 @@ def recognize_blocks(source, tokens, syntax=None):
             items = [replace(token, syntax=active_syntax) for token in items]
             from py_compiler.syntax.generic.grammar import SourceWindow
             window = SourceWindow(source, first.span.start, items[-1].span.end, tuple(items))
-            match = active_syntax.registry.recognize('B.header', window, optional=True)
+            from py_compiler.syntax.generic.grammar import Registry
+            extensions = [provider for _, ancestor in stack for provider in procedural.get(ancestor.identity, ())]
+            registry = Registry((*active_syntax.registry.providers, *extensions))
+            match = registry.recognize('B.header', window, optional=True)
             provider = match.provider if match else None
             kind = first.text if provider else "sentence"
             header = ()

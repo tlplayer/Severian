@@ -24,6 +24,11 @@ class Drop(PrefixOperator):
                     from py_compiler.syntax.function.calls import literal_value
                     zero = 0.0 if place.type.family == 'float' else 0
                     place.write(cfg, literal_value(zero, place.type, cfg, node.span), node.span)
+            if owner:
+                from py_compiler.syntax.generic.storage import element_slot
+                slot = element_slot(term)
+                if slot != '*':
+                    cfg.flow.retain(cfg.flow.resolve(owner.identity), slot, ())
             return
         if len(items) == 3 and items[0].text == '(' and items[-1].text == ')':
             items = items[1:-1]

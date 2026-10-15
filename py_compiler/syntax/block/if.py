@@ -35,6 +35,9 @@ class Conditional(BlockProvider):
         exits = []
         for node in chain:
             cfg.values, cfg.flow = dict(initial_values), initial_flow.fork()
+            validate = getattr(node.provider, 'validate_captures', None)
+            if validate:
+                validate(cfg, env)
             if node.provider.has_condition:
                 condition = cfg.expr(expression(node.header), env, cfg.syntax.types["bool"])
                 if condition.type.name != "bool":

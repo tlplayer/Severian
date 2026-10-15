@@ -69,8 +69,11 @@ class UnionType:
             matches = select(tag.type, 'F.operator', '==').expand(cfg, tag, expected, span)
             cfg.current.terminator = Terminator('conditional', (Edge(branch.identity), Edge(following.identity)), matches)
             cfg.current = branch
-            extracted = cfg.emit('union-member', member, (value,), UnionMember(index), span)
-            output = action(extracted, index)
+            if not member.mlir:
+                output = cfg.emit('union-none', self, (), UnionNone(index), span) if result else None
+            else:
+                extracted = cfg.emit('union-member', member, (value,), UnionMember(index), span)
+                output = action(extracted, index)
             cfg.current.terminator = Terminator('jump', (Edge(done.identity, (output,) if result else ()),))
             cfg.current = following
         # An invalid tag denotes an empty value after a partial move.
@@ -78,6 +81,12 @@ class UnionType:
         cfg.current.terminator = Terminator('jump', (Edge(done.identity, (empty,) if result else ()),))
         cfg.current = done
         return done.parameters[0] if result else None
+
+    def field_place(self, receiver, field, cfg, span, write=False):
+        present = [i for i, member in enumerate(self.variants) if member.mlir]
+        if write or len(self.variants) != 2 or len(present) != 1 or field not in ('has_value', 'value'):
+            raise ValueError('optional union exposes read-only has_value and value')
+        return OptionalField(receiver, present[0], field, cfg.context.type('bool') if field == 'has_value' else self.variants[present[0]])
 
     def require_context(self, cfg):
         pass
@@ -212,6 +221,34 @@ class UnionWiden:
             aggregate, tag = base + '_aggregate', base + '_tag'
         lines.append(f'{name(result)} = llvm.insertvalue {tag}, {aggregate}[0] : {result.type.mlir}')
         return lines
+
+
+@dataclass(frozen=True)
+class UnionNone(UnionEmpty):
+    index: int = 1
+
+    def render_operation(self, operation):
+        return [line.replace('constant -1 : i32', f'constant {self.index} : i32') for line in super().render_operation(operation)]
+
+
+@dataclass(frozen=True)
+class OptionalField:
+    receiver: object
+    index: int
+    field: str
+    type: object
+
+    def read(self, cfg, span):
+        from py_compiler.syntax.function.calls import literal_value
+        from py_compiler.syntax.generic.owned import select
+        from py_compiler.syntax.complex.object import Assert
+        tag = cfg.emit('union-tag', cfg.context.type('i32'), (self.receiver,), UnionTag(), span)
+        expected = literal_value(self.index, tag.type, cfg, span)
+        present = select(tag.type, 'F.operator', '==').expand(cfg, tag, expected, span)
+        if self.field == 'has_value':
+            return present
+        cfg.effect('assert', (present,), Assert('iterator is exhausted; optional value is absent'), span)
+        return cfg.emit('union-member', self.type, (self.receiver,), UnionMember(self.index), span)
 
 
 import unittest
