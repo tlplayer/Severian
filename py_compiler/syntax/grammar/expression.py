@@ -193,3 +193,21 @@ class OperatorBindingTests(unittest.TestCase):
             tree = tree.operands[1]
         tree = self.parse('8 / 2 / 2')
         self.assertEqual(tree.operands[0].token.text, '/')
+
+    def test_negation_contains_comparison_but_stops_before_and_or(self):
+        tree = self.parse('not left() == right() and enabled or fallback()')
+        self.assertEqual(tree.token.text, 'or')
+        conjunction = tree.operands[0]
+        self.assertEqual(conjunction.token.text, 'and')
+        negation = conjunction.operands[0]
+        self.assertEqual((negation.kind, negation.token.text), ('unary', 'not'))
+        comparison = negation.operands[0]
+        self.assertEqual(comparison.token.text, '==')
+        self.assertEqual([node.operands[0].token.text for node in comparison.operands], ['left', 'right'])
+
+    def test_comparison_chain_keeps_one_middle_call(self):
+        tree = self.parse('first() < middle() <= last()')
+        self.assertEqual(tree.kind, 'chain')
+        self.assertEqual([node.operands[0].token.text for node in tree.operands[::2]],
+                         ['first', 'middle', 'last'])
+        self.assertEqual([token.text for token in tree.operands[1::2]], ['<', '<='])

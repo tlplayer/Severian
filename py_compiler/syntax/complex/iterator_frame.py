@@ -121,7 +121,7 @@ class FrameCreate:
 
 def create(match, cfg):
     from py_compiler.hir.thir.src.checking import Checker
-    from py_compiler.mir.ownership.flow import Binding
+    from py_compiler.mir.ownership.flow import Binding, verify_retained_lifetimes
     from importlib import import_module
     FrozenCapture = import_module('py_compiler.syntax.block.for').FrozenCapture
     from py_compiler.syntax.function.calls import literal_value
@@ -135,6 +135,7 @@ def create(match, cfg):
     cfg.grammar_expansions += 1
     key = sha256((cfg.body.name + provider.node.identity + str(cfg.grammar_expansions)).encode()).hexdigest()[:24]
     producer = Checker(cfg.source, cfg.syntax, key, key, cfg.context.type('absent'))
+    producer.body.source_span = provider.node.span
     producer.context, producer.block_scope = cfg.context, cfg.block_scope
     producer.declaration_scope = cfg.declaration_scope
     producer.namespaces = {'module': cfg.context.global_bindings}
@@ -174,6 +175,9 @@ def create(match, cfg):
         producer.current.terminator = Terminator('finish')
     source = producer.body
     source.verify()
+    # Analyze the connected producer CFG before yield edges become returns.
+    # Each resume state restores exactly the facts proven at its own yield.
+    ownership = verify_retained_lifetimes(source)
     optional = iterator.result(cfg.context)
     values = {v.identity: v for block in source.blocks for v in (*block.parameters, *(op.result for op in block.operations if op.result))}
     definitions = {op.result.identity: op for block in source.blocks for op in block.operations if op.result}
@@ -200,6 +204,7 @@ def create(match, cfg):
         entry.scope = provider.scope
         cfg.context.add_callable(entry, None)
         builder = Checker(cfg.source, cfg.syntax, entry.symbol, entry.symbol, result)
+        builder.body.source_span = provider.node.span
         builder.context, builder.block_scope = cfg.context, cfg.block_scope
         builder.body.declaration = entry.name
         frame = builder.value(pointer)
@@ -220,11 +225,19 @@ def create(match, cfg):
     blocks = [resume.block() for _ in source.blocks]
     starts = {0: 0, **{index + 1: point[1] for index, point in enumerate(yields.values())}}
     states = {block: index + 1 for index, block in enumerate(yields)}
+    suspended = {states[block]: ownership[block] for block in yields if block in ownership}
     for number, target in starts.items():
+        if number and number not in suspended:
+            continue
         following = resume.block()
+        restored = resume.block() if number else blocks[target]
         expected = literal_value(number, state.type, resume, span)
         condition = select(state.type, 'F.operator', '==').expand(resume, state, expected, span)
-        resume.current.terminator = Terminator('conditional', (Edge(blocks[target].identity), Edge(following.identity)), condition)
+        resume.current.terminator = Terminator('conditional', (Edge(restored.identity), Edge(following.identity)), condition)
+        if number:
+            resume.current = restored
+            resume.effect('ownership-restore', (), suspended[number], span)
+            resume.current.terminator = Terminator('jump', (Edge(blocks[target].identity),))
         resume.current = following
     resume.current.terminator = Terminator('finish', value=empty)
     def transfer(edge):
@@ -278,11 +291,14 @@ def create(match, cfg):
     destroy_entry, destroy, frame = helper('destroy', cfg.context.type('absent'))
     state = destroy.emit('frame-state', state.type, (frame,), FrameAccess(layout, 0, 'load'), span)
     for block, (_, _, live) in yields.items():
+        if block not in ownership:
+            continue
         chosen, following = destroy.block(), destroy.block()
         expected = literal_value(states[block], state.type, destroy, span)
         condition = select(state.type, 'F.operator', '==').expand(destroy, state, expected, span)
         destroy.current.terminator = Terminator('conditional', (Edge(chosen.identity), Edge(following.identity)), condition)
         destroy.current = chosen
+        destroy.effect('ownership-restore', (), ownership[block], span)
         for value in reversed(live):
             restored = load(destroy, frame, value, span)
             value.type.release(restored, destroy, span)
@@ -300,3 +316,61 @@ def create(match, cfg):
     cfg.value_sources[result.identity] = set().union(*(cfg.value_sources.get(a.identity, set()) for a in arguments))
     cfg.owned_results.add(result.identity)
     return result
+
+
+import unittest
+
+
+class IteratorFrameOwnershipTests(unittest.TestCase):
+    source = '''class Counter:
+    count: int
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+        consumed = 7
+        drop consumed
+        while position < self.count with position = 0:
+            yield position
+            step = 1
+            yield position + step
+            position += 1
+
+test "each continuation restores its own initialized locals":
+    counter = Counter(2)
+    cursor = iterator(counter)
+    assert(next(cursor).value == 0)
+    assert(next(cursor).value == 1)
+    assert(next(cursor).value == 1)
+    assert(next(cursor).value == 2)
+    assert(not next(cursor).has_value)
+'''
+
+    def test_resume_facts_are_specific_to_each_yield(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.mir.ownership.flow import LifetimeEvent, OwnershipRestore
+        result = compile_source('frame-ownership.sev', self.source, Syntax())
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(b for b in result.program.bodies if b.declaration.startswith('__iterator_resume_'))
+        declarations = {op.payload.slot: op.payload.owner for block in body.blocks for op in block.operations
+                        if isinstance(op.payload, LifetimeEvent) and op.payload.kind == 'declare'}
+        restored = [op.payload for block in body.blocks for op in block.operations
+                    if isinstance(op.payload, OwnershipRestore)]
+        self.assertEqual(len(restored), 2)
+        for facts in restored:
+            self.assertIn(declarations['position'], facts.initialized)
+            self.assertIn(declarations['consumed'], facts.moved)
+            self.assertNotIn(declarations['consumed'], facts.initialized)
+        self.assertNotIn(declarations['step'], restored[0].initialized)
+        self.assertIn(declarations['step'], restored[1].initialized)
+
+    def test_native_multiple_resumes(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.testing import test_package
+        with tempfile.TemporaryDirectory(prefix='sev-frame-ownership-') as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/lib.sev').write_text(self.source)
+            (root / 'package.json').write_text(json.dumps({'package': {'name': 'frame-ownership', 'version': '0.1.0'}}))
+            result = test_package(root)
+            self.assertTrue(result['success'], result)

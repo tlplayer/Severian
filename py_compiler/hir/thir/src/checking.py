@@ -14,12 +14,18 @@ from py_compiler.syntax.generic.block import DeclarationProvider
 def located(method):
     @wraps(method)
     def call(self, node, *args, **kwargs):
+        origin = node[0] if isinstance(node, list) else node
+        span = origin.token.span if hasattr(origin, 'token') else origin.span
+        previous = getattr(self, 'lifetime_span', self.body.source_span)
+        self.lifetime_span = span
         try:
             return method(self, node, *args, **kwargs)
         except ValueError as failure:
             origin = node[0] if isinstance(node, list) else node
             span = origin.token.span if hasattr(origin, "token") else origin.span
             raise Diagnostic("THIR", str(failure), self.source, span) from failure
+        finally:
+            self.lifetime_span = previous
     return call
 
 
@@ -77,7 +83,8 @@ class Checker:
 
     def record_lifetime(self, kind, owner, slot='', sources=()):
         from py_compiler.mir.ownership.flow import LifetimeEvent
-        self.effect('lifetime', (), LifetimeEvent(kind, owner, slot, frozenset(sources)), self.body.source_span)
+        self.effect('lifetime', (), LifetimeEvent(kind, owner, slot, frozenset(sources)),
+                    getattr(self, 'lifetime_span', self.body.source_span))
 
     def value(self, type_):
         value = Value(self.next_value, type_)
@@ -143,6 +150,7 @@ class Checker:
         return None
 
     def read_binding(self, binding, span):
+        self.flow.read(binding)
         value = self._read_binding(binding, span)
         identity = self.flow.resolve(binding.identity)
         from py_compiler.syntax.generic.storage import FieldPlace
@@ -327,20 +335,22 @@ class Checker:
             return select(operand.type, "F.unary", token.text).expand(self, operand, token.span)
         if node.kind == "chain":
             left = self.expr(node.operands[0], env)
-            join = self.block((self.syntax.types['bool'],))
+            from py_compiler.mir.ownership.flow import join_expression
+            exits = []
             for index in range(1, len(node.operands), 2):
                 operator, term = node.operands[index:index + 2]
                 right = self.expr(term, env, left.type)
                 condition = self.emit('binary', self.syntax.types['bool'], (left, right), operator.text, operator.span)
                 if index + 2 < len(node.operands):
                     following = self.block()
-                    self.current.terminator = Terminator('conditional', (Edge(following.identity), Edge(join.identity, (condition,))), condition)
+                    skipped = self.block()
+                    exits.append((skipped, dict(self.values), self.flow.fork(), condition))
+                    self.current.terminator = Terminator('conditional', (Edge(following.identity), Edge(skipped.identity)), condition)
                     self.current = following
                 else:
-                    self.current.terminator = Terminator('jump', (Edge(join.identity, (condition,)),))
+                    exits.append((self.current, dict(self.values), self.flow.fork(), condition))
                 left = right
-            self.current = join
-            return join.parameters[0]
+            return join_expression(self, exits, env, node.token.span)
         if node.kind == "binary":
             from py_compiler.syntax.function.operations import binary
             return binary(self, node, env, expected)
@@ -360,7 +370,7 @@ class Checker:
         bindings = list(bindings)
         for binding in bindings:
             if binding.ownership in ("view", "borrow"):
-                self.flow.loans.pop(binding.identity, None)
+                self.flow.end_loan(binding.identity)
         pending = {binding.identity: binding for binding in bindings if binding.identity not in self.flow.moved}
         order = {binding.identity: index for index, binding in enumerate(self.body.bindings)}
         while pending:
@@ -403,7 +413,7 @@ class Checker:
                 for binding in env.values():
                     if (binding.name in local_names and binding.type and (binding.type.family == 'pointer' or binding.ownership == 'borrow')
                             and binding.name not in remaining):
-                        self.flow.loans.pop(binding.identity, None)
+                        self.flow.end_loan(binding.identity)
                 if self.current.terminator:
                     raise ValueError("unreachable sentence after a terminating operation")
                 if node.provider is None:

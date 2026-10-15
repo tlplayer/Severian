@@ -12,23 +12,18 @@ Superseded by:
 
 -- all terms, file formats, variables, classes, functions, traits in a table
 
-- mock
-- throws
-- assert
-- when
-- fix
-- suffix
-- prefix
-- with
-
-
-## Context
+- mock: when this occurs it should return this instead
+- throws: the following operation should throw something
+- assert: if this is 
+- when: if a condition happens these mocked values and or values should equal this 
+- fix: during the execution of this block this condition is *always true (if we leave the block we can't promise no change)
+- suffix: at the end of this test, this should be true
+- prefix: at the start of this block, this should be true
+- with: conditions for the test as well as packed imports test with profile does many imports/exposes variables and tests for devices. 
 
 
 
-## Problem(s)
-
-## Examples
+## Examples & Problem(s) 
 
 ```
 #Basic function test

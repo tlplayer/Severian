@@ -58,10 +58,12 @@ class ConsumerJump:
         cfg.flow.end_scope(live)
         baseline = consumer.flow if exit_loop else self.flow
         expected = baseline.fork()
+        expected.reporter = None
         expected.end_scope(live)
         if exit_loop:
             expected.moved = set(cfg.flow.moved)
-        if cfg.flow != expected:
+        if (cfg.flow.moved != expected.moved or cfg.flow.views != expected.views
+                or cfg.flow.loans != expected.loans):
             raise ValueError('iterator loop cannot change outer ownership on a continuing edge')
         edge(cfg, consumer.following if exit_loop else self.resume, kept, span)
         if exit_loop:
@@ -172,6 +174,7 @@ class For(BlockProvider):
         condition = output.type.field_place(output, 'has_value', cfg, node.span).read(cfg, node.span)
         body, exhausted = cfg.block(), cfg.block()
         cfg.current.terminator = Terminator('conditional', (Edge(body.identity), Edge(exhausted.identity)), condition)
+        condition_flow = cfg.flow.fork()
         header_values = dict(cfg.values)
         ambient = {b.identity for scope in cfg.active_scopes for b in scope.values()} | cfg.live_binding_ids(loop_env)
         consumer = Consumer(node, cfg, loop_env, carried, following, ambient, cursor.type.element)
@@ -182,7 +185,7 @@ class For(BlockProvider):
         consumer.emit(Expression('capture', source.token, (FrozenCapture(item, frozen),)), loop_env, node.span)
         if cfg.current.terminator is None:
             edge(cfg, header, carried, node.span)
-        consumer.exits.append((exhausted, header_values, initial_flow))
+        consumer.exits.append((exhausted, header_values, condition_flow))
         from py_compiler.mir.ownership.flow import reconcile_owners
         reconcile_owners(cfg, consumer.exits, carried, node.span)
         moved = set.union(*(flow.moved for _, _, flow in consumer.exits))
@@ -240,7 +243,7 @@ class For(BlockProvider):
         value = cfg.expr(source, env)
         loop_env, local_names = loop_syntax.initialize_loop(node, initializer, cfg, env)
         loan = Binding(node.identity + ':iterator-view', ':iterator-view', owner.type, True, 'view', node.span)
-        cfg.flow.loans[loan.identity] = cfg.flow.resolve(owner.identity)
+        cfg.flow.begin_loan(loan.identity, cfg.flow.resolve(owner.identity))
         loop_env[loan.name] = loan
         cfg.values[loan.identity] = cfg.read_binding(owner, node.span)
         cfg.body.bindings.append(loan)
@@ -281,7 +284,7 @@ class For(BlockProvider):
         cfg.current, cfg.values = following, original_values
         cfg.values.update({b.identity: v for b, v in retained})
         cfg.flow = FlowState.join([flow for _, _, flow in consumer.exits]) if consumer.exits else consumer.flow
-        cfg.flow.loans.pop(loan.identity, None)
+        cfg.flow.end_loan(loan.identity)
         cfg.cleanup_memory((loop_env[n] for n in local_names), node.span)
         cfg.flow.end_scope(cfg.live_binding_ids(env) | {b.identity for scope in cfg.active_scopes for b in scope.values()})
         return 1

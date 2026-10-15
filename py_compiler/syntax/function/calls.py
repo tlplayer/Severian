@@ -77,11 +77,11 @@ def select(entries, arguments, cfg, env, explicit=()):
                     sources.add(cfg.flow.resolve(owner.identity))
                 for source in sources:
                     key = (id(values), index, source)
-                    cfg.flow.loans[key] = source
+                    cfg.flow.begin_loan(key, source)
                     evaluation_loans.append(key)
     finally:
         for key in evaluation_loans:
-            cfg.flow.loans.pop(key, None)
+            cfg.flow.end_loan(key)
     from py_compiler.syntax.complex.generic import realize
     realized, failures = [], []
     for candidate in candidates:

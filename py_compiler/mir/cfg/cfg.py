@@ -2,6 +2,39 @@
 from dataclasses import dataclass, field
 
 
+def forward_dataflow(blocks, boundary, merge, transfer):
+    """Solve reachable forward equations with analysis-specific merge/transfer.
+
+    Missing output means unreachable so far, not an empty predecessor fact.
+    Recompute from current outputs so kills survive loop iterations.
+    """
+    from collections import deque
+    predecessors = {block.identity: set() for block in blocks}
+    for block in blocks:
+        for edge in block.terminator.edges:
+            predecessors[edge.target].add(block.identity)
+    incoming, outgoing = {}, {}
+    pending, queued = deque([0]), {0}
+    while pending:
+        identity = pending.popleft()
+        queued.remove(identity)
+        states = [outgoing[p] for p in sorted(predecessors[identity]) if p in outgoing]
+        if identity == 0:
+            states.insert(0, boundary)
+        if not states:
+            continue
+        incoming[identity] = merge(states)
+        result = transfer(blocks[identity], incoming[identity])
+        if identity in outgoing and result == outgoing[identity]:
+            continue
+        outgoing[identity] = result
+        for edge in blocks[identity].terminator.edges:
+            if edge.target not in queued:
+                pending.append(edge.target)
+                queued.add(edge.target)
+    return incoming, outgoing
+
+
 @dataclass(frozen=True)
 class Value:
     identity: int
@@ -111,21 +144,16 @@ class Body:
                 new = {b} | set.intersection(*(dominators[p] for p in incoming))
                 if new != dominators[b]:
                     dominators[b], changed = new, True
-        moved_in = {b: set() for b in reachable}
-        moved_out = {b: set() for b in reachable}
-        changed = True
-        while changed:
-            changed = False
-            for b in sorted(reachable):
-                incoming = set().union(*(moved_out[p] for p in predecessors[b] & reachable))
-                outgoing = incoming - {v.identity for v in self.blocks[b].parameters}
-                for operation in self.blocks[b].operations:
-                    if operation.result:
-                        outgoing.discard(operation.result.identity)
-                    if operation.atom:
-                        outgoing.update(v.identity for v, mode in zip(operation.operands, operation.atom.ownership) if mode == 'move')
-                if incoming != moved_in[b] or outgoing != moved_out[b]:
-                    moved_in[b], moved_out[b], changed = incoming, outgoing, True
+        def transfer_moves(block, incoming):
+            outgoing = incoming - {v.identity for v in block.parameters}
+            for operation in block.operations:
+                if operation.result:
+                    outgoing.discard(operation.result.identity)
+                if operation.atom:
+                    outgoing.update(v.identity for v, mode in zip(operation.operands, operation.atom.ownership) if mode == 'move')
+            return outgoing
+        moved_in, _ = forward_dataflow(self.blocks, set(),
+                                       lambda states: set().union(*states), transfer_moves)
         for b in reachable:
             moved = moved_in[b] - {v.identity for v in self.blocks[b].parameters}
             available = {v.identity for v in self.blocks[b].parameters}

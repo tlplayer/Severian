@@ -273,6 +273,8 @@ class While(BlockProvider):
                 cfg.stack_values.add(value.identity)
         header_values = dict(cfg.values)
         condition = cfg.expr(expression(node.header), env, cfg.context.type('bool'))
+        condition_flow = cfg.flow.fork()
+        header_values = dict(cfg.values)
         body, following = cfg.block(), cfg.block(tuple(binding.type for binding in carried))
         exhausted = cfg.block()
         cfg.current.terminator = Terminator('conditional',
@@ -292,7 +294,7 @@ class While(BlockProvider):
         finally:
             cfg.phases = previous_phases
             cfg.loops.pop()
-        exits = [(exhausted, dict(header_values), initial_flow.fork()), *loop.exits]
+        exits = [(exhausted, dict(header_values), condition_flow), *loop.exits]
         from py_compiler.mir.ownership.flow import reconcile_owners
         reconcile_owners(cfg, exits, carried, node.span)
         retained = [(b, h, v) for b, h, v in zip(carried, header.parameters, following.parameters)
@@ -415,3 +417,21 @@ class WhileTests(unittest.TestCase):
         result = compile_source('while.sev', 'def sum_to(n: int) -> int:\n    unsafe:\n        i = 0\n        total = 0\n        while i < n:\n            value = allocate[int]()\n            value[0] = i\n            total += value[0]\n            i += 1\n        return total\n', Syntax())
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         verify_native(render(lower(result.program)))
+
+
+class LoopOwnershipTests(unittest.TestCase):
+    def test_consumption_replacement_and_exit_paths(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        for tail, accepted in (
+            ('owner = allocate[int](1)\n            continue', True),
+            ('break', True),
+            ('continue', False),
+            ('if flag:\n                owner = allocate[int](1)\n            continue', False),
+        ):
+            with self.subTest(tail=tail):
+                source = ('def work(flag: bool):\n    unsafe:\n        owner = allocate[int](1)\n'
+                          '        while flag:\n            drop owner\n'
+                          f'            {tail}\n')
+                result = compile_source('loop-ownership.sev', source, Syntax())
+                self.assertEqual(not result.diagnostics, accepted, str(result.diagnostics))

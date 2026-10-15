@@ -179,7 +179,7 @@ class Assignment:
             if qualified is None or qualified == "local":
                 env[first.text] = binding
             cfg.flow.views.pop(binding.identity, None)
-            cfg.flow.loans.pop(binding.identity, None)
+            cfg.flow.end_loan(binding.identity)
         else:
             binding = Binding(node.identity, first.text, value.type, operator == ":=", ownership, node.span)
             destination[first.text] = binding
@@ -193,6 +193,7 @@ class Assignment:
                 cfg.storage[binding.identity] = place
                 cfg.body.storage.append(place)
         cfg.uninitialized_fields.discard(binding.identity)
+        cfg.record_lifetime('initialize' if existing else 'declare', binding.identity, binding.name)
         cfg.values[binding.identity] = value
         dependencies = cfg.value_dependencies.get(value.identity, set())
         if ownership not in ('view', 'borrow'):

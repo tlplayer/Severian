@@ -239,16 +239,16 @@ class BindingPlace:
             if self.rebind and self.binding.constant and self.binding.ownership != "borrow":
                 raise ValueError('cannot update a constant binding')
             identity = cfg.flow.resolve(self.binding.identity)
-            cfg.record_lifetime('check', identity, self.binding.name)
-            conflicts = [loan for loan, owner in cfg.flow.loans.items() if owner == identity and loan != self.binding.identity]
+            cfg.record_lifetime('check', identity, self.binding.name, (self.binding.identity,))
+            conflicts = [loan for loan, owner in cfg.flow.loans.items() if identity in (owner if isinstance(owner, frozenset) else (owner,)) and loan != self.binding.identity]
             if conflicts or cfg.flow.borrowers(identity):
                 raise ValueError('cannot acquire writable self while a borrow is live')
             key = self.binding.identity + ':grammar-borrow'
-            cfg.flow.loans[key] = identity
+            cfg.flow.begin_loan(key, identity)
             try:
                 yield
             finally:
-                cfg.flow.loans.pop(key, None)
+                cfg.flow.end_loan(key)
         return lease()
 
     def read(self, cfg, span):
