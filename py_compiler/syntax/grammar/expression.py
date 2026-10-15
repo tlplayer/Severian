@@ -57,7 +57,8 @@ def parse_expression(tokens, syntax):
         elif token.text == "&":
             left = Expression("address", token, (parse(6),))
         elif token.text in ("not", "+", "-", "~"):
-            left = Expression("unary", token, (parse(6),))
+            # Logical negation includes comparisons, but stops before and/or.
+            left = Expression("unary", token, (parse(2.5 if token.text == 'not' else 6),))
         elif token.text == "(":
             left = parse()
             if cursor[0] == len(tokens) or tokens[cursor[0]].text != ")":

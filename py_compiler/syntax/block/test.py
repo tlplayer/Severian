@@ -84,13 +84,12 @@ class TestScopeTests(unittest.TestCase):
         from py_compiler.testing import test_package
         source = '''test "nested failure keeps local record resolution":
     unsafe:
-        unsafe:
-            throws "read of uninitialized array element":
-                class Point:
-                    x: int
-                values = allocate[array[Point]](1)
-                point = values[0]
-                assert(point.x == 0)
+        throws "read of uninitialized array element":
+            class Point:
+                x: int
+            values = allocate[array[Point]](1)
+            point = values[0]
+            assert(point.x == 0)
 test "ordinary expected failure still works":
     throws "assertion failed":
         assert(false)
