@@ -26,7 +26,9 @@ class Assignment:
         if assignment is not None:
             left_tokens = items[:assignment]
             # An annotation introduces a binding; other targets compose as expressions.
-            annotation = len(left_tokens) > 1 and left_tokens[1].text == ':'
+            prefix = 2 if (len(left_tokens) > 2 and left_tokens[0].text in cfg.syntax.scope_providers
+                           and left_tokens[1].text == '.') else 0
+            annotation = len(left_tokens) > prefix + 1 and left_tokens[prefix + 1].text == ':'
             if not annotation:
                 left = cfg.capture_expression(expression(left_tokens))
                 if left.kind in ('member', 'index', 'capture') or (left.kind == 'reference' and left.token.text == 'self'):

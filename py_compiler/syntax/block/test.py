@@ -41,18 +41,17 @@ class Test(DeclarationProvider):
         context.declare_nodes(node.children, (*context.scope, node.identity))
 
     def compile(self, entry, context):
-        from dataclasses import replace
-        import ast
         expected = None
-        compiled = entry
         children = entry.node.children
+        while len(children) == 1 and getattr(children[0].provider, 'spelling', None) == 'unsafe':
+            children = children[0].children
         if (len(children) == 1 and getattr(children[0].provider, 'spelling', None) == 'throws'
                 and len(children[0].header) == 1 and children[0].header[0].kind == 'STRING'):
             expected = ast.literal_eval(children[0].header[0].text)
             if not expected:
                 raise ValueError('throws requires a nonempty runtime diagnostic')
-            compiled = replace(entry, node=replace(entry.node, children=children[0].children))
-        body = Function().compile(compiled, context)
+            entry.expected_failure_node = children[0].identity
+        body = Function().compile(entry, context)
         entry.body = body
         body.test = {'mode': entry.test_mode, 'label': entry.test_label, 'imports': [item.name for item in entry.imports]}
         line, column = context.source.position(entry.node.tokens[0].span.start)
@@ -77,6 +76,32 @@ class TestScopeTests(unittest.TestCase):
             assert(point.x == 0)
 ''', True)
         self.assertFalse(result.diagnostics, str(result.diagnostics))
+
+    def test_native_nested_failure_preserves_unsafe_and_local_declarations(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.testing import test_package
+        source = '''test "nested failure keeps local record resolution":
+    unsafe:
+        unsafe:
+            throws "read of uninitialized array element":
+                class Point:
+                    x: int
+                values = allocate[array[Point]](1)
+                point = values[0]
+                assert(point.x == 0)
+test "ordinary expected failure still works":
+    throws "assertion failed":
+        assert(false)
+'''
+        with tempfile.TemporaryDirectory(prefix='sev-nested-throws-') as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/lib.sev').write_text(source)
+            (root / 'package.json').write_text(json.dumps({'package': {'name': 'nested-throws', 'version': '0.1.0'}}))
+            result = test_package(root)
+            self.assertTrue(result['success'], result)
 
     def test_location_points_to_indented_test_header(self):
         result = self.compile('class Item:\n    value: int\n    test "location":\n        assert(true)\n', True)
@@ -181,7 +206,8 @@ class TestScopeTests(unittest.TestCase):
             self.assertTrue(self.compile(f'{spelling}:\n    unimplemented\n', True).diagnostics)
             result = self.compile(f'test:\n    {spelling}:\n        unimplemented\n', True)
             self.assertTrue(result.diagnostics)
-            self.assertIn('no execution provider', str(result.diagnostics[0]))
+            diagnostic = 'runtime throws must be the sole test boundary' if spelling == 'throws' else 'no execution provider'
+            self.assertIn(diagnostic, str(result.diagnostics[0]))
 
     def test_required_scope_is_enforced_even_with_explicit_import(self):
         from py_compiler.syntax.grammar.expansion import expand

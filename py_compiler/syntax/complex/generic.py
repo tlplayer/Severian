@@ -201,7 +201,8 @@ def realize(entry, explicit, values, context):
         return context.realizations[cache_key]
     result = replace(entry, parameters=tuple((n, substitute(t, types)) for n, t in entry.parameters),
                      result=substitute(entry.result, types), templates=(), type_arguments={**entry.type_arguments, **types},
-                     callable_arguments=functions, realization_key=key, body=None, compiling=False)
+                     callable_arguments=functions, realization_key=key, body=None, compiling=False,
+                     infer_result_ownership=entry.result in types and entry.result_ownership == 'own')
     context.realizations[cache_key] = result
     context.compilers[id(result)] = context.compilers[id(entry)]
     for type_ in types.values():
@@ -239,6 +240,10 @@ class GenericRealizationTests(unittest.TestCase):
         bodies = [b for b in program.bodies if b.declaration == 'identity']
         self.assertEqual({b.result_type.name for b in bodies}, {'i64', 'string', 'Point', 'dynamic'})
         self.assertEqual(len({b.name for b in bodies}), 4)
+        for body in bodies:
+            scalar = body.result_type.name == 'i64'
+            self.assertEqual(body.result_ownership, 'own' if scalar else 'view')
+            self.assertEqual(body.result_sources, () if scalar else (0,))
         from py_compiler.mlir.src.lib import lower, render
         ir = render(lower(program))
         for representation in ('i64', 'memref<?xi8>', '!llvm.ptr', '!llvm.struct<(ptr, ptr)>'):
@@ -272,7 +277,53 @@ class GenericRealizationTests(unittest.TestCase):
     def test_local_object_view_cannot_escape_through_generic_call(self):
         result = self.compile(self.identity + 'class Point:\n    x: int\ndef bad() -> Point:\n    original = Point(1)\n    return identity(original)\n')
         self.assertTrue(result.diagnostics)
-        self.assertIn('class by value requires ownership', str(result.diagnostics[0]))
+        self.assertIn('borrowed result by value', str(result.diagnostics[0]))
+
+    def test_generic_view_rejects_escape_and_use_after_owner_destruction(self):
+        prefix = self.identity + 'class Point:\n    x: int\n'
+        for body, diagnostic in (
+            ('def bad() -> view Point:\n    point = Point(1)\n    return identity(point)\n', 'escapes'),
+            ('def bad():\n    point = Point(1)\n    alias = identity(point)\n    drop point\n    result = alias.x\n', 'moved or dropped'),
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                result = self.compile(prefix + body)
+                self.assertTrue(result.diagnostics)
+                self.assertIn(diagnostic, str(result.diagnostics))
+
+    def test_native_generic_view_and_owned_results_keep_distinct_contracts(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.testing import test_package
+        source = self.identity + '''class Point:
+    x: int
+def duplicate[T](value: copy T) -> T:
+    return value
+def make[T](number: int) -> T:
+    return Point(number)
+def repeat[T](value: T, count: int) -> T:
+    if count == 0:
+        return value
+    return repeat(value, count - 1)
+test "generic results preserve views and independent owners":
+    original = Point(4)
+    alias = identity(original)
+    repeated = repeat(original, 2)
+    independent = duplicate(original)
+    created = make[Point](42)
+    original.x = 9
+    assert(alias.x == 9)
+    assert(repeated.x == 9)
+    assert(independent.x == 4)
+    assert(created.x == 42)
+'''
+        with tempfile.TemporaryDirectory(prefix='sev-generic-results-') as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/lib.sev').write_text(source)
+            (root / 'package.json').write_text(json.dumps({'package': {'name': 'generic-results', 'version': '0.1.0'}}))
+            result = test_package(root)
+            self.assertTrue(result['success'], result)
 
     def test_conflicting_inference_and_invalid_callable_contract(self):
         cases = (

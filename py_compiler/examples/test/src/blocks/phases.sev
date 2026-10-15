@@ -191,7 +191,7 @@ test "nested while counters use distinct names":
 
 test "while with owned initializer survives continue and cleans up on break":
     visited = 0
-    while scratch[0] < 4 with {scratch = allocate[int, location=memory.heap](1),}:
+    while scratch[0] < 4 with {scratch = array[int, 1](),}:
         scratch[0] += 1
         if scratch[0] == 1:
             continue
@@ -199,14 +199,14 @@ test "while with owned initializer survives continue and cleans up on break":
         if scratch[0] == 3:
             break
     assert(visited == 2)
-    while false with {scratch = allocate[int, location=memory.heap](1),}:
+    while false with {scratch = array[int, 1](),}:
         visited += 1
     assert(visited == 2)
 
 
 test "return cleans the while with initializer":
     def first() -> int:
-        while true with {scratch = allocate[int, location=memory.heap](1),}:
+        while true with {scratch = array[int, 1](),}:
             scratch[0] = 42
             return scratch[0]
         return 0

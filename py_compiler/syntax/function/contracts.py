@@ -30,6 +30,7 @@ class Callable:
     declaration_signature: tuple | None = None
     symbol_namespace: str = ''
     result_ownership: str = 'own'
+    infer_result_ownership: bool = False
 
     def __post_init__(self):
         # Inference rewrites parameters after compilation; names must stay stable

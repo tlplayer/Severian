@@ -533,9 +533,13 @@ class LoweringTests(unittest.TestCase):
         self.assertIn("constant", str(result.diagnostics[0]))
 
     def test_annotations_are_preserved_for_constructed_and_computed_values(self):
-        for initializer in ("u8(1)", "1 == 1"):
-            result = self.compile(f"def example():\n    x: i32 = {initializer}\n")
-            self.assertTrue(result.diagnostics)
+        result = self.compile('def example() -> i32:\n    x: i32 = u8(1)\n    return x\n')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(b for b in result.program.bodies if b.declaration == 'example')
+        self.assertEqual(next(b for b in body.bindings if b.name == 'x').type.name, 'i32')
+        result = self.compile('def example():\n    x: i32 = 1 == 1\n')
+        self.assertTrue(result.diagnostics)
+        self.assertIn('bool does not satisfy i32', str(result.diagnostics))
 
     def test_conditional_join_has_real_edges_and_parameters(self):
         result = self.compile('def choose(flag: bool) -> int:\n    x = 1\n    if flag:\n        x = 2\n    elif not flag:\n        x = 3\n    else:\n        x = 4\n    return x\n')

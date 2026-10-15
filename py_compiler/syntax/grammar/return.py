@@ -9,12 +9,27 @@ class Return:
     def lower(self, node, cfg, env, local_names):
         if cfg.return_handler is not None:
             return cfg.return_handler(node, env)
+        term = expression(node.tokens[1:]) if len(node.tokens) > 1 else None
+        explicit = term.token.text if term is not None and term.kind == 'unary' else None
+        if explicit in ('borrow', 'view'):
+            term = term.operands[0]
+        value = cfg.expr(term, env, cfg.body.result_type) if term is not None else None
+        contract = getattr(cfg, 'result_contract', None)
+        if contract is not None:
+            borrowed = (value is not None and value.type.binding_ownership != 'copy'
+                        and bool(cfg.value_sources.get(value.identity))
+                        and value.identity not in cfg.owned_results and explicit not in ('copy', 'mirror', 'move'))
+            mode = 'view' if borrowed else 'own'
+            previous = getattr(cfg, 'inferred_return_ownership', mode)
+            if previous != mode:
+                raise ValueError('generic return paths mix owned values and views; use a consistent result ownership contract')
+            cfg.inferred_return_ownership = mode
+            cfg.body.result_ownership = contract.result_ownership = mode
+            # Make the resolved return ABI and lifetime available to recursion.
+            contract.body = cfg.body
         if cfg.body.result_ownership in ('borrow', 'view'):
-            term = expression(node.tokens[1:])
-            explicit = term.token.text if term.kind == 'unary' else None
-            if explicit in ('borrow', 'view'):
-                term = term.operands[0]
-            value = cfg.expr(term, env, cfg.body.result_type)
+            if value is None:
+                raise ValueError('returned borrow requires a value')
             binding = cfg.lookup(term, env) if term.kind in ('name', 'reference') else cfg.call_result_owners.get(value.identity)
             mode = explicit or cfg.call_result_modes.get(value.identity) or (binding.ownership if binding else None)
             if cfg.body.result_ownership == 'borrow' and (mode == 'view' or (binding and binding.ownership == 'view')):
@@ -35,10 +50,7 @@ class Return:
         cfg.record_retained_parameters()
         expected = cfg.body.result_type
         if expected is None:
-            value = cfg.expr(expression(node.tokens[1:]), env) if len(node.tokens) > 1 else None
             cfg.body.result_type = value.type if value else cfg.syntax.types["absent"]
-        else:
-            value = cfg.expr(expression(node.tokens[1:]), env, expected) if len(node.tokens) > 1 else None
         if value:
             dependencies = cfg.value_dependencies.get(value.identity, set())
             if dependencies:

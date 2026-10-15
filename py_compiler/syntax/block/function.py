@@ -62,6 +62,8 @@ class Function(DeclarationProvider):
         builder.declaration_scope = (*entry.scope, node.identity)
         builder.body.declaration = entry.name
         builder.body.result_ownership = entry.result_ownership
+        builder.result_contract = entry if entry.infer_result_ownership else None
+        builder.expected_failure_node = getattr(entry, 'expected_failure_node', None)
         builder.body.dispatch_guards = tuple(' '.join(token.text for token in guard.tokens) for guard in entry.guards)
         builder.body.parameter_defaults = {name: ' '.join(token.text for token in value.tokens)
                                            for name, value in entry.defaults.items()}
@@ -108,6 +110,7 @@ class Function(DeclarationProvider):
         if builder.uninitialized_fields and (builder.current.terminator is None or builder.current.terminator.kind != "panic"):
             raise ValueError("constructor must initialize every field")
         entry.body = builder.finish()
+        entry.result_ownership = entry.body.result_ownership
         entry.body.complexity = {key: {"name": value.name, "rank": int(value)} for key, value in entry.complexity.items()}
         entry.result = entry.body.result_type.name
         offset = 1 if entry.receiver else 0
