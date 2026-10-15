@@ -295,7 +295,7 @@ def lower_result(match, cfg):
         return create(match, cfg)
     if not cfg.block_scope.allows(provider.node.scope):
         raise ValueError('production scope cannot use a test grammar')
-    from py_compiler.mir.cfg.cfg import Edge, Terminator
+    from py_compiler.hir.thir.src.model import Edge, Terminator
     from py_compiler.mir.ownership.flow import FlowState, reconcile_owners
     from py_compiler.syntax.generic.storage import root_binding
     depth = len(cfg.active_scopes)

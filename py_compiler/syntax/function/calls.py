@@ -1,7 +1,7 @@
 """Callable resolution and exact-one trait dispatch, owned by function syntax."""
 from py_compiler.syntax.complex.object import Invoke, TraitBox, Extract, Assert
 from py_compiler.hir.hir.src.program import Constant
-from py_compiler.mir.cfg.cfg import Edge, Terminator
+from py_compiler.hir.thir.src.model import Edge, Terminator
 from py_compiler.mir.ownership.flow import Binding
 
 
@@ -209,7 +209,8 @@ def invoke(entry, values, cfg, span, receiver=None):
     cfg.stack_values.discard(value.identity)
     if layout:
         cfg.stack_values.add(value.identity)
-    sources = entry.body.result_sources if entry.body is not None else ()
+    contract = getattr(entry, 'semantic_result', None)
+    sources = contract.sources if contract is not None else (entry.body.result_sources if entry.body is not None else ())
     dependencies = [receiver if i == -1 else values[i] for i in sources]
     dependencies = [source for source in dependencies if source is not None]
     cfg.value_sources[value.identity] = set().union(*(cfg.value_sources.get(source.identity, set()) for source in dependencies))
@@ -358,6 +359,8 @@ def lower_expression(node, cfg, env, expected=None):
         if receiver.identity in cfg.call_result_owners and value.type.binding_ownership != 'copy':
             cfg.call_result_owners[value.identity] = cfg.call_result_owners[receiver.identity]
             cfg.call_result_modes[value.identity] = cfg.call_result_modes.get(receiver.identity, 'view')
+            if receiver.identity in cfg.call_result_sources:
+                cfg.call_result_sources[value.identity] = cfg.call_result_sources[receiver.identity]
         return coerce(value, expected, cfg, span)
     callee, *arguments = node.operands
     imported = callee.operands[0] if callee.kind == 'index' else callee
@@ -511,9 +514,9 @@ def lower_expression(node, cfg, env, expected=None):
             if owner is not None:
                 owners.append(owner)
         if owners:
-            if len({owner.identity for owner in owners}) != 1:
-                raise ValueError('returned view has multiple possible owners')
             cfg.call_result_owners[value.identity] = owners[0]
+            if len({owner.identity for owner in owners}) > 1:
+                cfg.call_result_sources[value.identity] = frozenset(owner.identity for owner in owners)
             if entry.result_ownership in ('borrow', 'view'):
                 cfg.call_result_modes[value.identity] = entry.result_ownership
     return coerce(value, expected, cfg, span) if expected else value

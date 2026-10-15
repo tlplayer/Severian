@@ -1,7 +1,7 @@
 """Lower producer continuations to heap frame slots and ordinary MIR functions."""
 from dataclasses import dataclass, replace
 from hashlib import sha256
-from py_compiler.mir.cfg.cfg import Edge, Terminator
+from py_compiler.hir.thir.src.model import Edge, Terminator
 from py_compiler.syntax.generic.atom import Atom
 from py_compiler.syntax.generic.storage import stored_type, pack_value, unpack_value, FieldPlace
 from py_compiler.mlir.src.cfg import name, temporary_suffix
@@ -120,7 +120,7 @@ class FrameCreate:
 
 
 def create(match, cfg):
-    from py_compiler.mir.lowering import Builder
+    from py_compiler.hir.thir.src.checking import Checker
     from py_compiler.mir.ownership.flow import Binding
     from importlib import import_module
     FrozenCapture = import_module('py_compiler.syntax.block.for').FrozenCapture
@@ -134,7 +134,7 @@ def create(match, cfg):
     provider, iterator = match.provider, match.provider.result
     cfg.grammar_expansions += 1
     key = sha256((cfg.body.name + provider.node.identity + str(cfg.grammar_expansions)).encode()).hexdigest()[:24]
-    producer = Builder(cfg.source, cfg.syntax, key, key, cfg.context.type('absent'))
+    producer = Checker(cfg.source, cfg.syntax, key, key, cfg.context.type('absent'))
     producer.context, producer.block_scope = cfg.context, cfg.block_scope
     producer.declaration_scope = cfg.declaration_scope
     producer.namespaces = {'module': cfg.context.global_bindings}
@@ -199,7 +199,7 @@ def create(match, cfg):
         entry = Callable(provider.node, '__iterator_' + label + '_' + key, (('frame', 'pointer'),), result.name, ())
         entry.scope = provider.scope
         cfg.context.add_callable(entry, None)
-        builder = Builder(cfg.source, cfg.syntax, entry.symbol, entry.symbol, result)
+        builder = Checker(cfg.source, cfg.syntax, entry.symbol, entry.symbol, result)
         builder.context, builder.block_scope = cfg.context, cfg.block_scope
         builder.body.declaration = entry.name
         frame = builder.value(pointer)

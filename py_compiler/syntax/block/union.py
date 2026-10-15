@@ -58,7 +58,7 @@ class UnionType:
         self.dispatch(value, cfg, span, lambda member, index: release_storage(member, cfg, span), result=False)
 
     def dispatch(self, value, cfg, span, action, result=True):
-        from py_compiler.mir.cfg.cfg import Edge, Terminator
+        from py_compiler.hir.thir.src.model import Edge, Terminator
         from py_compiler.syntax.function.calls import literal_value
         from py_compiler.syntax.generic.owned import select
         tag = cfg.emit('union-tag', cfg.context.type('i32'), (value,), UnionTag(), span)

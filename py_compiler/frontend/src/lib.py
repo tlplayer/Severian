@@ -23,8 +23,8 @@ def compile_source(path, text, syntax, *, stop_after='mir', interface=None, nati
     except Diagnostic as failure:
         return FrontendResult(source, Program((), ()), (failure,))
     from py_compiler.frontend.parser.blocks import parse_blocks
-    from py_compiler.mir.lowering import Builder
-    from py_compiler.thir.src.lib import prepare, prepare_literals
+    from py_compiler.hir.thir.src.checking import Checker
+    from py_compiler.hir.thir.src.lib import prepare, prepare_literals
     from py_compiler.mir.registration import register
     from py_compiler.hir.hir.src.modules import resolve
     root, block_errors = parse_blocks(source, tokens, syntax)
@@ -57,8 +57,10 @@ def compile_source(path, text, syntax, *, stop_after='mir', interface=None, nati
             modules = (register(typed),) if stop_after == 'mir' else ()
             return FrontendResult(source, replace(program, typed_modules=(typed,), mir_modules=modules, stage=stop_after), ())
 
+    phase = 'HIR'
     try:
-        module = resolve(source, root, syntax, Builder, native_packages, interface)
+        module = resolve(source, root, syntax, Checker, native_packages, interface)
+        phase = 'THIR'
         typed = prepare(module, interface)
         constants = tuple(o.payload for b in typed.bodies for block in b.blocks for o in block.operations if o.kind == "constant")
         if stop_after == 'thir':
@@ -80,13 +82,14 @@ def compile_source(path, text, syntax, *, stop_after='mir', interface=None, nati
                            if getattr(node.provider, 'spelling', '') == 'class'
                            and node.header[0].text not in module.context.record_templates
                            and any(getattr(child.provider, 'spelling', '') == 'grammar' for child in node.children))
+        phase = 'MIR'
         mir = register(typed)
         return FrontendResult(source, Program(constants, module.submodules, mir.bodies, typed.declarations,
                                               (typed,), (mir,), 'mir'), (), templates)
     except Diagnostic as failure:
         return FrontendResult(source, Program((), ()), (failure,))
     except ValueError as failure:
-        return FrontendResult(source, Program((), ()), (Diagnostic("HIR/THIR/MIR", str(failure), source, root.span),))
+        return FrontendResult(source, Program((), ()), (Diagnostic(phase, str(failure), source, root.span),))
 
 
 import unittest

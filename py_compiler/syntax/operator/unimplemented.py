@@ -1,4 +1,4 @@
-from py_compiler.mir.cfg.cfg import Terminator
+from py_compiler.hir.thir.src.model import Terminator
 
 
 class Unimplemented:

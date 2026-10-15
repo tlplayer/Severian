@@ -202,7 +202,7 @@ def record_operation(type_, kind, cfg):
 
 
 def record_loop(value, cfg, span, action):
-    from py_compiler.mir.cfg.cfg import Edge, Terminator
+    from py_compiler.hir.thir.src.model import Edge, Terminator
     from py_compiler.syntax.function.calls import literal_value
     from py_compiler.syntax.function.length import Length
     integer = cfg.context.type('int')
@@ -251,7 +251,7 @@ class RecordElementPlace:
         return cfg.emit('record-element', self.type, (self.receiver, self.index), self.operation('load', cfg), span)
 
     def when_initialized(self, cfg, span, action):
-        from py_compiler.mir.cfg.cfg import Edge, Terminator
+        from py_compiler.hir.thir.src.model import Edge, Terminator
         condition = cfg.emit('element-initialized', cfg.context.type('bool'), (self.receiver, self.index), self.operation('initialized', cfg), span)
         body, done = cfg.block(), cfg.block()
         cfg.current.terminator = Terminator('conditional', (Edge(body.identity), Edge(done.identity)), condition)

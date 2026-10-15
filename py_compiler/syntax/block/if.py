@@ -1,6 +1,6 @@
 from py_compiler.syntax.generic.block import BlockProvider
 from py_compiler.syntax.grammar.expression import expression
-from py_compiler.mir.cfg.cfg import Edge, Terminator
+from py_compiler.hir.thir.src.model import Edge, Terminator
 from py_compiler.mir.ownership.flow import FlowState
 
 

@@ -8,7 +8,7 @@ class ErrorType(ObjectType):
 
     def raise_failure(self, arguments, cfg, span):
         import ast
-        from py_compiler.mir.cfg.cfg import Terminator
+        from py_compiler.hir.thir.src.model import Terminator
         if len(arguments) != 1 or arguments[0].kind != 'literal' or arguments[0].token.kind != 'STRING':
             raise ValueError('contract Error requires one string literal message')
         message = ast.literal_eval(arguments[0].token.text)

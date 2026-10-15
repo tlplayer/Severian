@@ -205,4 +205,11 @@ class Assignment:
         if binding.identity in cfg.storage:
             cfg.storage[binding.identity].write(cfg, value, node.span)
         if owner and ownership in ("view", "borrow"):
-            cfg.flow.loan(binding, owner)
+            sources = cfg.call_result_sources.get(value.identity)
+            if sources:
+                cfg.flow.view_sources[binding.identity] = sources
+                cfg.flow.read(binding)
+                if ownership == 'borrow':
+                    cfg.flow.retain(binding.identity, '*', sources)
+            else:
+                cfg.flow.loan(binding, owner)

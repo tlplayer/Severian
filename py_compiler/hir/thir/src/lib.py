@@ -1,9 +1,4 @@
-"""Materialize inferred callable contracts as typed views of HIR submodules.
-
-The bootstrap's semantic providers still use Builder for inference and execution
-expansion together. This pass captures their resolved output once; MIR registers
-that output without recompiling bodies or changing the source partition.
-"""
+"""Publish checked, immutable typed bodies in their HIR source partitions."""
 from dataclasses import dataclass
 from hashlib import sha256
 import json
@@ -83,10 +78,10 @@ def prepare_literals(source, program, interface=None):
 
 
 def prepare(module, interface=None):
-    # Keep one semantic expansion: calling MIR lowering here would recursively
-    # re-enter this pass. resolve_bodies is the existing provider/inference engine.
-    from py_compiler.mir.lowering import resolve_bodies
-    bodies, declarations = resolve_bodies(module)
+    from py_compiler.hir.thir.src.checking import check_module
+    drafts, declarations = check_module(module)
+    frozen = {id(body): body.freeze() for body in drafts}
+    bodies = tuple(frozen[id(body)] for body in drafts)
     context = module.context
     owners = {member: sub for sub in module.submodules for member in sub.declarations}
     nodes = {}
@@ -95,6 +90,9 @@ def prepare(module, interface=None):
         for child in node.children:
             collect(child)
     collect(module.root)
+    origins = {}
+    for node in nodes.values():
+        origins.setdefault((node.span, id(node.provider)), []).append(node)
 
     def source_owner(node):
         imported = getattr(context, 'imported_template_origins', {}).get(node.span.source)
@@ -103,14 +101,13 @@ def prepare(module, interface=None):
         if node.identity in owners:
             return owners[node.identity]
         # Generic record clones retain their original source span and provider.
-        candidates = [original for original in nodes.values()
-                      if original.span == node.span and original.provider is node.provider]
+        candidates = origins.get((node.span, id(node.provider)), ())
         if len(candidates) != 1:
             raise ValueError('THIR cannot locate the source partition for a generated declaration')
         return owners[candidates[0].identity]
 
-    entries = {id(entry.body): entry for entry in (*context.callables, *context.realizations.values())
-               if entry.body is not None}
+    entries = {id(frozen[id(entry.body)]): entry for entry in (*context.callables, *context.realizations.values())
+               if entry.body is not None and id(entry.body) in frozen}
     groups, body_owners = {}, {}
     for body in bodies:
         entry = entries.get(id(body))
@@ -245,3 +242,223 @@ class ThirTests(unittest.TestCase):
         self.assertEqual(sum(c.name == 'hash' for s in submodules for c in s.callables), 2)
         recursive = next(s for s in submodules if any(c.name == 'repeat' for c in s.callables))
         self.assertIn(recursive.identity, recursive.dependencies)
+
+    # Behavior fixtures deliberately avoid generated symbols, body shapes and
+    # pass implementation details, so the HIR/THIR boundary can change freely.
+    point = 'class Point:\n    x: int\n'
+
+    def native_behavior(self, source):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.testing import test_package
+        typed = self.compile(source, stop_after='thir')
+        self.assertFalse(typed.diagnostics, str(typed.diagnostics))
+        with tempfile.TemporaryDirectory(prefix='sev-typed-behavior-') as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/lib.sev').write_text(source)
+            (root / 'package.json').write_text(json.dumps({
+                'package': {'name': 'typed-behavior', 'version': '0.1.0'}}))
+            result = test_package(root)
+            self.assertTrue(result['success'], result)
+
+    def test_native_inferred_views_and_owned_results_in_declaration_orders(self):
+        declarations = (
+            'def identity[T](value: T) -> T:\n    return value\n',
+            'def duplicate[T](value: copy T) -> T:\n    return value\n',
+            'def make[T](number: int) -> T:\n    return Point(number)\n',
+        )
+        checks = '''test "inferred results preserve aliasing and ownership":
+    original = Point(4)
+    alias = identity(original)
+    independent = duplicate(original)
+    created = make[Point](42)
+    original.x = 9
+    assert(alias.x == 9)
+    assert(independent.x == 4)
+    assert(created.x == 42)
+    drop independent
+    drop created
+    assert(original.x == 9)
+'''
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse):
+                ordered = declarations[::-1] if reverse else declarations
+                self.native_behavior(self.point + ''.join(ordered) + checks)
+
+    def test_native_return_branch_order_preserves_both_borrow_sources(self):
+        # TDD: choosing between sources must not require one statically known owner.
+        branches = (
+            '    if take_left:\n        return left\n    return right\n',
+            '    if not take_left:\n        return right\n    return left\n',
+        )
+        checks = '''test "either selected parameter remains a view":
+    left = Point(10)
+    right = Point(20)
+    chosen_left = choose(left, right, true)
+    chosen_right = choose(left, right, false)
+    left.x = 11
+    right.x = 22
+    assert(chosen_left.x == 11)
+    assert(chosen_right.x == 22)
+'''
+        for branch in branches:
+            with self.subTest(branch=branch):
+                self.native_behavior(self.point +
+                    'def choose[T](left: T, right: T, take_left: bool) -> T:\n' + branch + checks)
+
+    def test_either_returned_parameter_must_outlive_result(self):
+        declaration = ('def choose[T](left: T, right: T, take_left: bool) -> T:\n'
+                       '    if take_left:\n        return left\n    return right\n')
+        for owner, flag in (('left', 'true'), ('right', 'false')):
+            prefix = (self.point + declaration + 'def observe():\n'
+                      '    left = Point(1)\n    right = Point(2)\n'
+                      f'    selected = choose(left, right, {flag})\n')
+            use = '    observed = selected.x\n'
+            for stage in ('thir', 'mir'):
+                with self.subTest(owner=owner, stage=stage):
+                    # A rejection alone could pass because choosing a view is
+                    # unsupported. Require the same use with live owners first.
+                    valid = self.compile(prefix + use, stop_after=stage)
+                    self.assertFalse(valid.diagnostics, str(valid.diagnostics))
+                    result = self.compile(prefix + f'    drop {owner}\n' + use, stop_after=stage)
+                    self.assertTrue(result.diagnostics)
+                    self.assertRegex(str(result.diagnostics), 'moved or dropped|borrow|lifetime')
+
+    def test_native_mutual_recursion_preserves_views_in_all_orders(self):
+        # TDD: discovering a recursive return before the base return must not
+        # commit the recursive callable to an owned-result contract.
+        branches = (
+            '    if count == 0:\n        return value\n'
+            '    return second(value, count - 1)\n',
+            '    if count > 0:\n        return second(value, count - 1)\n'
+            '    return value\n',
+        )
+        checks = '''test "mutually recursive results retain the caller's owner":
+    original = Point(4)
+    from_first = first(original, 4)
+    from_second = second(original, 4)
+    original.x = 19
+    assert(from_first.x == 19)
+    assert(from_second.x == 19)
+'''
+        for branch in branches:
+            declarations = (
+                'def first[T](value: T, count: int) -> T:\n' + branch,
+                'def second[T](value: T, count: int) -> T:\n    return first(value, count)\n',
+            )
+            for reverse in (False, True):
+                with self.subTest(branch=branch, reverse=reverse):
+                    ordered = declarations[::-1] if reverse else declarations
+                    self.native_behavior(self.point + ''.join(ordered) + checks)
+
+    def test_mixed_owned_and_view_results_rejected_in_both_branch_orders(self):
+        branches = (
+            '    if fresh:\n        return Point(7)\n    return value\n',
+            '    if not fresh:\n        return value\n    return Point(7)\n',
+        )
+        for branch in branches:
+            source = (self.point + 'def choose[T](value: T, fresh: bool) -> T:\n' + branch +
+                      'def invalid():\n    original = Point(1)\n    result = choose(original, true)\n')
+            for stage in ('thir', 'mir'):
+                with self.subTest(branch=branch, stage=stage):
+                    result = self.compile(source, stop_after=stage)
+                    self.assertTrue(result.diagnostics)
+                    self.assertIn('ownership contract', str(result.diagnostics))
+
+    def test_invalid_semantics_report_diagnostics_at_type_checking(self):
+        cases = {
+            'unknown symbol': ('def invalid() -> int:\n    return missing\n', 'unknown binding'),
+            'conflicting type arguments': (
+                'def same[T](a: T, b: T) -> T:\n    return a\n'
+                'def invalid():\n    result = same(1, "text")\n', 'conflicting type arguments'),
+            'wrong result type': (
+                'def invalid() -> int:\n    return "text"\n', 'does not satisfy'),
+            'missing parameter type': (
+                'def invalid(value):\n    return value\n', 'requires an annotation'),
+            'invalid conversion': (self.point +
+                'def invalid():\n    value = int(Point(1))\n', 'no declared conversion'),
+            'unresolved recursive type argument': (
+                'def recurse[T]() -> T:\n    return recurse[T]()\n'
+                'def invalid():\n    value = recurse()\n', 'cannot infer template argument'),
+        }
+        for reason, (source, diagnostic) in cases.items():
+            with self.subTest(reason=reason):
+                result = self.compile(source, stop_after='thir')
+                self.assertTrue(result.diagnostics, reason)
+                self.assertIn(diagnostic, str(result.diagnostics))
+                self.assertTrue(all(d.source.text == source for d in result.diagnostics))
+                self.assertFalse(result.program.typed_modules)
+
+    def test_native_inferred_types_conversions_and_callable_selection(self):
+        self.native_behavior('''def convert[T](value: T) -> int:
+    return int(value)
+def increment(value: int) -> int:
+    return value + 1
+def apply[T, F=convert](value: T) -> int:
+    return F(value)
+test "types and callable arguments determine behavior":
+    small: i32 = 7
+    assert(apply(small) == 7)
+    assert(apply(3.75) == 3)
+    assert(apply[int, increment](7) == 8)
+    assert(apply(7) == 7)
+    assert(apply[i32](small) == 7)
+''')
+
+    def test_native_shared_generic_dependencies_with_increasing_callers(self):
+        # Linear-sized fixtures exercise shared dependencies without asserting
+        # a cache implementation or using noisy wall-clock performance limits.
+        declarations = (
+            'def identity[T](value: T) -> T:\n    return value\n'
+            'def increment(value: int) -> int:\n    return value + 1\n'
+            'def apply[T, F=identity](value: T) -> T:\n    return F(value)\n'
+        )
+        for count in (4, 16):
+            helpers = [f'def caller_{i}(value: int) -> int:\n'
+                       f'    return apply(value) + apply[int, increment]({i})\n'
+                       for i in range(count)]
+            checks = [f'    assert(caller_{i}(10) == {11 + i})' for i in range(count)]
+            with self.subTest(callers=count):
+                self.native_behavior(''.join(reversed(helpers)) + declarations +
+                    'test "shared generic dependencies select the right callable":\n' +
+                    '\n'.join(checks) + '\n')
+
+    def test_checked_program_can_be_lowered_repeatedly_without_changing_meaning(self):
+        from dataclasses import replace
+        from py_compiler.mir.registration import register
+        from py_compiler.mlir.src.lib import lower, render
+        source = '''def identity[T](value: T) -> T:
+    return value
+def work(flag: bool) -> int:
+    values = array[int, 2]()
+    values[0] = 7
+    values[1] = 11
+    if flag:
+        return identity(values[0])
+    return identity(values[1])
+'''
+        checked = self.compile(source, stop_after='thir')
+        self.assertFalse(checked.diagnostics, str(checked.diagnostics))
+        direct = self.compile(source)
+        self.assertFalse(direct.diagnostics, str(direct.diagnostics))
+        expected = render(lower(direct.program))
+        for attempt in range(2):
+            with self.subTest(attempt=attempt):
+                modules = tuple(register(module) for module in checked.program.typed_modules)
+                resumed = replace(checked.program, stage='mir', mir_modules=modules,
+                                  bodies=tuple(body for module in modules for body in module.bodies))
+                self.assertEqual(render(lower(resumed)), expected)
+
+    def test_type_errors_are_reported_at_the_type_checking_boundary(self):
+        for source, diagnostic in (
+            ('def wrong() -> int:\n    return "text"\n', 'does not satisfy'),
+            ('def wrong() -> int:\n    return missing\n', 'unknown binding'),
+            ('class Point:\n    x: int\ndef wrong():\n    result = int(Point(1))\n', 'no declared conversion'),
+        ):
+            with self.subTest(source=source):
+                result = self.compile(source, stop_after='thir')
+                self.assertTrue(result.diagnostics)
+                self.assertEqual(result.diagnostics[0].stage, 'THIR')
+                self.assertIn(diagnostic, str(result.diagnostics[0]))

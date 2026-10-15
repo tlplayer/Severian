@@ -62,6 +62,9 @@ class Function(DeclarationProvider):
         builder.declaration_scope = (*entry.scope, node.identity)
         builder.body.declaration = entry.name
         builder.body.result_ownership = entry.result_ownership
+        contract = getattr(entry, 'semantic_result', None)
+        if contract is not None:
+            builder.body.result_sources = contract.sources
         builder.result_contract = entry if entry.infer_result_ownership else None
         builder.expected_failure_node = getattr(entry, 'expected_failure_node', None)
         builder.body.dispatch_guards = tuple(' '.join(token.text for token in guard.tokens) for guard in entry.guards)

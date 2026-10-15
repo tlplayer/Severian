@@ -1,465 +1,56 @@
-"""Resolve executable sentences into typed SSA, explicit CFG edges and ownership facts."""
-from hashlib import sha256
-from dataclasses import replace
-from functools import wraps
-from py_compiler.frontend.source.source import Diagnostic
-from py_compiler.syntax.grammar.expression import expression, OWNERSHIP
-from py_compiler.frontend.parser.contract import Literal
-from py_compiler.hir.hir.src.program import Constant, resolve_literal
-from py_compiler.mir.cfg.cfg import Body, ExecutionBlock, Value, Operation, Edge, Terminator
-from py_compiler.mir.ownership.flow import Binding, FlowState
-from py_compiler.syntax.generic.block import DeclarationProvider
+"""Construct executable MIR exclusively from checked THIR bodies."""
+from dataclasses import fields, replace
 
 
-def located(method):
-    @wraps(method)
-    def call(self, node, *args, **kwargs):
-        try:
-            return method(self, node, *args, **kwargs)
-        except ValueError as failure:
-            origin = node[0] if isinstance(node, list) else node
-            span = origin.token.span if hasattr(origin, "token") else origin.span
-            raise Diagnostic("MIR", str(failure), self.source, span) from failure
-    return call
-
-
-class Builder:
-    def __init__(self, source, syntax, identity, name, result):
-        self.source, self.syntax = source, syntax
-        self.body = Body(identity, name, source.path, result)
-        self.body.source_snapshot = source
-        self.body.source_span = source.span(0, 0)
-        self.next_value = 0
-        self.current = self.block()
-        self.flow = FlowState()
-        self.values = {}
-        self.local_names = set()
-        self.namespaces = {}
-        self.fallback_scopes = []
-        self.storage = {}
-        self.storage_factory = None
-        self.declared_nodes = set()
-        self.context = None
-        self.stack_values = set()
-        self.receiver = None
-        self.receiver_value = None
-        self.declaration_scope = ()
-        self.uninitialized_fields = set()
-        self.constructor = False
-        self.phases = None
-        self.imported = {}
-        self.unsafe_depth = 0
-        self.active_scopes = []
-        self.loops = []
-        self.value_sources = {}
-        self.call_result_owners = {}
-        self.call_result_modes = {}
-        self.owned_results = set()
-        self.value_dependencies = {}
-        self.value_origins = {}
-        self.parameter_bindings = {}
-        self.grammar_captures = {}
-        self.active_grammars = set()
-        self.grammar_expansions = 0
-        self.yield_handler = None
-        self.return_handler = None
-
-    @property
-    def flow(self):
-        return self._flow
-
-    @flow.setter
-    def flow(self, value):
-        self._flow = value
-        value.reporter = self.record_lifetime
-
-    def record_lifetime(self, kind, owner, slot='', sources=()):
-        from py_compiler.mir.ownership.flow import LifetimeEvent
-        self.effect('lifetime', (), LifetimeEvent(kind, owner, slot, frozenset(sources)), self.body.source_span)
-
-    def value(self, type_):
-        value = Value(self.next_value, type_)
-        self.next_value += 1
-        return value
-
-    def block(self, types=()):
-        block = ExecutionBlock(len(self.body.blocks), tuple(self.value(t) for t in types))
-        self.body.blocks.append(block)
-        return block
-
-    def emit(self, kind, type_, operands, payload, span):
-        if kind == 'binary' and isinstance(payload, str):
-            from py_compiler.syntax.generic.owned import select
-            payload = select(operands[0].type, 'F.operator', payload)
-            kind = 'scalar'
-        result = self.value(type_)
-        operation = Operation(kind, result, tuple(operands), payload, span)
-        if not callable(getattr(payload, 'atom', None)):
-            raise ValueError(f'{kind} has no object-supplied atom implementation')
-        operation = replace(operation, atom=payload.atom(operation))
-        operation.atom.verify(operation)
-        self.current.operations.append(operation)
-        if type_:
-            from py_compiler.syntax.generic.storage import contains_borrowed_fields
-            dependencies = (set().union(*(self.value_dependencies.get(v.identity, set()) for v in operands))
-                            if contains_borrowed_fields(type_, self.context) or type_.family == 'string' else set())
-            if type_.family in ('pointer', 'trait'):
-                dependencies.update(set().union(*(self.value_origins.get(v.identity, set()) for v in operands)))
-            self.value_dependencies[result.identity] = dependencies
-            self.value_origins[result.identity] = set().union(*(self.value_origins.get(v.identity, set()) for v in operands)) if kind != 'memory-copy' else set()
-        if kind != 'memory-copy' and type_ and type_.binding_ownership != 'copy':
-            self.value_sources[result.identity] = set().union(*(self.value_sources.get(v.identity, set()) for v in operands))
-        if kind != "memory-copy" and type_ and type_.family in ("record", "trait", "union", "dynamic", "array", "pointer") and any(v.identity in self.stack_values for v in operands):
-            self.stack_values.add(result.identity)
-        return result
-
-    def effect(self, kind, operands, payload, span):
-        operation = Operation(kind, None, tuple(operands), payload, span)
-        if not callable(getattr(payload, 'atom', None)):
-            raise ValueError(f'{kind} has no object-supplied atom implementation')
-        operation = replace(operation, atom=payload.atom(operation))
-        operation.atom.verify(operation)
-        self.current.operations.append(operation)
-
-    def capture_expression(self, node):
-        from py_compiler.syntax.block.grammar import capture_expression
-        return capture_expression(node, self.grammar_captures)
-
-    def lookup(self, node, env):
-        if node.kind == 'name' and node.token.text in self.grammar_captures:
-            return self.grammar_captures[node.token.text].binding(self)
-        if node.kind == 'name' and node.token.text == 'self' and hasattr(self, 'self_binding'):
-            return self.self_binding
-        if node.kind == "reference":
-            provider = self.syntax.scope_providers[node.token.text]
-            return provider.bindings(self, env).get(node.operands[0].text)
-        for scope in (env, *self.fallback_scopes):
-            if node.token.text in scope:
-                return scope[node.token.text]
-        return None
-
-    def read_binding(self, binding, span):
-        value = self._read_binding(binding, span)
-        identity = self.flow.resolve(binding.identity)
-        from py_compiler.syntax.generic.storage import FieldPlace
-        place = self.storage.get(identity)
-        origins = self.value_origins.get(place.receiver.identity, {identity}) if isinstance(place, FieldPlace) else {identity}
-        self.value_origins[value.identity] = set(origins)
-        dependencies = set().union(*(self.flow.sources(origin) for origin in origins)) | self.flow.sources(binding.identity)
-        if value.type.family in ('pointer', 'trait'):
-            dependencies.update(origins)
-        if identity in self.parameter_bindings:
-            from py_compiler.syntax.generic.storage import contains_borrowed_fields
-            if contains_borrowed_fields(value.type, self.context):
-                dependencies.add(identity)
-        self.value_dependencies[value.identity] = dependencies
-        return value
-
-    def _read_binding(self, binding, span):
-        identity = self.flow.resolve(binding.identity)
-        if identity in self.uninitialized_fields:
-            raise ValueError("constructor reads a field before initialization")
-        if binding.type.family == 'pointer' and binding.identity in self.values and binding.identity != identity:
-            return self.values[binding.identity]
-        if identity in self.storage:
-            return self.storage[identity].read(self, span)
-        value = self.values[identity]
-        if binding.type.family in ('record', 'array', 'shared', 'string', 'union', 'dynamic', 'iterator') and binding.identity in self.values and binding.type != value.type:
-            # A nested record view borrows the containing binding's lifetime,
-            # but retains the address and type of its own field.
-            value = self.values[binding.identity]
-        if binding.type != value.type and callable(getattr(binding.type, 'from_value', None)):
-            return binding.type.from_value(value, self, span)
-        return value
-
-    def infer(self, binding, type_, env):
-        previous = self.values[binding.identity].type
-        if previous is not None:
-            if type_ and previous != type_:
-                raise ValueError("conflicting parameter type constraints")
-            type_ = previous
-        if type_ is None:
-            raise ValueError(f"type of {binding.name!r} requires an annotation or expected type")
-        updated = replace(binding, type=type_, ownership=getattr(type_, 'parameter_ownership', binding.ownership))
-        value = self.values[binding.identity]
-        value = Value(value.identity, type_)
-        self.values[binding.identity] = value
-        self.body.blocks[0].parameters = tuple(value if p.identity == value.identity else p for p in self.body.blocks[0].parameters)
-        self.body.bindings = [updated if b.identity == binding.identity else b for b in self.body.bindings]
-        env[binding.name] = updated
-        return updated
-
-    def live_binding_ids(self, env):
-        return {b.identity for scope in (env, *self.namespaces.values()) for b in scope.values()}
-
-    @located
-    def expr(self, node, env, expected=None):
-        require_context = getattr(expected, 'require_context', None)
-        if require_context is not None:
-            require_context(self)
-        value = self.expression_value(self.capture_expression(node), env, expected)
-        if (value is not None and expected is not None and value.type != expected
-                and value.type.family == expected.family == 'integer'):
-            from py_compiler.syntax.function.calls import coerce
-            value = coerce(value, expected, self, node.token.span)
-        require_context = getattr(value.type, 'require_context', None) if value is not None else None
-        if require_context is not None:
-            require_context(self)
-        return value
-
-    def expression_value(self, node, env, expected=None):
-        token = node.token
-        from py_compiler.syntax.block.grammar import expression_grammar, lower_result
-        match = expression_grammar(node, self, env)
-        if match is not None:
-            return lower_result(match, self)
-        if node.kind == 'capture':
-            return node.operands[0].lower(self, expected)
-        if node.kind == 'address':
-            from py_compiler.syntax.complex.array import ArrayType, MemoryOperation, ElementPlace
-            from py_compiler.syntax.function.allocate import resolve_plan
-            from py_compiler.syntax.function.calls import literal_value
-            source = node.operands[0]
-            binding = self.lookup(source, env) if source.kind in ('name', 'reference') else None
-            if binding is None:
-                raise ValueError('address requires a live binding')
-            value = self.read_binding(binding, token.span)
-            target = self.context.type('pointer[' + binding.type.name + ']')
-            if binding.identity in self.storage:
-                place = self.storage[binding.identity]
-                if not isinstance(place, ElementPlace):
-                    raise ValueError('this storage has no bounded address implementation')
-                storage = place.receiver
-            else:
-                one = literal_value(1, self.context.type('index'), self, token.span)
-                storage = self.emit('address-storage', ArrayType(binding.type, location='stack'), (one,),
-                                    MemoryOperation('allocate', resolve_plan(binding.type, {'location': 'memory.stack'}, self.context)), token.span)
-                self.stack_values.add(storage.identity)
-                zero = literal_value(0, self.context.type('index'), self, token.span)
-                place = ElementPlace(storage, zero, binding.type)
-                place.write(self, value, token.span)
-                self.storage[binding.identity] = place
-            return target.from_value(storage, self, token.span)
-        if node.kind == 'owned':
-            return node.operands[0].lower_expression(node, self, env, expected)
-        if expected and expected.family == 'dynamic':
-            return expected.from_value(self.expr(node, env), self, token.span)
-        if expected and expected.family == "union":
-            from py_compiler.syntax.function.calls import coerce
-            return coerce(self.expr(node, env), expected, self, token.span)
-        if node.kind == "index":
-            subject, argument = node.operands
-            definition = self.context.types.get(subject.token.text) if subject.kind == 'name' else None
-            if callable(getattr(definition, 'construct_expression', None)):
-                return definition.construct_expression(argument, (), self, env, token.span, expected)
-            receiver = self.expr(node.operands[0], env)
-            place = receiver.type.element_place(receiver, node.operands[1], self, env, token.span)
-            value = place.read(self, token.span)
-            if receiver.identity in self.call_result_owners and value.type.binding_ownership != 'copy':
-                self.call_result_owners[value.identity] = self.call_result_owners[receiver.identity]
-                self.call_result_modes[value.identity] = self.call_result_modes.get(receiver.identity, 'view')
-            return value
-        if node.kind in ("call", "member"):
-            from py_compiler.syntax.function.calls import lower_expression
-            value = lower_expression(node, self, env, expected)
-            return value
-        if node.kind == "construct":
-            type_ = self.syntax.types.get(token.text)
-            if type_ is None:
-                raise ValueError(f"constructor {token.text!r} has no executable provider")
-            if expected and type_ != expected:
-                raise ValueError(f"constructor {type_.name} does not satisfy {expected.name}")
-            return self.expr(node.operands[0], env, type_)
-        if node.kind == "literal" or (node.kind == "unary" and token.text in ("-", "+") and node.operands[0].kind == "literal"):
-            literal_token = node.operands[0].token if node.kind == "unary" else token
-            spelling = (token.text if node.kind == "unary" else "") + literal_token.text
-            type_, value = resolve_literal(Literal("", token.span, spelling, literal_token.kind, expected.name if expected else None), self.syntax, self)
-            if not type_.mlir:
-                return None
-            identity = self.body.identity + ":literal:" + str(self.next_value)
-            constant = Constant(identity, None, type_, value, token.span, self.source.path, None)
-            return self.emit("constant", type_, (), constant, token.span)
-        if node.kind in ("name", "reference"):
-            binding = self.lookup(node, env)
-            if binding is None:
-                raise ValueError(f"unknown binding {token.text!r}")
-            if binding.type is None:
-                binding = self.infer(binding, expected, env)
-            self.flow.read(binding)
-            value = self.read_binding(binding, token.span)
-            if expected and binding.type != expected:
-                from py_compiler.syntax.function.calls import coerce
-                return coerce(value, expected, self, token.span)
-            return value
-        if node.kind == "unary":
-            if token.text in OWNERSHIP:
-                raise ValueError("ownership modifiers must apply to the entire binding initializer")
-            operand = self.expr(node.operands[0], env, expected)
-            from py_compiler.syntax.generic.owned import select
-            return select(operand.type, "F.unary", token.text).expand(self, operand, token.span)
-        if node.kind == "chain":
-            left = self.expr(node.operands[0], env)
-            join = self.block((self.syntax.types['bool'],))
-            for index in range(1, len(node.operands), 2):
-                operator, term = node.operands[index:index + 2]
-                right = self.expr(term, env, left.type)
-                condition = self.emit('binary', self.syntax.types['bool'], (left, right), operator.text, operator.span)
-                if index + 2 < len(node.operands):
-                    following = self.block()
-                    self.current.terminator = Terminator('conditional', (Edge(following.identity), Edge(join.identity, (condition,))), condition)
-                    self.current = following
-                else:
-                    self.current.terminator = Terminator('jump', (Edge(join.identity, (condition,)),))
-                left = right
-            self.current = join
-            return join.parameters[0]
-        if node.kind == "binary":
-            from py_compiler.syntax.function.operations import binary
-            return binary(self, node, env, expected)
-        raise ValueError("unresolved expression")
-
-    @located
-    def sentence(self, node, env, local_names):
-        from py_compiler.syntax.block.grammar import expand_sentence
-        if expand_sentence(node, self, env):
-            return
-        for provider in self.syntax.sentence_providers:
-            if provider.matches(node):
-                return provider.lower(node, self, env, local_names)
-        raise ValueError("sentence has no registered syntax provider")
-
-    def cleanup_memory(self, bindings, span):
-        bindings = list(bindings)
-        for binding in bindings:
-            if binding.ownership in ("view", "borrow"):
-                self.flow.loans.pop(binding.identity, None)
-        pending = {binding.identity: binding for binding in bindings if binding.identity not in self.flow.moved}
-        order = {binding.identity: index for index, binding in enumerate(self.body.bindings)}
-        while pending:
-            # End contained borrows before destroying their sources. Declaration
-            # order alone is insufficient when a later source fills an older array.
-            ready = [binding for binding in pending.values()
-                     if not (self.flow.borrowers(binding.identity) & pending.keys())]
-            if not ready:
-                raise ValueError('cyclic stored borrows prevent scope destruction')
-            binding = max(ready, key=lambda b: order.get(b.identity, -1))
-            pending.pop(binding.identity)
-            release = getattr(binding.type, 'release', None)
-            if release is not None and binding.ownership in ('own', 'move', 'copy', 'mirror'):
-                value = self.read_binding(binding, span)
-                self.flow.drop(binding)
-                release(value, self, span)
-            if binding.identity not in self.parameter_bindings:
-                self.flow.end_retained(binding.identity)
-
-    def scope(self, nodes, env, declarations=False, local_names=None):
-        local_names = set() if local_names is None else local_names
-        previous_scope = self.declaration_scope
-        previous_context_scope = self.context.scope if self.context else None
-        if nodes and nodes[0].parent:
-            parent = nodes[0].parent
-            if self.context and parent not in self.declaration_scope and parent != self.body.identity and not parent.endswith(":root"):
-                self.declaration_scope = (*self.declaration_scope, parent)
-        if self.context:
-            self.context.scope = self.declaration_scope
-        previous = self.local_names
-        self.local_names = local_names
-        index = 0
-        self.active_scopes.append(env)
-        try:
-            while index < len(nodes):
-                node = nodes[index]
-                def referenced_names(terms):
-                    return {token.text for term in terms for token in term.tokens} | set().union(*(referenced_names(term.children) for term in terms))
-                remaining = referenced_names(nodes[index:])
-                for binding in env.values():
-                    if (binding.name in local_names and binding.type and (binding.type.family == 'pointer' or binding.ownership == 'borrow')
-                            and binding.name not in remaining):
-                        self.flow.loans.pop(binding.identity, None)
-                if self.current.terminator:
-                    raise ValueError("unreachable sentence after a terminating operation")
-                if node.provider is None:
-                    self.sentence(node, env, local_names)
-                    if self.phases and self.current.terminator is None:
-                        self.phases.during()
-                    index += 1
-                else:
-                    if (self.constructor and self.uninitialized_fields and not isinstance(node.provider, DeclarationProvider)
-                            and getattr(node.provider, 'spelling', '') != 'unsafe'):
-                        raise ValueError("initialize constructor fields before control-flow blocks")
-                    index += node.provider.lower(node, self, env, nodes, index)
-                    if self.phases and self.current.terminator is None:
-                        self.phases.during()
-            if nodes and self.current.terminator is None:
-                self.cleanup_memory((env[n] for n in local_names if n in env), nodes[-1].span)
-        finally:
-            self.active_scopes.pop()
-            self.local_names = previous
-            self.declaration_scope = previous_scope
-            if self.context:
-                self.context.scope = previous_context_scope
-
-    def record_retained_parameters(self):
-        effects = dict(self.body.retained_parameter_sources)
-        for owner in self.flow.retained:
-            if owner not in self.parameter_bindings:
-                continue
-            sources = self.flow.sources(owner)
-            if any(source not in self.parameter_bindings for source in sources):
-                raise ValueError('stored borrow escapes local storage through a parameter')
-            target = self.parameter_bindings[owner]
-            effects[target] = tuple(sorted(set(effects.get(target, ())) | {self.parameter_bindings[source] for source in sources}))
-        self.body.retained_parameter_sources = tuple(sorted(effects.items()))
-
-    def finish(self):
-        self.record_retained_parameters()
-        if self.body.result_type is None:
-            self.body.result_type = self.syntax.types["absent"]
-        if self.current.terminator is None:
-            if self.body.result_type.mlir:
-                raise ValueError("not every path returns the declared result")
-            self.current.terminator = Terminator("finish")
-        if self.body.result_type.family == 'record' and self.body.result_ownership == 'own':
-            provider = self.context.provider_by_name[self.body.result_type.name]
-            self.body.result_layout = provider.layout(self.body.result_type.declaration, self.context)
-        from py_compiler.mir.ownership.flow import verify_retained_lifetimes
-        verify_retained_lifetimes(self.body)
-        from py_compiler.mir.memory import resolve
-        resolve(self.body)
-        self.body.verify()
-        return self.body
-
-
-def prepare(source, root, syntax):
-    from py_compiler.hir.hir.src.modules import resolve
-    return lower_module(resolve(source, root, syntax, Builder))
-
-
-def lower_module(module):
-    from py_compiler.thir.src.lib import prepare
-    from py_compiler.mir.registration import register
-    typed = prepare(module)
-    return register(typed).bodies, typed.declarations
-
-
-def resolve_bodies(module):
-    source, root, context = module.source, module.root, module.context
-    syntax = context.syntax
-    from py_compiler.mir.ownership.flow import FlowState
-    context.initial_flow = FlowState()
-    context.resolve_contracts()
-    qualifier = '::package=' + context.interface if context.interface else ''
-    from hashlib import sha256
-    initializer_symbol = sha256((source.path + qualifier).encode()).hexdigest()
-    initializer = Builder(source, context.bound_syntax, root.identity + qualifier, "__sev_init_" + initializer_symbol + qualifier, syntax.types["absent"])
-    initializer.context = context
-    initializer.block_scope = root.scope
-    initializer.declared_nodes = context.declared_nodes
-    root.provider.configure(initializer, context)
-    initializer.scope(root.children, context.global_bindings)
-    context.initial_flow = initializer.flow.fork()
-    context.resolve()
-    return (initializer.finish(), *context.bodies), tuple(context.declarations)
+def lower_body(typed):
+    from py_compiler.hir.thir.src.model import TypedBody, thaw_data
+    from py_compiler.mir.cfg.cfg import Body, ExecutionBlock, Value, Operation, Edge, Terminator
+    if not isinstance(typed, TypedBody):
+        raise ValueError('MIR requires a finalized typed body')
+    typed.verify()
+    values = {}
+    def value(source):
+        if source is None:
+            return None
+        existing = values.get(source.identity)
+        if existing is None:
+            existing = values[source.identity] = Value(source.identity, source.type)
+        elif existing.type != source.type:
+            raise ValueError('typed value changes type at MIR boundary')
+        return existing
+    body = Body(typed.identity, typed.name, typed.source, typed.result_type)
+    for description in fields(Body):
+        if description.name != 'blocks':
+            data = thaw_data(getattr(typed, description.name))
+            if description.name in ('bindings', 'storage'):
+                data = list(data)
+            setattr(body, description.name, data)
+    for region in typed.blocks:
+        operations = []
+        for expression in region.operations:
+            operation = Operation(expression.kind, value(expression.result),
+                                  tuple(value(operand) for operand in expression.operands),
+                                  expression.payload, expression.span)
+            atom = expression.payload.atom(operation)
+            atom.verify(operation)
+            contract = expression.contract
+            if (atom.inputs, atom.result, atom.ownership, atom.effects) != (
+                    contract.inputs, contract.result, contract.ownership, contract.effects):
+                raise ValueError('operation contract changed after type checking')
+            operations.append(replace(operation, atom=atom))
+        exit_ = region.terminator
+        terminator = Terminator(exit_.kind,
+            tuple(Edge(edge.target, tuple(value(argument) for argument in edge.arguments)) for edge in exit_.edges),
+            value(exit_.value), exit_.message, exit_.span)
+        body.blocks.append(ExecutionBlock(region.identity, tuple(value(parameter) for parameter in region.parameters),
+                                          operations, terminator))
+    from py_compiler.mir.ownership.flow import verify_retained_lifetimes
+    from py_compiler.mir.memory import resolve
+    body.verify()
+    verify_retained_lifetimes(body)
+    resolve(body)
+    body.verify()
+    return body
 
 
 import unittest

@@ -1,5 +1,5 @@
 from py_compiler.syntax.grammar.expression import expression
-from py_compiler.mir.cfg.cfg import Terminator
+from py_compiler.hir.thir.src.model import Terminator
 
 
 class Return:
@@ -20,13 +20,9 @@ class Return:
                         and bool(cfg.value_sources.get(value.identity))
                         and value.identity not in cfg.owned_results and explicit not in ('copy', 'mirror', 'move'))
             mode = 'view' if borrowed else 'own'
-            previous = getattr(cfg, 'inferred_return_ownership', mode)
+            previous = contract.semantic_result.ownership
             if previous != mode:
                 raise ValueError('generic return paths mix owned values and views; use a consistent result ownership contract')
-            cfg.inferred_return_ownership = mode
-            cfg.body.result_ownership = contract.result_ownership = mode
-            # Make the resolved return ABI and lifetime available to recursion.
-            contract.body = cfg.body
         if cfg.body.result_ownership in ('borrow', 'view'):
             if value is None:
                 raise ValueError('returned borrow requires a value')

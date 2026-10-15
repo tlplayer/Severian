@@ -61,12 +61,10 @@ class DynamicType:
 
 
 def destructor(symbol, shared, type_, cfg, span):
-    from py_compiler.mir.lowering import Builder
-    from py_compiler.mir.cfg.cfg import Edge, Terminator
+    from py_compiler.hir.thir.src.checking import Checker
+    from py_compiler.hir.thir.src.model import Edge, Terminator
     from py_compiler.syntax.complex.shared import SharedOperation
-    from py_compiler.mlir.src.lib import MlirProgram, MlirFunction, render
-    from py_compiler.hir.hir.src.program import Constant
-    builder = Builder(cfg.source, cfg.syntax, symbol, symbol, cfg.context.type('absent'))
+    builder = Checker(cfg.source, cfg.syntax, symbol, symbol, cfg.context.type('absent'))
     builder.context = cfg.context
     source = builder.value(type_)
     builder.current.parameters = (source,)
@@ -83,11 +81,7 @@ def destructor(symbol, shared, type_, cfg, span):
     builder.current = done
     body = builder.finish()
     body.source_snapshot = None
-    constants = [op.payload for block in body.blocks for op in block.operations if isinstance(op.payload, Constant)]
-    functions = tuple(MlirFunction('__sev_constant_' + sha256(c.identity.encode()).hexdigest(), c) for c in constants)
-    text = render(MlirProgram(functions, (body,)))
-    # Helpers are local to their native partition, including their constants.
-    return text[text.index('{') + 1:text.rfind('}')].replace('func.func @', 'func.func private @')
+    return body.freeze()
 
 
 @dataclass(frozen=True)
@@ -95,11 +89,19 @@ class DynamicBox:
     concrete: object
     owner: object
     symbol: str
-    helper: str
+    helper: object
 
     def global_definitions(self):
+        from py_compiler.mir.lowering import lower_body
+        from py_compiler.mlir.src.lib import MlirProgram, MlirFunction, render
+        from py_compiler.hir.hir.src.program import Constant
+        body = lower_body(self.helper)
+        constants = [op.payload for block in body.blocks for op in block.operations if isinstance(op.payload, Constant)]
+        functions = tuple(MlirFunction('__sev_constant_' + sha256(c.identity.encode()).hexdigest(), c) for c in constants)
+        text = render(MlirProgram(functions, (body,)))
+        helper = text[text.index('{') + 1:text.rfind('}')].replace('func.func @', 'func.func private @')
         return (f'llvm.func @malloc(i{self.owner.bits}) -> !llvm.ptr',
-                'llvm.func @free(!llvm.ptr)', self.helper)
+                'llvm.func @free(!llvm.ptr)', helper)
 
     def atom(self, operation):
         return Atom(self, (operation.operands[0].type,), self.owner, ('move',), ('allocation',), self)

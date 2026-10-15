@@ -26,7 +26,7 @@ class ContractPhases:
             self.checking = False
 
     def failure(self, condition, action):
-        from py_compiler.mir.cfg.cfg import Edge, Terminator
+        from py_compiler.hir.thir.src.model import Edge, Terminator
         from py_compiler.mir.ownership.flow import FlowState
         cfg = self.cfg
         failed, following = cfg.block(), cfg.block()

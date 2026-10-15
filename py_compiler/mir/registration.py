@@ -1,6 +1,6 @@
 """Group typed realizations under interfaces/modules and label their Atoms."""
 from dataclasses import dataclass
-from py_compiler.thir.src.lib import identity
+from py_compiler.hir.thir.src.lib import identity
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,8 @@ def register(typed):
             or {id(body) for body in owned} != {id(body) for body in typed.bodies}):
         raise ValueError('MIR body membership disagrees with typed submodules')
     groups = []
+    from py_compiler.mir.lowering import lower_body
+    bodies = {}
     for submodule in typed.submodules:
         if any(dependency not in labels for dependency in submodule.dependencies):
             raise ValueError('MIR dependency has no typed submodule')
@@ -48,8 +50,9 @@ def register(typed):
                     or tuple(value.type for value in callable_.body.blocks[0].parameters) != callable_.parameters
                     or callable_.body.result_type != callable_.result):
                 raise ValueError('MIR callable signature changed after THIR')
-            callable_.body.verify()
-            for block in callable_.body.blocks:
+            body = lower_body(callable_.body)
+            bodies[id(callable_.body)] = body
+            for block in body.blocks:
                 for position, operation in enumerate(block.operations):
                     if operation.atom is None:
                         raise ValueError('MIR registration requires resolved Atoms')
@@ -59,7 +62,7 @@ def register(typed):
                                              block.identity, position, operation.atom))
         groups.append(MirSubmodule(submodule, labels[submodule.identity],
                                    tuple(labels[d] for d in submodule.dependencies), tuple(atoms)))
-    return MirModule(typed.identity, typed.interface, tuple(groups), typed.bodies)
+    return MirModule(typed.identity, typed.interface, tuple(groups), tuple(bodies[id(body)] for body in typed.bodies))
 
 
 def interfaces(modules):
@@ -76,7 +79,7 @@ import unittest
 class RegistrationTests(unittest.TestCase):
     def test_lir_rejects_missing_empty_body(self):
         from dataclasses import replace
-        from py_compiler.thir.src.lib import ThirTests
+        from py_compiler.hir.thir.src.lib import ThirTests
         from py_compiler.lir.src.lib import lower
         result = ThirTests().compile()
         self.assertFalse(result.diagnostics, str(result.diagnostics))
@@ -88,7 +91,7 @@ class RegistrationTests(unittest.TestCase):
 
     def test_mir_rejects_missing_body_and_changed_signature(self):
         from dataclasses import replace
-        from py_compiler.thir.src.lib import ThirTests
+        from py_compiler.hir.thir.src.lib import ThirTests
         result = ThirTests().compile(stop_after='thir')
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         typed = result.program.typed_modules[0]
@@ -102,7 +105,7 @@ class RegistrationTests(unittest.TestCase):
 
     def test_missing_typed_dependency_is_rejected(self):
         from dataclasses import replace
-        from py_compiler.thir.src.lib import ThirTests
+        from py_compiler.hir.thir.src.lib import ThirTests
         result = ThirTests().compile(stop_after='thir')
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         typed = result.program.typed_modules[0]
@@ -111,7 +114,7 @@ class RegistrationTests(unittest.TestCase):
             register(replace(typed, submodules=(changed, *typed.submodules[1:])))
 
     def test_hash_groups_and_lir_keep_mir_atom_labels(self):
-        from py_compiler.thir.src.lib import ThirTests
+        from py_compiler.hir.thir.src.lib import ThirTests
         from py_compiler.lir.src.lib import lower
         result = ThirTests().compile(interface='geometry')
         self.assertFalse(result.diagnostics, str(result.diagnostics))
@@ -126,7 +129,7 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual(len({atom.label for atom in expected}), len(expected))
 
     def test_lir_rejects_a_thir_checkpoint(self):
-        from py_compiler.thir.src.lib import ThirTests
+        from py_compiler.hir.thir.src.lib import ThirTests
         from py_compiler.lir.src.lib import lower
         result = ThirTests().compile(stop_after='thir')
         self.assertFalse(result.diagnostics, str(result.diagnostics))

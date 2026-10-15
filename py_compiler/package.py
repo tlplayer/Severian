@@ -475,7 +475,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
 
 
 def realization_records(program):
-    from py_compiler.thir.src.lib import type_identity
+    from py_compiler.hir.thir.src.lib import type_identity
     registered = {sub.typed.identity: sub for module in program.mir_modules for sub in module.submodules}
     return [{
         'id': sub.identity, 'source-submodule': sub.source, 'source-members': list(sub.declarations),
@@ -709,7 +709,7 @@ class PackageTests(unittest.TestCase):
 
     def test_hash_checkpoint_layout_has_three_realizations_and_no_native_artifacts(self):
         from unittest.mock import patch
-        from py_compiler.thir.src.lib import ThirTests
+        from py_compiler.hir.thir.src.lib import ThirTests
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'src/hash').mkdir(parents=True)

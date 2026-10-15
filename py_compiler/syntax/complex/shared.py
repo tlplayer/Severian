@@ -93,7 +93,7 @@ class Shared:
         return cfg.emit('share-retain', self, (value,), SharedOperation('retain', self), span)
 
     def release(self, value, cfg, span):
-        from py_compiler.mir.cfg.cfg import Edge, Terminator
+        from py_compiler.hir.thir.src.model import Edge, Terminator
         last = cfg.emit('share-release', cfg.context.type('bool'), (value,), SharedOperation('release', self), span)
         destroy, done = cfg.block(), cfg.block()
         cfg.current.terminator = Terminator('conditional', (Edge(destroy.identity), Edge(done.identity)), last)

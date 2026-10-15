@@ -106,6 +106,7 @@ def partitions(program, lir):
     output = []
     owned = set()
     for module in program.mir_modules:
+        executable = {body.name: body for body in module.bodies}
         typed_module = next(item for item in program.typed_modules if item.identity == module.identity)
         source = typed_module.source.path
         module_name = readable(module.interface + '.' + str(Path(source).with_suffix('')).replace('/', '.'))
@@ -121,7 +122,7 @@ def partitions(program, lir):
             stem = module_name + '/' + readable('+'.join(sorted(labels)))[:100] + '-' + stable[:16]
             constants, bodies, mappings = {}, [], []
             for call in sub.callables:
-                body = call.body
+                body = executable[call.body.name]
                 if body.name in owned:
                     raise ValueError('native partition contains a duplicate callable')
                 owned.add(body.name)

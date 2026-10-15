@@ -1,5 +1,6 @@
 """SIP-0019: immutable source snapshots; scalar coordinates, explicit UTF-8 boundary."""
 from dataclasses import dataclass
+from functools import cached_property
 from hashlib import sha256
 
 
@@ -16,7 +17,7 @@ class SourceFile:
     text: str
     debug_path: str | None = None
 
-    @property
+    @cached_property
     def identity(self):
         return sha256((self.path + "\0" + self.text).encode()).hexdigest()
 

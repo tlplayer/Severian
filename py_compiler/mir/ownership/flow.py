@@ -19,22 +19,26 @@ class FlowState:
     views: dict = field(default_factory=dict)
     retained: dict = field(default_factory=dict)
     reporter: object = field(default=None, compare=False, repr=False)
+    view_sources: dict = field(default_factory=dict)
 
     def fork(self):
         return FlowState(set(self.moved), dict(self.loans), dict(self.views),
-                         {owner: dict(slots) for owner, slots in self.retained.items()}, self.reporter)
+                         {owner: dict(slots) for owner, slots in self.retained.items()}, self.reporter,
+                         dict(self.view_sources))
 
     def read(self, binding):
         self.resolve(binding.identity)
 
-    def resolve(self, identity):
-        visited = set()
+    def resolve(self, identity, _seen=()):
+        visited = set(_seen)
         while True:
             if identity in self.moved:
                 raise ValueError("binding or viewed owner was moved or dropped")
             if identity in visited:
                 raise ValueError("cyclic view binding")
             visited.add(identity)
+            for source in self.view_sources.get(identity, ()):
+                self.resolve(source, visited)
             if identity not in self.views:
                 return identity
             identity = self.views[identity]
@@ -44,6 +48,7 @@ class FlowState:
             raise ValueError(f"cannot rebind constant {binding.name!r} declared with :=")
         self.transfer(binding)
         self.moved.discard(binding.identity)
+        self.view_sources.pop(binding.identity, None)
 
     def retain(self, owner, slot, sources):
         sources = frozenset(self.resolve(source) for source in sources)
@@ -80,6 +85,7 @@ class FlowState:
         self.move(binding)
         self.loans.pop(binding.identity, None)
         self.views.pop(binding.identity, None)
+        self.view_sources.pop(binding.identity, None)
         self.end_retained(binding.identity)
 
     def loan(self, binding, owner):
@@ -117,12 +123,18 @@ class FlowState:
             if view in live and owner not in live:
                 raise ValueError("view escapes the lifetime of its source binding")
         self.views = {view: owner for view, owner in self.views.items() if view in live}
+        for view, sources in self.view_sources.items():
+            if view in live and not sources <= live:
+                raise ValueError('view escapes the lifetime of a possible source binding')
+        self.view_sources = {view: sources for view, sources in self.view_sources.items() if view in live}
         self.moved.intersection_update(live)
 
     @staticmethod
     def join(states):
         result = FlowState()
         for state in states:
+            for view, sources in state.view_sources.items():
+                result.view_sources[view] = result.view_sources.get(view, frozenset()) | sources
             result.moved.update(state.moved)
             result.loans.update(state.loans)
             for owner, slots in state.retained.items():

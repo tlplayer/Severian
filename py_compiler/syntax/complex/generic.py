@@ -194,7 +194,7 @@ def realize(entry, explicit, values, context):
         context.scope = previous_scope
     key = tuple((p.name, 'type', types[p.name].name) if p.name in types else
                 (p.name, 'callable', functions[p.name].symbol) for p in entry.templates)
-    from py_compiler.thir.src.lib import type_identity, callable_identity
+    from py_compiler.hir.thir.src.lib import type_identity, callable_identity
     cache_key = (entry.symbol, tuple((p.name, 'type', type_identity(types[p.name])) if p.name in types else
                                    (p.name, 'callable', callable_identity(functions[p.name])) for p in entry.templates))
     if cache_key in context.realizations:

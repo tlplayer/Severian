@@ -39,7 +39,7 @@ def main(argv=None):
             import unittest
             modules = ["frontend.source.source", "syntax.primitive.catalog", "syntax.symbol.forms", "syntax.symbol.symbol", "syntax.symbol.absent",
                        "frontend.lexer.lexer", "frontend.parser.parser", "hir.hir.src.program",
-                       "frontend.src.lib", "frontend.parser.blocks", "thir.src.lib", "mir.registration", "mir.cfg.cfg", "mir.ownership.flow",
+                       "frontend.src.lib", "frontend.parser.blocks", "hir.thir.src.lib", "hir.thir.src.contracts", "mir.registration", "mir.cfg.cfg", "mir.ownership.flow",
                        "mir.memory", "syntax.complex.shared", "mir.lowering", "syntax.primitive.int.operations", "syntax.primitive.float.operations",
                        "syntax.primitive.bool.declarations", "syntax.primitive.char.declarations",
                        "syntax.primitive.byte.byte", "syntax.primitive.pointer.operations",

@@ -1,5 +1,5 @@
 from py_compiler.syntax.primitive.numeric.grammar import ScalarOperation
-from py_compiler.mir.cfg.cfg import Edge, Terminator
+from py_compiler.hir.thir.src.model import Edge, Terminator
 
 
 class Logical(ScalarOperation):

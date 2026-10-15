@@ -154,6 +154,8 @@ class DeclarationContext:
     def compile(self, entry):
         if entry.templates:
             return None
+        from py_compiler.hir.thir.src.contracts import infer_result
+        infer_result(entry, self)
         if entry.body is not None:
             return entry.body
         if entry.compiling:
