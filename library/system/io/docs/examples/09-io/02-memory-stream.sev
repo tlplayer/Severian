@@ -2,7 +2,7 @@ import io
 
 
 test "memory stream":
-    stream = io.MemoryStream([10, 20, 30, 40])
+    stream = io.IOStream([10, 20, 30, 40])
 
     first = stream.read(2B)
 

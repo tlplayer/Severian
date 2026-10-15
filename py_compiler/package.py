@@ -112,7 +112,9 @@ def compile_partitions(program, lir, output, target, slot, compiler_id, optimize
     stems = {part.submodule: part.stem for part in selected}
     for part in selected:
         text = part.lir.text()
-        cache_key = digest(encode([compiler_id, target, lir.pointer_bits, toolchain, text]))
+        from py_compiler.mir.verification import artifact_contracts
+        cache_key = digest(encode([compiler_id, target, lir.pointer_bits, toolchain, text,
+                                  artifact_contracts(part.lir.mlir.bodies, program.bodies)]))
         cache = output / 'cache/native' / cache_key
         names = ('source.mlir', 'lowered.mlir', 'source.ll', 'native.o')
         values = None
@@ -777,6 +779,40 @@ class ModularFixtureTests(unittest.TestCase):
 
 
 class PartitionArtifactTests(unittest.TestCase):
+    def test_imported_lifetime_change_invalidates_native_cache_without_mlir_change(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.lir.src.lib import lower
+        package = {'package': {'name': 'lifetimes'}, 'objects': ['lifetimes.o'], 'types': [],
+                   'exports': [{'name': 'choose', 'symbol': 'choose', 'receiver': None,
+                     'parameters': [{'name': name, 'type': 'array[int]', 'ownership': 'view'}
+                                    for name in ('a', 'b')],
+                     'result': 'array[int]', 'result-ownership': 'view', 'result-sources': [0]}]}
+        source = ('import lifetimes\ndef work(a: array[int], b: array[int]) -> int:\n'
+                  '    return len(lifetimes.choose(a, b))\n'
+                  'def unrelated() -> int:\n    return 42\n')
+        target = 'x86_64-unknown-linux-gnu'
+        with tempfile.TemporaryDirectory() as directory:
+            def compile_consumer():
+                result = compile_source('consumer.sev', source, Syntax(),
+                                        native_packages={'lifetimes': json.loads(json.dumps(package))})
+                self.assertFalse(result.diagnostics, str(result.diagnostics))
+                lir = lower(result.program, target, 64)
+                records, _, _, _ = compile_partitions(result.program, lir, Path(directory), target,
+                                                       'dev', 'contract-regression', None)
+                return lir.text(), {record['symbols']: record for record in records}
+            before_text, before = compile_consumer()
+            _, repeated = compile_consumer()
+            self.assertTrue(all(record['reused'] for record in repeated.values()))
+            package['exports'][0]['result-sources'] = [1]
+            after_text, after = compile_consumer()
+            self.assertEqual(before_text, after_text)
+            changed = [symbols for symbols in before if before[symbols]['cache-key'] != after[symbols]['cache-key']]
+            self.assertEqual(len(changed), 1)
+            self.assertTrue(any('__sev_fn_work' in symbol for symbol in changed[0]))
+            self.assertFalse(after[changed[0]]['reused'])
+            self.assertTrue(all(record['reused'] for symbols, record in after.items() if symbols not in changed))
+
     def fixture(self, directory, source):
         root = Path(directory)
         (root / 'src').mkdir()

@@ -183,7 +183,7 @@ def invoke(entry, values, cfg, span, receiver=None):
     receiver_modes = (entry.receiver_ownership or 'borrow',) if entry.receiver else ()
     layout = (cfg.context.provider_by_name[result.name].layout(result.declaration, cfg.context)
               if result.family == 'record' and entry.result_ownership == 'own' else '')
-    operation = Invoke(entry.symbol, result, receiver_modes + modes, layout)
+    operation = Invoke(entry.symbol, result, receiver_modes + modes, layout, entry)
     if getattr(entry, 'native_symbol', None) is not None:
         from py_compiler.syntax.generic.atom import Atom
         from dataclasses import replace

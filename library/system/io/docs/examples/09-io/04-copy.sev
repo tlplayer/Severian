@@ -2,8 +2,8 @@ import io
 
 
 test "stream copy":
-    source = io.MemoryStream([1, 2, 3, 4, 5])
-    destination = io.MemoryStream([])
+    source = io.IOStream([1, 2, 3, 4, 5])
+    destination = io.IOStream([])
 
     copied = io.copy(source, destination, 2B)
 

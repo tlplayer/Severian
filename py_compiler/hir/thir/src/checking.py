@@ -383,10 +383,15 @@ class Checker:
             binding = max(ready, key=lambda b: order.get(b.identity, -1))
             pending.pop(binding.identity)
             release = getattr(binding.type, 'release', None)
+            if binding.type.family == 'string' and self.values.get(binding.identity) is not None:
+                if self.values[binding.identity].identity in self.owned_results:
+                    from py_compiler.syntax.generic.storage import release_storage
+                    release = release_storage
             if release is not None and binding.ownership in ('own', 'move', 'copy', 'mirror'):
                 value = self.read_binding(binding, span)
                 self.flow.drop(binding)
-                release(value, self, span)
+                from py_compiler.mir.cleanup import defer
+                defer(value, release, self, span)
             if binding.identity not in self.parameter_bindings:
                 self.flow.end_retained(binding.identity)
 

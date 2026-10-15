@@ -168,7 +168,8 @@ class Import(DeclarationProvider):
                                      native_symbol=NativeSymbol(contract['symbol'], 'severian', tuple(package['objects'])))
             entry.body = SimpleNamespace(result_sources=tuple(contract['result-sources']),
                                          retained_result_sources=tuple(contract.get('retained-result-sources', ())),
-                                         retained_parameter_sources=tuple(contract.get('retained-parameter-sources', ())))
+                                         retained_parameter_sources=tuple((destination, tuple(sources)) for destination, sources in
+                                                                          contract.get('retained-parameter-sources', ())))
             entry.result_ownership = contract.get('result-ownership', 'own')
             from py_compiler.syntax.grammar.expression import expression
             for parameter, spelling in contract.get('defaults', {}).items():
@@ -192,6 +193,30 @@ import unittest
 
 
 class ImportedPredicateTests(unittest.TestCase):
+    def test_json_roundtrip_preserves_all_lifetime_sources(self):
+        import json
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        package = {'package': {'name': 'lifetimes'}, 'objects': ['lifetimes.o'], 'types': [],
+                   'exports': [{'name': 'choose', 'symbol': 'choose', 'receiver': None,
+                     'parameters': [{'name': name, 'type': 'array[int]', 'ownership': 'view'}
+                                    for name in ('a', 'b')],
+                     'result': 'array[int]', 'result-ownership': 'view', 'result-sources': (0, 1),
+                     'retained-result-sources': (1,), 'retained-parameter-sources': ((0, (1,)),)}]}
+        restored = json.loads(json.dumps(package))
+        result = compile_source('roundtrip.sev', 'import lifetimes\n'
+                                'def work(a: array[int], b: array[int]) -> int:\n'
+                                '    return len(lifetimes.choose(a, b))\n', Syntax(),
+                                native_packages={'lifetimes': restored})
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        imported = next(op.atom.owner for body in result.program.bodies for block in body.blocks
+                        for op in block.operations if isinstance(op.atom.owner, ImportedCallable))
+        self.assertEqual(imported.body.result_sources, (0, 1))
+        self.assertEqual(imported.body.retained_result_sources, (1,))
+        self.assertEqual(imported.body.retained_parameter_sources, ((0, (1,)),))
+        self.assertEqual(imported.result_ownership, 'view')
+        self.assertEqual(imported.parameter_ownership, {'a': 'view', 'b': 'view'})
+
     def test_imported_union_is_a_named_constraint_and_value_type(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax

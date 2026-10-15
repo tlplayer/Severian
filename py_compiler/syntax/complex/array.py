@@ -77,7 +77,7 @@ class ArrayType:
 
     @property
     def aggregate(self):
-        return self.element.family in ('record', 'string', 'array', 'union', 'dynamic', 'shared')
+        return self.element.family in ('record', 'string', 'array', 'union', 'dynamic', 'shared', 'iterator')
 
     @property
     def name(self):
@@ -260,11 +260,21 @@ class RecordElementPlace:
         cfg.current.terminator = Terminator('jump', (Edge(done.identity),))
         cfg.current = done
 
+    def take(self, cfg, span, value=None):
+        from py_compiler.syntax.generic.storage import StorageTransfer, stored_type
+        value = self.read(cfg, span) if value is None else value
+        if self.type.family == 'record':
+            value = cfg.emit('memory-copy', self.type, (value,), StorageTransfer(stored_type(self.type, cfg.context)), span)
+        cfg.effect('element-clear', (self.receiver, self.index), self.operation('clear', cfg), span)
+        cfg.owned_results.add(value.identity)
+        return value
+
     def destroy(self, cfg, span):
         from py_compiler.syntax.generic.storage import owns_storage, release_storage
         if owns_storage(self.type):
-            self.when_initialized(cfg, span, lambda: release_storage(self.read(cfg, span), cfg, span))
-        cfg.effect('element-clear', (self.receiver, self.index), self.operation('clear', cfg), span)
+            self.when_initialized(cfg, span, lambda: release_storage(self.take(cfg, span), cfg, span))
+        else:
+            cfg.effect('element-clear', (self.receiver, self.index), self.operation('clear', cfg), span)
 
     def write(self, cfg, value, span):
         # Copy before replacement so a[i] = a[i] remains valid.

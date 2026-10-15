@@ -47,7 +47,10 @@ class Class(RecordProvider):
 
     def layout(self, declaration, context):
         types = [context.type(name) for _, name in declaration.fields]
-        return "!llvm.struct<(" + ", ".join(self.storage_type(t, context) for t in types) + ")>"
+        storage = [self.storage_type(t, context) for t in types]
+        if any(owns_storage(t) for t in types):
+            storage.extend('i1' for _ in types)
+        return "!llvm.struct<(" + ", ".join(storage) + ")>"
 
     def storage_type(self, type_, context):
         if not type_.mlir or type_.mlir == 'index':
@@ -112,10 +115,11 @@ class Class(RecordProvider):
         for index, (_, name) in enumerate(declaration.fields):
             type_ = cfg.context.type(name)
             storage = self.storage_type(type_, cfg.context)
-            field = FieldPlace(value, index, layout, type_, storage).read(cfg, span)
-            if owns_storage(type_):
-                field = copy_storage(field, cfg, span)
-            FieldPlace(result, index, layout, type_, storage).write(cfg, field, span)
+            place = FieldPlace(value, index, layout, type_, storage)
+            def copy_field():
+                field = copy_storage(place.read(cfg, span), cfg, span)
+                FieldPlace(result, index, layout, type_, storage).write(cfg, field, span)
+            place.when_initialized(cfg, span, copy_field)
         cfg.value_dependencies[result.identity] = set(cfg.value_dependencies.get(value.identity, ()))
         return result
 
@@ -127,10 +131,7 @@ class Class(RecordProvider):
         for index in reversed(range(len(declaration.fields))):
             type_ = cfg.context.type(declaration.fields[index][1])
             if owns_storage(type_):
-                field = FieldPlace(value, index, layout, type_, self.storage_type(type_, cfg.context)).read(cfg, span)
-                # An inline record lives on the stack; its owned buffer does not.
-                cfg.stack_values.discard(field.identity)
-                release_storage(field, cfg, span)
+                FieldPlace(value, index, layout, type_, self.storage_type(type_, cfg.context)).destroy(cfg, span)
 
 
 def store_field(place, expression, cfg, env, span, owner=None, initialized=True, value=None):
@@ -148,7 +149,7 @@ def store_field(place, expression, cfg, env, span, owner=None, initialized=True,
     if place.type.family == 'string':
         value = copy_storage(value, cfg, span)
         if initialized:
-            release_storage(place.read(cfg, span), cfg, span)
+            place.destroy(cfg, span)
     elif owns_storage(place.type):
         if mode in ('copy', 'mirror'):
             value = value.type.copy_value(value, cfg, span)
@@ -166,9 +167,7 @@ def store_field(place, expression, cfg, env, span, owner=None, initialized=True,
                     raise ValueError('owned field cannot consume its containing object')
                 cfg.flow.move(source)
         if initialized:
-            previous = place.read(cfg, span)
-            cfg.stack_values.discard(previous.identity)
-            place.type.release(previous, cfg, span)
+            place.destroy(cfg, span)
     place.write(cfg, value, span)
 
 
@@ -303,3 +302,59 @@ def work() -> i32:
         item = allocate[Item]()
         return item.value
 ''')
+
+
+class CompositionalStorageTests(unittest.TestCase):
+    source = """class Pair:
+    left: array[int]
+    right: array[int]
+
+test "partial array construction destroys only initialized slots":
+    slots = array[Pair,4]()
+    position = 0
+    while position < 2:
+        slots[position] = Pair(array[int,1](), array[int,2]())
+        position += 1
+    drop slots
+
+test "moved field survives parent destruction and replacement":
+    pair = Pair(array[int,1](), array[int,2]())
+    taken = move pair.left
+    pair.left = array[int,3]()
+    drop pair
+    assert(len(taken) == 1)
+    drop taken
+
+test "partially moved records compose inside arrays":
+    slots = array[Pair,2]()
+    slots[1] = Pair(array[int,1](), array[int,2]())
+    taken = move slots[1].left
+    saved = copy slots
+    drop slots
+    drop saved
+    assert(len(taken) == 1)
+    drop taken
+"""
+
+    def test_partial_moves_lower_to_initialized_field_cleanup(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.mlir.src.lib import lower, render
+        result = compile_source('compositional-storage.sev', self.source, Syntax())
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        text = render(lower(result.program))
+        self.assertIn('read of moved or uninitialized record field', text)
+        self.assertIn('field_flag', text)
+
+    def test_native_compositional_storage(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.testing import test_package
+        with tempfile.TemporaryDirectory(prefix='sev-compositional-storage-') as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/lib.sev').write_text(self.source)
+            (root / 'package.json').write_text(json.dumps({'package': {'name': 'compositional-storage', 'version': '0.1.0'}}))
+            result = test_package(root)
+            self.assertTrue(result['success'], result)

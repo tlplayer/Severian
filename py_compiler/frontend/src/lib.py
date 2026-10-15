@@ -84,6 +84,8 @@ def compile_source(path, text, syntax, *, stop_after='mir', interface=None, nati
                            and any(getattr(child.provider, 'spelling', '') == 'grammar' for child in node.children))
         phase = 'MIR'
         mir = register(typed)
+        constants = tuple({op.payload.identity: op.payload for body in mir.bodies
+                           for block in body.blocks for op in block.operations if op.kind == 'constant'}.values())
         return FrontendResult(source, Program(constants, module.submodules, mir.bodies, typed.declarations,
                                               (typed,), (mir,), 'mir'), (), templates)
     except Diagnostic as failure:

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,9 @@ class Allocate:
         value = operation.result
         alignment = f' {{alignment = {self.plan.alignment} : i64}}' if self.plan else ''
         return [f"%count_{value.identity} = arith.constant 1 : i64",
-                f"{name(value)} = llvm.alloca %count_{value.identity} x {self.record_type}{alignment} : (i64) -> !llvm.ptr"]
+                f"{name(value)} = llvm.alloca %count_{value.identity} x {self.record_type}{alignment} : (i64) -> !llvm.ptr",
+                f"%record_empty_{value.identity} = llvm.mlir.zero : {self.record_type}",
+                f"llvm.store %record_empty_{value.identity}, {name(value)} : {self.record_type}, !llvm.ptr"]
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,7 @@ class Invoke:
     result_type: object
     ownership: tuple = ()
     result_layout: str = ""
+    dependency: object = field(default=None, compare=False, repr=False)
 
     def atom(self, operation):
         from py_compiler.syntax.generic.atom import Atom

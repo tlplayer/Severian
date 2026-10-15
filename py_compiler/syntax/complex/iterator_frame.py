@@ -59,6 +59,22 @@ class FrameAccess:
 
 
 @dataclass(frozen=True)
+class FrameInitialize:
+    layout: FrameLayout
+    index: int
+
+    def atom(self, operation):
+        return Atom(self, (operation.operands[0].type,), None, ('borrow',), ('mutation',), self)
+
+    def render_operation(self, operation):
+        tag = temporary_suffix(operation)
+        storage = self.layout.slots[self.index].storage
+        return [f'%frame_init_address_{tag} = llvm.getelementptr {name(operation.operands[0])}[0, {self.index}] : (!llvm.ptr) -> !llvm.ptr, {self.layout.mlir}',
+                f'%frame_init_zero_{tag} = llvm.mlir.zero : {storage}',
+                f'llvm.store %frame_init_zero_{tag}, %frame_init_address_{tag} : {storage}, !llvm.ptr']
+
+
+@dataclass(frozen=True)
 class FrameFree:
     def atom(self, operation):
         return Atom(self, (operation.operands[0].type,), None, ('move',), ('destruction',), self)
@@ -126,7 +142,7 @@ def create(match, cfg):
     FrozenCapture = import_module('py_compiler.syntax.block.for').FrozenCapture
     from py_compiler.syntax.function.calls import literal_value
     from py_compiler.syntax.function.layout import storage_layout, layout_of, Layout
-    from py_compiler.syntax.generic.storage import copy_storage
+    from py_compiler.syntax.generic.storage import copy_storage, owns_storage, release_storage
     from py_compiler.syntax.complex.object import Allocate, Invoke
     from py_compiler.syntax.block.union import UnionBox, UnionNone
     from py_compiler.syntax.function.contracts import Callable
@@ -163,9 +179,10 @@ def create(match, cfg):
         value = copy_storage(value, producer, span)
         resume = producer.block()
         bindings = {b.identity: b for scope in producer.active_scopes for b in scope.values()}
-        live = tuple(producer.values[b.identity] for b in bindings.values()
-                     if b.identity not in producer.flow.moved and b.ownership in ('own', 'copy', 'move', 'mirror')
-                     and callable(getattr(b.type, 'release', None)))
+        live = tuple((b.identity, producer.values[b.identity]) for b in bindings.values()
+                     if b.identity in producer.values and b.ownership in ('own', 'copy', 'move', 'mirror')
+                     and owns_storage(b.type)
+                     and (b.type.family != 'string' or producer.values[b.identity].identity in producer.owned_results))
         yields[producer.current.identity] = (value, resume.identity, live)
         producer.current.terminator = Terminator('jump', (Edge(resume.identity),))
         producer.current = resume
@@ -249,7 +266,8 @@ def create(match, cfg):
         resume.current = block
         for op in original.operations:
             if isinstance(op.payload, Allocate):
-                continue  # The frame slot itself is the record's persistent storage.
+                resume.effect('frame-initialize', (frame,), FrameInitialize(layout, index_by_value[op.result.identity]), op.span)
+                continue  # Reused slots start with no initialized fields.
             operands = tuple(load(resume, frame, v, op.span) for v in op.operands)
             payload = op.payload
             if isinstance(payload, FieldPlace):
@@ -290,6 +308,9 @@ def create(match, cfg):
     cfg.context.bodies.append(resume_entry.body)
     destroy_entry, destroy, frame = helper('destroy', cfg.context.type('absent'))
     state = destroy.emit('frame-state', state.type, (frame,), FrameAccess(layout, 0, 'load'), span)
+    output = destroy.emit('frame-output', optional, (frame,), FrameAccess(layout, 1, 'load'), span)
+    if optional.release:
+        optional.release(output, destroy, span)
     for block, (_, _, live) in yields.items():
         if block not in ownership:
             continue
@@ -299,14 +320,23 @@ def create(match, cfg):
         destroy.current.terminator = Terminator('conditional', (Edge(chosen.identity), Edge(following.identity)), condition)
         destroy.current = chosen
         destroy.effect('ownership-restore', (), ownership[block], span)
-        for value in reversed(live):
-            restored = load(destroy, frame, value, span)
-            value.type.release(restored, destroy, span)
+        facts = ownership[block]
+        released = set()
+        pending = {identity: value for identity, value in live
+                   if identity in facts.initialized and identity not in facts.moved}
+        while pending:
+            ready = [identity for identity in pending if not any(
+                identity in sources and owner in pending
+                for (owner, _), sources in facts.retained)]
+            if not ready:
+                raise ValueError('cyclic stored borrows prevent iterator destruction')
+            value = pending.pop(ready[-1])
+            if value.identity not in released:
+                released.add(value.identity)
+                restored = load(destroy, frame, value, span)
+                release_storage(restored, destroy, span)
         destroy.current.terminator = Terminator('jump', (Edge(following.identity),))
         destroy.current = following
-    output = destroy.emit('frame-output', optional, (frame,), FrameAccess(layout, 1, 'load'), span)
-    if optional.release:
-        optional.release(output, destroy, span)
     destroy.effect('frame-free', (frame,), FrameFree(), span)
     destroy_entry.body = destroy.finish()
     cfg.context.bodies.append(destroy_entry.body)
@@ -374,3 +404,34 @@ test "each continuation restores its own initialized locals":
             (root / 'package.json').write_text(json.dumps({'package': {'name': 'frame-ownership', 'version': '0.1.0'}}))
             result = test_package(root)
             self.assertTrue(result['success'], result)
+
+
+class SuspendedCleanupTests(unittest.TestCase):
+    def test_suspended_cleanup_keeps_owned_record_fields(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.syntax.complex.array import MemoryOperation
+        source = """class Pair:
+    left: array[int]
+    right: array[int]
+class Counter:
+    count: int
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+        pair = Pair(array[int,1](), array[int,2]())
+        taken = move pair.left
+        yield self.count
+        drop taken
+        yield self.count
+
+def work():
+    counter = Counter(2)
+    cursor = iterator(counter)
+    next(cursor)
+    drop cursor
+"""
+        result = compile_source('suspended-cleanup.sev', source, Syntax())
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(b for b in result.program.bodies if b.declaration.startswith('__iterator_destroy_'))
+        releases = [op for block in body.blocks for op in block.operations
+                    if isinstance(op.payload, MemoryOperation) and op.payload.kind == 'release']
+        self.assertGreaterEqual(len(releases), 3)

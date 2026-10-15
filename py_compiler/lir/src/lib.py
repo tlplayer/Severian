@@ -43,7 +43,8 @@ def lower(program, target, pointer_bits):
                 or {id(body) for body in registered_bodies} != {id(body) for body in program.bodies}):
             raise ValueError('LIR body membership changed after MIR registration')
     for body in program.bodies:
-        body.verify()
+        from py_compiler.mir.verification import require_ready
+        require_ready(body)
     from py_compiler.syntax.generic.atom import ExternalSymbol
     dependencies = set()
     for body in program.bodies:
@@ -138,7 +139,10 @@ def partitions(program, lir):
                             operation = replace(operation, payload=constant, atom=constant.atom(operation))
                         operations.append(operation)
                     blocks.append(replace(block, operations=operations))
-                bodies.append(replace(body, blocks=blocks))
+                from py_compiler.mir.verification import verify_target_clone
+                clone = replace(body, blocks=blocks)
+                verify_target_clone(body, clone)
+                bodies.append(clone)
             for position, old in enumerate(sub.constants):
                 constant = replace(old, identity=stable + ':literal:' + str(position))
                 constants[constant.identity] = constant

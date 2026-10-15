@@ -97,6 +97,7 @@ class Body:
     source_snapshot: object = None
     source_span: object = None
     memory_regions: tuple = ()
+    call_contracts: tuple | None = None
 
     def verify(self):
         if not self.blocks:

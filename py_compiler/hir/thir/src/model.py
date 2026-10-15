@@ -126,6 +126,7 @@ class TypedBody:
     source_snapshot: object = None
     source_span: object = None
     memory_regions: tuple = ()
+    call_contracts: tuple | None = None
     expressions: tuple = ()
 
     def verify(self):
@@ -190,9 +191,11 @@ class DraftBody:
 
     def freeze(self):
         self.verify()
+        from py_compiler.mir.verification import dependency_contracts
         data = {description.name: freeze_data(getattr(self, description.name))
                 for description in fields(TypedBody)}
         data['blocks'] = tuple(TypedRegion(block.identity, tuple(block.parameters),
                                           tuple(block.operations), block.terminator)
                                for block in self.blocks)
+        data['call_contracts'] = dependency_contracts(self)
         return TypedBody(**data)

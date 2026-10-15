@@ -47,7 +47,8 @@ class MlirProgram:
             if body.name in symbols:
                 raise ValueError("duplicate executable symbol")
             symbols.add(body.name)
-            body.verify()
+            from py_compiler.mir.verification import require_ready
+            require_ready(body)
 
 
 def lower(program):

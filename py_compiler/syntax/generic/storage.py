@@ -175,6 +175,41 @@ class FieldPlace:
     type: object
     storage_type: str = ''
 
+    @property
+    def tracked(self):
+        return getattr(self.receiver.type, 'owns_fields', False)
+
+    def clear(self, cfg, span):
+        if self.tracked:
+            cfg.effect('field-clear', (self.receiver,), FieldState(self, False), span)
+
+    def when_initialized(self, cfg, span, action):
+        if not self.tracked:
+            return action()
+        from py_compiler.hir.thir.src.model import Edge, Terminator
+        condition = cfg.emit('field-initialized', cfg.context.type('bool'), (self.receiver,), FieldState(self), span)
+        body, done = cfg.block(), cfg.block()
+        cfg.current.terminator = Terminator('conditional', (Edge(body.identity), Edge(done.identity)), condition)
+        cfg.current = body
+        action()
+        cfg.current.terminator = Terminator('jump', (Edge(done.identity),))
+        cfg.current = done
+
+    def destroy(self, cfg, span):
+        def destroy():
+            value = self.read(cfg, span)
+            self.clear(cfg, span)
+            release_storage(value, cfg, span)
+        self.when_initialized(cfg, span, destroy)
+
+    def take(self, cfg, span, value=None):
+        value = self.read(cfg, span) if value is None else value
+        if self.type.family == 'record':
+            value = cfg.emit('memory-copy', self.type, (value,), StorageTransfer(stored_type(self.type, cfg.context)), span)
+        self.clear(cfg, span)
+        cfg.owned_results.add(value.identity)
+        return value
+
     def read(self, cfg, span):
         return cfg.emit("read", self.type, (self.receiver,), self, span)
 
@@ -203,6 +238,10 @@ class FieldPlace:
         address = f"%field_{suffix}_{self.index}"
         lines = [f"{address} = llvm.getelementptr {name(self.receiver)}[0, {self.index}] : (!llvm.ptr) -> !llvm.ptr, {self.record_type}"]
         if operation.result:
+            guard = []
+            if self.tracked:
+                guard = FieldState(self).render_load(operation, f'%field_ready_{suffix}')
+                guard.append(f'cf.assert %field_ready_{suffix}, "read of moved or uninitialized record field"')
             if self.type.family == 'record':
                 lines[0] = lines[0].replace(address + ' =', name(operation.result) + ' =', 1)
             elif self.type.mlir.startswith('memref'):
@@ -210,6 +249,7 @@ class FieldPlace:
                 lines.append(f"{name(operation.result)} = builtin.unrealized_conversion_cast %descriptor_{suffix} : {self.storage_type} to {self.type.mlir}")
             else:
                 lines.append(f"{name(operation.result)} = llvm.load {address} : !llvm.ptr -> {self.type.mlir}")
+            lines = guard + lines
         else:
             value, storage = name(operation.operands[-1]), self.storage_type or self.type.mlir
             if self.type.family == 'record':
@@ -219,6 +259,55 @@ class FieldPlace:
                 lines.append(f'%descriptor_{suffix}_{self.index} = builtin.unrealized_conversion_cast {value} : {self.type.mlir} to {storage}')
                 value = f'%descriptor_{suffix}_{self.index}'
             lines.append(f"llvm.store {value}, {address} : {storage}, !llvm.ptr")
+            if self.tracked:
+                lines.extend(FieldState(self, True).render_operation(operation))
+        return lines
+
+
+@dataclass(frozen=True)
+class FieldState:
+    place: FieldPlace
+    initialized: object = None
+
+    def atom(self, operation):
+        from py_compiler.syntax.generic.atom import Atom
+        return Atom(self, tuple(v.type for v in operation.operands), operation.result.type if operation.result else None,
+                    tuple('view' for _ in operation.operands), ('read', 'mutation'), self)
+
+    def address(self, operation):
+        from py_compiler.mlir.src.cfg import name, temporary_suffix
+        index = len(self.place.receiver.type.declaration.fields) + self.place.index
+        address = f'%field_flag_{temporary_suffix(operation)}_{index}'
+        return address, f'{address} = llvm.getelementptr {name(operation.operands[0])}[0, {index}] : (!llvm.ptr) -> !llvm.ptr, {self.place.record_type}'
+
+    def render_load(self, operation, result):
+        address, line = self.address(operation)
+        return [line, f'{result} = llvm.load {address} : !llvm.ptr -> i1']
+
+    def render_operation(self, operation):
+        from py_compiler.mlir.src.cfg import name, temporary_suffix
+        if self.initialized is None:
+            return self.render_load(operation, name(operation.result))
+        address, line = self.address(operation)
+        flag = f'%field_flag_value_{temporary_suffix(operation)}'
+        return [line, f'{flag} = arith.constant {int(self.initialized)} : i1',
+                f'llvm.store {flag}, {address} : i1, !llvm.ptr']
+
+
+@dataclass(frozen=True)
+class StorageTransfer:
+    storage: str
+
+    def atom(self, operation):
+        from py_compiler.syntax.generic.atom import Atom
+        return Atom(self, (operation.operands[0].type,), operation.result.type, ('move',), (), self)
+
+    def render_operation(self, operation):
+        from py_compiler.mlir.src.cfg import name, temporary_suffix
+        tag = temporary_suffix(operation)
+        lines = []
+        packed = pack_value(lines, name(operation.operands[0]), operation.result.type, self.storage, f'%transfer_{tag}')
+        unpack_value(lines, packed, operation.result.type, self.storage, name(operation.result))
         return lines
 
 
@@ -280,3 +369,25 @@ class AddressPlace:
 
     def write(self, cfg, value, span):
         return self.place.write(cfg, value, span)
+
+
+import unittest
+
+
+class FieldStateTests(unittest.TestCase):
+    def test_initialized_and_cleared_flags_pass_native_verification(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.mlir.src.lib import lower, render, verify_native
+        source = '''class Buffer:
+    data: array[int]
+def work():
+    buffer = Buffer(array[int,1]())
+    taken = move buffer.data
+    drop buffer
+    drop taken
+'''
+        result = compile_source('field-state.sev', source, Syntax())
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        text = render(lower(result.program))
+        verify_native(text)

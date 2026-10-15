@@ -27,6 +27,8 @@ def layout_of(type_, context, active=()):
             fields.append((field, offset))
             offset += layout.size
             alignment = max(alignment, layout.alignment)
+        if type_.owns_fields:
+            offset += len(type_.declaration.fields)
         return Layout((offset + alignment - 1) // alignment * alignment, alignment, tuple(fields))
     if type_.family == 'array':
         if type_.count is None:
@@ -40,6 +42,9 @@ def layout_of(type_, context, active=()):
             offset = (offset + layout.alignment - 1) // layout.alignment * layout.alignment + layout.size
             alignment = max(alignment, layout.alignment)
         return Layout((offset + alignment - 1) // alignment * alignment, alignment)
+    if type_.family == 'iterator':
+        word = context.type('usize').bits // 8
+        return Layout(3 * word, word)
     if type_.family == 'dynamic':
         word = context.type('usize').bits // 8
         return Layout(2 * word, word)

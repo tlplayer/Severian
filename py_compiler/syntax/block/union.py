@@ -80,7 +80,11 @@ class UnionType:
         empty = cfg.emit('union-empty', self, (), UnionEmpty(), span) if result else None
         cfg.current.terminator = Terminator('jump', (Edge(done.identity, (empty,) if result else ()),))
         cfg.current = done
-        return done.parameters[0] if result else None
+        if result:
+            output = done.parameters[0]
+            cfg.value_dependencies[output.identity] = set(cfg.value_dependencies.get(value.identity, ()))
+            return output
+        return None
 
     def field_place(self, receiver, field, cfg, span, write=False):
         present = [i for i, member in enumerate(self.variants) if member.mlir]
@@ -206,7 +210,7 @@ class UnionWiden:
         prefix = f'%widen_{result.identity}'
         lines = [f'{prefix}_source_tag = llvm.extractvalue {name(source)}[0] : {source.type.mlir}',
                  f'{prefix}_initial = llvm.mlir.zero : {result.type.mlir}',
-                 f'{prefix}_tag_0 = arith.constant 0 : i32']
+                 f'{prefix}_tag_0 = arith.constant -1 : i32']
         aggregate = prefix + '_initial'
         tag = prefix + '_tag_0'
         for index, member in enumerate(source.type.variants):

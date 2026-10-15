@@ -92,6 +92,8 @@ class AtomTests(unittest.TestCase):
         atom = Atom(integer, (integer,), integer, ('view',), ('IO',), ExternalSymbol('native_step', 'C', ('native.o',)))
         operation = Operation('external', result, (argument,), atom, None, atom)
         body = Body('run', 'run', 'atom.sev', integer, [ExecutionBlock(0, (argument,), [operation], Terminator('finish', value=result))])
+        from py_compiler.mir.verification import prepare_body
+        prepare_body(body)
         lir = lower(Program((), (), (body,)), 'x86_64-unknown-linux-gnu', 64)
         self.assertEqual(lir.dependencies, ('native.o',))
         self.assertIn('func.func private @native_step(i64) -> i64', lir.text())

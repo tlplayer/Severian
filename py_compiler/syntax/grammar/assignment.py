@@ -101,7 +101,13 @@ class Assignment:
         expected = annotation or (existing.type if existing else None)
         if expected and expected.family == 'shared' and owner and owner.type != expected and mode != 'share':
             raise ValueError('use share to convert a named owner into shared ownership')
-        value = cfg.expr(core, env, None if mode == 'share' else expected)
+        moving_place = None
+        if mode == 'move' and core.kind in ('member', 'index'):
+            from py_compiler.syntax.generic.place import analyze_target
+            moving_place, moving_owner, _, _ = analyze_target(core, cfg, env).lower(cfg, env, node.span)
+            value = moving_place.read(cfg, node.span)
+        else:
+            value = cfg.expr(core, env, None if mode == 'share' else expected)
         if mode == 'share':
             from py_compiler.syntax.complex.shared import Shared
             if owner is None or owner.ownership in ('view', 'borrow'):
@@ -154,17 +160,26 @@ class Assignment:
         if mode in ("borrow", "view", "move") and owner is None:
             raise ValueError(f"{mode} requires an existing binding")
         if mode == "move":
-            if owner and owner.identity in cfg.storage and callable(getattr(value.type, 'release', None)):
-                raise ValueError('moving an owned field requires replacing it; use copy')
-            if core.kind in ('member', 'index') and callable(getattr(value.type, 'release', None)):
-                raise ValueError('moving an owned field requires replacing it; use copy')
-            viewed = cfg.flow.views.get(owner.identity)
-            cfg.flow.move(owner)
-            ownership = owner.ownership if viewed else "own"
-            if viewed:
-                owner = next((b for b in env.values() if b.identity == viewed), None)
-                if owner is None:
-                    raise ValueError("moved view has no live source binding")
+            from py_compiler.syntax.generic.storage import owns_storage
+            if core.kind in ('member', 'index') and owns_storage(value.type):
+                place, source = moving_place, moving_owner
+                if not callable(getattr(place, 'take', None)):
+                    raise ValueError('this projection does not support ownership transfer')
+                if source is None or source.ownership in ('view', 'borrow'):
+                    raise ValueError('field move requires an owning binding')
+                with AddressPlace(place, source).capture(cfg, 'borrow'):
+                    value = place.take(cfg, node.span, value)
+                ownership, mode, owner = 'own', 'own', None
+            else:
+                if owner and owner.identity in cfg.storage and owns_storage(value.type):
+                    raise ValueError('moving an owned field requires an explicit field projection')
+                viewed = cfg.flow.views.get(owner.identity)
+                cfg.flow.move(owner)
+                ownership = owner.ownership if viewed else "own"
+                if viewed:
+                    owner = next((b for b in env.values() if b.identity == viewed), None)
+                    if owner is None:
+                        raise ValueError("moved view has no live source binding")
         if existing and operator not in ('=', ':='):
             select(existing.type, 'O.assignment', operator).expand(cfg, BindingPlace(existing), value, node.span)
             return

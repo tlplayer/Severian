@@ -2,7 +2,7 @@ import io
 
 
 test "seek":
-    stream = io.MemoryStream([1, 2, 3, 4])
+    stream = io.IOStream([1, 2, 3, 4])
 
     stream.seek(-1B, io.End)
 

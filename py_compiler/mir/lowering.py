@@ -2,7 +2,7 @@
 from dataclasses import fields, replace
 
 
-def lower_body(typed):
+def lower_body(typed, *, prepare=True):
     from py_compiler.hir.thir.src.model import TypedBody, thaw_data
     from py_compiler.mir.cfg.cfg import Body, ExecutionBlock, Value, Operation, Edge, Terminator
     if not isinstance(typed, TypedBody):
@@ -44,12 +44,9 @@ def lower_body(typed):
             value(exit_.value), exit_.message, exit_.span)
         body.blocks.append(ExecutionBlock(region.identity, tuple(value(parameter) for parameter in region.parameters),
                                           operations, terminator))
-    from py_compiler.mir.ownership.flow import verify_retained_lifetimes
-    from py_compiler.mir.memory import resolve
-    body.verify()
-    verify_retained_lifetimes(body)
-    resolve(body)
-    body.verify()
+    if prepare:
+        from py_compiler.mir.verification import prepare_body
+        prepare_body(body)
     return body
 
 

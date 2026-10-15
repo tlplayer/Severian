@@ -114,6 +114,8 @@ def resolve(body):
             replacements[identity] = replace(op.payload, plan=replace(plan, location=placement))
             if placement == 'stack':
                 local.add(identity)
+        elif plan.location == 'stack':
+            local.add(identity)
     positions = {id(op): index for index, op in enumerate(operations)}
     for (strategy, alignment), entries in groups.items():
         region = f'memory_region_{len(regions)}'
@@ -145,6 +147,36 @@ def resolve(body):
             if payload is not None:
                 updated = replace(op, payload=payload)
                 block.operations[index] = replace(updated, atom=payload.atom(updated))
+    return roots, local
+
+
+def verify_memory(body):
+    """Check the plan's fixed point and every elided deallocation's provenance."""
+    from py_compiler.mir.verification import snapshot
+    candidate = replace(body, blocks=[replace(block, operations=list(block.operations)) for block in body.blocks])
+    roots, local = resolve(candidate)
+    if snapshot(candidate) != snapshot(body):
+        raise ValueError('memory obligations are unresolved or the placement plan is stale')
+    slabs = {slab.name: slab for slab in body.memory_regions}
+    if len(slabs) != len(body.memory_regions):
+        raise ValueError('duplicate memory region')
+    for slab in slabs.values():
+        if slab.size < 0 or slab.alignment <= 0 or slab.alignment & (slab.alignment - 1):
+            raise ValueError('invalid memory region layout')
+    for block in body.blocks:
+        for operation in block.operations:
+            payload = operation.payload
+            if isinstance(payload, EndLocal):
+                sources = roots.get(operation.operands[0].identity, set())
+                # Shared handles end after their counter/backing release; those
+                # are not array placement decisions.
+                if operation.kind != 'share-end' and (not sources or not sources <= local):
+                    raise ValueError('local cleanup has no local allocation proof')
+            if isinstance(payload, (MemoryOperation, RecordMemory)) and payload.kind == 'allocate' and payload.plan:
+                if payload.plan.location not in ('stack', 'heap'):
+                    raise ValueError('unresolved allocation placement')
+                if payload.region and payload.region not in slabs:
+                    raise ValueError('allocation has no memory region')
 
 
 import unittest

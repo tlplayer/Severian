@@ -12,7 +12,7 @@ class Drop(PrefixOperator):
         items = list(node.tokens[1:])
         from py_compiler.syntax.grammar.expression import expression
         term = cfg.capture_expression(expression(items))
-        if term.kind == 'index':
+        if term.kind in ('index', 'member'):
             from py_compiler.syntax.generic.place import analyze_target
             from py_compiler.syntax.generic.storage import AddressPlace
             place, owner, _, _ = analyze_target(term, cfg, env).lower(cfg, env, node.span)
@@ -35,7 +35,7 @@ class Drop(PrefixOperator):
         if len(items) != 1 or items[0].text not in env:
             raise ValueError("drop requires a visible binding")
         binding = env[items[0].text]
-        if callable(getattr(binding.type, 'release', None)):
+        if callable(getattr(binding.type, 'release', None)) or (binding.type.family == 'string' and cfg.values.get(binding.identity) is not None and cfg.values[binding.identity].identity in cfg.owned_results):
             binding.type.require_context(cfg)
             if binding.ownership in ('view', 'borrow'):
                 raise ValueError('cannot drop memory through a view or borrow')
