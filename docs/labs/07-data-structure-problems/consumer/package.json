@@ -1,0 +1,8 @@
+{
+  "package": {"name": "lab-data-structure-problems", "version": "0.1.0"},
+  "dependencies": {
+    "linked_list": {"package": "lab-linked-list", "path": "../../04-linked-list/linked_list"},
+    "bst": {"package": "lab-bst", "path": "../../05-binary-search-tree/bst"},
+    "dictionary": {"package": "lab-dictionary", "path": "../../06-hash-dictionary/dictionary"}
+  }
+}

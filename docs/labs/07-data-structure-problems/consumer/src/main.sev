@@ -1,0 +1,417 @@
+import linked_list
+import bst
+import dictionary
+
+# Lab 07: consumers of the three independently packaged data structures.
+# Problem statements/examples: /home/tplayer/Documents/problems/en/1-1000/.
+# Each test below names its source file. Additional cases are marked regressions.
+
+# LC 24: relink pairs without exchanging payloads. O(N) time, O(1) extra.
+def swap_pairs(values: borrow linked_list.LinkedList[int]):
+    before = -1
+    remaining = values.size()
+    while remaining >= 2:
+        before = values.reverse_after(before, 2)
+        remaining -= 2
+
+
+# LC 19: lead/follow cursors make one forward pass, including head deletion.
+def remove_nth_from_end(values: borrow linked_list.LinkedList[int], n: int):
+    assert(n > 0 and n <= values.size())
+    lead = values.head
+    i = 0
+    while i < n:
+        lead = values.next[lead]
+        i += 1
+    follow = values.head
+    while lead != -1:
+        lead = values.next[lead]
+        follow = values.next[follow]
+    values.erase(follow)
+
+
+# LC 300: maintain the smallest possible last value for each subsequence length.
+# Tree rank locates the first tail >= value; replace it, or extend the tails.
+# O(N*h) time, O(N) storage; this lab's unbalanced BST has worst-case h=N.
+def longest_increasing_subsequence(values: array[int]) -> int:
+    tails = bst.Tree[int]()
+    i = 0
+    while i < len(values):
+        value = values[i]
+        position = tails.rank(value)
+        if position < tails.size():
+            previous = tails.kth(position)
+            tails.remove(previous)
+        tails.insert(value)
+        i += 1
+    return tails.size()
+
+
+# LC 454: count pair sums, retaining multiplicity rather than a set of sums.
+# Expected O(N*N) time and space for equally sized arrays, under LC bounds.
+def four_sum_count(a: array[int], b: array[int], c: array[int], d: array[int]) -> int:
+    sums = dictionary.Dictionary[int,int]()
+    i = 0
+    while i < len(a):
+        j = 0
+        while j < len(b):
+            key = a[i] + b[j]
+            sums[key] = sums.get_or(key, 0) + 1
+            j += 1
+        i += 1
+    result = 0
+    i = 0
+    while i < len(c):
+        j = 0
+        while j < len(d):
+            result += sums.get_or(-(c[i] + d[j]), 0)
+            j += 1
+        i += 1
+    return result
+
+
+# LC 84: monotonic stack of indices, implemented by the imported linked list.
+# Each index enters/leaves once: O(N) time and O(N) space. A virtual final
+# zero-height bar flushes the stack without mutating the input array.
+def largest_rectangle(heights: array[int]) -> int:
+    stack = linked_list.LinkedList[int]()
+    best = 0
+    i = 0
+    while i <= len(heights):
+        height = 0
+        if i < len(heights):
+            height = heights[i]
+            assert(height >= 0)
+        while stack.size() > 0:
+            top = stack.get(stack.tail)
+            if heights[top] <= height:
+                break
+            stack.pop_back()
+            left = -1
+            if stack.size() > 0:
+                left = stack.get(stack.tail)
+            area = heights[top] * (i - left - 1)
+            if area > best:
+                best = area
+        if i < len(heights):
+            stack.push_back(i)
+        i += 1
+    return best
+
+
+# Helpers keep examples expressed as the problem's input/output sequences.
+def make_list(values: array[int]) -> linked_list.LinkedList[int]:
+    result = linked_list.LinkedList[int]()
+    i = 0
+    while i < len(values):
+        result.push_back(values[i])
+        i += 1
+    return result
+
+
+def assert_list(values: linked_list.LinkedList[int], expected: array[int]):
+    assert(values.size() == len(expected))
+    node = values.head
+    previous = -1
+    i = 0
+    while i < len(expected):
+        assert(node != -1)
+        assert(values.previous[node] == previous)
+        assert(values.get(node) == expected[i])
+        previous = node
+        node = values.next[node]
+        i += 1
+    assert(node == -1)
+    assert(values.tail == previous)
+
+
+test "LC24 24-swap-nodes-in-pairs examples 1 through 4":
+    # values = make_list([1, 2, 3, 4])
+    input_1 = array[int,4]()
+    input_1[0] = 1
+    input_1[1] = 2
+    input_1[2] = 3
+    input_1[3] = 4
+    values = make_list(input_1)
+    original_head = values.head
+    swap_pairs(values)
+    # assert_list(values, [2, 1, 4, 3])
+    input_2 = array[int,4]()
+    input_2[0] = 2
+    input_2[1] = 1
+    input_2[2] = 4
+    input_2[3] = 3
+    assert_list(values, input_2)
+    assert(values.get(original_head) == 1)
+    empty = linked_list.LinkedList[int]()
+    swap_pairs(empty)
+    assert(empty.size() == 0)
+    # single = make_list([1])
+    input_3 = array[int,1]()
+    input_3[0] = 1
+    single = make_list(input_3)
+    swap_pairs(single)
+    # assert_list(single, [1])
+    input_4 = array[int,1]()
+    input_4[0] = 1
+    assert_list(single, input_4)
+    # odd = make_list([1, 2, 3])
+    input_5 = array[int,3]()
+    input_5[0] = 1
+    input_5[1] = 2
+    input_5[2] = 3
+    odd = make_list(input_5)
+    swap_pairs(odd)
+    # assert_list(odd, [2, 1, 3])
+    input_6 = array[int,3]()
+    input_6[0] = 2
+    input_6[1] = 1
+    input_6[2] = 3
+    assert_list(odd, input_6)
+
+
+test "LC19 19-remove-nth-node-from-end-of-list examples 1 through 3":
+    # values = make_list([1, 2, 3, 4, 5])
+    input_7 = array[int,5]()
+    input_7[0] = 1
+    input_7[1] = 2
+    input_7[2] = 3
+    input_7[3] = 4
+    input_7[4] = 5
+    values = make_list(input_7)
+    remove_nth_from_end(values, 2)
+    # assert_list(values, [1, 2, 3, 5])
+    input_8 = array[int,4]()
+    input_8[0] = 1
+    input_8[1] = 2
+    input_8[2] = 3
+    input_8[3] = 5
+    assert_list(values, input_8)
+    # single = make_list([1])
+    input_9 = array[int,1]()
+    input_9[0] = 1
+    single = make_list(input_9)
+    remove_nth_from_end(single, 1)
+    assert(single.size() == 0 and single.head == -1 and single.tail == -1)
+    # pair = make_list([1, 2])
+    input_10 = array[int,2]()
+    input_10[0] = 1
+    input_10[1] = 2
+    pair = make_list(input_10)
+    remove_nth_from_end(pair, 1)
+    # assert_list(pair, [1])
+    input_11 = array[int,1]()
+    input_11[0] = 1
+    assert_list(pair, input_11)
+    # Regression: remove the head of a non-singleton list.
+    remove_nth_from_end(values, 4)
+    # assert_list(values, [2, 3, 5])
+    input_12 = array[int,3]()
+    input_12[0] = 2
+    input_12[1] = 3
+    input_12[2] = 5
+    assert_list(values, input_12)
+
+
+test "LC300 300-longest-increasing-subsequence examples 1 through 3":
+    # assert(longest_increasing_subsequence([10, 9, 2, 5, 3, 7, 101, 18]) == 4)
+    input_13 = array[int,8]()
+    input_13[0] = 10
+    input_13[1] = 9
+    input_13[2] = 2
+    input_13[3] = 5
+    input_13[4] = 3
+    input_13[5] = 7
+    input_13[6] = 101
+    input_13[7] = 18
+    assert(longest_increasing_subsequence(input_13) == 4)
+    # assert(longest_increasing_subsequence([0, 1, 0, 3, 2, 3]) == 4)
+    input_14 = array[int,6]()
+    input_14[0] = 0
+    input_14[1] = 1
+    input_14[2] = 0
+    input_14[3] = 3
+    input_14[4] = 2
+    input_14[5] = 3
+    assert(longest_increasing_subsequence(input_14) == 4)
+    # assert(longest_increasing_subsequence([7, 7, 7, 7, 7, 7, 7]) == 1)
+    input_15 = array[int,7]()
+    input_15[0] = 7
+    input_15[1] = 7
+    input_15[2] = 7
+    input_15[3] = 7
+    input_15[4] = 7
+    input_15[5] = 7
+    input_15[6] = 7
+    assert(longest_increasing_subsequence(input_15) == 1)
+    # Regressions: decreasing, negative, and empty input.
+    # assert(longest_increasing_subsequence([5, 4, 3, 2, 1]) == 1)
+    input_16 = array[int,5]()
+    input_16[0] = 5
+    input_16[1] = 4
+    input_16[2] = 3
+    input_16[3] = 2
+    input_16[4] = 1
+    assert(longest_increasing_subsequence(input_16) == 1)
+    # assert(longest_increasing_subsequence([-3, -2, -2, -1]) == 3)
+    input_17 = array[int,4]()
+    input_17[0] = -3
+    input_17[1] = -2
+    input_17[2] = -2
+    input_17[3] = -1
+    assert(longest_increasing_subsequence(input_17) == 3)
+    empty = array[int,0]()
+    assert(longest_increasing_subsequence(empty) == 0)
+
+
+test "LC454 454-4sum-ii examples and duplicate multiplicity":
+    # assert(four_sum_count([1, 2], [-2, -1], [-1, 2], [0, 2]) == 2)
+    input_18 = array[int,2]()
+    input_18[0] = 0
+    input_18[1] = 2
+    input_19 = array[int,2]()
+    input_19[0] = -1
+    input_19[1] = 2
+    input_20 = array[int,2]()
+    input_20[0] = -2
+    input_20[1] = -1
+    input_21 = array[int,2]()
+    input_21[0] = 1
+    input_21[1] = 2
+    assert(four_sum_count(input_21, input_20, input_19, input_18) == 2)
+    # assert(four_sum_count([0], [0], [0], [0]) == 1)
+    input_22 = array[int,1]()
+    input_22[0] = 0
+    input_23 = array[int,1]()
+    input_23[0] = 0
+    input_24 = array[int,1]()
+    input_24[0] = 0
+    input_25 = array[int,1]()
+    input_25[0] = 0
+    assert(four_sum_count(input_25, input_24, input_23, input_22) == 1)
+    # Regressions: 2^4 index tuples, no match, and signed constraint extremes.
+    # assert(four_sum_count([0, 0], [0, 0], [0, 0], [0, 0]) == 16)
+    input_26 = array[int,2]()
+    input_26[0] = 0
+    input_26[1] = 0
+    input_27 = array[int,2]()
+    input_27[0] = 0
+    input_27[1] = 0
+    input_28 = array[int,2]()
+    input_28[0] = 0
+    input_28[1] = 0
+    input_29 = array[int,2]()
+    input_29[0] = 0
+    input_29[1] = 0
+    assert(four_sum_count(input_29, input_28, input_27, input_26) == 16)
+    # assert(four_sum_count([1], [1], [1], [1]) == 0)
+    input_30 = array[int,1]()
+    input_30[0] = 1
+    input_31 = array[int,1]()
+    input_31[0] = 1
+    input_32 = array[int,1]()
+    input_32[0] = 1
+    input_33 = array[int,1]()
+    input_33[0] = 1
+    assert(four_sum_count(input_33, input_32, input_31, input_30) == 0)
+    # assert(four_sum_count([268435456], [268435456], [-268435456], [-268435456]) == 1)
+    input_34 = array[int,1]()
+    input_34[0] = -268435456
+    input_35 = array[int,1]()
+    input_35[0] = -268435456
+    input_36 = array[int,1]()
+    input_36[0] = 268435456
+    input_37 = array[int,1]()
+    input_37[0] = 268435456
+    assert(four_sum_count(input_37, input_36, input_35, input_34) == 1)
+
+
+test "LC84 84-largest-rectangle-in-histogram examples and boundary bars":
+    # assert(largest_rectangle([2, 1, 5, 6, 2, 3]) == 10)
+    input_38 = array[int,6]()
+    input_38[0] = 2
+    input_38[1] = 1
+    input_38[2] = 5
+    input_38[3] = 6
+    input_38[4] = 2
+    input_38[5] = 3
+    assert(largest_rectangle(input_38) == 10)
+    # assert(largest_rectangle([2, 4]) == 4)
+    input_39 = array[int,2]()
+    input_39[0] = 2
+    input_39[1] = 4
+    assert(largest_rectangle(input_39) == 4)
+    # Regressions: duplicates, zero separators, monotonic inputs, final flush.
+    # assert(largest_rectangle([2, 2, 2]) == 6)
+    input_40 = array[int,3]()
+    input_40[0] = 2
+    input_40[1] = 2
+    input_40[2] = 2
+    assert(largest_rectangle(input_40) == 6)
+    # assert(largest_rectangle([2, 0, 2]) == 2)
+    input_41 = array[int,3]()
+    input_41[0] = 2
+    input_41[1] = 0
+    input_41[2] = 2
+    assert(largest_rectangle(input_41) == 2)
+    # assert(largest_rectangle([1, 2, 3, 4]) == 6)
+    input_42 = array[int,4]()
+    input_42[0] = 1
+    input_42[1] = 2
+    input_42[2] = 3
+    input_42[3] = 4
+    assert(largest_rectangle(input_42) == 6)
+    # assert(largest_rectangle([4, 3, 2, 1]) == 6)
+    input_43 = array[int,4]()
+    input_43[0] = 4
+    input_43[1] = 3
+    input_43[2] = 2
+    input_43[3] = 1
+    assert(largest_rectangle(input_43) == 6)
+    # assert(largest_rectangle([0]) == 0)
+    input_44 = array[int,1]()
+    input_44[0] = 0
+    assert(largest_rectangle(input_44) == 0)
+    # assert(largest_rectangle([10000]) == 10000)
+    input_45 = array[int,1]()
+    input_45[0] = 10000
+    assert(largest_rectangle(input_45) == 10000)
+    empty = array[int,0]()
+    assert(largest_rectangle(empty) == 0)
+
+
+def main():
+    # assert(longest_increasing_subsequence([10, 9, 2, 5, 3, 7, 101, 18]) == 4)
+    input_46 = array[int,8]()
+    input_46[0] = 10
+    input_46[1] = 9
+    input_46[2] = 2
+    input_46[3] = 5
+    input_46[4] = 3
+    input_46[5] = 7
+    input_46[6] = 101
+    input_46[7] = 18
+    assert(longest_increasing_subsequence(input_46) == 4)
+    # assert(four_sum_count([1, 2], [-2, -1], [-1, 2], [0, 2]) == 2)
+    input_47 = array[int,2]()
+    input_47[0] = 0
+    input_47[1] = 2
+    input_48 = array[int,2]()
+    input_48[0] = -1
+    input_48[1] = 2
+    input_49 = array[int,2]()
+    input_49[0] = -2
+    input_49[1] = -1
+    input_50 = array[int,2]()
+    input_50[0] = 1
+    input_50[1] = 2
+    assert(four_sum_count(input_50, input_49, input_48, input_47) == 2)
+    # assert(largest_rectangle([2, 1, 5, 6, 2, 3]) == 10)
+    input_51 = array[int,6]()
+    input_51[0] = 2
+    input_51[1] = 1
+    input_51[2] = 5
+    input_51[3] = 6
+    input_51[4] = 2
+    input_51[5] = 3
+    assert(largest_rectangle(input_51) == 10)

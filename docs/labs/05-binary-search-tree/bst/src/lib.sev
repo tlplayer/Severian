@@ -1,0 +1,237 @@
+# Lab 05: unbalanced binary search multiset with subtree cardinalities.
+# Duplicate keys share a node. rank counts strictly smaller entries; kth
+# is zero-based and counts duplicates. Operations cost O(h), worst O(N).
+# Parent links make insertion/deletion iterative even for a sorted input.
+class Tree[T = int]:
+    keys: array[T]
+    left: array[int]
+    right: array[int]
+    parent: array[int]
+    copies: array[int]
+    weight: array[int]
+    root: int
+    used: int
+    free: int
+    count: int
+
+    def Tree(self: borrow Self):
+        self.keys = array[T,0]()
+        self.left = array[int,0]()
+        self.right = array[int,0]()
+        self.parent = array[int,0]()
+        self.copies = array[int,0]()
+        self.weight = array[int,0]()
+        self.root = -1
+        self.used = 0
+        self.free = -1
+        self.count = 0
+
+    def size(self: view Self) -> int:
+        return self.count
+
+    def subtree(self: view Self, node: int) -> int:
+        if node == -1:
+            return 0
+        return self.weight[node]
+
+    def reserve(self: borrow Self, capacity: int):
+        assert(capacity >= 0)
+        if capacity <= len(self.keys):
+            return
+        buffer_keys = array[T,capacity]()
+        buffer_left = array[int,capacity]()
+        buffer_right = array[int,capacity]()
+        buffer_parent = array[int,capacity]()
+        buffer_copies = array[int,capacity]()
+        buffer_weight = array[int,capacity]()
+        i = 0
+        while i < self.used:
+            if self.copies[i] > 0:
+                buffer_keys[i] = self.keys[i]
+            buffer_left[i] = self.left[i]
+            buffer_right[i] = self.right[i]
+            buffer_parent[i] = self.parent[i]
+            buffer_copies[i] = self.copies[i]
+            buffer_weight[i] = self.weight[i]
+            i += 1
+        self.keys = move buffer_keys
+        self.left = move buffer_left
+        self.right = move buffer_right
+        self.parent = move buffer_parent
+        self.copies = move buffer_copies
+        self.weight = move buffer_weight
+
+    def repair(self: borrow Self, node: int):
+        while node != -1:
+            self.weight[node] = self.copies[node] + self.subtree(self.left[node]) + self.subtree(self.right[node])
+            node = self.parent[node]
+
+    def find(self: view Self, key: T) -> int:
+        node = self.root
+        while node != -1:
+            if key < self.keys[node]:
+                node = self.left[node]
+            elif self.keys[node] < key:
+                node = self.right[node]
+            else:
+                return node
+        return -1
+
+    def contains(self: view Self, key: T) -> bool:
+        return self.find(key) != -1
+
+    def insert(self: borrow Self, key: T):
+        ancestor = -1
+        node = self.root
+        goes_left = false
+        while node != -1:
+            ancestor = node
+            if key < self.keys[node]:
+                goes_left = true
+                node = self.left[node]
+            elif self.keys[node] < key:
+                goes_left = false
+                node = self.right[node]
+            else:
+                self.copies[node] += 1
+                self.count += 1
+                self.repair(node)
+                return
+        node = self.free
+        if node == -1:
+            if self.used == len(self.keys):
+                capacity = len(self.keys)
+                assert(capacity <= 576460752303423487)
+                self.reserve(capacity * 2 + 1)
+            node = self.used
+            self.used += 1
+        else:
+            self.free = self.left[node]
+        self.keys[node] = key
+        self.left[node] = -1
+        self.right[node] = -1
+        self.parent[node] = ancestor
+        self.copies[node] = 1
+        self.weight[node] = 1
+        if ancestor == -1:
+            self.root = node
+        elif goes_left:
+            self.left[ancestor] = node
+        else:
+            self.right[ancestor] = node
+        self.count += 1
+        self.repair(ancestor)
+
+    def rank(self: view Self, key: T) -> int:
+        result = 0
+        node = self.root
+        while node != -1:
+            if self.keys[node] < key:
+                result += self.subtree(self.left[node]) + self.copies[node]
+                node = self.right[node]
+            else:
+                node = self.left[node]
+        return result
+
+    def kth(self: view Self, position: int) -> T:
+        assert(position >= 0 and position < self.count)
+        node = self.root
+        while node != -1:
+            left_size = self.subtree(self.left[node])
+            if position < left_size:
+                node = self.left[node]
+            elif position < left_size + self.copies[node]:
+                value = copy self.keys[node]
+                return value
+            else:
+                position -= left_size + self.copies[node]
+                node = self.right[node]
+        assert(false)
+        value = copy self.keys[self.root]
+        return value
+
+    def remove(self: borrow Self, key: T) -> bool:
+        node = self.find(key)
+        if node == -1:
+            return false
+        self.count -= 1
+        if self.copies[node] > 1:
+            self.copies[node] -= 1
+            self.repair(node)
+            return true
+        if self.left[node] != -1 and self.right[node] != -1:
+            successor = self.right[node]
+            while self.left[successor] != -1:
+                successor = self.left[successor]
+            self.keys[node] = self.keys[successor]
+            self.copies[node] = self.copies[successor]
+            node = successor
+        child = self.left[node]
+        if child == -1:
+            child = self.right[node]
+        ancestor = self.parent[node]
+        if child != -1:
+            self.parent[child] = ancestor
+        if ancestor == -1:
+            self.root = child
+        elif self.left[ancestor] == node:
+            self.left[ancestor] = child
+        else:
+            self.right[ancestor] = child
+        drop self.keys[node]
+        self.copies[node] = 0
+        self.weight[node] = 0
+        self.left[node] = self.free
+        self.free = node
+        self.repair(ancestor)
+        return true
+
+
+test "rank and selection count duplicates and negative buffer_keys":
+    tree = Tree[int]()
+    for value in [5, 2, 6, 1, 2, -3]:
+        tree.insert(value)
+    assert(tree.size() == 6)
+    assert(tree.rank(2) == 2)
+    assert(tree.rank(7) == 6)
+    assert(tree.kth(0) == -3)
+    assert(tree.kth(2) == 2)
+    assert(tree.kth(3) == 2)
+    assert(tree.kth(5) == 6)
+
+
+test "delete root with a duplicated successor and recycle nodes":
+    tree = Tree[int]()
+    for value in [5, 2, 8, 6, 6, 7, 9]:
+        tree.insert(value)
+    assert(tree.remove(5))
+    assert(tree.size() == 6)
+    assert(tree.kth(1) == 6 and tree.kth(2) == 6)
+    assert(tree.remove(6))
+    assert(tree.rank(7) == 2)
+    assert(tree.remove(6))
+    assert(not tree.contains(6))
+    assert(tree.remove(2))
+    assert(tree.remove(8))
+    assert(tree.remove(7))
+    assert(tree.remove(9))
+    assert(tree.root == -1 and tree.size() == 0)
+    assert(not tree.remove(9))
+    tree.insert(42)
+    assert(tree.kth(0) == 42)
+
+
+test "sorted input is iterative and buffer_copies have independent ownership":
+    tree = Tree[int]()
+    i = 0
+    while i < 128:
+        tree.insert(i)
+        i += 1
+    saved = copy tree
+    i = 0
+    while i < 128:
+        assert(tree.remove(i))
+        i += 1
+    drop tree
+    assert(saved.size() == 128)
+    assert(saved.kth(127) == 127)

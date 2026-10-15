@@ -1,0 +1,236 @@
+# Lab 04: owning doubly linked list. -1 is the end sentinel.
+# Integer links survive array growth. Erasing a node invalidates its handle;
+# recycled handles must never be retained by callers after erase.
+# Insert is amortized O(1); unlink/move-front are O(1); get copies T.
+class LinkedList[T = int]:
+    values: array[T]
+    next: array[int]
+    previous: array[int]
+    live: array[bool]
+    head: int
+    tail: int
+    count: int
+    used: int
+    free: int
+
+    def LinkedList(self: borrow Self):
+        self.values = array[T,0]()
+        self.next = array[int,0]()
+        self.previous = array[int,0]()
+        self.live = array[bool,0]()
+        self.head = -1
+        self.tail = -1
+        self.count = 0
+        self.used = 0
+        self.free = -1
+
+    def size(self: view Self) -> int:
+        return self.count
+
+    def valid(self: view Self, node: int) -> bool:
+        return node >= 0 and node < self.used and self.live[node]
+
+    def reserve(self: borrow Self, capacity: int):
+        assert(capacity >= 0)
+        if capacity <= len(self.values):
+            return
+        buffer_values = array[T,capacity]()
+        buffer_next = array[int,capacity]()
+        buffer_previous = array[int,capacity]()
+        buffer_live = array[bool,capacity]()
+        i = 0
+        while i < self.used:
+            buffer_live[i] = self.live[i]
+            buffer_next[i] = self.next[i]
+            buffer_previous[i] = self.previous[i]
+            if self.live[i]:
+                buffer_values[i] = self.values[i]
+            i += 1
+        self.values = move buffer_values
+        self.next = move buffer_next
+        self.previous = move buffer_previous
+        self.live = move buffer_live
+
+    def acquire(self: borrow Self, value: T) -> int:
+        node = self.free
+        if node != -1:
+            self.free = self.next[node]
+        else:
+            if self.used == len(self.values):
+                capacity = len(self.values)
+                assert(capacity <= 576460752303423487)
+                self.reserve(capacity * 2 + 1)
+            node = self.used
+            self.used += 1
+        self.values[node] = value
+        self.live[node] = true
+        self.next[node] = -1
+        self.previous[node] = -1
+        self.count += 1
+        return node
+
+    def push_back(self: borrow Self, value: T) -> int:
+        node = self.acquire(value)
+        self.previous[node] = self.tail
+        if self.tail == -1:
+            self.head = node
+        else:
+            self.next[self.tail] = node
+        self.tail = node
+        return node
+
+    def push_front(self: borrow Self, value: T) -> int:
+        node = self.acquire(value)
+        self.next[node] = self.head
+        if self.head == -1:
+            self.tail = node
+        else:
+            self.previous[self.head] = node
+        self.head = node
+        return node
+
+    def get(self: view Self, node: int) -> T:
+        assert(self.valid(node))
+        value = copy self.values[node]
+        return value
+
+    def set(self: borrow Self, node: int, value: T):
+        assert(self.valid(node))
+        self.values[node] = value
+
+    def unlink(self: borrow Self, node: int):
+        assert(self.valid(node))
+        left = self.previous[node]
+        right = self.next[node]
+        if left == -1:
+            self.head = right
+        else:
+            self.next[left] = right
+        if right == -1:
+            self.tail = left
+        else:
+            self.previous[right] = left
+
+    def erase(self: borrow Self, node: int):
+        self.unlink(node)
+        drop self.values[node]
+        self.live[node] = false
+        self.next[node] = self.free
+        self.previous[node] = -1
+        self.free = node
+        self.count -= 1
+
+    def pop_front(self: borrow Self) -> T:
+        assert(self.count > 0)
+        value = self.get(self.head)
+        self.erase(self.head)
+        return value
+
+    def pop_back(self: borrow Self) -> T:
+        assert(self.count > 0)
+        value = self.get(self.tail)
+        self.erase(self.tail)
+        return value
+
+    def move_front(self: borrow Self, node: int):
+        assert(self.valid(node))
+        if node == self.head:
+            return
+        self.unlink(node)
+        self.previous[node] = -1
+        self.next[node] = self.head
+        self.previous[self.head] = node
+        self.head = node
+
+    # Reverse exactly width nodes following before (-1 means before head).
+    # Validate the entire range before mutation. Return the new group's tail.
+    def reverse_after(self: borrow Self, before: int, width: int) -> int:
+        assert(width > 0)
+        assert(before == -1 or self.valid(before))
+        first = self.head
+        if before != -1:
+            first = self.next[before]
+        after = first
+        i = 0
+        while i < width:
+            assert(after != -1)
+            after = self.next[after]
+            i += 1
+        node = first
+        left = after
+        i = 0
+        while i < width:
+            right = self.next[node]
+            self.next[node] = left
+            self.previous[node] = right
+            left = node
+            node = right
+            i += 1
+        self.previous[left] = before
+        if before == -1:
+            self.head = left
+        else:
+            self.next[before] = left
+        if after == -1:
+            self.tail = first
+        else:
+            self.previous[after] = first
+        return first
+
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[T]:
+        node = self.head
+        while node != -1:
+            yield self.values[node]
+            node = self.next[node]
+
+
+test "links survive growth and middle slots are reused":
+    buffer_values = LinkedList[int]()
+    first = buffer_values.push_back(10)
+    middle = buffer_values.push_back(20)
+    last = buffer_values.push_back(30)
+    buffer_values.reserve(128)
+    assert(buffer_values.next[first] == middle)
+    buffer_values.erase(middle)
+    assert(buffer_values.next[first] == last)
+    assert(buffer_values.previous[last] == first)
+    reused = buffer_values.push_front(40)
+    assert(reused == middle)
+    buffer_values.move_front(last)
+    assert(buffer_values.pop_front() == 30)
+    assert(buffer_values.pop_back() == 10)
+    assert(buffer_values.pop_back() == 40)
+    assert(buffer_values.head == -1 and buffer_values.tail == -1)
+    assert(buffer_values.size() == 0)
+
+
+test "reverse relinks nodes and preserves their buffer_values":
+    buffer_values = LinkedList[int]()
+    for value in [1, 2, 3, 4, 5]:
+        buffer_values.push_back(value)
+    group_tail = buffer_values.reverse_after(-1, 3)
+    assert(buffer_values.get(group_tail) == 1)
+    assert(buffer_values.pop_front() == 3)
+    assert(buffer_values.pop_front() == 2)
+    assert(buffer_values.pop_front() == 1)
+    assert(buffer_values.pop_back() == 5)
+    assert(buffer_values.pop_back() == 4)
+
+
+test "owned elements survive copying and removed slots stay uninitialized":
+    buffer_values = LinkedList[array[int]]()
+    source = array[int,1]()
+    source[0] = 42
+    node = buffer_values.push_back(source)
+    saved = copy buffer_values
+    buffer_values.erase(node)
+    drop buffer_values
+    item = saved.pop_back()
+    assert(item[0] == 42)
+    assert(saved.size() == 0)
+
+
+test "empty removal rejects underflow":
+    throws "assertion failed":
+        buffer_values = LinkedList[int]()
+        buffer_values.pop_front()

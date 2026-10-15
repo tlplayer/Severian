@@ -1,0 +1,217 @@
+# Lab 06: open addressing with linear probing and tombstones.
+# State 0 = empty, 1 = occupied, 2 = erased. A probe stops only at empty.
+# Rehash at 70% used buckets, including tombstones. Keys support int/string;
+# values are generic and copied on reads/writes. No iteration-order guarantee.
+# Expected O(1) operations with well-distributed keys, worst O(N).
+def hash_key(key: int) -> int:
+    value = key % 2147483647
+    if value < 0:
+        value += 2147483647
+    return value
+
+
+def hash_key(key: string) -> int:
+    value = 0
+    position = 0
+    while position < len(key):
+        value = (value * 131 + int(key[position])) % 2147483647
+        position += 1
+    return value
+
+
+def keys_equal(left: int, right: int) -> bool:
+    return left == right
+
+
+def keys_equal(left: string, right: string) -> bool:
+    if len(left) != len(right):
+        return false
+    position = 0
+    while position < len(left):
+        if left[position] != right[position]:
+            return false
+        position += 1
+    return true
+
+
+class Dictionary[K: int | string = int, V = int]:
+    keys: array[K]
+    values: array[V]
+    states: array[int]
+    count: int
+    used: int
+
+    def Dictionary(self: borrow Self):
+        self.keys = array[K,8]()
+        self.values = array[V,8]()
+        self.states = array[int,8]()
+        self.count = 0
+        self.used = 0
+
+    def size(self: view Self) -> int:
+        return self.count
+
+    def locate(self: view Self, key: K) -> int:
+        capacity = len(self.states)
+        position = hash_key(key) % capacity
+        probes = 0
+        while probes < capacity:
+            state = self.states[position]
+            if state == 0:
+                return -1
+            if state == 1:
+                candidate = copy self.keys[position]
+                if keys_equal(candidate, key):
+                    return position
+            position = (position + 1) % capacity
+            probes += 1
+        return -1
+
+    def contains(self: view Self, key: K) -> bool:
+        return self.locate(key) != -1
+
+    def get(self: view Self, key: K) -> V:
+        position = self.locate(key)
+        assert(position != -1)
+        value = copy self.values[position]
+        return value
+
+    def get_or(self: view Self, key: K, fallback: V) -> V:
+        position = self.locate(key)
+        if position == -1:
+            value = copy fallback
+            return value
+        value = copy self.values[position]
+        return value
+
+    def rehash(self: borrow Self, capacity: int):
+        assert(capacity >= 8 and capacity > self.count)
+        buffer_keys = array[K,capacity]()
+        buffer_values = array[V,capacity]()
+        buffer_states = array[int,capacity]()
+        i = 0
+        while i < len(self.states):
+            if self.states[i] == 1:
+                stored_key = copy self.keys[i]
+                position = hash_key(stored_key) % capacity
+                while buffer_states[position] == 1:
+                    position = (position + 1) % capacity
+                buffer_keys[position] = self.keys[i]
+                buffer_values[position] = self.values[i]
+                buffer_states[position] = 1
+            i += 1
+        self.keys = move buffer_keys
+        self.values = move buffer_values
+        self.states = move buffer_states
+        self.used = self.count
+
+    def set(self: borrow Self, key: K, value: V):
+        existing = self.locate(key)
+        if existing != -1:
+            self.values[existing] = value
+            return
+        capacity = len(self.states)
+        if (self.used + 1) * 10 >= capacity * 7:
+            if (self.count + 1) * 10 >= capacity * 7:
+                assert(capacity <= 576460752303423487)
+                capacity *= 2
+            self.rehash(capacity)
+        position = hash_key(key) % capacity
+        while self.states[position] == 1:
+            position = (position + 1) % capacity
+        if self.states[position] == 0:
+            self.used += 1
+        self.keys[position] = key
+        self.values[position] = value
+        self.states[position] = 1
+        self.count += 1
+
+    def set_default(self: borrow Self, key: K, fallback: V) -> V:
+        if not self.contains(key):
+            self.set(key, fallback)
+        return self.get(key)
+
+    def erase(self: borrow Self, key: K) -> bool:
+        position = self.locate(key)
+        if position == -1:
+            return false
+        drop self.keys[position]
+        drop self.values[position]
+        self.states[position] = 2
+        self.count -= 1
+        return true
+
+    grammar get[self, "[", key: K, "]"]() -> V:
+        saved_key = copy key
+        return self.get(saved_key)
+
+    grammar assign[self, "[", key: K, "]", "=", value: V]() -> absent:
+        saved_key = copy key
+        saved_value = copy value
+        self.set(saved_key, saved_value)
+
+
+test "collision chains survive deletion and overwrite beyond a tombstone":
+    buffer_values = Dictionary[int,int]()
+    buffer_values[7] = 10
+    buffer_values[15] = 20
+    buffer_values[23] = 30
+    assert(buffer_values.erase(7))
+    assert(buffer_values[23] == 30)
+    buffer_values[23] = 99
+    assert(buffer_values.size() == 2)
+    buffer_values[31] = 40
+    assert(buffer_values[15] == 20)
+    assert(buffer_values[23] == 99)
+    assert(not buffer_values.erase(7))
+    assert(buffer_values.get_or(7, -1) == -1)
+
+
+test "growth and tombstone compaction preserve negative buffer_keys":
+    buffer_values = Dictionary[int,int]()
+    i = -128
+    while i < 128:
+        buffer_values[i] = i * i
+        i += 1
+    i = -128
+    while i < 128:
+        assert(buffer_values[i] == i * i)
+        assert(buffer_values.erase(i))
+        i += 1
+    assert(buffer_values.size() == 0)
+    i = 0
+    while i < 128:
+        buffer_values[i] = i + 1
+        i += 1
+    assert(buffer_values[127] == 128)
+    buffer_values[-9223372036854775807 - 1] = 42
+    assert(buffer_values[-9223372036854775807 - 1] == 42)
+
+
+test "string buffer_keys and owned buffer_values copy independently":
+    buffer_values = Dictionary[string,array[int]]()
+    source = array[int,1]()
+    source[0] = 42
+    buffer_values["answer"] = source
+    buffer_values[""] = source
+    saved = copy buffer_values
+    source[0] = 9
+    assert(buffer_values.erase("answer"))
+    drop buffer_values
+    result = saved["answer"]
+    assert(result[0] == 42)
+    empty_key = saved[""]
+    assert(empty_key[0] == 42)
+
+
+test "default inserts only when missing":
+    buffer_values = Dictionary[int,int]()
+    assert(buffer_values.set_default(5, 10) == 10)
+    assert(buffer_values.set_default(5, 99) == 10)
+    assert(buffer_values.size() == 1)
+
+
+test "missing lookup rejects":
+    throws "assertion failed":
+        buffer_values = Dictionary[int,int]()
+        buffer_values.get(6)
