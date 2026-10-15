@@ -13,6 +13,7 @@ If there is functionality which you pivoted to avoid because
  it was out of scope, add a test and a note in `.agent_todo.md`
 so I can go over and think about what we should build next. 
 Only after after python/sev implementation is COMPLETE 100%! not partial, can you run tests and builds in severian
+for references on compilers see: .references.md
 
 ```
 sev_py # python backup compiler
