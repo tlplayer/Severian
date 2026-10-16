@@ -1,0 +1,94 @@
+# Randomness is an effectful source, not a property of the output integer.
+# next mutates the caller-owned source; bound describes the exclusive upper
+# bound of a uniform raw draw. No global state or hidden reseeding.
+trait RandomSource:
+    def next(self: borrow Self) -> int
+    def bound(self: view Self) -> int
+
+
+# Deterministic Park-Miller generator for reproducible algorithm experiments.
+# Not cryptographic. The positive seed is explicit and copy preserves state.
+class ParkMiller: RandomSource
+    state: int
+
+    def ParkMiller(self: borrow Self, seed: int):
+        assert(seed > 0 and seed < 2147483647)
+        self.state = seed
+
+    def bound(self: view Self) -> int:
+        return 2147483646
+
+    def next(self: borrow Self) -> int:
+        self.state = (self.state * 48271) % 2147483647
+        return self.state - 1
+
+
+# SIP-0007 value dispatch: after matching R and int, exactly one provider
+# accepts upper. A one-outcome range consumes no entropy; larger ranges use
+# rejection sampling. Adding providers cannot silently override a fallback.
+trait RandomRange[R]:
+    def draw(source: borrow R, upper: int) -> int
+
+
+class UnitRange[R: RandomSource]: RandomRange[R]
+    def draw(source: borrow R, upper: int) -> int with upper == 1:
+        return 0
+
+
+class RejectionRange[R: RandomSource]: RandomRange[R]
+    def draw(source: borrow R, upper: int) -> int with upper > 1:
+        bound = source.bound()
+        limit = bound - bound % upper
+        while true:
+            value = source.next()
+            assert(value >= 0 and value < bound)
+            if value < limit:
+                return value % upper
+        return 0
+
+
+def random[R: RandomSource](source: borrow R, upper: int) -> int:
+    assert(upper > 0 and upper <= source.bound())
+    return RandomRange[R].draw(source, upper)
+
+
+test "seeded random vectors and copies reproduce the same stream":
+    source = ParkMiller(1)
+    assert(source.next() == 48270)
+    assert(source.next() == 182605793)
+    saved = copy source
+    assert(source.next() == 1291394885)
+    assert(saved.next() == 1291394885)
+    i = 0
+    while i < 128:
+        value = random(source, 17)
+        assert(value >= 0 and value < 17)
+        i += 1
+
+
+test "random uses a supplied source and rejects the biased tail":
+    class Sequence: RandomSource
+        cursor: int
+        def bound(self: view Self) -> int:
+            return 8
+        def next(self: borrow Self) -> int:
+            value = self.cursor
+            self.cursor = (self.cursor + 1) % 8
+            return value
+    source = Sequence(6)
+    assert(random(source, 3) == 0)
+    assert(source.cursor == 1)  # 6 and 7 rejected, 0 accepted.
+    assert(random(source, 3) == 1)
+    assert(random(source, 1) == 0)
+    assert(source.cursor == 2)  # UnitRange does not advance the source.
+
+
+test "random rejects zero range":
+    throws "assertion failed":
+        source = ParkMiller(1)
+        random(source, 0)
+
+
+test "random rejects an invalid seed":
+    throws "assertion failed":
+        source = ParkMiller(0)

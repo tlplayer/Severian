@@ -364,7 +364,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
              for d in program.declarations if d.kind == 'class' and '.' not in d.name]
     types += [{'name': d.name, 'kind': 'union', 'variants': list(d.variants)}
               for d in program.declarations if d.kind == 'union' and '.' not in d.name]
-    type_names = {t['name'] for t in types}
+    type_names = {t['name'] for t in types} | {d.name for d in program.declarations if d.kind == 'trait'}
     exports = []
     for body in program.bodies:
         if body.declaration and not body.declaration.startswith('__iterator_') and not body.test and (('.' not in body.declaration and '[' not in body.declaration) or body.declaration.rsplit('.', 1)[0] in type_names):

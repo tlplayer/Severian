@@ -3,6 +3,7 @@ from importlib import import_module
 
 
 BLOCKS = (
+    ('block.mlir', 'Mlir'),
     ('block.for', 'For'), ('block.while', 'While'), ('block.import', 'Import'), ('block.if', 'Conditional'), ('block.elif', 'Elif'), ('block.else', 'Else'),
     ('block.class', 'Class'), ('block.trait', 'Trait'), ('block.enum', 'Enum'), ('block.union', 'UnionDeclaration'),
     ('block.function', 'Function'), ('block.test', 'Test'), ('block.grammar', 'Grammar'),

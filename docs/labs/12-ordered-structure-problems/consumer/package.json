@@ -1,0 +1,28 @@
+{
+  "package": {
+    "name": "lab-ordered-structure-problems",
+    "version": "0.1.0"
+  },
+  "dependencies": {
+    "heap": {
+      "package": "lab-heap",
+      "path": "../../08-heap/heap"
+    },
+    "stack": {
+      "package": "lab-stack",
+      "path": "../../09-stack/stack"
+    },
+    "btree": {
+      "package": "lab-btree",
+      "path": "../../10-btree/btree"
+    },
+    "disjoint_sets": {
+      "package": "lab-disjoint-sets",
+      "path": "../../11-disjoint-sets/disjoint_sets"
+    },
+    "utils": {
+      "package": "lab-utils",
+      "path": "../../02-utils/utils"
+    }
+  }
+}

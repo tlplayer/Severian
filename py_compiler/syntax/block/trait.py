@@ -17,7 +17,6 @@ class Trait(RecordProvider):
         if record_header(node.header)[2]:
             raise ValueError('trait inheritance is not implemented')
         fields, defaults, members = self.fields(node, context)
-        self.context = context
         methods = tuple(signature(member, ".".join((*context.scope, node.header[0].text))) for member in members)
         for method in methods:
             method.scope = context.scope
@@ -33,24 +32,39 @@ class Trait(RecordProvider):
                                          getattr(node, 'record_template', ''), getattr(node, 'record_arguments', ())))
         name = ".".join((*context.scope, node.header[0].text))
         context.types[name] = ObjectType(name, "trait", "!llvm.struct<(!llvm.ptr, i32)>", declaration=context.by_name[name])
+        if not getattr(context, 'importing_trait', False):
+            from py_compiler.syntax.block.function import Function
+            previous = context.scope
+            context.scope = (*previous, node.header[0].text)
+            try:
+                for method in methods:
+                    if method.node.children and method.receiver_ownership is None:
+                        Function().register(method.node, context)
+            finally:
+                context.scope = previous
 
-    def satisfy(self, target, implementation):
+
+    def satisfy(self, target, implementation, context):
         def resolved(annotation):
             from py_compiler.syntax.complex.generic import substitute
-            return self.context.type(substitute(annotation, {'Self': self.context.types[implementation.name]}))
+            return context.type(substitute(annotation, {'Self': context.types[implementation.name]}))
         for field in target.fields:
             if field not in implementation.fields:
                 raise ValueError(f"{implementation.name} does not satisfy {target.name}.{field[0]}: {field[1]}")
         for method in target.methods:
             name = method.name.rsplit(".", 1)[-1]
-            candidates = self.context.functions.get(implementation.name + "." + name, [])
+            candidates = context.functions.get(implementation.name + "." + name, [])
             expected = tuple(resolved(t) for _, t in method.parameters)
             if not candidates:
+                if method.node.children and method.receiver_ownership is None:
+                    continue
                 if method.node.children:
                     from py_compiler.syntax.block.function import Function
                     from importlib import import_module
-                    Function().register(method.node, self.context, import_module("py_compiler.syntax.block.class").Receiver(implementation))
-                    candidates = self.context.functions[implementation.name + "." + name]
+                    Function().register(method.node, context, import_module("py_compiler.syntax.block.class").Receiver(implementation))
+                    candidates = context.functions[implementation.name + "." + name]
+                    for entry in candidates:
+                        entry.trait_fallback = True
                 else:
                     raise ValueError(f"{implementation.name} is missing {target.name}.{name}")
             matches = []
@@ -58,7 +72,7 @@ class Trait(RecordProvider):
                 if entry.result_ownership != method.result_ownership:
                     continue
                 actual = tuple(resolved(t) for _, t in entry.parameters)
-                if actual == expected and resolved(entry.result or "absent") == resolved(method.result or "absent"):
+                if actual == expected and (method.node.children and method.receiver_ownership is None or resolved(entry.result or "absent") == resolved(method.result or "absent")):
                     if any(entry.parameter_ownership.get(n, 'view') != method.parameter_ownership.get(m, 'view') for (n, _), (m, _) in zip(entry.parameters, method.parameters)):
                         continue
                     if method.receiver_ownership == 'view' and entry.receiver_ownership == 'borrow':
@@ -72,6 +86,31 @@ import unittest
 
 
 class GenericTraitTests(unittest.TestCase):
+    def test_shared_syntax_keeps_parallel_trait_checks_in_their_module(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        from unittest.mock import patch
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        syntax = Syntax()
+        barrier = Barrier(2)
+        satisfy = Trait.satisfy
+
+        def synchronized(provider, target, implementation, context):
+            barrier.wait(timeout=5)
+            return satisfy(provider, target, implementation, context)
+
+        def compile_module(name):
+            return compile_source(name + '.sev',
+                'trait Readable:\n    def read(self: view Self) -> int\n'
+                f'class {name}: Readable\n'
+                '    def read(self: view Self) -> int:\n        return 1\n', syntax)
+
+        with patch.object(Trait, 'satisfy', synchronized), ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(compile_module, ('First', 'Second')))
+        for result in results:
+            self.assertFalse(result.diagnostics, str(result.diagnostics))
+
     source = ('trait Readable[T]:\n    def read(self: view Self) -> T\n'
               'class Cell[T = int]: Readable[T]\n    value: T\n'
               '    def read(self: view Self) -> T:\n        return self.value\n')

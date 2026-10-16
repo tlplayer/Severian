@@ -1,0 +1,533 @@
+import utils
+
+# B-tree ordered map, minimum degree >= 2. Each node has at most 2*t-1
+# entries, every nonroot at least t-1, and every leaf the same depth.
+# Flat arena rows avoid recursive ownership. Freed nodes are reused.
+# O(t*log_t N) search/update; arena growth occasionally copies O(N) storage.
+# Equivalent keys overwrite values; erase reports whether an entry existed.
+class BTree[K = int, V = int, F: utils.Compare[K] = utils.NaturalCompare[K]]:
+    keys: array[K]
+    values: array[V]
+    children: array[int]
+    counts: array[int]
+    leaves: array[bool]
+    degree: int
+    width: int
+    root: int
+    used: int
+    free: int
+    count: int
+
+    def BTree(self: borrow Self, degree: int = 2):
+        assert(degree >= 2 and degree <= 65536)
+        self.degree = degree
+        self.width = degree * 2 - 1
+        self.keys = array[K,0]()
+        self.values = array[V,0]()
+        self.children = array[int,0]()
+        self.counts = array[int,0]()
+        self.leaves = array[bool,0]()
+        self.used = 0
+        self.free = -1
+        self.count = 0
+        self.root = self.allocate(true)
+
+    def less(self: view Self, left: K, right: K) -> bool:
+        return utils.compare[K,F](left, right) < 0
+
+    def size(self: view Self) -> int:
+        return self.count
+
+    def key(self: view Self, node: int, index: int) -> K:
+        value = copy self.keys[node * self.width + index]
+        return value
+
+    def value(self: view Self, node: int, index: int) -> V:
+        result = copy self.values[node * self.width + index]
+        return result
+
+    def put(self: borrow Self, node: int, index: int, key: K, value: V):
+        self.keys[node * self.width + index] = key
+        self.values[node * self.width + index] = value
+
+    def copy_entry(self: borrow Self, target: int, index: int, source: int, offset: int):
+        saved_key = self.key(source, offset)
+        saved_value = self.value(source, offset)
+        self.put(target, index, saved_key, saved_value)
+
+    def discard(self: borrow Self, node: int, index: int):
+        drop self.keys[node * self.width + index]
+        drop self.values[node * self.width + index]
+
+    def child(self: view Self, node: int, index: int) -> int:
+        return self.children[node * (self.width + 1) + index]
+
+    def set_child(self: borrow Self, node: int, index: int, child: int):
+        self.children[node * (self.width + 1) + index] = child
+
+    def allocate(self: borrow Self, leaf: bool) -> int:
+        node = self.free
+        if node != -1:
+            self.free = self.child(node, 0)
+        else:
+            if self.used == len(self.counts):
+                assert(self.used <= 576460752303423487 // (self.width + 1))
+                capacity = self.used * 2 + 1
+                slots = capacity * self.width
+                edges = capacity * (self.width + 1)
+                buffer_keys = array[K,slots]()
+                buffer_values = array[V,slots]()
+                buffer_children = array[int,edges]()
+                buffer_counts = array[int,capacity]()
+                buffer_leaves = array[bool,capacity]()
+                n = 0
+                while n < self.used:
+                    buffer_counts[n] = self.counts[n]
+                    buffer_leaves[n] = self.leaves[n]
+                    j = 0
+                    while j < self.counts[n]:
+                        buffer_keys[n * self.width + j] = self.keys[n * self.width + j]
+                        buffer_values[n * self.width + j] = self.values[n * self.width + j]
+                        j += 1
+                    j = 0
+                    while j <= self.width:
+                        buffer_children[n * (self.width + 1) + j] = self.child(n, j)
+                        j += 1
+                    n += 1
+                self.keys = move buffer_keys
+                self.values = move buffer_values
+                self.children = move buffer_children
+                self.counts = move buffer_counts
+                self.leaves = move buffer_leaves
+            node = self.used
+            self.used += 1
+        self.counts[node] = 0
+        self.leaves[node] = leaf
+        return node
+
+    def release(self: borrow Self, node: int):
+        i = 0
+        while i < self.counts[node]:
+            self.discard(node, i)
+            i += 1
+        self.counts[node] = 0
+        self.set_child(node, 0, self.free)
+        self.free = node
+
+    def position(self: view Self, node: int, key: K) -> int:
+        i = 0
+        while i < self.counts[node]:
+            if not self.less(self.key(node, i), key):
+                break
+            i += 1
+        return i
+
+    def locate(self: view Self, key: K) -> int:
+        node = self.root
+        while true:
+            i = self.position(node, key)
+            if i < self.counts[node]:
+                if not self.less(key, self.key(node, i)):
+                    return node * self.width + i
+            if self.leaves[node]:
+                return -1
+            node = self.child(node, i)
+        return -1
+
+    def contains(self: view Self, value: K) -> bool:
+        return self.locate(value) != -1
+
+    def get(self: view Self, key: K) -> V:
+        slot = self.locate(key)
+        assert(slot != -1)
+        result = copy self.values[slot]
+        return result
+
+    def get_or(self: view Self, key: K, fallback: V) -> V:
+        slot = self.locate(key)
+        if slot == -1:
+            result = copy fallback
+            return result
+        result = copy self.values[slot]
+        return result
+
+    def split(self: borrow Self, parent: int, index: int):
+        left = self.child(parent, index)
+        right = self.allocate(self.leaves[left])
+        i = 0
+        while i < self.degree - 1:
+            self.copy_entry(right, i, left, i + self.degree)
+            self.discard(left, i + self.degree)
+            i += 1
+        self.counts[right] = self.degree - 1
+        if not self.leaves[left]:
+            i = 0
+            while i < self.degree:
+                self.set_child(right, i, self.child(left, i + self.degree))
+                i += 1
+        i = self.counts[parent]
+        while i > index:
+            self.copy_entry(parent, i, parent, i - 1)
+            self.set_child(parent, i + 1, self.child(parent, i))
+            i -= 1
+        self.copy_entry(parent, index, left, self.degree - 1)
+        self.discard(left, self.degree - 1)
+        self.set_child(parent, index + 1, right)
+        self.counts[left] = self.degree - 1
+        self.counts[parent] += 1
+
+    def set(self: borrow Self, key: K, value: V):
+        existing = self.locate(key)
+        if existing != -1:
+            self.values[existing] = value
+            return
+        if self.counts[self.root] == self.width:
+            old = self.root
+            self.root = self.allocate(false)
+            self.set_child(self.root, 0, old)
+            self.split(self.root, 0)
+        node = self.root
+        while not self.leaves[node]:
+            index = self.position(node, key)
+            child = self.child(node, index)
+            if self.counts[child] == self.width:
+                self.split(node, index)
+                if self.less(self.key(node, index), key):
+                    index += 1
+            node = self.child(node, index)
+        index = self.position(node, key)
+        i = self.counts[node]
+        while i > index:
+            self.copy_entry(node, i, node, i - 1)
+            i -= 1
+        self.put(node, index, key, value)
+        self.counts[node] += 1
+        self.count += 1
+
+    def merge(self: borrow Self, parent: int, index: int) -> int:
+        left = self.child(parent, index)
+        right = self.child(parent, index + 1)
+        offset = self.counts[left]
+        self.copy_entry(left, offset, parent, index)
+        i = 0
+        while i < self.counts[right]:
+            self.copy_entry(left, offset + 1 + i, right, i)
+            i += 1
+        if not self.leaves[left]:
+            i = 0
+            while i <= self.counts[right]:
+                self.set_child(left, offset + 1 + i, self.child(right, i))
+                i += 1
+        self.counts[left] += self.counts[right] + 1
+        i = index
+        while i + 1 < self.counts[parent]:
+            self.copy_entry(parent, i, parent, i + 1)
+            self.set_child(parent, i + 1, self.child(parent, i + 2))
+            i += 1
+        self.counts[parent] -= 1
+        self.discard(parent, self.counts[parent])
+        self.release(right)
+        return left
+
+    def borrow_left(self: borrow Self, parent: int, index: int):
+        node = self.child(parent, index)
+        sibling = self.child(parent, index - 1)
+        i = self.counts[node]
+        while i > 0:
+            self.copy_entry(node, i, node, i - 1)
+            i -= 1
+        if not self.leaves[node]:
+            i = self.counts[node] + 1
+            while i > 0:
+                self.set_child(node, i, self.child(node, i - 1))
+                i -= 1
+            self.set_child(node, 0, self.child(sibling, self.counts[sibling]))
+        self.copy_entry(node, 0, parent, index - 1)
+        last = self.counts[sibling] - 1
+        self.copy_entry(parent, index - 1, sibling, last)
+        self.discard(sibling, last)
+        self.counts[sibling] -= 1
+        self.counts[node] += 1
+
+    def borrow_right(self: borrow Self, parent: int, index: int):
+        node = self.child(parent, index)
+        sibling = self.child(parent, index + 1)
+        self.copy_entry(node, self.counts[node], parent, index)
+        if not self.leaves[node]:
+            self.set_child(node, self.counts[node] + 1, self.child(sibling, 0))
+        self.copy_entry(parent, index, sibling, 0)
+        i = 0
+        while i + 1 < self.counts[sibling]:
+            self.copy_entry(sibling, i, sibling, i + 1)
+            i += 1
+        if not self.leaves[sibling]:
+            i = 0
+            while i < self.counts[sibling]:
+                self.set_child(sibling, i, self.child(sibling, i + 1))
+                i += 1
+        self.counts[sibling] -= 1
+        self.discard(sibling, self.counts[sibling])
+        self.counts[node] += 1
+
+    def erase_from(self: borrow Self, node: int, key: K) -> absent:
+        index = self.position(node, key)
+        found = false
+        if index < self.counts[node]:
+            found = not self.less(key, self.key(node, index))
+        if found:
+            if self.leaves[node]:
+                i = index
+                while i + 1 < self.counts[node]:
+                    self.copy_entry(node, i, node, i + 1)
+                    i += 1
+                self.counts[node] -= 1
+                self.discard(node, self.counts[node])
+                return
+            left = self.child(node, index)
+            right = self.child(node, index + 1)
+            if self.counts[left] >= self.degree:
+                cursor = left
+                while not self.leaves[cursor]:
+                    cursor = self.child(cursor, self.counts[cursor])
+                last = self.counts[cursor] - 1
+                replacement = self.key(cursor, last)
+                self.copy_entry(node, index, cursor, last)
+                self.erase_from(left, replacement)
+            elif self.counts[right] >= self.degree:
+                cursor = right
+                while not self.leaves[cursor]:
+                    cursor = self.child(cursor, 0)
+                replacement = self.key(cursor, 0)
+                self.copy_entry(node, index, cursor, 0)
+                self.erase_from(right, replacement)
+            else:
+                merged = self.merge(node, index)
+                self.erase_from(merged, key)
+            return
+        assert(not self.leaves[node])
+        child = self.child(node, index)
+        if self.counts[child] < self.degree:
+            if index > 0 and self.counts[self.child(node, index - 1)] >= self.degree:
+                self.borrow_left(node, index)
+            elif index < self.counts[node] and self.counts[self.child(node, index + 1)] >= self.degree:
+                self.borrow_right(node, index)
+            elif index < self.counts[node]:
+                child = self.merge(node, index)
+            else:
+                child = self.merge(node, index - 1)
+        self.erase_from(child, key)
+
+    def erase(self: borrow Self, key: K) -> bool:
+        if not self.contains(key):
+            return false
+        self.erase_from(self.root, key)
+        self.count -= 1
+        if self.counts[self.root] == 0 and not self.leaves[self.root]:
+            previous = self.root
+            self.root = self.child(previous, 0)
+            self.release(previous)
+        return true
+
+    def clear(self: borrow Self):
+        n = 0
+        while n < self.used:
+            i = 0
+            while i < self.counts[n]:
+                self.discard(n, i)
+                i += 1
+            self.counts[n] = 0
+            n += 1
+        self.used = 0
+        self.free = -1
+        self.count = 0
+        self.root = self.allocate(true)
+
+    def height(self: view Self) -> int:
+        node = self.root
+        depth = 0
+        while not self.leaves[node]:
+            node = self.child(node, 0)
+            depth += 1
+        return depth
+
+    def extreme(self: view Self, node: int, maximum: bool) -> K:
+        while not self.leaves[node]:
+            index = 0
+            if maximum:
+                index = self.counts[node]
+            node = self.child(node, index)
+        index = 0
+        if maximum:
+            index = self.counts[node] - 1
+        return self.key(node, index)
+
+    def validate_node(self: view Self, node: int, depth: int, leaf_depth: int) -> int:
+        assert(node >= 0 and node < self.used)
+        occupied = self.counts[node]
+        assert(occupied <= self.width)
+        if node != self.root:
+            assert(occupied >= self.degree - 1)
+        elif not self.leaves[node]:
+            assert(occupied > 0)
+        i = 1
+        while i < occupied:
+            assert(self.less(self.key(node, i - 1), self.key(node, i)))
+            i += 1
+        if self.leaves[node]:
+            assert(depth == leaf_depth)
+            return occupied
+        total = occupied
+        i = 0
+        while i <= occupied:
+            child = self.child(node, i)
+            total += self.validate_node(child, depth + 1, leaf_depth)
+            if i > 0:
+                assert(self.less(self.key(node, i - 1), self.extreme(child, false)))
+            if i < occupied:
+                assert(self.less(self.extreme(child, true), self.key(node, i)))
+            i += 1
+        return total
+
+    def validate(self: view Self):
+        assert(self.validate_node(self.root, 0, self.height()) == self.count)
+
+
+test "btree ascending descending and permuted deletion preserve invariants":
+    mode = 0
+    while mode < 3:
+        tree = BTree[int,int]()
+        i = 0
+        while i < 193:
+            key = (i * 71) % 193 - 96
+            tree.set(key, key * key)
+            tree.validate()
+            i += 1
+        assert(tree.size() == 193 and tree.height() >= 3)
+        tree.set(0, 999)
+        assert(tree.get(0) == 999 and tree.size() == 193)
+        i = 0
+        while i < 193:
+            key = i - 96
+            if mode == 1:
+                key = 96 - i
+            elif mode == 2:
+                key = (i * 53) % 193 - 96
+            assert(tree.contains(key))
+            if key != 0:
+                assert(tree.get(key) == key * key)
+            assert(tree.erase(key))
+            assert(not tree.erase(key))
+            assert(tree.size() == 192 - i)
+            tree.validate()
+            i += 1
+        assert(tree.height() == 0)
+        used = tree.used
+        i = 0
+        while i < 64:
+            tree.set(i, i)
+            i += 1
+        assert(tree.used <= used)
+        tree.validate()
+        tree.clear()
+        tree.validate()
+        tree.set(42, 84)
+        assert(tree.get(42) == 84)
+        mode += 1
+
+
+test "btree larger degree owned values overwrite erase and independent copies":
+    tree = BTree[int,array[int]](8)
+    payload = array[int,1]()
+    i = 0
+    while i < 130:
+        payload[0] = i
+        tree.set(i, payload)
+        i += 1
+    tree.validate()
+    saved = copy tree
+    payload[0] = 999
+    tree.set(64, payload)
+    assert(tree.erase(0))
+    tree.clear()
+    drop tree
+    read = saved.get(64)
+    assert(read[0] == 64)
+    read[0] = -1
+    again = saved.get(64)
+    assert(again[0] == 64)
+    i = 129
+    while i >= 0:
+        assert(saved.erase(i))
+        saved.validate()
+        i -= 1
+
+
+test "btree missing lookup and invalid degree reject":
+    throws "assertion failed":
+        tree = BTree[int,int]()
+        tree.get(1)
+
+
+test "btree degree one rejects":
+    throws "assertion failed":
+        tree = BTree[int,int](1)
+
+
+test "btree equivalence follows its comparison provider independently of hashing":
+    class ByMagnitude: utils.Compare[int]
+        def compare(left: int, right: int) -> int:
+            # Keep this lab policy within [-1000,1000]; no abs(INT_MIN).
+            assert(left >= -1000 and left <= 1000)
+            assert(right >= -1000 and right <= 1000)
+            a = left
+            b = right
+            if a < 0:
+                a = -a
+            if b < 0:
+                b = -b
+            if a < b:
+                return -1
+            if a > b:
+                return 1
+            return 0
+    tree = BTree[int,int,ByMagnitude]()
+    for key in [-9, 2, -5, 7, -1, 3, -8, 4, 6]:
+        tree.set(key, key)
+    tree.set(5, 99)
+    assert(tree.size() == 9)
+    assert(tree.get(-5) == 99 and tree.get(5) == 99)
+    tree.validate()
+    assert(tree.erase(5))
+    assert(not tree.contains(-5))
+    tree.validate()
+
+
+test "seeded interleaved updates agree with a direct array model":
+    source = utils.ParkMiller(42)
+    tree = BTree[int,int](3)
+    present = array[bool,47]()
+    expected = array[int,47]()
+    count = 0
+    step = 0
+    while step < 300:
+        key = utils.random(source, 47)
+        if utils.random(source, 3) == 0:
+            assert(tree.erase(key) == present[key])
+            if present[key]:
+                present[key] = false
+                count -= 1
+        else:
+            tree.set(key, step)
+            expected[key] = step
+            if not present[key]:
+                present[key] = true
+                count += 1
+        tree.validate()
+        assert(tree.size() == count)
+        i = 0
+        while i < 47:
+            assert(tree.contains(i) == present[i])
+            if present[i]:
+                assert(tree.get(i) == expected[i])
+            i += 1
+        step += 1

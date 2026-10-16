@@ -1,0 +1,203 @@
+import utils
+
+# Binary heap: O(log N) push/pop/replace, O(1) peek, O(N) heapify.
+# Compare is a provider contract, so ordering never requires Numeric or Hash.
+class Heap[T = int, F: utils.Compare[T] = utils.NaturalCompare[T]]:
+    items: array[T]
+    count: int
+    maximum: bool
+
+    def Heap(self: borrow Self, maximum: bool = false):
+        self.items = array[T,0]()
+        self.count = 0
+        self.maximum = maximum
+
+    def size(self: view Self) -> int:
+        return self.count
+
+    def before(self: view Self, left: T, right: T) -> bool:
+        if self.maximum:
+            return utils.compare[T,F](right, left) < 0
+        return utils.compare[T,F](left, right) < 0
+
+    def swap(self: borrow Self, left: int, right: int):
+        saved = copy self.items[left]
+        self.items[left] = self.items[right]
+        self.items[right] = saved
+
+    def sift_down(self: borrow Self, index: int):
+        while index * 2 + 1 < self.count:
+            child = index * 2 + 1
+            if child + 1 < self.count:
+                if self.before(self.items[child + 1], self.items[child]):
+                    child += 1
+            if not self.before(self.items[child], self.items[index]):
+                return
+            self.swap(index, child)
+            index = child
+
+    def push(self: borrow Self, value: T):
+        if self.count == len(self.items):
+            assert(self.count <= 576460752303423487)
+            capacity = self.count * 2 + 1
+            grown = array[T,capacity]()
+            i = 0
+            while i < self.count:
+                grown[i] = self.items[i]
+                i += 1
+            self.items = move grown
+        index = self.count
+        self.items[index] = value
+        self.count += 1
+        while index > 0:
+            parent = (index - 1) // 2
+            if not self.before(self.items[index], self.items[parent]):
+                break
+            self.swap(index, parent)
+            index = parent
+
+    def heapify(self: borrow Self, values: array[T]):
+        self.items = copy values
+        self.count = len(values)
+        index = self.count // 2
+        while index > 0:
+            index -= 1
+            self.sift_down(index)
+
+    def peek(self: view Self) -> T:
+        assert(self.count > 0)
+        value = copy self.items[0]
+        return value
+
+    def pop(self: borrow Self) -> T:
+        assert(self.count > 0)
+        value = copy self.items[0]
+        self.count -= 1
+        if self.count > 0:
+            self.items[0] = self.items[self.count]
+        drop self.items[self.count]
+        if self.count > 0:
+            self.sift_down(0)
+        return value
+
+    def replace(self: borrow Self, value: T) -> T:
+        assert(self.count > 0)
+        previous = copy self.items[0]
+        self.items[0] = value
+        self.sift_down(0)
+        return previous
+
+    def push_pop(self: borrow Self, value: T) -> T:
+        if self.count > 0:
+            if self.before(self.items[0], value):
+                return self.replace(value)
+        result = copy value
+        return result
+
+    def clear(self: borrow Self):
+        while self.count > 0:
+            self.count -= 1
+            drop self.items[self.count]
+
+    def validate(self: view Self):
+        i = 1
+        while i < self.count:
+            assert(not self.before(self.items[i], self.items[(i - 1) // 2]))
+            i += 1
+
+
+
+test "heap min max duplicates negatives and growth":
+    minimum = Heap[int]()
+    maximum = Heap[int](true)
+    i = 0
+    while i < 129:
+        value = (i * 37) % 43 - 21
+        minimum.push(value)
+        maximum.push(value)
+        minimum.validate()
+        maximum.validate()
+        i += 1
+    assert(minimum.size() == 129)
+    i = -21
+    while i <= 21:
+        repeats = 0
+        while repeats < 3:
+            assert(minimum.pop() == i)
+            assert(maximum.pop() == -i)
+            repeats += 1
+        i += 1
+    assert(minimum.size() == 0 and maximum.size() == 0)
+
+
+test "heapify replace push_pop copies and floating specialization":
+    input = array[int,4]()
+    input[0] = 8
+    input[1] = -3
+    input[2] = 2
+    input[3] = 2
+    values = Heap[int]()
+    values.heapify(input)
+    input[1] = 99
+    assert(values.peek() == -3)
+    assert(values.push_pop(-4) == -4 and values.size() == 4)
+    assert(values.push_pop(7) == -3)
+    assert(values.replace(9) == 2)
+    values.validate()
+    saved = copy values
+    values.clear()
+    assert(values.push_pop(5) == 5 and values.size() == 0)
+    assert(saved.pop() == 2)
+    assert(saved.pop() == 7)
+    assert(saved.pop() == 8)
+    assert(saved.pop() == 9)
+    floating = Heap[f64]()
+    floating.push(1.5)
+    floating.push(-2.25)
+    assert(floating.pop() == -2.25)
+
+
+test "empty heap pop rejects":
+    throws "assertion failed":
+        values = Heap[int]()
+        values.pop()
+
+
+test "empty heap replace rejects":
+    throws "assertion failed":
+        values = Heap[int]()
+        values.replace(1)
+
+
+test "heap selects an independent comparison provider for the same int payload":
+    class Descending: utils.Compare[int]
+        def compare(left: int, right: int) -> int:
+            if left > right:
+                return -1
+            if left < right:
+                return 1
+            return 0
+    natural = Heap[int]()
+    reverse = Heap[int,Descending]()
+    for value in [2, 7, 1, 7]:
+        natural.push(value)
+        reverse.push(value)
+    assert(natural.pop() == 1)
+    assert(reverse.pop() == 7)
+    assert(reverse.pop() == 7)
+    assert(reverse.pop() == 2)
+    assert(reverse.pop() == 1)
+
+
+test "seeded random input exercises heap ordering without requiring random elements":
+    source = utils.ParkMiller(17)
+    values = Heap[int]()
+    i = 0
+    while i < 200:
+        values.push(utils.random(source, 101) - 50)
+        i += 1
+    previous = -51
+    while values.size() > 0:
+        current = values.pop()
+        assert(previous <= current)
+        previous = current

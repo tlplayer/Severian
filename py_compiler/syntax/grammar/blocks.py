@@ -107,6 +107,25 @@ def recognize_blocks(source, tokens, syntax=None):
     if pending:
         errors.append(Diagnostic("parser", "block requires an indented body", source, pending.span))
     def extend(node):
+        from py_compiler.syntax.block.mlir import Mlir
+        attached = []
+        annotation = None
+        for child in node.children:
+            if isinstance(child.provider, Mlir):
+                if annotation is not None:
+                    errors.append(Diagnostic('parser', 'duplicate @mlir annotation', source, child.span))
+                annotation = child
+                continue
+            if annotation is not None:
+                if getattr(child.provider, 'spelling', '') != 'def' or child.children:
+                    errors.append(Diagnostic('parser', '@mlir requires a bodyless def', source, child.span))
+                else:
+                    child.mlir_operation = annotation.header
+                annotation = None
+            attached.append(child)
+        if annotation is not None:
+            errors.append(Diagnostic('parser', '@mlir requires a following def', source, annotation.span))
+        node.children = attached
         for child in node.children:
             extend(child)
         if node.children:

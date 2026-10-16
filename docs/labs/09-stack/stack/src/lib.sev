@@ -1,0 +1,87 @@
+# Amortized O(1) push; O(1) peek/pop; O(N) capacity growth.
+# No ordering, hashing, or numeric constraint belongs on a stack's element T.
+class Stack[T = int]:
+    items: array[T]
+    count: int
+
+    def Stack(self: borrow Self):
+        self.items = array[T,0]()
+        self.count = 0
+
+    def size(self: view Self) -> int:
+        return self.count
+
+    def push(self: borrow Self, value: T):
+        if self.count == len(self.items):
+            assert(self.count <= 576460752303423487)
+            capacity = self.count * 2 + 1
+            grown = array[T,capacity]()
+            i = 0
+            while i < self.count:
+                grown[i] = self.items[i]
+                i += 1
+            self.items = move grown
+        self.items[self.count] = value
+        self.count += 1
+
+    def peek(self: view Self) -> T:
+        assert(self.count > 0)
+        value = copy self.items[self.count - 1]
+        return value
+
+    def pop(self: borrow Self) -> T:
+        assert(self.count > 0)
+        self.count -= 1
+        value = copy self.items[self.count]
+        drop self.items[self.count]
+        return value
+
+    def clear(self: borrow Self):
+        while self.count > 0:
+            self.count -= 1
+            drop self.items[self.count]
+
+
+
+test "stack LIFO growth clear and element counts":
+    values = Stack[int]()
+    assert(values.size() == 0)
+    i = 0
+    while i < 129:
+        values.push(i)
+        i += 1
+    assert(values.peek() == 128 and values.size() == 129)
+    while i > 0:
+        i -= 1
+        assert(values.pop() == i)
+    values.push(-7)
+    values.clear()
+    values.push(42)
+    assert(values.pop() == 42)
+
+
+test "stack copies nested owned payloads independently":
+    values = Stack[array[int]]()
+    payload = array[int,1]()
+    payload[0] = 42
+    values.push(payload)
+    payload[0] = 9
+    saved = copy values
+    read = values.peek()
+    read[0] = 3
+    values.clear()
+    drop values
+    result = saved.pop()
+    assert(result[0] == 42)
+
+
+test "empty stack pop rejects":
+    throws "assertion failed":
+        values = Stack[int]()
+        values.pop()
+
+
+test "empty stack peek rejects":
+    throws "assertion failed":
+        values = Stack[int]()
+        values.peek()

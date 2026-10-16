@@ -41,7 +41,7 @@ class Class(RecordProvider):
             owns_fields=any(owns_storage(context.type(t)) for _, t in fields))
         context.tags[declaration.name] = len(context.tags) + 1
         for trait_name in traits:
-            context.require(trait_name, lambda provider, target: provider.satisfy(target, declaration))
+            context.require(trait_name, lambda provider, target: provider.satisfy(target, declaration, context))
         for member in members:
             member.provider.declare_member(member, context, Receiver(declaration))
 

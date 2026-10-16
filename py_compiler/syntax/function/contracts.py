@@ -154,6 +154,12 @@ def signature(node, owner=""):
 
 
 def pure_predicate(node, parameters):
+    if node.kind == 'call' and len(node.operands) == 2:
+        callee, argument = node.operands
+        if callee.kind == 'member' and callee.token.text == 'suffix':
+            pure_predicate(callee.operands[0], parameters)
+            pure_predicate(argument, parameters)
+            return
     if node.kind == "chain":
         for operand in node.operands[::2]:
             pure_predicate(operand, parameters)

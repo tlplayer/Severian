@@ -1,0 +1,123 @@
+import io
+
+# Trait bodies are reusable defaults. Imported/local implementations with
+# matching predicates replace them; default bodies never compete in dispatch.
+trait File:
+    def read(path: string) -> string:
+        return read_text(path)
+
+    def write(path: string, contents: string) -> int:
+        return write_text(path, contents)
+
+# UTF-8 validation belongs to the file text boundary, independent of suffix.
+def valid_utf8(data: view array[u8]) -> bool:
+    position = 0
+    while position < len(data):
+        first = int(data[position])
+        width = 1
+        value = first
+        minimum = 0
+        if first >= 194 and first <= 223:
+            width = 2
+            value = first - 192
+            minimum = 128
+        elif first >= 224 and first <= 239:
+            width = 3
+            value = first - 224
+            minimum = 2048
+        elif first >= 240 and first <= 244:
+            width = 4
+            value = first - 240
+            minimum = 65536
+        elif first >= 128:
+            return false
+        if width > len(data) - position:
+            return false
+        index = 1
+        while index < width:
+            next = int(data[position + index])
+            if next < 128 or next > 191:
+                return false
+            value = value * 64 + next - 128
+            index += 1
+        if value < minimum or value > 1114111 or value >= 55296 and value <= 57343:
+            return false
+        position += width
+    return true
+
+# Bounded streaming read handles empty files, short reads and non-seekable files.
+# IO failures currently use the Python compiler's assertion diagnostic boundary.
+# Every opened descriptor is closed before a failure is reported.
+def read_text(path: string) -> string:
+    handle = io.open(path)
+    assert(handle >= 0)
+    capacity = 4096
+    data = array[u8, capacity]()
+    used = 0
+    failure = 0
+    done = false
+    while not done:
+        if used == capacity:
+            if capacity >= 67108864:
+                # Probe EOF so exactly-limit files remain valid.
+                probe = array[u8, 1]()
+                extra = io.read(handle, probe, 0, 1)
+                if extra != 0:
+                    failure = -27
+                done = true
+            else:
+                capacity *= 2
+                grown = array[u8, capacity]()
+                index = 0
+                while index < used:
+                    grown[index] = data[index]
+                    index += 1
+                drop data
+                data = move grown
+        if not done:
+            received = io.read(handle, data, used, capacity - used)
+            if received < 0:
+                failure = received
+                done = true
+            elif received == 0:
+                done = true
+            else:
+                used += received
+    closed = io.close(handle)
+    assert(failure == 0 and closed == 0)
+    bytes = array[u8, used]()
+    index = 0
+    while index < used:
+        bytes[index] = data[index]
+        index += 1
+    assert(valid_utf8(bytes))
+    return string(bytes)
+
+# Returns bytes written or negative errno. Opening truncates the destination.
+def write_text(path: string, contents: string) -> int:
+    bytes = array[u8, len(contents)]()
+    index = 0
+    while index < len(contents):
+        bytes[index] = contents[index]
+        index += 1
+    handle = io.open(path, 577, 384)
+    if handle < 0:
+        return handle
+    written = io.write_all(handle, bytes, 0, len(bytes))
+    closed = io.close(handle)
+    if written < 0:
+        return written
+    if closed < 0:
+        return closed
+    return written
+
+test "text validates UTF-8 without rejecting embedded NUL":
+    bytes = array[u8, 2]()
+    bytes[0] = u8(206)
+    bytes[1] = u8(187)
+    assert(valid_utf8(bytes))
+    bytes[0] = u8(192)
+    assert(not valid_utf8(bytes))
+    bytes[0] = u8(0)
+    bytes[1] = u8(0)
+    assert(valid_utf8(bytes))

@@ -1,0 +1,29 @@
+import file
+import counts
+
+# The imported predicate selects Count; the caller sees its concrete type.
+def read_count() -> int:
+    value = file.read("/tmp/sev-file-dispatch.count")
+    return value.value
+
+# An unknown suffix or no suffix uses the trait's text default.
+def read_plain(path: string) -> string:
+    return file.read.default(path)
+
+# Runtime selection exposes both possible results.
+def read_dynamic(path: string) -> string | counts.Count:
+    return file.read(path)
+
+test "imported handler reuses the default reader and returns its own type":
+    assert(file.write("/tmp/sev-file-dispatch.count", "42") == 2)
+    assert(read_count() == 42)
+    text = file.read.default("/tmp/sev-file-dispatch.count")
+    assert(len(text) == 2 and text[0] == u8(52))
+
+test "unknown and absent extensions fall back to text":
+    assert(file.write("/tmp/sev-file-dispatch.unknown", "λ\0") == 3)
+    text = file.read("/tmp/sev-file-dispatch.unknown")
+    assert(len(text) == 3 and text[2] == u8(0))
+    assert(file.write("/tmp/sev-file-dispatch", "") == 0)
+    empty = file.read("/tmp/sev-file-dispatch")
+    assert(len(empty) == 0)

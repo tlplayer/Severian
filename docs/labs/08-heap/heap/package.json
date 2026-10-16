@@ -1,0 +1,12 @@
+{
+  "package": {
+    "name": "lab-heap",
+    "version": "0.1.0"
+  },
+  "dependencies": {
+    "utils": {
+      "package": "lab-utils",
+      "path": "../../02-utils/utils"
+    }
+  }
+}

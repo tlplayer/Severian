@@ -241,7 +241,57 @@ The dispatch invariant is:
 
 number of matching implementations == 1
 
-Zero matches and multiple matches are both errors.
+Zero matches is an error unless the trait provides a default body. Multiple
+matches remain an error; a default body never resolves ambiguity.
+
+File dispatch with a reusable default
+
+```sev
+# Proposed trait-default semantics. Sections below belong to separate modules.
+# Reading a file does not require an extension. Extensions are one possible
+# condition for choosing a parser, not a requirement of the underlying reader.
+
+# In system.file: text.read owns the lower-level text read through IO streams.
+trait File:
+    @file
+    def read[T = string](path: string) -> T:
+        # This body supplies the string fallback, not an arbitrary T conversion.
+        # T comes from the selected implementation; only the fallback defaults
+        # to string. This body is NOT a candidate in with-clause dispatch.
+        return text.read(path)
+
+# In json: importing this module makes its File implementation available.
+def read(path: string) -> Data with { path.suffix(".json") }: File
+    # Call the trait's original body directly, without conditional redispatch.
+    # Read the SAME .json path as text; do not rename it or pretend it ends .txt.
+    source = file.read.default(path)
+    return json.parse(source)
+
+# In the application:
+import file
+import json
+
+document = file.read("settings.json")  # JSON implementation -> Data
+notes = file.read("notes.txt")        # No matching implementation -> string
+license = file.read("LICENSE")        # No extension -> default reader -> string
+custom = parse_custom(file.read("settings.custom"))
+# An unknown extension also falls back to text; apply application parsing above.
+
+# The application can instead register its own conditional implementation.
+# parse_config is the application's parser returning its Config type.
+def read(path: string) -> Config with { path.suffix(".cfg") }: File
+    return parse_config(file.read.default(path))
+
+config = file.read("settings.cfg")    # Local implementation -> Config
+raw = file.read.default("settings.json")  # Explicit default -> string
+
+# Selection: one matching imported/local implementation -> call it;
+# zero matches -> call the default; unresolved multiple matches -> error.
+# A selected implementation's read/parse failure propagates; it does not trigger
+# fallback. The default is reusable behavior, not error recovery.
+# Known selection -> its concrete result type. A runtime-only selection retains
+# the union of possible result types, including string when fallback is possible.
+```
 
 Language detection
 
@@ -474,5 +524,3 @@ If shapes are dynamic, the same selector can be evaluated at runtime, provided i
 
 
 ## Performance
-
-

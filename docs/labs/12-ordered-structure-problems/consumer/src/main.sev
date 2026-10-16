@@ -1,0 +1,247 @@
+# Shared provider contracts used by the imported collection templates.
+import utils
+import heap
+import stack
+import btree
+import disjoint_sets
+
+# Reference examples: /home/tplayer/Documents/problems/en/1-1000/.
+# LC20: 20-valid-parentheses.md. O(N) time and O(N) stack storage.
+def valid_parentheses(text: string) -> bool:
+    expected = stack.Stack[int]()
+    i = 0
+    while i < len(text):
+        code = int(text[i])
+        if code == 40:
+            expected.push(41)
+        elif code == 91:
+            expected.push(93)
+        elif code == 123:
+            expected.push(125)
+        else:
+            if expected.size() == 0:
+                return false
+            if expected.pop() != code:
+                return false
+        i += 1
+    return expected.size() == 0
+
+
+# LC684: 684-redundant-connection.md. Endpoints are parallel arrays;
+# return the zero-based index of the redundant edge, or -1 if acyclic.
+# O(E*alpha(N)) time, O(N) space.
+def redundant_connection(left: array[int], right: array[int], n: int) -> int:
+    assert(len(left) == len(right))
+    sets = disjoint_sets.DisjointSets(n + 1)
+    i = 0
+    while i < len(left):
+        assert(left[i] >= 1 and left[i] <= n)
+        assert(right[i] >= 1 and right[i] <= n)
+        if not sets.unite(left[i], right[i]):
+            return i
+        i += 1
+    return -1
+
+
+# LC349: 349-intersection-of-two-arrays.md. Erasing a matched key ensures
+# uniqueness. B-tree gives O((A+B)*log A) worst-case comparison work.
+def intersection(left: array[int], right: array[int]) -> array[int]:
+    keys = btree.BTree[int,int]()
+    i = 0
+    while i < len(left):
+        keys.set(left[i], 1)
+        i += 1
+    matches = stack.Stack[int]()
+    i = 0
+    while i < len(right):
+        if keys.erase(right[i]):
+            matches.push(right[i])
+        i += 1
+    count = matches.size()
+    result = array[int,count]()
+    i = count
+    while i > 0:
+        i -= 1
+        result[i] = matches.pop()
+    return result
+
+
+# LC743: 743-network-delay-time.md. Dijkstra with adjacency lists and a
+# min-heap; stale entries are ignored. Packed priority = distance*(N+1)+node
+# preserves priority order under the source problem's N<=100, weight<=100.
+# O((N+E)*log(E+1)) time, O(N+E) space; zero-weight edges are allowed.
+def network_delay(source: array[int], destination: array[int], weight: array[int], n: int, start: int) -> int:
+    assert(n >= 1 and n <= 100 and start >= 1 and start <= n)
+    assert(len(source) == len(destination) and len(source) == len(weight))
+    nodes = n + 1
+    edges = len(source)
+    head = array[int,nodes]()
+    next = array[int,edges]()
+    distance = array[int,nodes]()
+    i = 0
+    while i <= n:
+        head[i] = -1
+        distance[i] = 1000000
+        i += 1
+    i = 0
+    while i < edges:
+        assert(source[i] >= 1 and source[i] <= n)
+        assert(destination[i] >= 1 and destination[i] <= n)
+        assert(weight[i] >= 0 and weight[i] <= 100)
+        next[i] = head[source[i]]
+        head[source[i]] = i
+        i += 1
+    pending = heap.Heap[int]()
+    distance[start] = 0
+    pending.push(start)
+    while pending.size() > 0:
+        packed = pending.pop()
+        node = packed % nodes
+        elapsed = packed // nodes
+        if elapsed == distance[node]:
+            edge = head[node]
+            while edge != -1:
+                target = destination[edge]
+                candidate = elapsed + weight[edge]
+                if candidate < distance[target]:
+                    distance[target] = candidate
+                    pending.push(candidate * nodes + target)
+                edge = next[edge]
+    result = 0
+    i = 1
+    while i <= n:
+        if distance[i] == 1000000:
+            return -1
+        if distance[i] > result:
+            result = distance[i]
+        i += 1
+    return result
+
+
+test "LC20 all four reference examples and unmatched boundaries":
+    assert(valid_parentheses("()"))
+    assert(valid_parentheses("()[]{}"))
+    assert(not valid_parentheses("(]"))
+    assert(valid_parentheses("([])"))
+    assert(not valid_parentheses("([)]"))
+    assert(not valid_parentheses(")"))
+    assert(not valid_parentheses("("))
+    assert(valid_parentheses(""))
+    assert(valid_parentheses("{[()]}"))
+
+
+test "LC684 both reference examples and acyclic graph":
+    left = array[int,3]()
+    right = array[int,3]()
+    left[0] = 1
+    right[0] = 2
+    left[1] = 1
+    right[1] = 3
+    left[2] = 2
+    right[2] = 3
+    index = redundant_connection(left, right, 3)
+    assert(index == 2 and left[index] == 2 and right[index] == 3)
+    a = array[int,5]()
+    b = array[int,5]()
+    a[0] = 1
+    b[0] = 2
+    a[1] = 2
+    b[1] = 3
+    a[2] = 3
+    b[2] = 4
+    a[3] = 1
+    b[3] = 4
+    a[4] = 1
+    b[4] = 5
+    index = redundant_connection(a, b, 5)
+    assert(index == 3 and a[index] == 1 and b[index] == 4)
+    empty = array[int,0]()
+    assert(redundant_connection(empty, empty, 1) == -1)
+    one = array[int,1]()
+    two = array[int,1]()
+    one[0] = 1
+    two[0] = 2
+    assert(redundant_connection(one, two, 2) == -1)
+
+
+test "LC349 reference examples duplicates disjoint and empty inputs":
+    a = array[int,4]()
+    a[0] = 1
+    a[1] = 2
+    a[2] = 2
+    a[3] = 1
+    b = array[int,2]()
+    b[0] = 2
+    b[1] = 2
+    result = intersection(a, b)
+    assert(len(result) == 1 and result[0] == 2)
+    c = array[int,3]()
+    c[0] = 4
+    c[1] = 9
+    c[2] = 5
+    d = array[int,5]()
+    d[0] = 9
+    d[1] = 4
+    d[2] = 9
+    d[3] = 8
+    d[4] = 4
+    other = intersection(c, d)
+    assert(len(other) == 2 and other[0] == 9 and other[1] == 4)
+    disjoint = intersection(a, c)
+    assert(len(disjoint) == 0)
+    empty = array[int,0]()
+    missing = intersection(empty, b)
+    assert(len(missing) == 0)
+
+
+test "LC743 all three reference examples":
+    a = array[int,3]()
+    b = array[int,3]()
+    w = array[int,3]()
+    a[0] = 2
+    b[0] = 1
+    w[0] = 1
+    a[1] = 2
+    b[1] = 3
+    w[1] = 1
+    a[2] = 3
+    b[2] = 4
+    w[2] = 1
+    assert(network_delay(a, b, w, 4, 2) == 2)
+    source = array[int,1]()
+    destination = array[int,1]()
+    weight = array[int,1]()
+    source[0] = 1
+    destination[0] = 2
+    weight[0] = 1
+    assert(network_delay(source, destination, weight, 2, 1) == 1)
+    assert(network_delay(source, destination, weight, 2, 2) == -1)
+
+
+test "LC743 stale priorities zero weight cycle and isolated start":
+    a = array[int,5]()
+    b = array[int,5]()
+    w = array[int,5]()
+    a[0] = 1
+    b[0] = 2
+    w[0] = 10
+    a[1] = 1
+    b[1] = 3
+    w[1] = 1
+    a[2] = 3
+    b[2] = 2
+    w[2] = 1
+    a[3] = 2
+    b[3] = 4
+    w[3] = 0
+    a[4] = 4
+    b[4] = 1
+    w[4] = 0
+    assert(network_delay(a, b, w, 4, 1) == 2)
+    empty = array[int,0]()
+    assert(network_delay(empty, empty, empty, 1, 1) == 0)
+    assert(network_delay(empty, empty, empty, 2, 1) == -1)
+
+
+def main():
+    assert(valid_parentheses("{[()]}"))

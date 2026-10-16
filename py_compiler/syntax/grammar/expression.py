@@ -124,7 +124,7 @@ def parse_expression(tokens, syntax):
                 continue
             if tokens[cursor[0]].text == ".":
                 cursor[0] += 1
-                if cursor[0] == len(tokens) or tokens[cursor[0]].kind != "IDENTIFIER":
+                if cursor[0] == len(tokens) or tokens[cursor[0]].kind != "IDENTIFIER" and tokens[cursor[0]].text != "suffix":
                     raise ValueError("member access requires a name")
                 left = Expression("member", tokens[cursor[0]], (left,))
                 cursor[0] += 1

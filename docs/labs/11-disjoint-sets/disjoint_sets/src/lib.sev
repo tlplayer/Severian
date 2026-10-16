@@ -1,0 +1,102 @@
+# Dense integer identities [0,N): no Hash/Equal requirements on payloads.
+# Union by size + full path compression: amortized O(alpha(N)).
+# root is a read-only O(log N) query; find explicitly borrows to compress.
+class DisjointSets:
+    parent: array[int]
+    weights: array[int]
+    components: int
+
+    def DisjointSets(self: borrow Self, count: int):
+        assert(count >= 0)
+        self.parent = array[int,count]()
+        self.weights = array[int,count]()
+        self.components = count
+        i = 0
+        while i < count:
+            self.parent[i] = i
+            self.weights[i] = 1
+            i += 1
+
+    def size(self: view Self) -> int:
+        return len(self.parent)
+
+    def contains(self: view Self, value: int) -> bool:
+        return value >= 0 and value < self.size()
+
+    def root(self: view Self, value: int) -> int:
+        assert(self.contains(value))
+        while self.parent[value] != value:
+            value = self.parent[value]
+        return value
+
+    def find(self: borrow Self, value: int) -> int:
+        result = self.root(value)
+        while self.parent[value] != value:
+            next = self.parent[value]
+            self.parent[value] = result
+            value = next
+        return result
+
+    def connected(self: view Self, left: int, right: int) -> bool:
+        return self.root(left) == self.root(right)
+
+    def component_size(self: view Self, value: int) -> int:
+        return self.weights[self.root(value)]
+
+    def unite(self: borrow Self, left: int, right: int) -> bool:
+        a = self.find(left)
+        b = self.find(right)
+        if a == b:
+            return false
+        if self.weights[a] < self.weights[b]:
+            saved = a
+            a = b
+            b = saved
+        self.parent[b] = a
+        self.weights[a] += self.weights[b]
+        self.components -= 1
+        return true
+
+
+
+test "disjoint sets weighted unions compression and repeated edges":
+    sets = DisjointSets(16)
+    assert(sets.size() == 16 and sets.components == 16)
+    step = 1
+    while step < 16:
+        i = 0
+        while i < 16:
+            assert(sets.unite(i, i + step))
+            i += 2 * step
+        step *= 2
+    assert(sets.components == 1 and sets.component_size(15) == 16)
+    assert(sets.parent[15] != sets.root(15))
+    root = sets.find(15)
+    assert(sets.parent[15] == root)
+    assert(not sets.unite(3, 15))
+    assert(not sets.unite(4, 4))
+    assert(sets.connected(0, 15))
+    assert(not sets.contains(-1) and not sets.contains(16))
+    empty = DisjointSets(0)
+    assert(empty.components == 0 and empty.size() == 0)
+
+
+test "disjoint set copies preserve independent partitions":
+    sets = DisjointSets(4)
+    sets.unite(0, 1)
+    saved = copy sets
+    sets.unite(1, 2)
+    drop sets
+    assert(saved.components == 3 and not saved.connected(0, 2))
+    assert(saved.component_size(1) == 2)
+
+
+test "disjoint set invalid identity rejects":
+    throws "assertion failed":
+        sets = DisjointSets(2)
+        sets.find(2)
+
+
+test "disjoint set negative size rejects":
+    throws "assertion failed":
+        sets = DisjointSets(-1)

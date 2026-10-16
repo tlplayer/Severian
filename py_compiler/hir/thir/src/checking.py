@@ -121,6 +121,8 @@ class Checker:
             self.value_sources[result.identity] = set().union(*(self.value_sources.get(v.identity, set()) for v in operands))
         if kind != "memory-copy" and type_ and type_.family in ("record", "trait", "union", "dynamic", "array", "pointer") and any(v.identity in self.stack_values for v in operands):
             self.stack_values.add(result.identity)
+        if kind == 'constant' and type_ and type_.family == 'string':
+            self.owned_results.add(result.identity)
         return result
 
     def effect(self, kind, operands, payload, span):

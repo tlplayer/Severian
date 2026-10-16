@@ -57,6 +57,7 @@ class Import(DeclarationProvider):
         from py_compiler.frontend.lexer.lexer import lex
         from py_compiler.frontend.parser.blocks import parse_blocks
         from py_compiler.syntax.block.record import register_template
+        trait_contracts = []
         for contract in package.get('templates', ()):
             if contract.get('kind') == 'class-grammars':
                 continue
@@ -70,6 +71,11 @@ class Import(DeclarationProvider):
             context.imported_template_origins[source.identity] = node.identity
             if getattr(template.provider, 'spelling', '') not in ('class', 'trait', 'def') or template.header[0].text != contract['name']:
                 raise ValueError('imported template identity does not match its declaration')
+            if contract.get('kind') == 'trait':
+                if template.provider.spelling != 'trait':
+                    raise ValueError('imported trait contract requires a trait declaration')
+                trait_contracts.append(template)
+                continue
             previous = context.scope
             context.scope = (alias,)
             try:
@@ -120,6 +126,16 @@ class Import(DeclarationProvider):
             context.register(declaration)
             context.provider_by_name[name] = UnionDeclaration()
             context.types[name] = UnionType(tuple(context.type(member) for member in variants), name).with_layout(context)
+        previous = context.scope, context.active_provider
+        context.scope = (alias,)
+        try:
+            context.importing_trait = True
+            for template in trait_contracts:
+                context.active_provider = template.provider
+                template.provider.declare(template, context)
+        finally:
+            context.importing_trait = False
+            context.scope, context.active_provider = previous
         from dataclasses import replace
         from py_compiler.syntax.generic.storage import owns_storage
         def owned(name, active=()):

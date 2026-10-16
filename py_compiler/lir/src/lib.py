@@ -53,6 +53,9 @@ def lower(program, target, pointer_bits):
                 if operation.atom is None:
                     raise ValueError(f"unresolved operation at LIR boundary: {operation.kind}")
                 implementation = operation.atom.implementation
+                validate_target = getattr(implementation, 'validate_target', None)
+                if validate_target:
+                    validate_target(target, pointer_bits)
                 if isinstance(implementation, ExternalSymbol):
                     dependencies.update(implementation.dependencies)
     atoms = tuple(atom for module in program.mir_modules for sub in module.submodules for atom in sub.atoms)

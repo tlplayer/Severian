@@ -1,0 +1,49 @@
+# SIP-0007: a trait specifies an operation; a provider supplies its policy.
+# Like core.utils.hash[F], compare[T,F] selects F independently of T.
+# Negative/zero/positive means before/equivalent/after. Providers must define
+# a consistent strict weak order. B-tree key equivalence uses zero; it need
+# not be field equality (e.g. jobs ordered only by priority).
+trait Compare[T]:
+    def compare(left: T, right: T) -> int
+
+
+class NaturalCompare[T]: Compare[T]
+    def compare(left: T, right: T) -> int:
+        if left < right:
+            return -1
+        if right < left:
+            return 1
+        # Reject unordered inputs such as NaN instead of treating them as keys
+        # equivalent to every other value. Custom providers choose their policy.
+        assert(left == right)
+        return 0
+
+
+def compare[T, F: Compare[T] = NaturalCompare[T]](left: T, right: T) -> int:
+    operation = F()
+    return operation.compare(left, right)
+
+
+test "comparison default handles extremes without subtracting operands":
+    assert(compare(-9223372036854775807 - 1, 9223372036854775807) < 0)
+    assert(compare(5, 5) == 0)
+    assert(compare(7, -2) > 0)
+    assert(compare(1.5, 2.5) < 0)
+
+
+test "comparison provider selects policy independently of payload type":
+    class Job:
+        priority: int
+        identity: int
+    class ByPriority: Compare[Job]
+        def compare(left: Job, right: Job) -> int:
+            if left.priority < right.priority:
+                return -1
+            if left.priority > right.priority:
+                return 1
+            return 0
+    first = Job(2, 100)
+    second = Job(2, 200)
+    third = Job(9, 300)
+    assert(compare[Job,ByPriority](first, second) == 0)
+    assert(compare[Job,ByPriority](first, third) < 0)

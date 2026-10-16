@@ -1,0 +1,153 @@
+# Linux x86-64 provider. Results are byte counts/descriptors or negative errno.
+# No libc, errno global, foreign wrapper, or source-language ABI marshalling.
+@mlir("llvm.inline_asm", asm_string="syscall", constraints="={ax},{ax},{di},{si},{dx},~{rcx},~{r11},~{memory},~{cc}", has_side_effects=true, target="x86_64-linux")
+def __syscall(number: int, first: int, second: int, third: int) -> int
+
+@mlir("memref.extract_aligned_pointer_as_index")
+def __address(data: view array[u8]) -> index
+
+@mlir("arith.index_cast")
+def __integer(value: index) -> int
+
+# These arrays own contiguous storage; offset/count are checked before use.
+def __position(data: view array[u8], offset: int, count: int) -> int:
+    assert(offset >= 0 and offset <= len(data))
+    assert(count >= 0 and count <= len(data) - offset)
+    return __integer(__address(data)) + offset
+
+def stdin() -> int:
+    return 0
+
+def stdout() -> int:
+    return 1
+
+def stderr() -> int:
+    return 2
+
+# access: 0 read, 1 write, 2 read/write; flags use the Linux open ABI.
+# O_CLOEXEC is always applied. Embedded NUL is rejected before opening.
+def open(path: string, flags: int = 0, mode: int = 384) -> int:
+    name = array[u8, len(path) + 1]()
+    position = 0
+    while position < len(path):
+        value = path[position]
+        if value == u8(0):
+            return -22
+        name[position] = value
+        position += 1
+    name[position] = u8(0)
+    if flags < 0 or flags > 2147483647 or mode < 0 or mode > 4095:
+        return -22
+    return __syscall(2, __position(name, 0, len(name)), flags | 524288, mode)
+
+# Anonymous file: automatically removed when the final descriptor closes.
+# The directory filesystem must support Linux O_TMPFILE.
+def temporary(directory: string = "/tmp") -> int:
+    return open(directory, 4259842, 384)
+
+# close is never retried: Linux may already have released the descriptor.
+def close(handle: int) -> int:
+    if handle < 0 or handle > 2147483647:
+        return -9
+    return __syscall(3, handle, 0, 0)
+
+def seek(handle: int, offset: int, origin: int = 0) -> int:
+    if origin < 0 or origin > 2:
+        return -22
+    if handle < 0 or handle > 2147483647:
+        return -9
+    return __syscall(8, handle, offset, origin)
+
+def flush(handle: int) -> int:
+    if handle < 0 or handle > 2147483647:
+        return -9
+    return __syscall(74, handle, 0, 0)
+
+def read(handle: int, data: borrow array[u8], offset: int, count: int) -> int:
+    address = __position(data, offset, count)
+    if handle < 0 or handle > 2147483647:
+        return -9
+    attempts = 0
+    while attempts < 64:
+        result = __syscall(0, handle, address, count)
+        if result != -4:
+            return result
+        attempts += 1
+    return -4
+
+def write(handle: int, data: view array[u8], offset: int, count: int) -> int:
+    address = __position(data, offset, count)
+    if handle < 0 or handle > 2147483647:
+        return -9
+    attempts = 0
+    while attempts < 64:
+        result = __syscall(1, handle, address, count)
+        if result != -4:
+            return result
+        attempts += 1
+    return -4
+
+# EOF returns a short count. Errors retain negative errno; prior progress may
+# already have changed the destination or file. No rollback is implied.
+def read_exact(handle: int, data: borrow array[u8], offset: int, count: int) -> int:
+    __position(data, offset, count)
+    used = 0
+    while used < count:
+        received = read(handle, data, offset + used, count - used)
+        if received < 0:
+            return received
+        if received == 0:
+            return used
+        used += received
+    return used
+
+def write_all(handle: int, data: view array[u8], offset: int, count: int) -> int:
+    __position(data, offset, count)
+    used = 0
+    while used < count:
+        written = write(handle, data, offset + used, count - used)
+        if written < 0:
+            return written
+        if written == 0:
+            return -5
+        used += written
+    return used
+
+# Copies at most limit bytes; a finite limit also bounds endless streams.
+def copy_stream(reader: int, writer: int, limit: int = 67108864) -> int:
+    if limit < 0:
+        return -22
+    buffer = array[u8, 4096]()
+    used = 0
+    while used < limit:
+        count = limit - used
+        if count > 4096:
+            count = 4096
+        received = read(reader, buffer, 0, count)
+        if received < 0:
+            return received
+        if received == 0:
+            return used
+        written = write_all(writer, buffer, 0, received)
+        if written < 0:
+            return written
+        used += written
+    return used
+
+test "descriptor errors are negative errno and path NUL is rejected":
+    buffer = array[u8, 1]()
+    buffer[0] = u8(42)
+    assert(read(-1, buffer, 0, 1) == -9)
+    assert(write(-1, buffer, 0, 1) == -9)
+    assert(close(-1) == -9)
+    assert(close(4294967297) == -9)
+    assert(seek(-1, 0) == -9)
+    assert(open("/tmp\0ignored") == -22)
+    assert(open("", 0) == -2)
+    assert(seek(-1, 0, 3) == -22)
+    assert(copy_stream(-1, -1, -1) == -22)
+
+test "empty transfers do not dereference the buffer":
+    buffer = array[u8, 0]()
+    assert(write_all(-1, buffer, 0, 0) == 0)
+    assert(read_exact(-1, buffer, 0, 0) == 0)

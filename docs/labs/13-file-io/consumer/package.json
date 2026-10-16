@@ -1,0 +1,6 @@
+{
+  "package": {"name": "lab-file-io", "version": "0.1.0"},
+  "dependencies": {
+    "io": {"package": "system.io", "path": "../../../../library/system/io/linux_x86_64"}
+  }
+}

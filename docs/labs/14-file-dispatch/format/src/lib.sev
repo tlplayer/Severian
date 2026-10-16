@@ -1,0 +1,18 @@
+import file
+
+class Count:
+    value: int
+
+# Importing this package contributes the handler; callers need no registry.
+class CountFile: file.File
+    def read(path: string) -> Count with path.suffix(".count"):
+        text = file.read.default(path)
+        value = 0
+        index = 0
+        while index < len(text):
+            digit = int(text[index]) - 48
+            assert(digit >= 0 and digit <= 9)
+            assert(value <= (9223372036854775807 - digit) / 10)
+            value = value * 10 + digit
+            index += 1
+        return Count(value)

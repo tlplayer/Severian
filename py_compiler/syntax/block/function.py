@@ -44,7 +44,7 @@ class Function(DeclarationProvider):
             imported[0:0] = active.imports
             active = active.parent
         entry.imports = tuple(imported)
-        if not self.has_body(node):
+        if not self.has_body(node) and node.mlir_operation is None:
             raise ValueError("a non-trait callable requires a body; use unimplemented for a stub")
         for guard in entry.guards:
             pure_predicate(guard, {name for name, _ in entry.parameters} | ({'self'} if receiver else set()))
@@ -101,6 +101,22 @@ class Function(DeclarationProvider):
             if type_ and type_.binding_ownership != 'copy' and mode in ('view', 'borrow'):
                 builder.value_sources[value.identity] = {len(env) - 1}
         builder.current.parameters = tuple(parameters)
+        if node.mlir_operation is not None:
+            from py_compiler.syntax.generic.atom import Atom
+            from py_compiler.hir.thir.src.model import Terminator
+            implementation = node.mlir_operation
+            implementation.validate(tuple(v.type for v in parameters), result)
+            modes = tuple(entry.parameter_ownership.get(n, 'view') for n, _ in entry.parameters)
+            atom = Atom(entry, tuple(v.type for v in parameters), result if result and result.mlir else None,
+                        modes, ('IO', 'mutation'), implementation)
+            value = builder.emit('mlir', result, tuple(parameters), atom, node.span) if result and result.mlir else None
+            if value is None:
+                builder.effect('mlir', tuple(parameters), atom, node.span)
+            builder.current.terminator = Terminator('finish', value=value, span=node.span)
+            entry.body = builder.finish()
+            entry.result = entry.body.result_type.name
+            context.bodies.append(entry.body)
+            return entry.body
         context.scope = builder.declaration_scope
         from py_compiler.syntax.block.phases import ContractPhases
         builder.phases = ContractPhases(entry, builder, env)

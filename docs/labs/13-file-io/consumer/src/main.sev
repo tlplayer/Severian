@@ -1,0 +1,52 @@
+import io
+
+# Two anonymous files exercise descriptors, binary bytes, offsets, EOF,
+# copying and explicit close. Every failure path closes acquired handles.
+def roundtrip() -> bool:
+    source = io.temporary()
+    if source < 0:
+        return false
+    destination = io.temporary()
+    if destination < 0:
+        io.close(source)
+        return false
+    bytes = array[u8, 4]()
+    bytes[0] = u8(65)
+    bytes[1] = u8(0)
+    bytes[2] = u8(255)
+    bytes[3] = u8(10)
+    ok = io.write_all(source, bytes, 0, 4) == 4
+    if ok:
+        ok = io.seek(source, 0) == 0
+    if ok:
+        ok = io.copy_stream(source, destination, 32) == 4
+    if ok:
+        ok = io.flush(destination) == 0
+    if ok:
+        ok = io.seek(destination, 0) == 0
+    received = array[u8, 8]()
+    received[0] = u8(99)
+    received[7] = u8(88)
+    if ok:
+        ok = io.read_exact(destination, received, 2, 5) == 4
+    if ok:
+        ok = received[2] == u8(65) and received[3] == u8(0) and received[4] == u8(255) and received[5] == u8(10)
+    if ok:
+        ok = received[0] == u8(99) and received[7] == u8(88)
+    if ok:
+        ok = io.read(destination, received, 0, 1) == 0
+    source_closed = io.close(source)
+    destination_closed = io.close(destination)
+    return ok and source_closed == 0 and destination_closed == 0
+
+def main() -> int:
+    if roundtrip():
+        return 0
+    return 1
+
+test "file streams preserve NUL and high bytes through copy and EOF":
+    assert(roundtrip())
+
+test "missing files and invalid descriptors preserve kernel errors":
+    assert(io.open("", 0) == -2)
+    assert(io.close(-1) == -9)

@@ -107,7 +107,7 @@ def check_constraints(parameters, bindings, context):
             declaration = context.by_name.get(actual.name)
             if contract.family != 'trait' or declaration is None or contract.name not in declaration.traits:
                 raise ValueError(f'{actual.name} does not satisfy {required}')
-            context.provider_by_name[contract.name].satisfy(context.by_name[contract.name], declaration)
+            context.provider_by_name[contract.name].satisfy(context.by_name[contract.name], declaration, context)
 
 
 def type_parameters(entry):

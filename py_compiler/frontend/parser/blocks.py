@@ -18,6 +18,7 @@ class Node:
     syntax: object = None
     imports: tuple = ()
     scope: object = None
+    mlir_operation: object = None
 
 
 def parse_blocks(source, tokens, syntax=None):

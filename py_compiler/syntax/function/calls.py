@@ -132,6 +132,13 @@ def select(entries, arguments, cfg, env, explicit=()):
             binding = cfg.call_result_owners.get(value.identity)
             if mode == 'borrow' and cfg.call_result_modes.get(value.identity) == 'view':
                 raise ValueError('cannot pass a returned view as a mutable borrow')
+        if binding is None and value is not None and value.type.family == 'string' and value.identity in cfg.owned_results:
+            temporary = '<string argument ' + str(value.identity) + '>'
+            binding = Binding(cfg.body.identity + ':' + temporary, temporary, value.type, False, 'own', argument.token.span)
+            env[temporary] = binding
+            cfg.local_names.add(temporary)
+            cfg.values[binding.identity] = value
+            cfg.body.bindings.append(binding)
         if binding is None and mode in ('view', 'borrow') and callable(getattr(value.type, 'release', None)):
             raise ValueError('memory arguments passed by view or borrow require a live binding')
         if mode == 'borrow' and value.type.family == 'shared':
@@ -363,6 +370,10 @@ def lower_expression(node, cfg, env, expected=None):
                 cfg.call_result_sources[value.identity] = cfg.call_result_sources[receiver.identity]
         return coerce(value, expected, cfg, span)
     callee, *arguments = node.operands
+    from py_compiler.syntax.function.trait_dispatch import resolve_default_call
+    selected = resolve_default_call(callee, arguments, cfg, env, span)
+    if selected is not None:
+        return coerce(selected, expected, cfg, span) if expected else selected
     imported = callee.operands[0] if callee.kind == 'index' else callee
     if imported.kind == 'member' and imported.operands[0].kind == 'name' and imported.operands[0].token.text in context.package_imports:
         from py_compiler.syntax.grammar.expression import Expression
@@ -403,7 +414,8 @@ def lower_expression(node, cfg, env, expected=None):
     receiver_binding = None
     if callee.kind == 'name':
         name = callee.token.text
-        declaration_name = context.declaration_name(name, cfg.declaration_scope)
+        bound = context.template_types.get(name)
+        declaration_name = bound.name if bound is not None else context.declaration_name(name, cfg.declaration_scope)
         if declaration_name in context.record_templates:
             template = context.record_templates[declaration_name]
             if not explicit and any(p.default is None for p in template.parameters):
@@ -526,6 +538,22 @@ import unittest
 
 
 class BorrowedTraitRoutingTests(unittest.TestCase):
+    def test_selected_provider_type_constructs_its_record(self):
+        source = '''trait Operation:
+    def apply(value: int) -> int
+class Double: Operation
+    def apply(value: int) -> int:
+        return value * 2
+def apply[F: Operation = Double](value: int) -> int:
+    operation = F()
+    return operation.apply(value)
+def work() -> int:
+    return apply(3)
+'''
+        result = self.compile(source)
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        self.assertTrue(any(body.declaration == 'Double.apply' for body in result.program.bodies))
+
     def test_owning_temporary_receivers_live_through_saved_views(self):
         source = ('class Buffer:\n    data: array[int]\n'
                   '    def size(self: view Self) -> int:\n        return len(self.data)\n'

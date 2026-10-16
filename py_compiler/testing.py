@@ -63,6 +63,16 @@ def test_passed(result, diagnostic=None):
     return result.returncode == -signal.SIGABRT and diagnostic in result.stdout + result.stderr
 
 
+def test_environment(environ, sanitize):
+    env = dict(environ)
+    if sanitize:
+        # Honor explicit runtime settings (e.g. LSan under ptrace), while
+        # keeping memory errors fatal and leak checking enabled by default.
+        options = env.get('ASAN_OPTIONS', '')
+        env['ASAN_OPTIONS'] = 'detect_leaks=1:' + options + ':halt_on_error=1'
+    return env
+
+
 def no_core():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
@@ -230,7 +240,7 @@ def test_package(root, *, sanitize=None, timeout=30, backtrace=False, **options)
         tool([linker, *(['-fsanitize=address'] if sanitize else []), stem.with_suffix('.o'),
               *(linked_objects[obj] for obj in selected_objects), '-lm', '-o', stem])
         expected = test.get('expected-failure')
-        env = {**os.environ, **({'ASAN_OPTIONS': 'detect_leaks=1:halt_on_error=1'} if sanitize else {})}
+        env = test_environment(os.environ, sanitize)
         try:
             trace = ''
             if backtrace:
@@ -261,6 +271,17 @@ import unittest
 
 
 class PackageTestRunnerTests(unittest.TestCase):
+    def test_sanitizer_environment_preserves_explicit_runtime_options(self):
+        source = {'ASAN_OPTIONS': 'detect_leaks=0:halt_on_error=0', 'OTHER': 'value'}
+        env = test_environment(source, 'address')
+        options = dict(option.split('=', 1) for option in env['ASAN_OPTIONS'].split(':') if option)
+        self.assertEqual(options['detect_leaks'], '0')
+        self.assertEqual(options['halt_on_error'], '1')
+        self.assertEqual(env['OTHER'], 'value')
+        self.assertEqual(source['ASAN_OPTIONS'], 'detect_leaks=0:halt_on_error=0')
+        self.assertEqual(test_environment(source, None), source)
+        self.assertIn('detect_leaks=1', test_environment({}, 'address')['ASAN_OPTIONS'])
+
     def test_result_locations_and_links(self):
         root = Path('/tmp/package with spaces')
         location = test_location(root, {'location': {'file': 'src/lib.sev', 'line': 58, 'column': 5}})

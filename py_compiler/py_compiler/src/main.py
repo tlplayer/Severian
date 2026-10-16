@@ -37,7 +37,7 @@ def main(argv=None):
     try:
         if args.command == "test" and args.compiler:
             import unittest
-            modules = ["frontend.source.source", "syntax.primitive.catalog", "syntax.symbol.forms", "syntax.symbol.symbol", "syntax.symbol.absent",
+            modules = ["syntax.function.trait_dispatch", "syntax.block.mlir", "frontend.source.source", "syntax.primitive.catalog", "syntax.symbol.forms", "syntax.symbol.symbol", "syntax.symbol.absent",
                        "frontend.lexer.lexer", "frontend.parser.parser", "hir.hir.src.program",
                        "frontend.src.lib", "frontend.parser.blocks", "hir.thir.src.lib", "hir.thir.src.contracts", "mir.registration", "mir.cfg.cfg", "mir.ownership.flow",
                        "mir.memory", "syntax.complex.shared", "mir.lowering", "syntax.primitive.int.operations", "syntax.primitive.float.operations",

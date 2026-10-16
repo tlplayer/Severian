@@ -1,0 +1,42 @@
+# Same callable contract and FNV-1a 128-bit vectors as
+# library/core/utils/src/hash.sev. Python bootstrap string indexing reads UTF-8
+# bytes; its u128 arithmetic lowers to modular arith.muli/arith.xori directly.
+# Equal byte sequences must hash equally; equal hashes do not imply equality.
+# Provider choice is independent of the value type and of ordering policy.
+trait HashFunction:
+    def hash(value: string) -> u128
+
+
+class StableHashFunction: HashFunction
+    def hash(value: string) -> u128:
+        result: u128 = 0x6c62272e07bb014262b821756295c58d
+        prime: u128 = 0x0000000001000000000000000000013b
+        position = 0
+        while position < len(value):
+            result = (result ^ u128(value[position])) * prime
+            position += 1
+        return result
+
+
+def hash[F: HashFunction = StableHashFunction](value: string) -> u128:
+    operation = F()
+    return operation.hash(value)
+
+
+test "hash matches core utils vectors including UTF-8 and embedded zero":
+    assert(hash("") == 0x6c62272e07bb014262b821756295c58d)
+    assert(hash("a") == 0xd228cb696f1a8caf78912b704e4a8964)
+    assert(hash("hello") == 0xe3e1efd54283d94f7081314b599d31b3)
+    assert(hash("λ") == 0x088093a58cab1be95aa0733054b79b8e)
+    assert(hash("a\0b") == 0xa68d6315038b5822836dbc79783ec15a)
+
+
+test "hash provider can be replaced without changing the string type":
+    class ByteCount: HashFunction
+        def hash(value: string) -> u128:
+            return u128(len(value))
+    assert(hash[ByteCount]("λ") == 2)
+    assert(hash[ByteCount]("") == 0)
+    assert(hash("hello") != hash[ByteCount]("hello"))
+    # A collision is legal: callers still need a separate equality operation.
+    assert(hash[ByteCount]("ab") == hash[ByteCount]("cd"))

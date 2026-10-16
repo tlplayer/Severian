@@ -1,0 +1,7 @@
+{
+  "package": {
+    "name": "system.io",
+    "version": "0.1.0",
+    "description": "Python compiler Linux x86-64 streams through library MLIR operations"
+  }
+}
