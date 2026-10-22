@@ -1,4 +1,4 @@
-#include "../../../../memory/native/memory.h"
+#include "../../../../memory/c/memory.h"
 #include "regex_abi.h"
 
 #include <regex.h>

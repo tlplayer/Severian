@@ -1,7 +1,4 @@
-SIP-0000: Title
-
 Status: Draft | Accepted | Implementing | Implemented | Rejected | Superseded
-Type: Language | Compiler | Runtime | Tooling | Package | Interop | Process
 Tags: types | containers | blocks | ... (topics relevant to the document)
 ## Appendix
 
@@ -14,12 +11,10 @@ Tags: types | containers | blocks | ... (topics relevant to the document)
 
 List of goals to 
 
-## Examples & Problems
+## Examples, Problems,  & Tests 
 
 Blocks of severian code to show the desired behavior
 
 Examples of corner cases
-
-## Tests
 
 Blocks of severian code to test behavior and problems to resolve/reject certain behaviors

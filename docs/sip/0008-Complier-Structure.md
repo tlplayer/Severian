@@ -271,7 +271,7 @@ They are not required to correspond to modules, submodules, or object files.
 | `Defer`       | constraint form     | Alias/convenience form for a fixed invariant.                                           |
 | `ValueDomain` | analysis node       | Known subset/range/properties of possible values.                                       |
 | `Universal`   | graph IR            | Typed semantic graph containing compiler-visible entities.                              |
-| `ObjectUnit`  | backend node        | Unit selected for native/backend emission.                                              |
+| `ObjectUnit`  | backend node        | Unit selected for c/backend emission.                                              |
 | `File`        | source object       | Physical source text and source positions.                                              |
 | `Contains`    | graph edge          | Hierarchical containment.                                                               |
 | `Depends`     | graph edge          | One node depends on another.                                                            |

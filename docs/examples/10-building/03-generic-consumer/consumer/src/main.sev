@@ -1,3 +1,5 @@
+from util import range
+
 import printer
 
 def answer() -> int:
@@ -12,3 +14,7 @@ def main():
         printer.foo(1.5)
         printer.foo(true)
     print(answer())
+
+test with integ "imported generic functions specialize for each argument type":
+    main()
+    assert(stdout == "hello\nx\n42\n1.5\ntrue\nhello\nx\n42\n1.5\ntrue\nhello\nx\n42\n1.5\ntrue\n41\n")

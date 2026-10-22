@@ -1,4 +1,4 @@
-
+from collections import list
 
 def multiply(values: list[float], factor: float) -> list[float]:
     output: list[float] := []
@@ -9,13 +9,14 @@ def multiply(values: list[float], factor: float) -> list[float]:
     return output
 
 
-test "gpu placement preserves numerical result through the native fallback":
+test "gpu placement preserves numerical result on ROCm":
     result = multiply([1.0, 2.0, 3.0], 4.0)
 
-    assert(result == [4.0, 8.0, 12.0])
+    assert(result.len() == 3)
+    assert(result[0] == 4.0 and result[1] == 8.0 and result[2] == 12.0)
 
 
-test with skip("requires a configured GPU backend") "gpu placement records device profile metrics":
+test with profile "gpu placement records device profile metrics":
     result = multiply([1.0, 2.0, 3.0], 4.0)
 
     # Proves `with gpu` actually reached a GPU backend.
@@ -25,3 +26,38 @@ test with skip("requires a configured GPU backend") "gpu placement records devic
     # Proves device memory was actually consumed.
     assert(profile.gpu.memory.peak > 0)
     assert(profile.gpu.memory.allocations > 0)
+
+
+test with profile "gpu empty map launches no kernel":
+    result = multiply([], 4.0)
+    assert(result.len() == 0)
+    assert(profile.gpu.kernels == 0)
+
+
+test "gpu tail preserves element order":
+    values: list[float] := []
+    for i in range(257):
+        values.append(float(i))
+    result = multiply(values, 4.0)
+    assert(result.len() == 257)
+    for i in range(257):
+        assert(result[i] == float(i) * 4.0)
+
+
+def multiply_tensors(left: tensor[f64], right: tensor[f64]) -> tensor[f64]:
+    with gpu:
+        return left * right
+
+
+test "gpu tensor arithmetic returns completed host storage":
+    left = tensor[f64](tuple[f64,5](1.0, 2.0, 3.0, 4.0, 5.0))
+    right = tensor[f64](tuple[f64,5](2.0, 2.0, 2.0, 2.0, 2.0))
+    result = multiply_tensors(left, right)
+    assert(result[0] == 2.0 and result[4] == 10.0)
+    assert(left[4] == 5.0 and right[4] == 2.0)
+
+
+test "gpu allows the same read-only input twice":
+    values = tensor[f64](tuple[f64,3](2.0, 3.0, 4.0))
+    result = multiply_tensors(values, values)
+    assert(result[0] == 4.0 and result[2] == 16.0)

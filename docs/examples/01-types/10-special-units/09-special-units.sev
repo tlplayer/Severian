@@ -84,7 +84,7 @@ def process(data: string):
 # {
 #     defer time < 10ms -> Error("operation took too long"),
 # }
-test with profile "latency":
+test "sized input":
     process("a")
 
 # Temperature suffixes are dimensioned literals supplied by the prelude.
@@ -124,3 +124,47 @@ test with compiler:
 
     reject:
         value := 1s + 4B
+
+from collections import list, sum
+
+test "signed temperatures apply offsets before comparing normalized values":
+    assert(-40F == -40C)
+    assert(-273.15C == 0K)
+    assert(212F == 100C)
+
+def measured_duration() -> duration:
+    return 2s
+
+test "units compose through nested expressions and function results":
+    assert(1 / (2s + 3s) == 0.2Hz)
+    assert(1 / measured_duration() == 0.5Hz)
+    assert(3 * measured_duration() == 6s)
+    assert(0B < 1KB < 2MB)
+
+test "runtime negation and compound assignments preserve dimensions":
+    elapsed = 2s
+    reversed = -elapsed
+    assert(reversed == -2s)
+    elapsed += 3s
+    elapsed -= 1s
+    elapsed *= 2
+    elapsed /= 4
+    assert(elapsed == 2s)
+
+test "C sums retain duration and ratio types":
+    durations: list[duration] = [2s,3s]
+    total: duration = sum(durations)
+    assert(total == 5s)
+    empty = list[duration]()
+    assert(sum(empty) == 0s)
+    fractions: list[ratio] = [25pct,50pct]
+    assert(sum(fractions) == 75pct)
+
+test with compiler "dimension checks survive calls updates and comparison chains":
+    reject "incompatible unit dimensions":
+        value = measured_duration() + 4B
+    reject "cannot change the destination type or dimensions":
+        elapsed = 2s
+        elapsed *= 3s
+    reject "incompatible unit dimensions":
+        assert(0s < measured_duration() < 4MB)

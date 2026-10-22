@@ -1,0 +1,42 @@
+# Each event replaces only the selected call in this test. Wrappers inherit
+# reachable lower-level scenarios; ordinary production calls remain unchanged.
+def read() -> int | Error:
+    return 65
+
+def wrapper() -> int | Error:
+    return read() + 1
+
+def main():
+    print(wrapper())
+
+test with chaos "read results":
+    chaos.add(when read return 0)
+    chaos.add(when read return 65)
+    events_seen = 0
+    for event in chaos:
+        result = read()
+        assert(result == 0 or result == 65)
+        events_seen += 1
+    assert(events_seen == 2)
+
+test with chaos "read exceptions":
+    chaos.add(when read throw Error("permission denied"))
+    chaos.add(when read throw Error("timed out"))
+    events_seen = 0
+    for event in chaos:
+        result ?= read()
+        assert(result is Error)
+        events_seen += 1
+    assert(events_seen == 2)
+
+test with chaos "wrapper inherits read failures":
+    events_seen = 0
+    for event in chaos:
+        result ?= wrapper()
+        assert(result is Error or result == 1 or result == 66)
+        events_seen += 1
+    assert(events_seen == 4)
+
+test "fault injection does not escape its test":
+    assert(read() == 65)
+    assert(wrapper() == 66)

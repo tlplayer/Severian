@@ -15,16 +15,31 @@ test:
         assert(value_pointer[0B+bytes(int)] == 20)
         assert(value_pointer[3] == 40)
 
-        free(values)
+        drop values
 
 test with compiler:
-    values := [10, 20, 30]
+    values := tuple[int,3](10,20,30)
 
     reject:
         value_pointer := &values + 1
     
 test with compiler "Cannot increment pointer by offset":
-    values := [10, 20, 30]
+    values := tuple[int,3](10,20,30)
 
     reject:
         assert((value_pointer+1) == &values + 1)       
+
+
+test "byte offset writes use element size":
+    unsafe:
+        values = tensor[int,(2,)](tuple[int,2](10,20))
+        address: pointer[int] = borrow values
+        address[bytes(int)] = 42
+        assert(values[1] == 42)
+
+test "unaligned pointer byte offsets fail":
+    unsafe:
+        throws "pointer byte offset is not element-aligned":
+            values = tensor[int,(2,)](tuple[int,2](10,20))
+            address: pointer[int] = values
+            item = address[1B]

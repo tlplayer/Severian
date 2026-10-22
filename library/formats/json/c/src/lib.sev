@@ -1,0 +1,285 @@
+import file
+import string
+
+# Offsets are UTF-8 byte offsets; a value retains its own source storage.
+def whitespace(text: view string, position: int) -> int:
+    while position < len(text):
+        byte = int(text[position])
+        if byte != 32 and byte != 9 and byte != 10 and byte != 13:
+            break
+        position += 1
+    return position
+
+def digit(byte: u8) -> bool:
+    return byte >= u8(48) and byte <= u8(57)
+
+def hex_digit(byte: u8) -> int | Error:
+    value = int(byte)
+    if value >= 48 and value <= 57:
+        return value - 48
+    if value >= 65 and value <= 70:
+        return value - 55
+    if value >= 97 and value <= 102:
+        return value - 87
+    throw Error("invalid JSON Unicode escape")
+
+def unicode_escape(text: view string, position: int) -> int | Error:
+    if position + 4 > len(text):
+        throw Error("truncated JSON Unicode escape")
+    value = 0
+    index = 0
+    while index < 4:
+        value = value * 16 + hex_digit(text[position + index])
+        index += 1
+    return value
+
+def string_end(text: view string, position: int) -> int | Error:
+    position += 1
+    while position < len(text):
+        byte = int(text[position])
+        if byte == 34:
+            return position + 1
+        if byte < 32:
+            throw Error("unescaped JSON control character")
+        if byte == 92:
+            position += 1
+            if position >= len(text):
+                throw Error("truncated JSON escape")
+            escape = int(text[position])
+            if escape == 117:
+                value = unicode_escape(text, position + 1)
+                position += 4
+                if value >= 55296 and value <= 56319:
+                    if position + 6 >= len(text):
+                        throw Error("missing JSON low surrogate")
+                    if text[position + 1] != u8(92) or text[position + 2] != u8(117):
+                        throw Error("missing JSON low surrogate")
+                    low = unicode_escape(text, position + 3)
+                    if low < 56320 or low > 57343:
+                        throw Error("invalid JSON low surrogate")
+                    position += 6
+                elif value >= 56320 and value <= 57343:
+                    throw Error("unpaired JSON low surrogate")
+            elif escape != 34 and escape != 92 and escape != 47 and escape != 98 and escape != 102 and escape != 110 and escape != 114 and escape != 116:
+                throw Error("invalid JSON escape")
+        position += 1
+    throw Error("unterminated JSON string")
+
+def number_end(text: view string, position: int) -> int | Error:
+    if text[position] == u8(45):
+        position += 1
+    if position >= len(text) or not digit(text[position]):
+        throw Error("invalid JSON number")
+    if text[position] == u8(48):
+        position += 1
+    else:
+        while position < len(text) and digit(text[position]):
+            position += 1
+    if position < len(text) and text[position] == u8(46):
+        position += 1
+        first = position
+        while position < len(text) and digit(text[position]):
+            position += 1
+        if first == position:
+            throw Error("JSON fraction requires digits")
+    if position < len(text) and (text[position] == u8(101) or text[position] == u8(69)):
+        position += 1
+        if position < len(text) and (text[position] == u8(43) or text[position] == u8(45)):
+            position += 1
+        first = position
+        while position < len(text) and digit(text[position]):
+            position += 1
+        if first == position:
+            throw Error("JSON exponent requires digits")
+    return position
+
+def literal_end(text: view string, position: int, expected: view string) -> int | Error:
+    if position + len(expected) > len(text):
+        throw Error("truncated JSON literal")
+    if text[position:position + len(expected)] != expected:
+        throw Error("invalid JSON literal")
+    return position + len(expected)
+
+def value_end(text: view string, position: int, depth: int) -> int | Error:
+    if depth > 128:
+        throw Error("JSON nesting exceeds 128 levels")
+    position = whitespace(text, position)
+    if position == len(text):
+        throw Error("missing JSON value")
+    first = int(text[position])
+    if first == 34:
+        return string_end(text, position)
+    if first == 116:
+        return literal_end(text, position, "true")
+    if first == 102:
+        return literal_end(text, position, "false")
+    if first == 110:
+        return literal_end(text, position, "null")
+    if first == 91 or first == 123:
+        close = 93
+        if first == 123:
+            close = 125
+        position = whitespace(text, position + 1)
+        if position < len(text) and int(text[position]) == close:
+            return position + 1
+        while position < len(text):
+            if first == 123:
+                if text[position] != u8(34):
+                    throw Error("JSON object key must be a string")
+                position = whitespace(text, string_end(text, position))
+                if position >= len(text) or text[position] != u8(58):
+                    throw Error("JSON object key requires a colon")
+                position = whitespace(text, position + 1)
+            position = whitespace(text, value_end(text, position, depth + 1))
+            if position >= len(text):
+                throw Error("unterminated JSON container")
+            if int(text[position]) == close:
+                return position + 1
+            if text[position] != u8(44):
+                throw Error("JSON values require a comma")
+            position = whitespace(text, position + 1)
+        throw Error("unterminated JSON container")
+    return number_end(text, position)
+
+def decode_string(text: view string) -> string | Error:
+    result = ""
+    position = 1
+    while position < len(text) - 1:
+        if text[position] != u8(92):
+            result = result + text[position:position + 1]
+        else:
+            position += 1
+            escape = int(text[position])
+            value = escape
+            if escape == 98:
+                value = 8
+            elif escape == 102:
+                value = 12
+            elif escape == 110:
+                value = 10
+            elif escape == 114:
+                value = 13
+            elif escape == 116:
+                value = 9
+            elif escape == 117:
+                value = unicode_escape(text, position + 1)
+                position += 4
+                if value >= 55296 and value <= 56319:
+                    low = unicode_escape(text, position + 3)
+                    value = 65536 + (value - 55296) * 1024 + low - 56320
+                    position += 6
+            result = result + string(char(value))
+        position += 1
+    return result
+
+class Value:
+    source: string
+
+    def get(self: view Self, key: string) -> Value | Error:
+        if source[0] != u8(123):
+            throw Error("JSON string indexing requires an object")
+        position = whitespace(source, 1)
+        while source[position] != u8(125):
+            end = string_end(source, position)
+            name = decode_string(source[position:end])
+            position = whitespace(source, end)
+            position = whitespace(source, position + 1)
+            end = value_end(source, position, 0)
+            if name == key:
+                return Value(source[position:end])
+            position = whitespace(source, end)
+            if source[position] == u8(44):
+                position = whitespace(source, position + 1)
+        throw Error("JSON object key not found")
+
+    def get(self: view Self, index: int) -> Value | Error:
+        if source[0] != u8(91) or index < 0:
+            throw Error("JSON integer indexing requires an array and nonnegative index")
+        position = whitespace(source, 1)
+        current = 0
+        while source[position] != u8(93):
+            end = value_end(source, position, 0)
+            if current == index:
+                return Value(source[position:end])
+            current += 1
+            position = whitespace(source, end)
+            if source[position] == u8(44):
+                position = whitespace(source, position + 1)
+        throw Error("JSON array index out of bounds")
+
+    grammar indexed[self, "[", key: string, "]"]() -> Value:
+        return self.get(key)
+
+    grammar indexed[self, "[", index: int, "]"]() -> Value:
+        return self.get(index)
+
+    def as_bool(self: view Self) -> bool | Error:
+        if source != "true" and source != "false":
+            throw Error("JSON value is not a boolean")
+        return source == "true"
+
+    def as_int(self: view Self) -> int:
+        return int(source)
+
+    def as_float(self: view Self) -> float:
+        return float(source)
+
+    def as_string(self: view Self) -> string | Error:
+        if source[0] != u8(34):
+            throw Error("JSON value is not a string")
+        return decode_string(source)
+
+    def is_null(self: view Self) -> bool:
+        return source == "null"
+
+    operator ==(expected: bool) -> bool:
+        return self.as_bool() == expected
+
+    operator ==(expected: int) -> bool:
+        return self.as_int() == expected
+
+    operator ==(expected: view string) -> bool:
+        return self.as_string() == expected
+
+def parse(text: view string) -> Value | Error:
+    bytes = text.utf()
+    if not file.valid_utf8(bytes):
+        throw Error("JSON contains invalid UTF-8")
+    start = whitespace(text, 0)
+    end = value_end(text, start, 0)
+    if whitespace(text, end) != len(text):
+        throw Error("trailing data after JSON value")
+    return Value(text[start:end])
+
+class JsonFile: file.File
+    def read(path: string) -> Value | Error with path.suffix(".json"):
+        return parse(file.read.default(path))
+
+    def write(path: string, contents: string) -> int | Error with path.suffix(".json"):
+        document = parse(contents)
+        return file.write.default(path, contents)
+
+test "nested JSON values and decoded object keys":
+    document = parse("{\"enabled\":true,\"a\\u0062\":[-2, false, null, \"\\uD83D\\uDE00\"]}")
+    assert(document["enabled"] == true)
+    values = document["ab"]
+    assert(values[0] == -2)
+    assert(values[1] == false)
+    assert(values[2].is_null())
+    assert(values[3].as_string() == "😀")
+
+test malformed(text) with cases "JSON syntax rejects malformed documents" {
+    ("",), ("01",), ("+1",), ("1.",), ("1e",), ("[1,]",),
+    ("{\"a\":}",), ("{\"a\" 1}",), ("true false",),
+    ("\"\\uD800\"",), ("\"\\uDC00\"",)
+}:
+    result ?= parse(text)
+    assert(result is Error)
+
+test "JSON scalar conversions and child lifetime":
+    parent = parse("[\"hello\\nworld\", 1.25e2]")
+    child = parent[0]
+    number = parent[1]
+    drop parent
+    assert(child.as_string() == "hello\nworld")
+    assert(number.as_float() == 125.0)

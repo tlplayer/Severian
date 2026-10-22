@@ -8,3 +8,52 @@ test with compiler "Received cannot go to Connecting":
     state := Received
     reject:
         state = Connecting
+
+
+test "declared transitions reach either terminal state":
+    received = Connecting
+    received = Received
+    assert(received == Status.Received)
+    failed = Status.Connecting
+    failed = Status.Failed
+    assert(failed == Failed)
+
+test with compiler "mutable terminal states cannot transition backwards":
+    state = Received
+    reject:
+        state = Connecting
+
+test with compiler "terminal states cannot transition to other terminals":
+    state = Failed
+    reject:
+        state = Received
+
+test with compiler "branch joins preserve every possible source state":
+    reject:
+        def invalid(condition: bool):
+            state = Connecting
+            if condition:
+                state = Received
+            state = Failed
+
+test with compiler "loops cannot reuse a consumed transition":
+    reject:
+        def invalid(count: int):
+            state = Connecting
+            index = 0
+            while index < count:
+                state = Received
+                index += 1
+
+test with compiler "transition destinations must be declared":
+    reject:
+        enum Broken:
+            Start -> Missing
+
+test with compiler "ambiguous bare variants need qualification":
+    reject:
+        enum First:
+            Same
+        enum Second:
+            Same
+        value = Same

@@ -392,11 +392,11 @@ test "each continuation restores its own initialized locals":
         self.assertNotIn(declarations['step'], restored[0].initialized)
         self.assertIn(declarations['step'], restored[1].initialized)
 
-    def test_native_multiple_resumes(self):
+    def test_c_multiple_resumes(self):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         with tempfile.TemporaryDirectory(prefix='sev-frame-ownership-') as directory:
             root = Path(directory)
             (root / 'src').mkdir()

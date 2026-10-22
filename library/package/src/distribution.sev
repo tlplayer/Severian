@@ -25,24 +25,24 @@ def select(root: string, requirements: Requirements) -> Selection | Error:
         declared = declared or (target.kind == "binary" and target.name == selected)
     if not declared:
         return Selection("unavailable", "", ["unknown binary: " + selected])
-    native = root + "/artifacts/" + safe_name(requirements.platform) + "/" + safe_name(requirements.profile) + "/bin/" + safe_name(selected)
+    c = root + "/artifacts/" + safe_name(requirements.platform) + "/" + safe_name(requirements.profile) + "/bin/" + safe_name(selected)
     rejected: list[string] = []
     compatible := false
     if os.is_file(root + "/metadata/build.json"):
         provenance = parse_document(read_text(root + "/metadata/build.json"))
         compatible = text_setting(provenance, "", "architecture") == capture(["uname", "-m"]) and text_setting(provenance, "", "os") == capture(["uname", "-s"]) and text_setting(provenance, "", "runtime-abi") == "severian-source-1"
-    if os.is_file(native) and requirements.platform == "host" and compatible:
-        return Selection("native", native, rejected)
+    if os.is_file(c) and requirements.platform == "host" and compatible:
+        return Selection("c", c, rejected)
     if requirements.platform == "host" and compatible and os.is_dir(root + "/metadata/build-records"):
         for location in files(root + "/metadata/build-records"):
             if not location.ends_with(".json") or location.ends_with(".inputs.json"):
                 continue
             realization = parse_document(read_text(location))
-            if text_setting(realization, "", "kind", "") == "native" and text_setting(realization, "", "profile", "") == requirements.profile:
+            if text_setting(realization, "", "kind", "") == "c" and text_setting(realization, "", "profile", "") == requirements.profile:
                 output = relative_path(text_setting(realization, "", "output"))
                 if path.basename(output) == selected and (output.starts_with("bin/") or output.starts_with("artifacts/")) and os.is_file(root + "/" + output):
-                    return Selection("native", root + "/" + output, rejected)
-    rejected.append("no compatible native artifact for " + requirements.platform + "/" + requirements.profile)
+                    return Selection("c", root + "/" + output, rejected)
+    rejected.append("no compatible c artifact for " + requirements.platform + "/" + requirements.profile)
     if os.is_file(manifest_file(root + "/source")):
         return Selection("source", root + "/source", rejected)
     rejected.append("distribution contains no source fallback")
@@ -104,7 +104,7 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
                 relative = location[int(len(project.root)) + 1:]
                 if relative in ["package.json", "package.toml", "sev.lock", "package.lock"]:
                     continue
-                # Include native providers, headers and other package assets.
+                # Include c providers, headers and other package assets.
                 copy_file(location, distribution + "/source/" + relative_path(relative))
             write_text(distribution + "/source/package.json", frozen)
             if source_checksum(distribution + "/source") != checksum:
@@ -152,7 +152,7 @@ def publish(project: Project, compiler: Compiler, request: Publish) -> string | 
         write_text(distribution + "/metadata/content.sha256", publication_files(distribution, name))
         verify_publication(distribution, name)
         mkdir(path.dirname(release))
-        lock = file.native_lock(root + "/.sev-publish.lock")
+        lock = file.c_lock(root + "/.sev-publish.lock")
         if lock < 0:
             throw Error("could not lock registry publication")
         try:
@@ -191,12 +191,12 @@ def materialize(value: string, compiler: Compiler, request: Run) -> string | Err
         result = execute(plan(open(location), Build(request.target, request.platform, request.profile, "", "", request.locked), "run"), compiler)
         return result.artifacts[0].path
     selected = select(path.dirname(location), Requirements(request.target, platform, profile, false))
-    if selected.kind == "native":
+    if selected.kind == "c":
         return selected.path
     if selected.kind == "source":
         stage = registry_root() + "/cache/build/" + source_checksum(selected.path).replace(":", "-")
         mkdir(stage)
-        lock = file.native_lock(stage + "/.sev-build.lock")
+        lock = file.c_lock(stage + "/.sev-build.lock")
         if lock < 0:
             throw Error("could not lock installed source realization")
         try:

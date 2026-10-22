@@ -45,7 +45,7 @@ enum ArtifactFormat:
     Other(name: string, version: string)
 
 # An artifact may support several uses. MLIR specialization and dynamic loading
-# are distinct from passing a native object or archive to a linker.
+# are distinct from passing a c object or archive to a linker.
 enum ArtifactUse:
     Compile
     Import
@@ -129,7 +129,7 @@ class ExternalRequirement:
     compatibility: ArtifactCompatibility
 
 # Metadata resolves a declaration to a particular artifact before requesting use.
-# symbol_id is the compiler's declaration identity; entry is its native/link/load
+# symbol_id is the compiler's declaration identity; entry is its c/link/load
 # name. specialization is the compiler's opaque specialization key.
 class ArtifactRequest:
     artifact: ArtifactRef

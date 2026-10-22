@@ -1,0 +1,1 @@
+{"package":{"name":"cli","version":"0.1.0"},"dependencies":{"process":{"path":"../../process/linux_x86_64"},"collections":{"path":"../../../core/collections/collection"},"string":{"path":"../../../core/string/c"}}}

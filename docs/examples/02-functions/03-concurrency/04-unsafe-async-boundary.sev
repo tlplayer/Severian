@@ -2,8 +2,19 @@ def raw_driver_call() -> int:
     return 42
 
 def main():
-    # This example explicitly demonstrates crossing into runtime ownership.
+    # This example explicitly demonstrates crossing into runtime ownership without checking the scope 
     unsafe:
         task = async raw_driver_call() with runtime
 
-    print(await task)
+        print(await task)
+
+
+test "unsafe task stays inside its declared scope":
+    unsafe:
+        task = async raw_driver_call() with runtime
+        assert(await task == 42)
+
+
+test with compiler "runtime scope requires an unsafe boundary":
+    reject:
+        task = async raw_driver_call() with runtime

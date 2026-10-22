@@ -13,9 +13,9 @@ steps see the same digest and can reuse their results. Broken records or outputs
 request execution again; failed execution cannot publish a completion record.
 
 The source compiler uses these boundaries for ownership lowering, LLVM dialect
-lowering, LLVM IR translation, native object generation, and bytecode output.
+lowering, LLVM IR translation, c object generation, and bytecode output.
 C preprocessing reruns on a compilation-unit miss to discover transitive header
-changes; unchanged preprocessed bytes reuse their object. Native linking remains
+changes; unchanged preprocessed bytes reuse their object. C linking remains
 conservative and reruns after a unit miss. Unchanged complete units bypass the
 whole pipeline through the package compilation-unit cache.
 
@@ -35,7 +35,7 @@ package.pkg/
   cache/compiler/              stage records and shared IR/object blobs
   debug/quality/               lint and file-contribution reports
   debug/coverage/              runtime coverage reports
-  debug/profile/               frontend and native-stage measurements
+  debug/profile/               frontend and c-stage measurements
 ```
 
 Explicit `-o` still controls delivery. Platform/profile identities remain in

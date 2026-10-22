@@ -1,6 +1,8 @@
-# Parameter modes are declarations, not deductions from function bodies.
-def length(values: list[int]) -> usize:
-    return values.length()
+from collections import list
+
+# Explicit modes constrain the ownership inferred from each function body.
+def length(values: list[int]) -> int:
+    return values.len()
 
 
 def clear(values: borrow list[int]):
@@ -52,19 +54,19 @@ test with compiler "move parameters consume their argument":
         assert(length(owned) == 3)
 
 
-test with compiler "a default view cannot mutate or transfer ownership":
+test with compiler "an explicit view cannot mutate or transfer ownership":
     reject:
-        def bad(values: list[int]):
+        def bad(values: view list[int]):
             values.clear()
     reject:
-        def bad(values: list[int]) -> list[int]:
+        def bad(values: view list[int]) -> list[int]:
             return values
     reject:
-        def bad(values: list[int]):
+        def bad(values: view list[int]):
             alias = values
             alias[0] = 99
     reject:
-        def bad(values: list[int]):
+        def bad(values: view list[int]):
             drop(values)
 
 

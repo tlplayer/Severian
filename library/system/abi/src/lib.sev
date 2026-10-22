@@ -1,0 +1,70 @@
+# C layout contracts. The target is explicit; this never probes the build host.
+enum Architecture:
+    X86_64
+    Aarch64
+
+enum OperatingSystem:
+    Linux
+    Darwin
+    Windows
+
+enum Scalar:
+    Bool
+    I8
+    U8
+    I16
+    U16
+    I32
+    U32
+    I64
+    U64
+    F32
+    F64
+    Pointer
+    CLong
+    CUnsignedLong
+
+class Target:
+    architecture: Architecture
+    operating_system: OperatingSystem
+    pointer_bits: int
+    long_bits: int
+
+class Layout:
+    size_bytes: int
+    alignment_bytes: int
+
+def c_target(architecture: Architecture, system: OperatingSystem) -> Target:
+    if system == Windows:
+        return Target(architecture, system, 64, 32)
+    return Target(architecture, system, 64, 64)
+
+def scalar_layout(value: Scalar, selected: Target) -> Layout | Error:
+    if selected.pointer_bits != 64 or selected.long_bits != (32 if selected.operating_system == Windows else 64):
+        throw Error("inconsistent C ABI target widths")
+    if value == Bool or value == I8 or value == U8:
+        return Layout(1, 1)
+    if value == I16 or value == U16:
+        return Layout(2, 2)
+    if value == I32 or value == U32 or value == F32:
+        return Layout(4, 4)
+    if value == CLong or value == CUnsignedLong:
+        width = selected.long_bits // 8
+        return Layout(width, width)
+    return Layout(8, 8)
+
+def extends_narrow_integers(selected: Target) -> bool:
+    return selected.operating_system != Windows and (selected.architecture == X86_64 or selected.operating_system == Darwin)
+
+test "C long differs between LP64 and LLP64":
+    linux = c_target(X86_64, Linux)
+    windows = c_target(X86_64, Windows)
+    assert(scalar_layout(CLong, linux).size_bytes == 8)
+    assert(scalar_layout(CLong, windows).size_bytes == 4)
+    assert(scalar_layout(Pointer, windows).size_bytes == 8)
+
+test "narrow integer extension belongs to the target":
+    assert(extends_narrow_integers(c_target(X86_64, Linux)))
+    assert(not extends_narrow_integers(c_target(Aarch64, Linux)))
+    assert(extends_narrow_integers(c_target(Aarch64, Darwin)))
+    assert(not extends_narrow_integers(c_target(X86_64, Windows)))

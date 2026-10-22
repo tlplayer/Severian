@@ -67,7 +67,10 @@ def resolve_literal(literal, syntax, context=None):
     if literal.explicit_constructor and getattr(target, 'conversion_sources', ()):
         from py_compiler.syntax.primitive.numeric.conversion import literal_conversion
         return target, literal_conversion(target, owner, value)
-    return target, target.accept_literal(owner, value)
+    accept = getattr(target, 'accept_literal', None)
+    if accept is None:
+        raise ValueError(f'{owner.name} literal does not satisfy {target.name}')
+    return target, accept(owner, value)
 
 
 def partition(source, graph, syntax):
@@ -91,6 +94,14 @@ from py_compiler.syntax.recognition import Syntax
 
 
 class HirTests(unittest.TestCase):
+    def test_record_literal_mismatch_is_a_diagnostic(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = 'class Point:\n    x: int\ndef read(p: Point) -> int:\n    return p.x\ntest:\n    read(1)\n'
+        result = compile_source('record-literal.sev', source, Syntax())
+        self.assertTrue(result.diagnostics)
+        self.assertIn('Point', str(result.diagnostics[0]))
+
     def value(self, spelling, expected=None, kind="NUMBER"):
         return resolve_literal(Literal("x", Span("x", 0, len(spelling)), spelling, kind, expected), Syntax())
 

@@ -1,0 +1,17 @@
+{
+  "package": {
+    "name": "system.os",
+    "version": "0.1.0"
+  },
+  "dependencies": {
+    "io": {
+      "path": "../../io/linux_x86_64"
+    },
+    "string": {
+      "path": "../../../core/string/c"
+    },
+    "process": {
+      "path": "../../process/linux_x86_64"
+    }
+  }
+}

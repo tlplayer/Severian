@@ -6,9 +6,9 @@ def main():
     print(name.upper())
     print(name.contains("ver"))
     print(f"Hello, {name}!")
-    print(name[:5])
+    print(name.slice(0,5))
 
-test with integration:
+test with integ:
     main()
     assert("Hello, Severian!" in stdout)
-    assert("Apple".append("s").append('!') == "Apples!")
+    assert("Apple".concat("s") + '!' == "Apples!")

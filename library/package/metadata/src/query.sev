@@ -78,5 +78,5 @@ def lookup_implementation(value: Realization, name: string, required: Compatibil
     kind = artifacts[0].kind
     action = "specialize" if kind == "mlir" else "compile" if kind == "source" else "link"
     if action == "link" and (value.state != "complete" or implementation.specialization != specialization):
-        throw Error("no completed native implementation for specialization: " + name)
+        throw Error("no completed c implementation for specialization: " + name)
     return ImplementationSelection(symbol, implementation, artifacts, action)

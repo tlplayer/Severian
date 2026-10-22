@@ -1,0 +1,60 @@
+# Range owns its iteration grammar; consumers inline the checked iterator body.
+class Range:
+    start: int
+    stop: int
+    step: int
+
+    grammar iteration["iterator", "(", self, ")"]() -> iterator[int]:
+        value = self.start
+        while self.step > 0 and value < self.stop or self.step < 0 and value > self.stop:
+            yield value
+            if self.step > 0 and value > 9223372036854775807 - self.step:
+                break
+            if self.step < 0 and value < -9223372036854775808 - self.step:
+                break
+            value += self.step
+
+def range(stop: int) -> Range:
+    return Range(0,stop,1)
+
+def range(start: int, stop: int) -> Range:
+    return Range(start,stop,1)
+
+def range(start: int, stop: int, step: int) -> Range:
+    if step == 0:
+        throw Error("range step cannot be zero")
+    return Range(start,stop,step)
+
+def abs(value: int) -> int:
+    if value == -9223372036854775808:
+        throw Error("absolute value exceeds int range")
+    if value < 0:
+        return -value
+    return value
+
+def min(left: int, right: int) -> int:
+    if left < right:
+        return left
+    return right
+
+def max(left: int, right: int) -> int:
+    if left > right:
+        return left
+    return right
+
+# assert is supplied by the test capability, never exported as a runtime call.
+test "successful assertion returns normally":
+    assert(true)
+
+test "failed assertion reports its diagnostic":
+    throws "assertion failed":
+        assert(false)
+
+test "range iterates in both directions":
+    total = 0
+    for value in range(1,5):
+        total += value
+    assert(total == 10)
+    for value in range(4,0,-1):
+        total -= value
+    assert(total == 0)

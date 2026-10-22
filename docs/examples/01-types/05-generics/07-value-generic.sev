@@ -1,3 +1,5 @@
+from collections import list
+
 # V - Value
 # Fold compiler values without erasing their concrete representation.
 
@@ -17,7 +19,7 @@ class ConstantValue: ValueTerm
 
 
 def fold_values[V: ValueTerm](values: list[V]) -> V:
-    total := V.zero()
+    total = V.zero()
 
     for value in values:
         total = total.add(value)

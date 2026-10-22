@@ -1,0 +1,437 @@
+import format
+
+# Standard string methods use owned UTF-8 storage and ordinary MLIR operations.
+def _concat(left: string, right: string) -> string:
+    if len(left) > 9223372036854775807 - len(right):
+        throw Error("string concatenation exceeds addressable storage")
+    bytes = tensor[u8](len(left) + len(right))
+    index = 0
+    while index < len(left):
+        bytes[index] = left[index]
+        index += 1
+    offset = 0
+    while offset < len(right):
+        bytes[index + offset] = right[offset]
+        offset += 1
+    return string(bytes)
+
+def _contains(value: string, needle: string) -> bool:
+    if len(needle) > len(value):
+        return false
+    start = 0
+    while start <= len(value) - len(needle):
+        offset = 0
+        while offset < len(needle) and value[start + offset] == needle[offset]:
+            offset += 1
+        if offset == len(needle):
+            return true
+        start += 1
+    return false
+
+
+# Counted bytes preserve embedded NUL. C strings reject interior terminators.
+def _utf(value: string, terminated: bool = false) -> tensor[u8]:
+    count = len(value)
+    if terminated:
+        if count == 9223372036854775807:
+            throw Error("UTF-8 packing exceeds addressable storage")
+        count += 1
+    bytes = tensor[u8,(count,)]()
+    index = 0
+    while index < len(value):
+        if terminated and value[index] == u8(0):
+            throw Error("C string contains an embedded NUL")
+        bytes[index] = value[index]
+        index += 1
+    if terminated:
+        bytes[index] = u8(0)
+    return bytes
+
+def _convert(value: int) -> string:
+    return format.convert(value)
+
+def _convert(value: bool) -> string:
+    return format.convert(value)
+
+def _convert(value: char) -> string:
+    return format.convert(value)
+
+# UTF-8 ASCII case conversion preserves every non-ASCII byte unchanged.
+def _upper(value: string) -> string:
+    bytes = value.utf()
+    index = 0
+    while index < len(bytes):
+        if bytes[index] >= u8(97) and bytes[index] <= u8(122):
+            bytes[index] = u8(int(bytes[index]) - 32)
+        index += 1
+    return string(bytes)
+
+def _lower(value: string) -> string:
+    bytes = value.utf()
+    index = 0
+    while index < len(bytes):
+        if bytes[index] >= u8(65) and bytes[index] <= u8(90):
+            bytes[index] = u8(int(bytes[index]) + 32)
+        index += 1
+    return string(bytes)
+
+def _equal(left: string, right: string) -> bool:
+    if len(left) != len(right):
+        return false
+    index = 0
+    while index < len(left):
+        if left[index] != right[index]:
+            return false
+        index += 1
+    return true
+
+# Slice indices here are UTF-8 byte offsets, consistent with string indexing.
+def _slice(value: string, start: int, stop: int, start_closed: bool = true, stop_closed: bool = false) -> string:
+    first = start
+    last = stop
+    if first < 0:
+        first += len(value)
+    if last < 0:
+        last += len(value)
+    if not start_closed and first < len(value):
+        first += 1
+    if stop_closed and last < len(value):
+        last += 1
+    if first < 0:
+        first = 0
+    if last > len(value):
+        last = len(value)
+    if first > len(value):
+        first = len(value)
+    if last < first:
+        last = first
+    bytes = tensor[u8,(last - first,)]()
+    index = first
+    while index < last:
+        bytes[index - first] = value[index]
+        index += 1
+    return string(bytes)
+
+
+def _convert(value: f64) -> string:
+    return format.convert(value)
+
+def _convert(value: f32) -> string:
+    return format.convert(value)
+
+# Replacement follows the existing string methods contract: non-overlapping
+# matches, and empty needles inserted at UTF-8 character boundaries.
+def __matches(value: string, needle: string, position: int) -> bool:
+    if len(needle) > len(value) - position:
+        return false
+    offset = 0
+    while offset < len(needle):
+        if value[position + offset] != needle[offset]:
+            return false
+        offset += 1
+    return true
+
+def __character_end(value: string, position: int) -> int:
+    end = position + 1
+    while end < len(value) and value[end] >= u8(128) and value[end] < u8(192):
+        end += 1
+    return end
+
+def _replace(value: string, needle: string, replacement: string) -> string:
+    size = len(value)
+    width = len(needle)
+    extra = len(replacement)
+    matches = 0
+    position = 0
+    while position <= size:
+        if width == 0 or __matches(value, needle, position):
+            if matches == 9223372036854775807:
+                throw Error("string replacement exceeds addressable storage")
+            matches += 1
+            if width != 0:
+                position += width
+                continue
+        if position == size:
+            break
+        position = __character_end(value, position) if width == 0 else position + 1
+    remaining = size - matches * width
+    if extra != 0 and matches > (9223372036854775807 - remaining) / extra:
+        throw Error("string replacement exceeds addressable storage")
+    bytes = tensor[u8,(remaining + matches * extra,)]()
+    position = 0
+    output = 0
+    while position <= size:
+        if width == 0 or __matches(value, needle, position):
+            offset = 0
+            while offset < extra:
+                bytes[output] = replacement[offset]
+                output += 1
+                offset += 1
+            if width != 0:
+                position += width
+                continue
+        if position == size:
+            break
+        end = __character_end(value, position) if width == 0 else position + 1
+        while position < end:
+            bytes[output] = value[position]
+            position += 1
+            output += 1
+    return string(bytes)
+
+# Parsing belongs to core.string, with range checks before multiplication.
+def __parse_magnitude(value: string, start: int, base: int, limit: u64) -> u64:
+    if base < 2 or base > 36:
+        throw Error("integer base outside [2, 36]")
+    if start == len(value):
+        throw Error("integer requires digits")
+    radix = u64(base)
+    result: u64 = 0
+    position = start
+    while position < len(value):
+        current = int(value[position])
+        digit = -1
+        if current >= 48 and current <= 57:
+            digit = current - 48
+        elif current >= 65 and current <= 90:
+            digit = current - 65 + 10
+        elif current >= 97 and current <= 122:
+            digit = current - 97 + 10
+        if digit < 0 or digit >= base:
+            throw Error("invalid integer digit")
+        amount = u64(digit)
+        if result > (limit - amount) / radix:
+            throw Error("integer string outside target range")
+        result = result * radix + amount
+        position += 1
+    return result
+
+def __integer_space(value: u8) -> bool:
+    return value == u8(32) or value >= u8(9) and value <= u8(13)
+
+def __integer_text(value: string) -> string:
+    start = 0
+    end = len(value)
+    while start < end and __integer_space(value[start]):
+        start += 1
+    while end > start and __integer_space(value[end - 1]):
+        end -= 1
+    return _slice(value,start,end)
+
+def _parse_integer(value: string, base: int = 10) -> int:
+    text = __integer_text(value)
+    if len(text) == 0:
+        throw Error("integer requires digits")
+    negative = text[0] == u8(45)
+    start = 1 if negative or text[0] == u8(43) else 0
+    limit: u64 = 9223372036854775807
+    if negative:
+        limit += u64(1)
+    magnitude = __parse_magnitude(text, start, base, limit)
+    if negative and magnitude != u64(0):
+        return -int(magnitude - u64(1)) - 1
+    return int(magnitude)
+
+def _parse_unsigned(value: string, base: int = 10) -> u64:
+    text = __integer_text(value)
+    if len(text) == 0:
+        throw Error("integer requires digits")
+    if text[0] == u8(45):
+        throw Error("negative string cannot convert to unsigned integer")
+    start = 1 if text[0] == u8(43) else 0
+    limit: u64 = 18446744073709551615
+    return __parse_magnitude(text, start, base, limit)
+
+
+def _pointer(value: u64) -> string:
+    return format.pointer_text(value)
+
+
+# Decimal text parsing is shared by float constructors, including union dispatch.
+# Retaining nineteen significant digits bounds the accumulator; the remaining
+# digits adjust the decimal exponent without overflowing integer storage.
+def _parse_float(value: string) -> f64:
+    text = __integer_text(value)
+    if len(text) == 0:
+        throw Error("float requires digits")
+    negative = text[0] == u8(45)
+    position = 1 if negative or text[0] == u8(43) else 0
+    magnitude: u64 = 0
+    significant = 0
+    digits = 0
+    exponent = 0
+    fraction = false
+    while position < len(text):
+        current = text[position]
+        if current == u8(46) and not fraction:
+            fraction = true
+            position += 1
+            continue
+        if current < u8(48) or current > u8(57):
+            break
+        digit = u64(current) - u64(48)
+        digits += 1
+        if significant < 19:
+            magnitude = magnitude * u64(10) + digit
+            if magnitude != u64(0):
+                significant += 1
+            if fraction:
+                exponent -= 1
+        elif not fraction:
+            exponent += 1
+        position += 1
+    if digits == 0:
+        throw Error("float requires digits")
+    if position < len(text) and (text[position] == u8(101) or text[position] == u8(69)):
+        position += 1
+        exponent_negative = false
+        if position < len(text) and (text[position] == u8(43) or text[position] == u8(45)):
+            exponent_negative = text[position] == u8(45)
+            position += 1
+        start = position
+        explicit_exponent = 0
+        while position < len(text) and text[position] >= u8(48) and text[position] <= u8(57):
+            # Saturation preserves range behavior even for enormous exponents.
+            if explicit_exponent < 1000000000:
+                explicit_exponent = explicit_exponent * 10 + int(text[position]) - 48
+            position += 1
+        if position == start:
+            throw Error("float exponent requires digits")
+        exponent += -explicit_exponent if exponent_negative else explicit_exponent
+    if position != len(text):
+        throw Error("invalid float digit")
+    result = f64(magnitude)
+    if magnitude != u64(0):
+        if exponent > 308:
+            throw Error("float string outside target range")
+        if exponent < -400:
+            result = 0.0
+        else:
+            # Scaling in chunks preserves subnormals: 5e-324 must not divide
+            # by an intermediate infinity or multiply by an underflowed power.
+            if exponent < -308:
+                result /= 1e308
+                exponent += 308
+            power = 10.0
+            scale = 1.0
+            remaining = -exponent if exponent < 0 else exponent
+            while remaining > 0:
+                if remaining % 2 == 1:
+                    scale *= power
+                remaining /= 2
+                if remaining > 0:
+                    power *= power
+            result = result / scale if exponent < 0 else result * scale
+        if result > 1.7976931348623157e308:
+            throw Error("float string outside target range")
+    return -result if negative else result
+
+
+test "float parsing covers signs fractions exponents and subnormals":
+    assert(_parse_float("  +4.5\t") == 4.5)
+    assert(_parse_float("-.125") == -0.125)
+    assert(_parse_float("12.") == 12.0)
+    assert(_parse_float("1.25e2") == 125.0)
+    assert(_parse_float("5e-324") > 0.0)
+    assert(_parse_float("1e-9999999999") == 0.0)
+    assert(_parse_float("0e9999999999") == 0.0)
+    assert(_parse_float("123456789012345678901234567890e-29") > 1.23)
+    assert(_parse_float("123456789012345678901234567890e-29") < 1.24)
+
+test "float exponent requires digits":
+    throws "float exponent requires digits":
+        value = _parse_float("1e+")
+
+test "float text rejects trailing garbage":
+    throws "invalid float digit":
+        value = _parse_float("4.5x")
+
+test "float text rejects overflow":
+    throws "float string outside target range":
+        value = _parse_float("1e309")
+
+
+test "string operations preserve UTF-8 and embedded zeroes":
+    joined = "aλ".concat("\0😀")
+    assert(len(joined) == 8)
+    assert(joined.contains("λ\0"))
+    assert(joined.contains(""))
+    assert(not joined.contains("absent"))
+
+test "decimal conversion includes both signed boundaries":
+    minimum = string(-9223372036854775808)
+    maximum = string(9223372036854775807)
+    zero = string(0)
+    assert(len(minimum) == 20 and minimum.contains("-9223372036854775808"))
+    assert(len(maximum) == 19 and maximum.contains("9223372036854775807"))
+    assert(len(zero) == 1 and zero[0] == u8(48))
+
+test "UTF-8 packing owns counted and terminated buffers":
+    packed = "λ".utf()
+    assert(len(packed) == 2)
+    assert(packed[0] == u8(206) and packed[1] == u8(187))
+    terminated = "λ".utf(true)
+    assert(len(terminated) == 3 and terminated[2] == u8(0))
+    zero = "a\0b".utf()
+    assert(len(zero) == 3 and zero[1] == u8(0))
+    empty = "".utf(true)
+    assert(len(empty) == 1 and empty[0] == u8(0))
+
+test "C packing rejects embedded NUL":
+    throws "C string contains an embedded NUL":
+        bytes = "a\0b".utf(true)
+
+test "temporary string methods work inside short-circuit expressions":
+    assert(true and "a".contains("a"))
+    assert(false or "a".contains("a"))
+
+
+test "replacement handles growth deletion overlap and UTF-8 boundaries":
+    assert("1_024".replace("_", "") == "1024")
+    assert("aaaa".replace("aa", "b") == "bb")
+    assert("aba".replace("b", "long") == "alonga")
+    assert("λ😀".replace("", ":") == ":λ:😀:")
+    assert("".replace("", "x") == "x")
+    assert("unchanged".replace("missing", "x") == "unchanged")
+    assert("a\0b".replace("\0", "!") == "a!b")
+
+test "integer parsing preserves signed and unsigned boundaries":
+    assert(_parse_integer("-9223372036854775808") == -9223372036854775808)
+    assert(_parse_integer("+9223372036854775807") == 9223372036854775807)
+    assert(_parse_integer("-0") == 0)
+    assert(_parse_integer("FF",16) == 255)
+    assert(_parse_unsigned("18446744073709551615") == u64(18446744073709551615))
+
+test "integer parsing rejects overflow":
+    throws "integer string outside target range":
+        value = _parse_integer("9223372036854775808")
+
+test "integer parsing rejects sign without digits":
+    throws "integer requires digits":
+        value = _parse_integer("+")
+
+test "integer parsing rejects trailing junk":
+    throws "invalid integer digit":
+        value = _parse_integer("12x")
+
+# Lexicographic UTF-8 ordering shares the string library's bounded byte access.
+def _compare[Text](left: Text, right: Text) -> int:
+    index = 0
+    while index < len(left) and index < len(right):
+        if left[index] < right[index]:
+            return -1
+        if left[index] > right[index]:
+            return 1
+        index += 1
+    if len(left) < len(right):
+        return -1
+    if len(left) > len(right):
+        return 1
+    return 0
+
+test "string ordering compares bytes and then prefix lengths":
+    assert("ada" < "grace")
+    assert("prefix" < "prefix-longer")
+    assert("same" <= "same" and "same" >= "same")
+    assert("" < "a" and "z" > "a")
+    assert("é" > "z")

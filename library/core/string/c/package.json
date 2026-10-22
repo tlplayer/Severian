@@ -1,0 +1,12 @@
+{
+  "package": {
+    "name": "core.string",
+    "version": "0.1.0"
+  },
+  "dependencies": {
+    "format": {
+      "package": "core.string.format",
+      "path": "../format/c"
+    }
+  }
+}

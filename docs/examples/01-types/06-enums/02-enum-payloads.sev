@@ -20,3 +20,148 @@ test "matches enum variants and destructures payloads":
     assert(area(Circle(2.0)) > 12.5)
     assert(area(Rectangle(3.0, 4.0)) == 12.0)
     assert(area(Point) == 0.0)
+
+
+def scaled_area(shape: Shape, scale: float) -> float:
+    measured: float = match shape:
+        case Circle(radius):
+            3.1415926 * radius ** 2
+        case Shape.Rectangle(width, height):
+            width * height
+        case Point:
+            0.0
+    return measured * scale
+
+
+def is_rectangle(shape: Shape) -> bool:
+    return match shape:
+        case Rectangle:
+            true
+        #TODO: this should automatically expand to all other cases in the T1 | T2... otherwise it's not an exhaustive match
+        case _:
+            false
+
+
+enum Message:
+    Label(text: string)
+    Missing
+
+
+test "a match value joins its arms and continues after the match":
+    assert(scaled_area(Rectangle(3.0,4.0),2.0) == 24.0)
+    assert(scaled_area(Point,2.0) == 0.0)
+    measured = 1.0
+    measured = match Rectangle(3.0,4.0):
+        case Rectangle(width,height):
+            width * height
+        case _:
+            0.0
+    assert(measured == 12.0)
+
+
+test "bare payload variants ignore fields and wildcard covers the rest":
+    assert(is_rectangle(Rectangle(3.0,4.0)))
+    assert(not is_rectangle(Circle(2.0)))
+    assert(not is_rectangle(Point))
+
+
+test "match values own strings independently of their source enum":
+    message = Label("kept")
+    selected := match message:
+        case Label(text):
+            text
+        case Missing:
+            "missing"
+    drop(message)
+    assert(selected == "kept")
+    temporary = match Label("temporary"):
+        case Label(text):
+            text
+        case Missing:
+            "missing"
+    assert(temporary == "temporary")
+
+
+test with compiler "payload patterns enforce arity binding scope and coverage":
+    reject:
+        match Rectangle(3.0,4.0):
+            case Rectangle(width,width):
+                width = width
+            case _:
+                unimplemented
+    reject:
+        match Rectangle(3.0,4.0):
+            case Rectangle(width):
+                width = width
+            case _:
+                unimplemented
+    reject:
+        value = match Point:
+            case Circle(radius):
+                radius
+    reject:
+        value = match Point:
+            case _:
+                0.0
+            case Point:
+                1.0
+    reject:
+        value = match Point:
+            case Rectangle(width,height):
+                width * height
+            case _:
+                "wrong type"
+
+
+match_evaluations = 0
+
+def measured_shape() -> Shape:
+    module.match_evaluations += 1
+    return Rectangle(3.0,4.0)
+
+test "match evaluates its subject once and executes only the selected arm":
+    module.match_evaluations = 0
+    selected = 0
+    measured = match measured_shape():
+        case Circle(radius):
+            selected += 100
+            radius
+        case Rectangle(width,height):
+            selected += 1
+            width * height
+        case Point:
+            selected += 1000
+            0.0
+    assert(module.match_evaluations == 1)
+    assert(selected == 1 and measured == 12.0)
+
+test with compiler "a payload view cannot outlive its enum owner":
+    reject:
+        message = Label("owned")
+        match message:
+            case Label(text):
+                drop(message)
+                selected = copy text
+            case Missing:
+                unimplemented
+
+
+test with compiler "match assignment preserves ordinary binding rules":
+    reject:
+        selected := 0.0
+        selected = match Point:
+            case _:
+                12.0
+    reject:
+        selected = match Rectangle(3.0,4.0):
+            case Rectangle(width,height):
+                width * height
+            case _:
+                0.0
+        escaped = width
+    reject:
+        selected = match Point:
+            case Message.Label(text):
+                1.0
+            case _:
+                0.0

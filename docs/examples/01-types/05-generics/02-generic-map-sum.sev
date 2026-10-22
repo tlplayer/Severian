@@ -1,19 +1,11 @@
-trait Hash:
-    def hash() -> usize
+from collections import C, map, dict, list, Numeric, enumerate, sum
 
-trait Equal:
-    def equal(other: Self) -> bool
 
-trait Number:
-    def zero() -> Self
-    def add(other: Self) -> Self
-
-def sum_values[K: Hash + Equal, V: Number](Vs: map[K, V]) -> V:
-    total := V.zero()
-
-    for _, V in Vs:
-        total = total.add(V)
-
+# C supplies typed key/value pairs; the loop ignores keys and sums values.
+def sum_values[K,V:Numeric,Container:C[K,V]](container: Container) -> V:
+    total: V = 0
+    for _, value in enumerate(container):
+        total += value
     return total
 
 def main():
@@ -23,3 +15,33 @@ def main():
 test:
     counts = {"first": 34, "second": 8}
     assert(sum_values(counts) == 42)
+
+
+test "the same utility accepts every numeric container":
+    counts: dict[string,int] = {"first": 34, "second": 8}
+    numbers: list[int] = [34,8]
+    packed = tensor[int](tuple[int,2](34,8))
+    assert(sum_values(counts) == 42)
+    assert(sum_values(numbers) == 42)
+    assert(sum_values(packed) == 42)
+    assert(sum(counts) == 42)
+
+test "enumeration keeps dictionary keys and values typed as strings":
+    names: dict[string,string] = {"first": "Alice", "second": "Bob"}
+    pairs: list[tuple[string,string]] = enumerate(names)
+    drop(names)
+    assert(pairs.get(0)[0] == "first")
+    assert(pairs.get(1)[1] == "Bob")
+
+test "numeric sum keeps floating point results":
+    parts: map[string,f64] = {"first": 1.25, "second": 2.5}
+    result: f64 = sum_values(parts)
+    assert(result == 3.75)
+
+test "empty generic sums retain their numeric result type":
+    integers = dict[string,int]()
+    fractions = list[f64]()
+    integer_total: int = sum_values(integers)
+    fractional_total: f64 = sum_values(fractions)
+    assert(integer_total == 0)
+    assert(fractional_total == 0.0)

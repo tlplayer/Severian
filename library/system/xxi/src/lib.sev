@@ -1,145 +1,72 @@
 import abi
-import ffi
-import universal
 
-enum ExternalLanguage:
-    C
-    Rust
-    System
-    Custom(name: string)
+# @c declarations are compiler syntax. This layer checks the results of calls;
+# it does not generate adapters or choose a calling convention by language name.
+class BoundaryError: Error
+    message: string
 
+class Budget:
+    calls_remaining: int
+    bytes_remaining: int
 
-class ExternalImport:
-    language: ExternalLanguage
-    provider: string
-    alias: string
+def c_target(architecture: abi.Architecture, system: abi.OperatingSystem) -> abi.Target:
+    return abi.c_target(architecture, system)
 
+def status(code: int) -> absent | BoundaryError:
+    if code != 0:
+        throw BoundaryError("external call returned an error status")
+    return absent
 
-class ResolvedExternalModule:
-    imports: list[ExternalImport]
-    foreign: ffi.ForeignModule
-    plans: list[ffi.BoundaryPlan]
+def count(value: int, maximum: int) -> int | BoundaryError:
+    if maximum < 0 or value < 0 or value > maximum:
+        throw BoundaryError("external count is outside its limit")
+    return value
 
+def transfer(value: int, remaining: int, require_progress: bool = false) -> int | BoundaryError:
+    checked = count(value, remaining)
+    if require_progress and remaining > 0 and checked == 0:
+        throw BoundaryError("external transfer made no progress")
+    return checked
 
-enum XxiError:
-    DuplicateDeclaration(name: string)
-    GenericExternalType(name: string)
-    MissingLanguageAttribute
-    MultipleLanguageAttributes
-    UnknownLanguage(name: string)
-    UnknownRepresentation(name: string)
-    UnknownType(name: string)
-    Ffi(message: string)
-    Symbol(message: string)
+def budget(max_calls: int, max_bytes: int) -> Budget | BoundaryError:
+    if max_calls < 0 or max_bytes < 0:
+        throw BoundaryError("external call budget must be nonnegative")
+    return Budget(max_calls, max_bytes)
 
+def account(context: Budget, amount: int) -> Budget | BoundaryError:
+    used = count(amount, context.bytes_remaining)
+    return Budget(context.calls_remaining, context.bytes_remaining - used)
 
-def language_from_name(name: string) -> ExternalLanguage | XxiError:
-    if name == "c":
-        return C
-    if name == "rust":
-        return Rust
-    if name == "system":
-        return System
-    if len(name) > 0:
-        return Custom(name)
-    return error(UnknownLanguage(name))
+def step(context: Budget, amount: int = 0) -> Budget | BoundaryError:
+    if context.calls_remaining <= 0:
+        throw BoundaryError("external call budget exhausted")
+    checked = account(context, amount)
+    return Budget(checked.calls_remaining - 1, checked.bytes_remaining)
 
+test "partial transfers retain the remaining budget":
+    context = budget(2, 10)
+    first = step(context, transfer(4, 10, true))
+    assert(first.calls_remaining == 1)
+    assert(first.bytes_remaining == 6)
+    second = step(first, transfer(6, 6, true))
+    assert(second.calls_remaining == 0)
+    assert(second.bytes_remaining == 0)
 
-def language_abi(language: ExternalLanguage) -> ffi.AbiSelection:
-    if language == C:
-        return ffi.C
-    if language == Rust:
-        return ffi.Rust
-    return ffi.System
-
-
-def external_import(locator: string, alias: string) -> ExternalImport | None | XxiError:
-    if not locator.contains(":"):
-        return None
-    parts = locator.split(":", 1)
-    return ExternalImport(language_from_name(parts[0]), parts[1], alias)
+test "empty completed transfers are allowed":
+    assert(transfer(0, 0, true) == 0)
+    assert(count(0, 0) == 0)
 
 
-def resolve_contract(annotation: universal.TypeAnnotation, foreign: ffi.ForeignModule, types: universal.TypeContext, result: bool) -> tuple[ffi.ValueContract, ffi.ParameterMode] | XxiError:
-    ownership: ffi.Ownership = ffi.Copy
-    mode = ffi.In
-    nullable = false
-    current = annotation
-    while true:
-        match current.kind:
-            case Named:
-                if len(arguments) != 1:
-                    break
-                if name == "borrowed":
-                    ownership = ffi.Borrowed(ffi.Return if result else ffi.Call)
-                elif name == "owned":
-                    ownership = ffi.Owned
-                elif name == "transferred":
-                    ownership = ffi.Transferred
-                elif name == "out":
-                    ownership = ffi.Owned
-                    mode = ffi.Out
-                elif name == "inout":
-                    ownership = ffi.Owned
-                    mode = ffi.InOut
-                elif name == "nullable":
-                    nullable = true
-                else:
-                    break
-                current = arguments[0]
-            else:
-                break
-    match current.kind:
-        case Named:
-            if name == "list" and len(arguments) == 1:
-                element = universal.simple_type_name(arguments[0])
-                if result or element != "u8" or (ownership == ffi.Copy or ownership == ffi.Transferred or mode == ffi.Out):
-                    return error(UnknownType("sequence boundary requires borrowed[list[u8]] or inout[list[u8]]"))
-                if mode != ffi.InOut and ownership == ffi.Owned:
-                    return error(UnknownType("sequence ownership cannot be inferred"))
-                element_type = types.resolve_name("u8")
-                if element_type == None:
-                    return error(UnknownType("u8"))
-                return (ffi.ValueContract(ffi.Sequence(element_type), ownership, nullable), mode)
-            if len(arguments) != 0:
-                return error(UnknownType(name))
-            semantic_type = types.resolve_name(name)
-            if semantic_type != None:
-                return (ffi.ValueContract(ffi.Severian(semantic_type), ownership, nullable), mode)
-            if foreign.type_declaration(name) != None:
-                return (ffi.ValueContract(ffi.External(name), ownership, nullable), mode)
-    return error(UnknownType(string(current)))
-
-
-def resolve(module: universal.Module, types: universal.TypeContext, target: abi.AbiTarget) -> ResolvedExternalModule | XxiError:
-    imports: list[ExternalImport] = []
-    foreign = ffi.ForeignModule([], [])
-    for item in module.items:
-        match item:
-            case Import:
-                match declaration.subject:
-                    case Locator:
-                        if declaration.alias != None:
-                            resolved = external_import(locator, declaration.alias)
-                            if resolved != None:
-                                imports.append(resolved)
-            case Type:
-                if len(declaration.decorators) > 0:
-                    if len(declaration.type_parameters) > 0:
-                        return error(GenericExternalType(declaration.name))
-                    foreign.types.append(ffi.ForeignTypeDeclaration(declaration.name, abi.Opaque(declaration.name)))
-            case Function:
-                if len(declaration.decorators) > 0:
-                    attribute = declaration.decorators[0]
-                    language = language_from_name(attribute.name)
-                    parameters: list[ffi.ForeignParameter] = []
-                    for parameter in declaration.parameters:
-                        contract = resolve_contract(parameter.annotation, foreign, types, false)
-                        parameters.append(ffi.ForeignParameter(parameter.name, contract[0], contract[1]))
-                    result = resolve_contract(declaration.result, foreign, types, true)[0]
-                    symbol = abi.AbiSymbol(universal.Symbol(universal.SymbolName(declaration.name), universal.Function), abi.External, abi.Default, abi.Import)
-                    foreign.functions.append(ffi.ForeignFunction(declaration.name, None, symbol, parameters, result, language_abi(language), false))
-    plans: list[ffi.BoundaryPlan] = []
-    for function in foreign.functions:
-        plans.append(ffi.lower_function(function, foreign, types, target))
-    return ResolvedExternalModule(imports, foreign, plans)
+test "invalid statuses counts and progress are errors":
+    failed_status ?= status(1)
+    negative ?= count(-1, 10)
+    oversized ?= transfer(11, 10)
+    stalled ?= transfer(0, 10, true)
+    exceeded ?= account(budget(2, 10), 11)
+    exhausted ?= step(budget(0, 10))
+    assert(failed_status is BoundaryError)
+    assert(negative is BoundaryError)
+    assert(oversized is BoundaryError)
+    assert(stalled is BoundaryError)
+    assert(exceeded is BoundaryError)
+    assert(exhausted is BoundaryError)

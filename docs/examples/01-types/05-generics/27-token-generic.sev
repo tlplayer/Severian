@@ -27,9 +27,12 @@ class IdentifierToken: Token
 
 
 def validate_origin(span: Span, lexeme: Lexeme):
-    assert(span.start == lexeme.span.start)
-    assert(span.end == lexeme.span.end)
-    assert(span.start <= span.end)
+    if not (span.start == lexeme.span.start):
+        throw Error("token span does not match its lexeme")
+    if not (span.end == lexeme.span.end):
+        throw Error("token span does not match its lexeme")
+    if not (span.start <= span.end):
+        throw Error("token span does not match its lexeme")
 
 
 def checked_token[To: Token](token: To) -> To:
@@ -45,9 +48,26 @@ def integer_literal(token: IntegerToken) -> IntegerLiteral:
     return IntegerLiteral(int(token.lexeme.text.replace("_", "")))
 
 
-test:
-    integer = checked_token(IntegerToken(Lexeme("1_024", Span(9, 14)), Span(9, 14)))
-    identifier = checked_token(IdentifierToken(Lexeme("total", Span(0, 5)), Span(0, 5)))
+test "token preserves source identity and decodes numeric value":
+    integer_source = IntegerToken(Lexeme("1_024", Span(9, 14)), Span(9, 14))
+    identifier_source = IdentifierToken(Lexeme("total", Span(0, 5)), Span(0, 5))
+    integer = checked_token(integer_source)
+    identifier = checked_token(identifier_source)
     assert(integer_literal(integer).value == 1024)
     assert(integer.lexeme.text == "1_024")
     assert(identifier.lexeme.text == "total")
+
+test "token rejects inconsistent source spans":
+    throws "token span does not match its lexeme":
+        source = IntegerToken(Lexeme("42", Span(0,2)), Span(0,3))
+        token = checked_token(source)
+
+test "integer conversion through string library is checked":
+    assert(int("42") == 42)
+    assert(int(" \t-42\r\n") == -42)
+    assert(i8("-128") == -128)
+    assert(u64("18446744073709551615") == u64(18446744073709551615))
+
+test "narrow integer conversion rejects overflow":
+    throws "scalar conversion above maximum":
+        value = i8("128")

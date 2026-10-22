@@ -1,3 +1,5 @@
+from math import approximate
+
 '''
 Approximate comparison is a numeric test utility, not another assertion
 primitive. The predicate exposes explicit absolute and relative tolerances.

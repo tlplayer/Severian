@@ -65,24 +65,60 @@ if condition:
 #Invalid: the linter should wrap the conditions 
 else condition and condition condition and condition condition and condition condition and condition 
 ->
-else condition\
-    and condition\
-    and condition\
+else condition
+    and condition
+    and condition
     and condition:
 ```
 
 ---
 
-Parameters cannot be greater than 8 this leads to over parameterization. 
-
+Parameters cannot be greater than 3 this leads to over parameterization. 
+Unless they are explicit
 ```
+foo(a,b,c,d,e,f,g,h) # What happens if e/f are swapped -> BUG
+foo(a,b,c) # This is a lot easier to reason over
+foo(
+    A=a,
+    B=b,
+    C=c,
+    D=d,
+    ...) # By making explicit what is mapping fields->params it prevents uncertainty +readability
 
+#Exception is variadic params
+
+print(a,b,c,d,e,f,g) # variadic there is not explicit mapping so it's ok. 
 ```
 
 ---
 Blocks of severian code to show the desired behavior
 
 Examples of corner cases
+
+### Classes
+
+```
+# Classes construction is free form
+class User:
+    name: string
+    age: int
+    active: bool
+
+    def active(status:bool) -> User | Error:
+        if status and other_flag:
+            self.active = status
+        elif not other_flag:
+            throw Error("Other flag was false")
+        return User
+
+
+
+
+user1 = User("Alice",36,true)
+user2 =User{name:"Alice",age:36,active:true}
+other_flag = true
+user3 = User.builder().name("Alice").age(36).active(true)
+```
 
 ## Tests
 

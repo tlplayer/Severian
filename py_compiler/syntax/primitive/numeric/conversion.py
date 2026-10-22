@@ -80,11 +80,18 @@ def literal_conversion(target, source, value):
 
 class ScalarConstructor(Constructor):
     def expand(self, cfg, arguments, env):
+        policy = 'checked'
+        if len(arguments) == 2:
+            modifier = arguments[1]
+            if modifier.kind != 'name' or modifier.token.text not in ('checked', 'lossy'):
+                raise ValueError('scalar conversion policy must be checked or lossy')
+            policy = modifier.token.text
+            arguments = arguments[:1]
         if len(arguments) != 1:
             raise ValueError(f'{self.owner.name} constructor requires one value')
         self.owner.require_context(cfg)
         argument = arguments[0]
-        if argument.kind == 'literal' or (argument.kind == 'unary' and argument.token.text in ('+', '-') and argument.operands[0].kind == 'literal'):
+        if policy != 'lossy' and ((argument.kind == 'literal' and argument.token.kind != 'STRING') or (argument.kind == 'unary' and argument.token.text in ('+', '-') and argument.operands[0].kind == 'literal')):
             from py_compiler.frontend.parser.contract import Literal
             from py_compiler.hir.hir.src.program import resolve_literal
             from py_compiler.syntax.function.calls import literal_value
@@ -93,21 +100,67 @@ class ScalarConstructor(Constructor):
             owner, value = resolve_literal(Literal('', argument.token.span, spelling, token.kind, self.owner.name, True), cfg.syntax, cfg)
             return literal_value(value, owner, cfg, argument.token.span)
         value = cfg.expr(argument, env)
+        if value.type.family == 'union':
+            return self.convert_union(value, argument, cfg, env, policy)
+        return self.convert(value, argument, cfg, env, policy=policy)
+
+    def convert(self, value, argument, cfg, env, binding=None, policy='checked'):
+        if value.type.family == 'string' and (self.owner.family == 'float' or self.owner.family == 'integer' and self.owner.bits <= 64):
+            from py_compiler.syntax.grammar.expression import Expression
+            from py_compiler.syntax.complex.tensor import ArgumentValue
+            from py_compiler.syntax.generic.storage import root_binding
+            method = '_parse_float' if self.owner.family == 'float' else '_parse_integer' if self.owner.signed else '_parse_unsigned'
+            captured = Expression('capture', argument.token, (ArgumentValue(value, binding or root_binding(argument, cfg, env)),))
+            value = value.type.library_call(method, (captured,), cfg, env, argument.token.span)
         if value.type == self.owner:
             return value
         if value.type.family not in self.owner.conversion_sources:
             raise ValueError(f'{value.type.name} has no declared conversion to {self.owner.name}')
-        return cfg.emit('convert', self.owner, (value,), ScalarConversion(value.type, self.owner), argument.token.span)
+        return cfg.emit('convert', self.owner, (value,), ScalarConversion(value.type, self.owner, policy), argument.token.span)
+
+    def convert_union(self, value, argument, cfg, env, policy='checked'):
+        from py_compiler.hir.thir.src.model import Edge, Terminator
+        from py_compiler.syntax.block.union import UnionTag, UnionMember
+        from py_compiler.syntax.function.calls import literal_value
+        from py_compiler.syntax.generic.owned import select
+        from py_compiler.syntax.generic.storage import root_binding, owns_storage, release_storage
+        from py_compiler.mir.ownership.flow import Binding
+        span = argument.token.span
+        owner = root_binding(argument, cfg, env)
+        done = cfg.block((self.owner,))
+        tag = cfg.emit('union-tag', cfg.context.type('i32'), (value,), UnionTag(), span)
+        for index, member in enumerate(value.type.variants):
+            branch, following = cfg.block(), cfg.block()
+            expected = literal_value(index, tag.type, cfg, span)
+            active = select(tag.type, 'F.operator', '==').expand(cfg, tag, expected, span)
+            cfg.current.terminator = Terminator('conditional', (Edge(branch.identity), Edge(following.identity)), active)
+            cfg.current = branch
+            if not member.mlir:
+                raise ValueError(f'{member.name} has no declared conversion to {self.owner.name}')
+            projected = cfg.emit('union-member', member, (value,), UnionMember(index), span)
+            # The projection borrows the union's payload, including a temporary union.
+            binding = Binding('union-conversion:' + str(projected.identity), ':union-member', member, True, 'view', span)
+            cfg.values[binding.identity] = projected
+            converted = self.convert(projected, argument, cfg, env, binding, policy)
+            cfg.current.terminator = Terminator('jump', (Edge(done.identity, (converted,)),))
+            cfg.current = following
+        cfg.current.terminator = Terminator('panic', message='invalid union tag in scalar conversion')
+        cfg.current = done
+        if owner is None and value.identity in cfg.owned_results and owns_storage(value.type):
+            release_storage(value, cfg, span)
+        return done.parameters[0]
 
 
 @dataclass(frozen=True)
 class ScalarConversion:
     source: object
     target: object
+    policy: str = 'checked'
 
     def atom(self, operation):
         from py_compiler.syntax.generic.atom import Atom
-        effects = () if lossless_integer_conversion(self.source, self.target) else ('panic',)
+        effects = () if lossless_integer_conversion(self.source, self.target) or (
+            self.policy == 'lossy' and self.source.family == self.target.family == 'integer') else ('panic',)
         return Atom(self.target, (self.source,), self.target, ('view',), effects, self)
 
     def render_operation(self, operation):
@@ -162,11 +215,11 @@ class ScalarConversion:
         else:
             source_low, source_high = bounds(source)
             predicate = 's' if source_signed else 'u'
-            if source_low < low:
+            if source_low < low and self.policy != 'lossy':
                 minimum = emit('minimum', f'arith.constant {low} : {source_type}')
                 valid = emit('minimum_ok', f'arith.cmpi {predicate}ge, {value}, {minimum} : {source_type}')
                 check(valid, 'scalar conversion below minimum')
-            if source_high > high:
+            if source_high > high and self.policy != 'lossy':
                 maximum = emit('maximum', f'arith.constant {high} : {source_type}')
                 valid = emit('maximum_ok', f'arith.cmpi {predicate}le, {value}, {maximum} : {source_type}')
                 check(valid, 'scalar conversion above maximum')
@@ -195,6 +248,17 @@ import unittest
 
 
 class ConversionTests(unittest.TestCase):
+    def test_union_conversion_dispatches_all_numeric_variants(self):
+        from py_compiler.mlir.src.lib import lower, render
+        result = self.compile('def convert(value: int | f64 | u8) -> f64:\n    return f64(value)\n')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        text = render(lower(result.program))
+        self.assertIn('arith.sitofp', text)
+        self.assertIn('arith.uitofp', text)
+        self.assertIn('invalid union tag', text)
+        invalid = self.compile('def convert(value: int | None) -> f64:\n    return f64(value)\n')
+        self.assertIn('None has no declared conversion', str(invalid.diagnostics))
+
     def test_known_integers_narrow_without_runtime_checks(self):
         from py_compiler.mlir.src.lib import lower, render
         for term in ('i64(6)', 'i64(3) + i64(3)', 'i64(-2147483648)', 'i64(2147483647)'):

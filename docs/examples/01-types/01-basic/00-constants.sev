@@ -1,3 +1,4 @@
+
 MAX_RETRIES: int := view 3
 PI: float := view 3.1415926
 VARIABLE_GLOBAL = 0
@@ -5,3 +6,27 @@ VARIABLE_GLOBAL = 0
 test "constant output":
     VARIABLE_GLOBAL = 1
     assert(VARIABLE_GLOBAL == 1)
+
+test with compiler "You cannot change a constant binding view":
+    reject:
+        MAX_RETRIES = 1
+
+def increment_global():
+    VARIABLE_GLOBAL += 1
+
+
+test "unqualified assignments update the module binding":
+    VARIABLE_GLOBAL = 0
+    increment_global()
+    assert(module.VARIABLE_GLOBAL == 1)
+
+
+test with compiler "qualified constants cannot be reassigned either":
+    reject "constant":
+        module.MAX_RETRIES = 1
+
+
+test "explicit declarations can shadow a module constant":
+    MAX_RETRIES: int = 9
+    assert(MAX_RETRIES == 9)
+    assert(module.MAX_RETRIES == 3)

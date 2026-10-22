@@ -1,0 +1,17 @@
+
+def duplicates(array: list[int]) -> bool with
+{
+    len(array) <= 1000,
+}:
+    seen = set()
+    for n in array:
+        if n in seen:
+            return true
+    return false
+
+
+test "No duplicates":
+    assert(duplicates([1,2,3,4]) == false)
+
+test "Has duplicates":
+    assert(duplicates([1,2,3,4]) == false)

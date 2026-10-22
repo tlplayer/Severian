@@ -36,17 +36,25 @@ class DynamicType:
         storage = cfg.emit('allocate-array', backing, (count,), allocation, span)
         place = RecordElementPlace(storage, zero, concrete) if backing.aggregate else ElementPlace(storage, zero, concrete)
         place.write(cfg, value, span)
+        from py_compiler.syntax.generic.storage import owns_storage
+        if (owns_storage(concrete) and value.identity in cfg.owned_results
+                and not cfg.value_origins.get(value.identity)):
+            concrete.release(value, cfg, span)
         shared = Shared(backing, self.bits)
         handle = cfg.emit('share-create', shared, (storage,), SharedOperation('create', shared), span)
-        symbol = '__sev_dynamic_drop_' + sha256((concrete.name + concrete.mlir + str(self.bits)).encode()).hexdigest()
+        symbol = '__sev_dynamic_drop_' + sha256((self.name + concrete.name + concrete.mlir + str(self.bits)).encode()).hexdigest()
         helpers = getattr(cfg.context, 'dynamic_helpers', None)
         if helpers is None:
             helpers = cfg.context.dynamic_helpers = {}
         if symbol not in helpers:
             helpers[symbol] = destructor(symbol, shared, self, cfg, span)
-        result = cfg.emit('memory-copy', self, (handle,), DynamicBox(concrete, self, symbol, helpers[symbol]), span)
+        operation = self.box_operation(concrete, symbol, helpers[symbol], cfg, span)
+        result = cfg.emit('memory-copy', self, (handle,), operation, span)
         cfg.owned_results.add(result.identity)
         return result
+
+    def box_operation(self, concrete, symbol, helper, cfg, span):
+        return DynamicBox(concrete, self, symbol, helper)
 
     def copy_value(self, value, cfg, span):
         from py_compiler.syntax.complex.shared import Shared, SharedOperation
@@ -92,16 +100,15 @@ class DynamicBox:
     helper: object
 
     def global_definitions(self):
-        from py_compiler.mir.lowering import lower_body
-        from py_compiler.mlir.src.lib import MlirProgram, MlirFunction, render
-        from py_compiler.hir.hir.src.program import Constant
-        body = lower_body(self.helper)
-        constants = [op.payload for block in body.blocks for op in block.operations if isinstance(op.payload, Constant)]
-        functions = tuple(MlirFunction('__sev_constant_' + sha256(c.identity.encode()).hexdigest(), c) for c in constants)
-        text = render(MlirProgram(functions, (body,)))
-        helper = text[text.index('{') + 1:text.rfind('}')].replace('func.func @', 'func.func private @')
         return (f'llvm.func @malloc(i{self.owner.bits}) -> !llvm.ptr',
-                'llvm.func @free(!llvm.ptr)', helper)
+                'llvm.func @free(!llvm.ptr)')
+
+    def auxiliary_bodies(self):
+        from py_compiler.mir.lowering import lower_body
+        return tuple(lower_body(body) for body in self.generated_bodies())
+
+    def generated_bodies(self):
+        return (self.helper,)
 
     def atom(self, operation):
         return Atom(self, (operation.operands[0].type,), self.owner, ('move',), ('allocation',), self)
@@ -168,11 +175,11 @@ class DynamicTests(unittest.TestCase):
         result = compile_source('dynamic.sev', 'def bad() -> dynamic:\n    value: dynamic = 42\n    return value\n', Syntax())
         self.assertFalse(result.diagnostics, str(result.diagnostics))
 
-    def test_native_dynamic_owners_arrays_and_union_payloads(self):
+    def test_c_dynamic_owners_arrays_and_union_payloads(self):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         source = '''union Value:
     string
     array[int]

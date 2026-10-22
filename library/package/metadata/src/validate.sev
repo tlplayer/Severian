@@ -122,12 +122,12 @@ def validate(value: Realization) -> unit | Error:
                     throw Error("artifact cannot implement a symbol")
                 current = "specialize" if artifact.kind == "mlir" else "compile" if artifact.kind == "source" else "link"
                 if mode != "" and mode != current:
-                    throw Error("implementation mixes native, MLIR or source inputs")
+                    throw Error("implementation mixes c, MLIR or source inputs")
                 mode = current
         if mode == "link":
             identifier(item.entry)
             if value.state != "complete":
-                throw Error("metadata-only realization cannot provide native implementations")
+                throw Error("metadata-only realization cannot provide c implementations")
     runtime_ids: list[string] = []
     for item in value.runtime:
         unique(runtime_ids, item.artifact_id, "runtime artifact")

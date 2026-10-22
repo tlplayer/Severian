@@ -8,13 +8,14 @@ enum Color:
     # Mixed type values
     Purple {"purple"} 
 
-def colors(sample: Color):
+def colors(sample: Color) -> int | string | None | absent:
     for color in Color:
         if color is sample:
             return color.value
+    return None
 
 
-test "color iteration is natively supported":
+test "color iteration is supported":
     assert(colors(Blue) is absent)
     assert(colors(Green) == 3)
     assert(colors(Red) == 2)

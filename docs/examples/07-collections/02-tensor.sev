@@ -1,0 +1,36 @@
+# Shape is a tuple of extents, not a rank: memref<1x2x3xi64>.
+def shaped() -> tensor[int,(1,2,3)]:
+    values = tensor[int,(1,2,3)]()
+    values[0,1,2] = 9
+    return values
+
+def main() -> int:
+    values = shaped()
+    return values[0,1,2]
+
+test "shape tuple maps directly to ranked storage":
+    values = shaped()
+    assert(values.dim(0) == 1 and values.dim(1) == 2 and values.dim(2) == 3)
+    assert(len(values) == 6 and values[0,1,2] == 9)
+    explicit_tuple = tensor[int,tuple(1,2,3)]()
+    assert(len(explicit_tuple) == 6)
+
+test "tuple to tensor preserves row-major values and owns its copy":
+    source = tuple[int,6](1,2,3,4,5,6)
+    values = tensor[int,(1,2,3)](source)
+    assert(values[0,0,2] == 3 and values[0,1,2] == 6)
+    values[0,0,0] = 99
+    assert(source[0] == 1)
+
+test "tuple to dynamic tensor permits growth":
+    source = tuple[int,3](1,2,3)
+    values = tensor[int](source)
+    values.append(4)
+    assert(len(values) == 4 and values[3] == 4)
+    assert(len(source) == 3)
+
+test "static shape respects stack allocation and alignment":
+    unsafe:
+        values = allocate[tensor[int,(1,2,3)],location=memory.stack,alignment=64]()
+        values[0,1,2] = 7
+        assert(values[0,1,2] == 7)

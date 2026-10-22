@@ -40,14 +40,14 @@ class Shared:
             from py_compiler.syntax.complex.array import ArrayType, record_operation, RecordElementPlace
             from py_compiler.syntax.function.allocate import resolve_plan
             from py_compiler.syntax.function.calls import literal_value
-            from py_compiler.syntax.generic.storage import release_storage
             backing = ArrayType(self.payload)
             count = literal_value(1, cfg.context.type('index'), cfg, span)
             plan = resolve_plan(backing, {'location': 'heap'}, cfg.context)
             storage = cfg.emit('allocate-array', backing, (count,), record_operation(backing, 'allocate', cfg).with_plan(plan), span)
             zero = literal_value(0, count.type, cfg, span)
-            RecordElementPlace(storage, zero, self.payload).write(cfg, value, span)
-            release_storage(value, cfg, span)
+            # Sharing transfers the existing owner into backing storage. A
+            # copy followed by release would run resource destructors early.
+            cfg.effect('element-store', (storage, zero, value), record_operation(backing, 'store', cfg), span)
             value = storage
         elif not self.payload.mlir.startswith('memref') or not callable(getattr(value.type, 'release', None)):
             raise ValueError('share requires an owning class or memory value')
@@ -190,14 +190,14 @@ class SharedTests(unittest.TestCase):
     def test_shared_reference_survives_original_drop(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax
-        from py_compiler.mlir.src.lib import lower, render, verify_native
+        from py_compiler.mlir.src.lib import lower, render, verify_c
         for atomic in ('', 'atomic '):
             source = f'def work() -> int:\n    unsafe:\n        a = allocate[int]()\n        a[0] = 42\n        b = share {atomic}a\n        drop a\n        return b[0]\n'
             result = compile_source('share.sev', source, Syntax())
             self.assertFalse(result.diagnostics, str(result.diagnostics))
             text = render(lower(result.program))
             self.assertEqual('memref.atomic_rmw' in text, bool(atomic))
-            verify_native(text)
+            verify_c(text)
 
     def test_shared_payload_cannot_mutate(self):
         from py_compiler.frontend.src.lib import compile_source
@@ -206,7 +206,7 @@ class SharedTests(unittest.TestCase):
         self.assertTrue(result.diagnostics)
         self.assertIn('read-only', str(result.diagnostics))
 
-    def test_native_lifetimes_and_shared_parameter_copy(self):
+    def test_c_lifetimes_and_shared_parameter_copy(self):
         import ctypes
         from pathlib import Path
         import shutil
@@ -216,9 +216,9 @@ class SharedTests(unittest.TestCase):
         from py_compiler.syntax.recognition import Syntax
         from py_compiler.lir.src.lib import lower, compile_object
         if not shutil.which('cc'):
-            self.skipTest('native linker unavailable')
+            self.skipTest('c linker unavailable')
         source = ('def read(value: share atomic array[int]) -> int:\n    return value[0]\ndef work() -> int:\n    unsafe:\n        a = allocate[int]()\n        a[0] = 42\n        b = share atomic a\n        c = share atomic b\n        drop a\n        drop b\n        return read(c) + c[0]\n')
-        result = compile_source('shared-native.sev', source, Syntax())
+        result = compile_source('shared-c.sev', source, Syntax())
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         artifact = compile_object(lower(result.program, 'x86_64-unknown-linux-gnu', 64))
         with tempfile.TemporaryDirectory(prefix='sev-shared-test-') as directory:
@@ -230,11 +230,11 @@ class SharedTests(unittest.TestCase):
             function.restype = ctypes.c_int64
             self.assertEqual(function(), 84)
 
-    def test_native_shared_classes_destroy_owned_fields_at_last_handle(self):
+    def test_c_shared_classes_destroy_owned_fields_at_last_handle(self):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         source = '''class Buffer:
     data: array[int]
     label: string

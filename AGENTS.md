@@ -2,6 +2,8 @@ DO
 1. Implement all functionality first
 2. Only after 1 can you build to make sure it builds
 Try not to RUN TESTS, give me the test to run if they take longer than 1 min. 
+DONT FUCKING USE C AS A SHORTCUT to AVOID MLIR! C is handy for system calls/incompatible calls through MLIR.
+IF YOU MUST USE C USE IT THROUGH MLIR 
 NEVER NEVER NEVER UNDO if you do something wrong. I CAN DO THAT. YOU DO WHAT I SAY.
 PUT TESTS in the same file they test against with test blocks following the code. NOT A NEW FILE.
 NO TASK SHOULD TAKE LONGER THAN 10 MINUTES if builds hold it back that's a problem of not implementing and handing off the build to the human. Humans build/run/create regression tests not agents. 
@@ -14,6 +16,7 @@ If there is functionality which you pivoted to avoid because
 so I can go over and think about what we should build next. 
 Only after after python/sev implementation is COMPLETE 100%! not partial, can you run tests and builds in severian
 for references on compilers see: .references.md
+USE DESCRIPTIVE IMPLEMENTATION NAMES. C code belongs in c/...
 
 ```
 sev_py # python backup compiler

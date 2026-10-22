@@ -77,15 +77,15 @@ def main():
     manifests = [read_json(p) for p in (package / 'metadata/realizations').glob('*.json')
                  if not p.name.endswith('.inputs.json')]
     library = next(m for m in manifests if m['kind'] == 'library')
-    native = next(m for m in manifests if m['kind'] == 'native')
+    c = next(m for m in manifests if m['kind'] == 'c')
     build_id, triple = library['build-id'], library['target']
     artifact_root = package / 'artifacts' / triple / 'dev' / build_id
-    assert run(package / native['output']).stdout.strip() == '85'
+    assert run(package / c['output']).stdout.strip() == '85'
     for location in ['package.json', 'package.lock', 'source-index.json', 'artifacts.json']:
         read_json(package / 'metadata' / location)
     read_json(producer / 'package.lock')
     assert (package / 'source/src/lib.sev').read_bytes() == (producer / 'src/lib.sev').read_bytes()
-    assert (package / 'source/native/scale.c').is_file()
+    assert (package / 'source/c/scale.c').is_file()
     for directory in ['dep-info', 'incremental', 'staging']:
         assert (package / 'build' / build_id / directory).is_dir()
     read_json(package / 'build' / build_id / 'inputs.json')
@@ -106,15 +106,15 @@ def main():
     for relative, checksum in library['files'].items():
         assert 'sha256:' + hashlib.sha256((package / relative).read_bytes()).hexdigest() == checksum
     windows = package / 'artifacts/x86_64-pc-windows-msvc/dev' / build_id
-    assert (windows / 'dynamic/geometry-native.dll').read_bytes()[:2] == b'MZ'
+    assert (windows / 'dynamic/geometry-c.dll').read_bytes()[:2] == b'MZ'
     assert 'COFF-x86-64' in run('llvm-readobj-21', '--file-headers', windows / 'object/scale.obj').stdout
     for suffix in ['.lib', '.import.lib']:
-        assert (windows / ('archive/geometry-native' + suffix)).read_bytes().startswith(b'!<arch>\n')
+        assert (windows / ('archive/geometry-c' + suffix)).read_bytes().startswith(b'!<arch>\n')
     kinds = {a['path']: a['kind'] for a in library['artifact']}
-    assert kinds[str((windows / 'archive/geometry-native.import.lib').relative_to(package))] == 'import-library'
+    assert kinds[str((windows / 'archive/geometry-c.import.lib').relative_to(package))] == 'import-library'
     assert list((package / 'debug/symbols' / build_id).rglob('*.pdb'))
     darwin = package / 'artifacts/aarch64-apple-macos11/dev' / build_id
-    assert 'Mach-O' in run('llvm-readobj-21', '--file-headers', darwin / 'dynamic/geometry-native.dylib').stdout
+    assert 'Mach-O' in run('llvm-readobj-21', '--file-headers', darwin / 'dynamic/geometry-c.dylib').stdout
     assert list((package / 'debug/symbols' / build_id).rglob('*.dSYM'))
     assert (artifact_root / 'archive/libprovider.rlib').read_bytes().startswith(b'!<arch>\n')
     assert (artifact_root / 'archive/libprovider.rmeta').stat().st_size > 0
@@ -123,7 +123,7 @@ def main():
     run('rustc', rust_probe, '--extern', f'provider={artifact_root / "archive/libprovider.rlib"}', '-o', work / 'provider-probe')
     run(work / 'provider-probe')
     # Inspect the OCI graph and verify every content-addressed blob.
-    oci = package / 'container' / native['target'] / native['build-id']
+    oci = package / 'container' / c['target'] / c['build-id']
     assert json.loads((oci / 'oci-layout').read_text())['imageLayoutVersion'] == '1.0.0'
     def blob(descriptor):
         path = oci / 'blobs/sha256' / descriptor['digest'].split(':')[1]
@@ -135,15 +135,15 @@ def main():
     assert config['config']['Entrypoint'] == ['/app']
     with tarfile.open(blob(image['layers'][0])) as layer:
         assert './app' in layer.getnames()
-        assert hashlib.sha256(layer.extractfile('./app').read()).digest() == hashlib.sha256((package / native['output']).read_bytes()).digest()
+        assert hashlib.sha256(layer.extractfile('./app').read()).digest() == hashlib.sha256((package / c['output']).read_bytes()).digest()
 
-    # Actual native instrumentation, scoped to this native provider's C lines.
+    # Actual c instrumentation, scoped to this c provider's C lines.
     reports = package / 'debug'
     profile = reports / 'profile' / build_id
     coverage = reports / 'coverage' / build_id
     probe = work / 'profile_probe.c'
     probe.write_text('#include <stdint.h>\nint64_t geometry_scale(int64_t);\nint main(void) { return geometry_scale(42) != 84; }\n')
-    run('clang-21', '-g', '-gsplit-dwarf', '-fprofile-instr-generate', '-fcoverage-mapping', '-c', producer / 'native/scale.c', '-o', work / 'scale.o')
+    run('clang-21', '-g', '-gsplit-dwarf', '-fprofile-instr-generate', '-fcoverage-mapping', '-c', producer / 'c/scale.c', '-o', work / 'scale.o')
     shutil.copy2(work / 'scale.dwo', reports / 'symbols' / build_id / 'scale.dwo')
     run('clang-21', '-fprofile-instr-generate', '-fcoverage-mapping', probe, work / 'scale.o', '-o', work / 'profile-probe')
     run(work / 'profile-probe', extra_env={'LLVM_PROFILE_FILE': str(profile / 'geometry.profraw')})
@@ -151,7 +151,7 @@ def main():
     for fmt, name in [('text', 'geometry.json'), ('lcov', 'geometry.lcov')]:
         result = run('llvm-cov-21', 'export', work / 'profile-probe', f'-instr-profile={profile / "geometry.profdata"}', f'-format={fmt}')
         (coverage / name).write_text(result.stdout)
-    (reports / 'test' / build_id / 'results.json').write_text(json.dumps({'passed': True, 'scope': 'native provider', 'commands': records}, indent=2))
+    (reports / 'test' / build_id / 'results.json').write_text(json.dumps({'passed': True, 'scope': 'c provider', 'commands': records}, indent=2))
     # A warm build cannot re-enter Severian code generation.
     warm = run(compiler, 'build', producer)
     assert 'compiling ' not in warm.stderr, warm.stderr
@@ -192,7 +192,7 @@ def main():
     interface.write_bytes(interface.read_bytes()[:-1])
     failure = run(compiler, 'build', consumer, succeeds=False)
     assert 'PackageIntegrityError' in failure.stderr
-    print(f'PASS: native formats, binary metadata/MIR, bindings, OCI, reports and source-free reuse ({len(records)} commands)', flush=True)
+    print(f'PASS: c formats, binary metadata/MIR, bindings, OCI, reports and source-free reuse ({len(records)} commands)', flush=True)
 
 
 if __name__ == '__main__':

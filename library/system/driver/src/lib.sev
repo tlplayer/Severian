@@ -1,6 +1,6 @@
 import device
 
-Native = "native"
+C = "c"
 MlirVector = "mlir-vector"
 Rocdl = "rocdl"
 StableHloXla = "stablehlo-xla"
@@ -11,7 +11,7 @@ class Driver:
     device_name: string
 
 def host() -> Driver:
-    return Driver(Native, "host-cpu")
+    return Driver(C, "host-cpu")
 
 def simd() -> Driver:
     # SIMD remains on the host, but is lowered through MLIR's vector route.

@@ -22,3 +22,27 @@ test "question assignment preserves failure":
 
     assert(result is Error)
     assert(result.message == "division by zero")
+
+
+def dynamic_failure(message: string) -> int | Error:
+    throw Error(message)
+
+
+def rethrow_dynamic(message: string) -> int | Error:
+    try:
+        return dynamic_failure(message)
+    catch error: Error:
+        throw error
+
+
+test "rethrow preserves an owned runtime message":
+    message = "runtime" + " failure"
+    result ?= rethrow_dynamic(message)
+    drop(message)
+    assert(result is Error)
+    assert(result.message == "runtime failure")
+
+
+test "typed throws checks the failure without terminating the test":
+    throws(divide(1, 0) -> Error)
+    assert(divide(8, 2) == 4)

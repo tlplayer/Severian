@@ -35,9 +35,9 @@ test:
 
 test:
     table = Hash[string,string]()
-    table.set("native", "MLIR")
-    value ?= table.get("native")
+    table.set("c", "MLIR")
+    value ?= table.get("c")
     assert(value == "MLIR")
-    table.set("native", "source")
+    table.set("c", "source")
     assert(table.len() == 1)
     assert(table.valid())

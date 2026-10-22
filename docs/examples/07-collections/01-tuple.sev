@@ -1,0 +1,29 @@
+# tuple[T,N] owns exactly N contiguous elements of T.
+def readings() -> tuple[i32,4]:
+    return tuple[i32,4](10,20,30,40)
+
+def main() -> int:
+    values = readings()
+    values[1] = 25
+    return int(values[1])
+
+test "tuple has a static count and mutable elements":
+    values = readings()
+    index = 1
+    values[index] = 25
+    assert(len(values) == 4 and values[index] == i32(25))
+
+test "tuple inference preserves homogeneous element type":
+    values = tuple(10,20,30)
+    assert(values.len() == 3)
+    assert(values[2] == 30)
+
+test "tuple copy owns independent storage":
+    original = tuple[int,3](10,20,30)
+    copied = original.copy()
+    copied[1] = 99
+    assert(original[1] == 20 and copied[1] == 99)
+
+test "zero-sized tuple retains its element type":
+    empty = tuple[u8,0]()
+    assert(len(empty) == 0)

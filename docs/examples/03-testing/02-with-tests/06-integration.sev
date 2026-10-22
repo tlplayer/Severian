@@ -1,7 +1,7 @@
 def main():
     print("hello from integ")
 
-test with integ "captures native output":
+test with integ "captures c output":
     main()
     assert("hello from integ" in stdout)
     assert(stderr == "")

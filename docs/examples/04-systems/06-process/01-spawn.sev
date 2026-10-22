@@ -2,6 +2,5 @@ import process
 
 
 test with integ "run waits for completion":
-    status = process.run("exit 3")
-
+    status = process.run(["/bin/sh", "-c", "exit 3"])
     assert(status == 3)

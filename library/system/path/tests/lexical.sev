@@ -10,7 +10,7 @@ test "lexical paths preserve Unicode and separator behavior":
     assert(path.dirname("/") == "/")
     assert(path.join("", "relative") == "relative")
 
-test "lexical paths have no fixed native buffer limit":
+test "lexical paths have no fixed c buffer limit":
     value := ""
     for index in range(5000):
         value += "x"

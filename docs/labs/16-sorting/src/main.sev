@@ -1,0 +1,214 @@
+from collections import list, enumerate
+from util import range
+
+def bubble_sort(values: move list[int]) -> move list[int] with
+{
+    bubble_sort.complexity.time := BigO.quadratic,
+    bubble_sort.complexity.space := BigO.constant,
+    len(values) < 10000,
+}:
+    if not values:
+        return move values
+    end = len(values) - 1
+    while end > 0:
+        last_swap = 0
+        i = 0
+        while i < end:
+            if values[i] > values[i + 1]:
+                values[i], values[i + 1] = values[i + 1], values[i]
+                last_swap = i
+            i += 1
+        end = last_swap
+    return move values
+   
+def selection_sort(values:move list[int]) -> move list[int] with
+{
+    selection_sort.complexity.time := BigO.quadratic,
+    selection_sort.complexity.space := BigO.constant,
+    len(values) < 10000,
+}:  
+    for n in range(len(values)) with minimum = values[n]:
+        for i,value in enumerate(values[n:]) with local.min_index = n:
+            if value < minimum:
+                minimum,min_index = value,n + i
+        values[n],values[min_index] = minimum,values[n]
+
+    return values
+
+
+def insertion_sort(a:infer):
+    # Forward swap then backwards swap 
+    for i in range(1, len(a)):
+        key = a[i]
+        j = i-1
+        # while the element to the left by 1 or right till end is 
+        while j >= 0 and a[j] > key:
+            a[j+1] = a[j] 
+            j -= 1
+        a[j+1] = key
+
+    return a
+
+
+def heap_sort(values: move list[int]) -> move list[int]:
+    count = len(values)
+    
+    def heap_sift_down(values: borrow list[int], root: int, end: int):
+        # Restore the max heap inside [0, end).
+        while root * 2 + 1 < end:
+            child = root * 2 + 1
+            if child + 1 < end and values[child + 1] > values[child]:
+                child += 1
+            if values[root] >= values[child]:
+                break
+            values[root], values[child] = values[child], values[root]
+            root = child
+    # Build a max heap, starting with the last parent.
+    root = count // 2
+    while root > 0:
+        root -= 1
+        heap_sift_down(values, root, count)
+
+    # Move each maximum to the sorted suffix, then repair the remaining heap.
+    end = count
+    while end > 1:
+        end -= 1
+        values[0], values[end] = values[end], values[0]
+        heap_sift_down(values, 0, end)
+
+    return move values
+
+
+def main():
+    insertion_sort([3,2,1,5,4])
+
+test "insertion sort":
+    empty = insertion_sort([])
+    assert(len(empty) == 0)
+    singleton = insertion_sort([7])
+    assert(singleton == [7])
+    ordered = insertion_sort([1, 2, 3, 4])
+    assert(ordered == [1, 2, 3, 4])
+    reversed = insertion_sort([4, 3, 2, 1])
+    assert(reversed == [1, 2, 3, 4])
+    zero = insertion_sort([0, 2, 1])
+    assert(zero == [0, 1, 2])
+    duplicates = insertion_sort([3, -1, 3, 0, -1])
+    assert(duplicates == [-1, -1, 0, 3, 3])
+
+
+test with differential "compare bubble and selection sort":
+    differential(bubble_sort, selection_sort, times=100)
+
+test "Selection sort initializes each pass and uses absolute indices":
+    empty = selection_sort([])
+    assert(len(empty) == 0)
+    singleton = selection_sort([7])
+    assert(singleton == [7])
+    ordered = selection_sort([1, 2, 3, 4])
+    assert(ordered == [1, 2, 3, 4])
+    reversed = selection_sort([4, 3, 2, 1])
+    assert(reversed == [1, 2, 3, 4])
+    zero = selection_sort([0, 2, 1])
+    assert(zero == [0, 1, 2])
+    duplicates = selection_sort([3, -1, 3, 0, -1])
+    assert(duplicates == [-1, -1, 0, 3, 3])
+    
+
+def verify_sorted(values: move list[int], expected: list[int]) -> bool with len(values) < 10000:
+    result = bubble_sort(values)
+    if result != expected:
+        panic("sorted result differs from the expected values")
+    return true
+
+def verify_mismatch(values: move list[int], expected: list[int]) -> bool with len(values) < 10000:
+    result = bubble_sort(values)
+    if result == expected:
+        panic("mismatched expected output was accepted")
+    return true
+
+test "Happy case":
+    sorted = bubble_sort([1,2,3,4][::-1])
+    assert(sorted == [1,2,3,4])
+
+
+test with fuzz "Values within bounds are all valid":
+    fuzz(bubble_sort, times=100)
+
+    test "fuzz regression cb23ed845a5574d702ca":
+        replay(verify_sorted, cases=[[[], []]])
+
+    test "fuzz regression c9a11e5224d1b9c65b81":
+        replay(verify_sorted, fixture="package.pkg/debug/test/fuzz/dev/cases/e39a16b1860acd39aa51901df11e59499093587397bf55ea7593a74595916948.json")
+
+    test "Reject mismatched oracle fuzz regression d8bfd81b3108eb1e4ffd":
+        replay(verify_mismatch, fixture="package.pkg/debug/test/fuzz/dev/cases/68538048d238f56af5d7a3da91003ef67bfd62cb53945a56cd6c8e0650eac4c5.json")
+
+    test "fuzz regression 60da17fbc4f40f4e2af0":
+        replay(bubble_sort, cases=[[[]]])
+
+    test with timeout(10000ms) "fuzz regression b91385214ad241fb3fce":
+        replay(bubble_sort, 
+        fixture="package.pkg/debug/test/fuzz/dev/cases/be0701e2558aaa7073bffb2ad87d1685a1307774f11d3e55352327b42ed2cc4e.json")
+
+    test with timeout(30000ms) "fuzz regression d38e7ede2d63928d8521":
+        replay(bubble_sort, fixture="package.pkg/debug/test/fuzz/dev/cases/5aa56983c2163ae5f31afef7e7f6244af83dbe80993fe5c1e7b13fe8241ee320.json")
+
+    test "fuzz regression 232f57c3714e61ae152d":
+        replay(bubble_sort, fixture="package.pkg/debug/test/fuzz/dev/cases/0040f612d5073082b9c9afa6ceb2e1e201e8a77e613ca8c29ad637b6c852d28f.json")
+
+    test "fuzz regression b8bc2cb6a1a9ede4910f":
+        replay(bubble_sort, fixture="package.pkg/debug/test/fuzz/dev/cases/a2b759214170df76f42012ea21ab884e694f11c0f3be2cf6d85bcd7d6c2c4fc9.json")
+
+    test "fuzz regression 727d1ffe88cbce856065":
+        replay(bubble_sort, fixture="package.pkg/debug/test/fuzz/dev/cases/2fa717135463e7a9d36e9877fff790974f96ea190853ab1de4b6ac4a7b9b7875.json")
+
+
+
+
+test with profile "Runtime is quadratic for bubble sort":
+    profile(bubble_sort, times=10)
+    test "fuzz regression 961fa13aeab08c2ea65d":
+        replay(verify_sorted, cases=[[[60, 1, 28, -35, -58, 116, -31, 100, -13, 21, 8, 113, 79, -72, -10, -104, -2, 100, -7, -12, -49, 85, 6, 0, -53, 126, -1, -25, -53, 65, 20, -46, -78, 28, -62, -47, -26, 37, 51, 85, -83, 51, 29, 34, -67, 15, 83, -35, 65, -105, -83, -102, 112, 66, 24, 112, 109, -66, 24, -100, 120, 14, 37, -108, -106, 50, 57, 116, -75, 54, 63, -39, 119, -117, -20, -32, -32, 123, -80, -62, 96, -15, 48, -103, 77, 128, 15, -81, -98, 85, -107, 43, -17, -18, 21, 121, 108, 49, -52, -110, 114, -15, -74, -81, -62, -85, -58, -19, -68, 126, -82, 110, 80, 50, -1, -123, 80, -77, 99, 4, 80, 39, 17, -122, -22, -15, -127, 80], [-127, -123, -122, -117, -110, -108, -107, -106, -105, -104, -103, -102, -100, -98, -85, -83, -83, -82, -81, -81, -80, -78, -77, -75, -74, -72, -68, -67, -66, -62, -62, -62, -58, -58, -53, -53, -52, -49, -47, -46, -39, -35, -35, -32, -32, -31, -26, -25, -22, -20, -19, -18, -17, -15, -15, -15, -13, -12, -10, -7, -2, -1, -1, 0, 1, 4, 6, 8, 14, 15, 15, 17, 20, 21, 21, 24, 24, 28, 28, 29, 34, 37, 37, 39, 43, 48, 49, 50, 50, 51, 51, 54, 57, 60, 63, 65, 65, 66, 77, 79, 80, 80, 80, 80, 83, 85, 85, 85, 96, 99, 100, 100, 108, 109, 110, 112, 112, 113, 114, 116, 116, 119, 120, 121, 123, 126, 126, 128]]])
+
+    test "Reject mismatched oracle fuzz regression 8b9376b240f05062e20e":
+        replay(verify_mismatch, cases=[[[-127, -123, -122, -117, -110, -108, -107, -106, -105, -104, -103, -102, -100, -98, -85, -83, -83, -82, -81, -81, -80, -78, -77, 0, -74, -72, -68, -67, -66, -62, -62, -62, -58, -58, -53, -53, -52, -49, -47, -46, -39, -35, -35, -32, -32, -31, -26, -25, -22, -20, -19, -18, -17, -15, -15, -15, -13, -12, -10, -7, -2, -1, -1, 0, 1, 4, 6, 8, 14, 15, 15, 17, 20, 21, 21, 24, 24, 28, 28, 29, 34, 37, 37, 39, 43, 48, 49, 50, 50, 51, 51, 54, 57, 60, 63, 65, 65, 66, 77, 79, 80, 80, 80, 80, 83, 85, 85, 85, 96, 99, 100, 100, 108, 109, 110, 112, 112, 113, 114, 116, 116, 119, 120, 121, 123, 126, 126, 128], [60, 1, 28, -35, -58, 116, -31, 100, -13, 21, 8, 113, 79, -72, -10, -104, -2, 100, -7, -12, -49, 85, 6, 0, -53, 126, -1, -25, -53, 65, 20, -46, -78, 28, -62, -47, -26, 37, 51, 85, -83, 51, 29, 34, -67, 15, 83, -35, 65, -105, -83, -102, 112, 66, 24, 112, 109, -66, 24, -100, 120, 14, 37, -108, -106, 50, 57, 116, -75, 54, 63, -39, 119, -117, -20, -32, -32, 123, -80, -62, 96, -15, 48, -103, 77, 128, 15, -81, -98, 85, -107, 43, -17, -18, 21, 121, 108, 49, -52, -110, 114, -15, -74, -81, -62, -85, -58, -19, -68, 126, -82, 110, 80, 50, -1, -123, 80, -77, 99, 4, 80, 39, 17, -122, -22, -15, -127, 80]]])
+
+
+    test "fuzz regression f849025e9850cb88deee":
+        replay(bubble_sort, cases=[[[-1]], [[-1, 0]], [[1, -1, 3, 3]]], profile=true, times=10)
+
+
+test "Empty, singleton, duplicates and negative values":
+    empty = bubble_sort([])
+    assert(len(empty) == 0)
+    singleton = bubble_sort([7])
+    assert(singleton == [7])
+    duplicates = bubble_sort([3, -1, 3, 0, -1])
+    assert(duplicates == [-1, -1, 0, 3, 3])
+    ordered = bubble_sort([1, 2, 3, 4])
+    assert(ordered == [1, 2, 3, 4])
+
+test with profile "Temporary enumeration is released after break" with {
+    suffix profile.memory < 128KB,
+}:
+    values = [3, 1, 4, 1, 5, 9]
+    repetitions = 0
+    while repetitions < 2000:
+        for index, value in enumerate(values):
+            assert(value == values[index])
+            if index == 2:
+                break
+        repetitions += 1
+    assert(repetitions == 2000)
+
+test with memory "Sorting and iterator cleanup are memory safe":
+    repetitions = 0
+    while repetitions < 100:
+        values = bubble_sort([3, -1, 3, 0, -1])
+        assert(values == [-1, -1, 0, 3, 3])
+        for index, value in enumerate(values):
+            assert(value == values[index])
+            if index == 2:
+                break
+        repetitions += 1

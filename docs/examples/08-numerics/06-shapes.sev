@@ -1,21 +1,7 @@
-import tensor
-
-
-test "shape":
-    value = tensor(
-        [1.0, 2.0, 3.0,
-         4.0, 5.0, 6.0],
-        [2, 3],
-    )
-
-    assert(value.shape == [2, 3])
-
-
-test "contiguous strides":
-    value = tensor(
-        [1.0, 2.0, 3.0,
-         4.0, 5.0, 6.0],
-        [2, 3],
-    )
-
-    assert(value.strides() == [3, 1])
+test "shape and contiguous strides share the storage descriptor":
+    value = tensor[f64,(2,3)](tuple[f64,6](1.0,2.0,3.0,4.0,5.0,6.0))
+    shape = value.shape
+    assert(shape[0] == 2 and shape[1] == 3)
+    strides = value.strides()
+    assert(strides[0] == 3 and strides[1] == 1)
+    assert(value[1,2] == 6.0)

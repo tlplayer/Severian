@@ -25,7 +25,7 @@ class pointer[T]: Pointer
     token_kind: string = PointerPrimitive().token_kind
     literal_family: string = PointerPrimitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = PointerPrimitive().literal_syntaxes
-    # The address uses the same native pointer contract as memory and @c.
+    # The address uses the same c pointer contract as memory and @c.
     __address: pointer
 
     

@@ -36,7 +36,8 @@ class ContractPhases:
         cfg.current = failed
         callee = action.operands[0]
         owner = cfg.syntax.types.get(callee.token.text) if callee.kind == 'name' else None
-        if getattr(owner, 'family', None) == 'error':
+        from py_compiler.syntax.complex.error import is_error
+        if is_error(owner):
             owner.raise_failure(action.operands[1:], cfg, action.token.span)
         else:
             result = cfg.expr(action, self.env)

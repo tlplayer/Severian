@@ -1,0 +1,34 @@
+{
+  "package": {
+    "name": "examples-collections",
+    "version": "0.1.0"
+  },
+  "sources": [
+    "01-tuple.sev",
+    "02-tensor.sev",
+    "03-list.sev",
+    "04-deque.sev",
+    "06-map.sev",
+    "07-set.sev",
+    "08-dict.sev",
+    "09-heap.sev",
+    "10-count.sev",
+    "11-lists-tuples.sev",
+    "13-comprehension-style.sev",
+    "14-shape-stable-indexing.sev"
+  ],
+  "dependencies": {
+    "collections": {
+      "package": "core.collections",
+      "path": "../../../library/core/collections/collection"
+    },
+    "string": {
+      "package": "core.string",
+      "version": "0.1.0"
+    },
+    "io": {
+      "package": "system.io",
+      "version": "0.1.1"
+    }
+  }
+}

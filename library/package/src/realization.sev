@@ -1,7 +1,7 @@
 import document_quote, entries_json, parse_document, relative_path, setting, string_array, text_setting, toml_quote, unquote from "document.sev"
 import canonical, capture, command, copy_file, digest, exists, files, manifest_file, mkdir, mutable_project, project_lock_file, published_project, read_bytes, read_text, remove_tree, replace_file, require_command, sorted_strings, temporary, write_bytes, write_text from "host.sev"
-import Archive, ArchiveEntry, Artifact, Build, BuildPlan, BuildResult, BuildUnit, Check, Clean, Compiler, DependencyEdge, Entry, Install, LinkInput, LinkPlan, LinkResult, PackageIdentity, Project, Publish, Requirements, Resolution, Resolve, ResolvedPackage, Run, Selection, Target, Test, TestReport, TestResult, append_number, append_text, archive_text, artifact_kind, dependency_source, execute_link, fetch, library_sidecars, library_target, module_source, number, payload_copy, payload_text, plan_link, publication_files, registry_discovery_state, registry_release, registry_root, resolve, retain_cross_native, retain_payload, semantic_plan, semantic_plan_json, semantic_source_unit, semantic_unit_key, source_checksum, standalone_source, verify_publication, versions, write_archive from "payload.sev"
-import interfaces, retain_native_interface from "interface_metadata.sev"
+import Archive, ArchiveEntry, Artifact, Build, BuildPlan, BuildResult, BuildUnit, Check, Clean, Compiler, DependencyEdge, Entry, Install, LinkInput, LinkPlan, LinkResult, PackageIdentity, Project, Publish, Requirements, Resolution, Resolve, ResolvedPackage, Run, Selection, Target, Test, TestReport, TestResult, append_number, append_text, archive_text, artifact_kind, dependency_source, execute_link, fetch, library_sidecars, library_target, module_source, number, payload_copy, payload_text, plan_link, publication_files, registry_discovery_state, registry_release, registry_root, resolve, retain_cross_c, retain_payload, semantic_plan, semantic_plan_json, semantic_source_unit, semantic_unit_key, source_checksum, standalone_source, verify_publication, versions, write_archive from "payload.sev"
+import interfaces, retain_c_interface from "interface_metadata.sev"
 import retain_container from "container.sev"
 import inside, open, parse_manifest, prelude_exclusions, reference, safe_name, write_document from "manifest.sev"
 import "model.sev" as _dependency_180
@@ -54,9 +54,9 @@ def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compil
         retain_container(root, root + "/" + output, triple, build_id)
     inventory.append(toml_quote(output) + " = " + toml_quote(digest(root + "/" + output)))
     if emit == "library":
-        interface = retain_native_interface(owner, unit, compiler, cache, root, prefix, name, build_id, triple, resolution)
+        interface = retain_c_interface(owner, unit, compiler, cache, root, prefix, name, build_id, triple, resolution)
         inventory.append(toml_quote(interface) + " = " + toml_quote(digest(root + "/" + interface)))
-    text := "format = 1\nbuild-id = " + toml_quote(build_id) + "\ncontent-id = " + toml_quote(owner.checksum) + "\ncompiler = " + toml_quote(digest(compiler.executable)) + "\ntarget = " + toml_quote(triple) + "\nprofile = " + toml_quote(unit.profile) + "\noutput = " + toml_quote(output) + "\ninterface = " + toml_quote(interface) + "\nkind = " + toml_quote(emit if emit != "" else "native") + "\n\n[files]\n" + inventory.join("\n") + "\n"
+    text := "format = 1\nbuild-id = " + toml_quote(build_id) + "\ncontent-id = " + toml_quote(owner.checksum) + "\ncompiler = " + toml_quote(digest(compiler.executable)) + "\ntarget = " + toml_quote(triple) + "\nprofile = " + toml_quote(unit.profile) + "\noutput = " + toml_quote(output) + "\ninterface = " + toml_quote(interface) + "\nkind = " + toml_quote(emit if emit != "" else "c") + "\n\n[files]\n" + inventory.join("\n") + "\n"
     if os.is_file(cache + "/pipeline.json"):
         retain_file(cache + "/pipeline.json", root + "/build/" + build_id + "/pipeline.json")
     if os.is_file(cache + "/link.json"):
@@ -114,7 +114,7 @@ def retain_realization(resolution: Resolution, unit: BuildUnit, compiler: Compil
         retain_file(root + "/" + output, root + "/bin/" + name)
         require_command(["chmod", "755", "--", root + "/bin/" + name])
     usable = interface != "" and (read_text(cache + "/artifact.interface.sev").strip() != "" or os.is_file(cache + "/artifact.semantic"))
-    return Artifact(unit.target, triple, unit.profile, "archive" if emit == "library" else "native", root + "/" + output, build_id, root, root + "/" + interface if usable else "")
+    return Artifact(unit.target, triple, unit.profile, "archive" if emit == "library" else "c", root + "/" + output, build_id, root, root + "/" + interface if usable else "")
 
 def sidecars_match(cache: string) -> bool:
     if not os.is_file(cache + "/sidecars.json"):

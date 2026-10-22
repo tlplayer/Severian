@@ -16,7 +16,7 @@ It supersedes source-optional publication and older XDG registry layouts.
 - `package.lock` pins exact dependency identities and the resolved graph.
 - `package.pkg/` is the generated package realization directory.
 - `package.pkg/package.pkgi/` is a DIRECTORY containing compiler interfaces in .sevi format
-- Source MUST ship in every published package, including native provider sources.
+- Source MUST ship in every published package, including c provider sources.
 - Compatible dependencies MUST reuse metadata and compiled implementations.
 - Source availability MUST NOT cause dependency recompilation on every import.
 - `library/package` owns these semantics; CLI commands delegate to its APIs.
@@ -48,7 +48,7 @@ includes supporting private declarations needed for public layouts and generics.
 | --- | --- |
 | `sev init` | Create package definition with all supported options, defaults and commented alternatives; provide the standard package pipeline |
 | `sev build` | Resolve existing locked graph, reuse/build targets, populate working realization |
-| `sev check` | Load/produce metadata without requiring native codegen; mark metadata-only results as non-linkable |
+| `sev check` | Load/produce metadata without requiring c codegen; mark metadata-only results as non-linkable |
 | `sev test` | Reuse dependencies, build test targets locally, run with explicit resource/time bounds |
 | `sev publish <name>:version --local` | Validate name, source completeness and selected completed artifacts; exclude build/cache/debug; install atomically |
 | `sev add <name>:version` | Resolve and atomically update manifest/lock without compiling the dependency |
@@ -60,7 +60,7 @@ includes supporting private declarations needed for public layouts and generics.
 | `sev clean` | Remove bloat, old builds, cache/* build/* etc.  |
 
 Export packages MUST NOT contain a metadata-only check result masquerading as a
-linkable library. Native artifacts may be omitted for an unsupported target only
+linkable library. C artifacts may be omitted for an unsupported target only
 when the publication explicitly declares source-rebuild availability for it.
 
 ##  Working package and local build layout
@@ -130,16 +130,16 @@ interface.sevi       REQUIRED
     compiler-facing public semantic interface
 
 .o            BUILD PRODUCT
-    native codegen units
+    c codegen units
 
 .a/.lib            DEFAULT REUSABLE STATIC IMPLEMENTATION
-    archive of native codegen units
+    archive of c codegen units
 
 .so/.dylib/.dll       DYNAMIC IMPLEMENTATION
     
 
 .mlirbc               SPECIALIZATION IMPLEMENTATION
-    generics/JIT/target specialization where native code isn't sufficient
+    generics/JIT/target specialization where c code isn't sufficient
 
 executable           BINARY TARGET
     output of main.sev
@@ -813,7 +813,7 @@ Coverage is defaulted on
 * Removed rules remain recognized as deprecated configuration keys for at least one migration period.
 
 ## Migration
-1. Severian manifests use `package.json` with comment support; Cargo files retain their native TOML format.
+1. Severian manifests use `package.json` with comment support; Cargo files retain their c TOML format.
 2. Generated `package.json` files use the default options with comments listing supported values. `package.options` keeps generated configuration aligned with the option catalog. 
 3. All builds should have limits for LOC <1000, code/branch coverage > 90% and no dead code/unused variables as warnings as well as a O(...) notation for functions etc. which allows for cleaner profiling testing and better optimizations
 4. Methods should be smaller than 400 LOCs. 

@@ -1,25 +1,37 @@
-def read(value: borrow list[int]) -> int:
+def read(value: view tensor[int]) -> int:
     return value[0]
 
 
-def increment(value: borrow mut list[int]):
+def increment(value: borrow tensor[int]):
     value[0] += 1
 
 
 test:
-    values := [1, 2, 3]
+    values := tuple[int,3](1,2,3)
 
-    assert(read(borrow values) == 1)
+    assert(read(values) == 1)
 
-    increment(borrow mut values)
+    increment(values)
 
     assert(values[0] == 2)
 
 test with compiler:
-    values := [1, 2, 3]
+    values := tuple[int,3](1,2,3)
 
     first := borrow values
 
     reject:
-        second := borrow mut values
-        print(first.length())
+        second := borrow values
+        print(len(first))
+
+
+test "read-only calls preserve caller values":
+    values = tuple[int,3](1,2,3)
+    assert(read(values) == 1)
+    assert(read(values) == 1)
+    assert(values[0] == 1)
+
+test with compiler "view parameters cannot mutate their elements":
+    reject:
+        def invalid(value: view tensor[int]):
+            value[0] = 9

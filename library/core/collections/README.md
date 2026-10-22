@@ -7,7 +7,7 @@ is not checked in as a second implementation.
 
 Collections delegate allocation and initialized-element destruction to
 core.storage, which depends on core.memory. No collection package declares a C
-provider, foreign ABI, or direct allocator call. Optional native storage
+provider, foreign ABI, or direct allocator call. Optional c storage
 instrumentation is isolated in core.storage.statistics and is not a dependency.
 
 The list package supplies owned lists and borrowed slice regions. Array, deque,

@@ -10,4 +10,4 @@ test with integ "create and list directory":
     assert(os.is_dir(directory))
 
     entries = os.list(directory)
-    assert(size(entries) >= 0)
+    assert(entries.len() >= 0)

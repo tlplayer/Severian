@@ -4,6 +4,29 @@ from py_compiler.syntax.primitive.literal import QuotedLiteral
 from py_compiler.syntax.symbol.forms import decode_quoted
 from py_compiler.syntax.complex.collection import Collection
 from py_compiler.syntax.complex.array import ElementPlace
+from py_compiler.syntax.generic.owned import OwnedGrammar, Capture
+
+
+class StringMembership(OwnedGrammar):
+    spelling = 'in'
+    precedence = 3
+    associativity = 'left'
+    comparison = True
+
+    def __init__(self, owner):
+        super().__init__(owner, 'F.operator', (Capture('needle', owner), 'in', Capture('value', owner)))
+
+    def recognize(self, window):
+        from py_compiler.syntax.generic.grammar import Match
+        if len(window.tokens) == 1 and window.tokens[0].text == 'in':
+            return Match(self, window, window.end, {})
+        return None
+
+    def lower_expression(self, cfg, node, env):
+        needle = cfg.expr(node.operands[0], env, self.owner)
+        if needle.type != self.owner:
+            raise ValueError('string membership requires a string needle')
+        return self.owner.binary_operation(node, needle, cfg, env)
 
 
 class StringBytePlace(ElementPlace):
@@ -17,13 +40,37 @@ class String(Collection):
     family: str = "string"
     mlir: str = "memref<?xi8>"
     no_result: bool = False
+    pointer_bits: int = 64
+
+    @property
+    def global_storage_type(self):
+        from py_compiler.syntax.generic.storage import descriptor_type
+        return descriptor_type(self.pointer_bits)
+
+    def module_storage(self, symbol):
+        storage = self.global_storage_type
+        return f'llvm.mlir.global external @{symbol}() : {storage} {{\n    %zero = llvm.mlir.zero : {storage}\n    llvm.return %zero : {storage}\n  }}'
 
     def construct_expression(self, argument, arguments, cfg, env, span, expected=None):
         if argument is not None or len(arguments) != 1:
             raise ValueError('string requires one UTF-8 byte array or string')
         value = cfg.expr(arguments[0], env)
-        if value.type.family != 'string' and not (value.type.family == 'array' and value.type.element.name == 'u8'):
-            raise ValueError('string requires UTF-8 byte storage')
+        if value.type.family == 'type':
+            from py_compiler.syntax.function.calls import literal_value
+            return literal_value(value.type.declaration.name, self, cfg, span)
+        if value.type.family == 'pointer':
+            from py_compiler.syntax.primitive.pointer.operations import ArrayAddress
+            from py_compiler.syntax.primitive.numeric.conversion import ScalarConversion
+            from py_compiler.syntax.grammar.expression import Expression
+            raw = cfg.context.type('pointer')
+            if value.type.mlir.startswith('memref'):
+                value = cfg.emit('pointer-address', raw, (value,), ArrayAddress(raw), span)
+            address_type = cfg.context.type('u64')
+            address = cfg.emit('pointer-address-bits', address_type, (value,), ScalarConversion(value.type, address_type), span)
+            return self.library_call('_pointer', (Expression('capture', arguments[0].token, (StringConversion(address),)),), cfg, env, span)
+        if value.type.family != 'string' and not (value.type.family in ('array', 'tensor', 'tuple') and value.type.element.name == 'u8' and getattr(value.type, 'rank', 1) == 1):
+            from py_compiler.syntax.grammar.expression import Expression
+            return self.library_call('_convert', (Expression('capture', arguments[0].token, (StringConversion(value),)),), cfg, env, span)
         from py_compiler.syntax.complex.array import MemoryOperation
         result = cfg.emit('memory-copy', self, (value,), MemoryOperation('copy'), span)
         cfg.owned_results.add(result.identity)
@@ -37,17 +84,96 @@ class String(Collection):
         cfg.value_dependencies[result.identity] = set()
         return result
 
+    def slice_value(self, receiver, bounds, cfg, env, span, owner=None, *, closed=(True, True)):
+        from py_compiler.syntax.grammar.expression import Expression
+        from py_compiler.syntax.complex.tensor import ArgumentValue
+        from py_compiler.syntax.function.calls import literal_value
+        from py_compiler.frontend.lexer.lexer import lex
+        from py_compiler.frontend.source.source import SourceFile
+        start, stop, step = bounds
+        if step is not None:
+            raise ValueError('string slicing currently requires unit stride')
+        token = lex(SourceFile(cfg.source.path + ':slice', 'slice'), cfg.syntax)[0]
+        integer = cfg.context.type('int')
+        begin = cfg.expr(start, env, integer) if start else literal_value(0, integer, cfg, span)
+        end = cfg.expr(stop, env, integer) if stop else self.length(receiver, cfg, span)
+        arguments = tuple(Expression('capture', token, (ArgumentValue(v, owner if i == 0 else None),))
+                          for i, v in enumerate((receiver, begin, end,
+                              literal_value(closed[0] or start is None, cfg.context.type('bool'), cfg, span),
+                              literal_value(closed[1] and stop is not None, cfg.context.type('bool'), cfg, span))))
+        return self.library_call('_slice', arguments, cfg, env, span)
+
     def release(self, value, cfg, span):
         from py_compiler.syntax.complex.array import MemoryOperation
         cfg.effect('deallocate', (value,), MemoryOperation('release'), span)
 
+    def library_call(self, method, arguments, cfg, env, span):
+        from py_compiler.syntax.function.calls import select, invoke
+        entries = cfg.context.lookup_functions(method, cfg.declaration_scope)
+        if not entries:
+            from py_compiler.syntax.prelude import require_library
+            require_library(cfg.context, 'core.string')
+        for alias in cfg.context.package_imports:
+            package = cfg.context.c_packages[alias]
+            if package['package']['name'] == 'core.string':
+                entries = cfg.context.lookup_functions(alias + '.' + method, cfg.declaration_scope)
+                break
+        if not entries:
+            raise ValueError('string operation requires an explicit import of core.string')
+        existing = set(env)
+        entry, values = select(entries, arguments, cfg, env)
+        result = invoke(entry, values, cfg, span)
+        # These library operations return independent values. Argument literals
+        # must not become branch-local bindings carried by short-circuit joins.
+        if not getattr(entry.body, 'result_sources', ()):
+            for key in set(env) - existing:
+                if key.startswith('<owned argument '):
+                    binding = env.pop(key)
+                    cfg.cleanup_memory((binding,), span)
+                    cfg.local_names.discard(key)
+        return result
+
     def call_method(self, receiver, method, arguments, cfg, env, span, owner=None):
+        if method in ('concat', 'contains', 'utf', 'upper', 'lower', 'equal', 'slice', 'replace', 'compare'):
+            from py_compiler.syntax.grammar.expression import Expression
+            from importlib import import_module
+            from py_compiler.frontend.lexer.lexer import lex
+            from py_compiler.frontend.source.source import SourceFile
+            token = lex(SourceFile(cfg.source.path + ':string-method', method), cfg.syntax)[0]
+            capture = Expression('capture', token, (import_module('py_compiler.syntax.block.for').FrozenCapture(receiver, owner),))
+            return self.library_call('_' + method, (capture, *arguments), cfg, env, span)
         if method != 'suffix' or len(arguments) != 1:
             raise ValueError('unknown string method: ' + method)
         suffix = cfg.expr(arguments[0], env, self)
         result = cfg.emit('string-suffix', cfg.context.type('bool'), (receiver, suffix), Suffix(), span)
         if arguments[0].kind == 'literal':
             self.release(suffix, cfg, span)
+        return result
+
+    def binary_operation(self, node, left, cfg, env):
+        from py_compiler.syntax.grammar.expression import Expression
+        from py_compiler.syntax.generic.storage import root_binding
+        from py_compiler.syntax.function.calls import lower_expression
+        from py_compiler.syntax.complex.tensor import ArgumentValue
+        owner = root_binding(node.operands[0], cfg, env)
+        frozen = Expression('capture', node.token, (ArgumentValue(left, owner),))
+        method = {'+': 'concat', '==': 'equal', '!=': 'equal', 'in': 'contains',
+                  '<': 'compare', '<=': 'compare', '>': 'compare', '>=': 'compare'}.get(node.token.text)
+        if method is None:
+            raise ValueError('unsupported string operation: ' + node.token.text)
+        receiver, argument = (node.operands[1], frozen) if node.token.text == 'in' else (frozen, node.operands[1])
+        if node.token.text == '+':
+            argument = Expression('call', node.token, (Expression('name', node.token.with_text('string', kind='IDENTIFIER')), argument))
+        call = Expression('call', node.token, (Expression('member', node.token.with_text(method, kind='IDENTIFIER'), (receiver,)), argument))
+        result = lower_expression(call, cfg, env)
+        if method == 'compare':
+            from py_compiler.syntax.function.calls import literal_value
+            from py_compiler.syntax.generic.owned import select
+            zero = literal_value(0, result.type, cfg, node.token.span)
+            return select(result.type, 'F.operator', node.token.text).expand(cfg, result, zero, node.token.span)
+        if node.token.text == '!=':
+            from py_compiler.syntax.generic.owned import select
+            return select(result.type, 'F.unary', 'not').expand(cfg, result, node.token.span)
         return result
 
     def length(self, value, cfg, span):
@@ -65,7 +191,8 @@ class String(Collection):
         return value
 
     def grammars(self):
-        return (Constructor(self), QuotedLiteral(self, 'STRING'))
+        from py_compiler.syntax.complex.collection import CollectionCondition
+        return (Constructor(self), QuotedLiteral(self, 'STRING'), StringMembership(self), CollectionCondition(self))
 
     def render_constant(self, value, symbol):
         import json
@@ -143,3 +270,17 @@ class Suffix:
                 f'    {p}next = arith.andi {p}ok, {p}equal : i1',
                 f'    scf.yield {p}next : i1', '  }', f'  scf.yield {p}match : i1',
                 '} else {', f'  scf.yield {p}false : i1', '}']
+
+
+@dataclass(frozen=True)
+class StringConversion:
+    value: object
+
+    def type(self, cfg, expected=None):
+        return self.value.type
+
+    def binding(self, cfg):
+        return None
+
+    def lower(self, cfg, expected=None):
+        return self.value

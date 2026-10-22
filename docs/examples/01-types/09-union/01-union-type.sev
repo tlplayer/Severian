@@ -7,14 +7,14 @@ class foo:
     def return_foobar() -> foobar:
         return self
 
-    def foo_value() -> None:
+    def foo_value() -> int:
         return 1
 
 class bar:
     def return_bar() -> foobar:
         return self
 
-    def bar_value() -> None:
+    def bar_value() -> int:
         return 2
 
 

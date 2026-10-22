@@ -19,3 +19,13 @@ test "lock scope ends after await":
     await task
     counter.increment()
     assert(counter.value == 6)
+
+
+test with compiler "parent waits before reading locked state":
+    counter = Counter(0)
+    task = async counter.increment() with self and lock
+    reject:
+        value = counter.value
+    accept:
+        await task
+        assert(counter.value == 1)

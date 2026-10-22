@@ -10,3 +10,21 @@ def main():
     print(f"{letter}:{type(letter)}")
     print(f"{enabled}:{type(enabled)}")
     print(f"{name}:{type(name)}")
+
+test with integ "inferred values print with their types":
+    main()
+    assert("10:i64" in stdout)
+    assert("true:bool" in stdout)
+    assert("severian:string" in stdout)
+
+test "inference retains scalar and string types":
+    count = 10
+    ratio = 0.5
+    enabled = true
+    letter = 'l'
+    name = "severian"
+    assert(type(count) == int)
+    assert(type(ratio) == f64)
+    assert(type(enabled) == bool)
+    assert(type(letter) == char)
+    assert(type(name) == string)

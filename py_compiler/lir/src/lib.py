@@ -47,17 +47,27 @@ def lower(program, target, pointer_bits):
         require_ready(body)
     from py_compiler.syntax.generic.atom import ExternalSymbol
     dependencies = set()
-    for body in program.bodies:
+    pending, visited = list(program.bodies), set()
+    for body in pending:
+        if body.name in visited:
+            continue
+        visited.add(body.name)
         for block in body.blocks:
             for operation in block.operations:
                 if operation.atom is None:
                     raise ValueError(f"unresolved operation at LIR boundary: {operation.kind}")
                 implementation = operation.atom.implementation
+                auxiliary = getattr(implementation, 'auxiliary_bodies', None)
+                if auxiliary:
+                    pending.extend(auxiliary())
                 validate_target = getattr(implementation, 'validate_target', None)
                 if validate_target:
                     validate_target(target, pointer_bits)
                 if isinstance(implementation, ExternalSymbol):
                     dependencies.update(implementation.dependencies)
+                c_dependencies = getattr(implementation, 'c_dependencies', None)
+                if c_dependencies:
+                    dependencies.update(c_dependencies(target, pointer_bits))
     atoms = tuple(atom for module in program.mir_modules for sub in module.submodules for atom in sub.atoms)
     if program.mir_modules:
         current = {(body.name, block.identity, position): operation.atom
@@ -128,7 +138,7 @@ def partitions(program, lir):
             for call in sub.callables:
                 body = executable[call.body.name]
                 if body.name in owned:
-                    raise ValueError('native partition contains a duplicate callable')
+                    raise ValueError('c partition contains a duplicate callable')
                 owned.add(body.name)
                 blocks = []
                 for block in body.blocks:
@@ -154,11 +164,11 @@ def partitions(program, lir):
             globals_ = tuple(place.identity for body in bodies if not body.declaration
                              for place in body.storage if not getattr(place, 'external_symbol', ''))
             mlir = MlirProgram(functions, tuple(bodies), (), globals_)
-            native = replace(lir, mlir=mlir, atoms=submodule.atoms)
+            c = replace(lir, mlir=mlir, atoms=submodule.atoms)
             output.append(Partition(module.identity, sub.identity, source, stem, (*symbols, *(f.symbol for f in functions)),
-                                    sub.dependencies, native, tuple(mappings)))
+                                    sub.dependencies, c, tuple(mappings)))
     if owned != {body.name for body in program.bodies}:
-        raise ValueError('native partitions do not cover all registered callables')
+        raise ValueError('c partitions do not cover all registered callables')
     return tuple(output)
 
 
@@ -170,12 +180,18 @@ def compile_object(lir, optimizer=None):
         if result.returncode:
             raise ValueError(f'{Path(arguments[0]).name} failed:\n{result.stderr}')
         return result.stdout
-    dialect = run([optimizer, '--expand-strided-metadata', '--arith-expand', '--convert-math-to-llvm', '--convert-scf-to-cf',
-                   '--convert-arith-to-llvm', f'--convert-index-to-llvm=index-bitwidth={lir.pointer_bits}',
-                   '--convert-cf-to-llvm', f'--finalize-memref-to-llvm=index-bitwidth={lir.pointer_bits}',
+    text = lir.text()
+    if 'gpu.module @' in text:
+        from py_compiler.syntax.complex.gpu import lower_device_modules
+        text = lower_device_modules(text, optimizer)
+    # Keep index constants visible while lowering memref.dim; lowering arith
+    # first turns fixed dimensions into dynamic stack scratch on every loop pass.
+    dialect = run([optimizer, '--expand-strided-metadata', '--lower-affine', '--arith-expand', '--convert-math-to-llvm', '--convert-scf-to-cf',
+                   '--convert-vector-to-llvm', f'--finalize-memref-to-llvm=index-bitwidth={lir.pointer_bits}',
+                   '--convert-arith-to-llvm', f'--convert-index-to-llvm=index-bitwidth={lir.pointer_bits}', '--convert-cf-to-llvm',
                    f'--convert-func-to-llvm=index-bitwidth={lir.pointer_bits}',
                    '--convert-arith-to-llvm', '--reconcile-unrealized-casts',
-                   '--ensure-debug-info-scope-on-llvm-func', '--mlir-print-debuginfo'], lir.text())
+                   '--ensure-debug-info-scope-on-llvm-func', '--mlir-print-debuginfo'], text)
     llvm_ir = run([translator, '--mlir-to-llvmir'], dialect)
     llvm_ir = flush_before_abort(llvm_ir)
     with tempfile.TemporaryDirectory(prefix='sev-object-') as directory:
@@ -211,16 +227,16 @@ class DebugInfoTests(unittest.TestCase):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax
         import signal
-        source = 'def crash() -> int:\n    assert(false)\n    return 0\n'
-        result = compile_source('assert-flush.sev', source, Syntax())
+        source = 'test "crash":\n    assert(false)\n'
+        result = compile_source('assert-flush.sev', source, Syntax(include_tests=True))
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         artifact = compile_object(lower(result.program, 'x86_64-unknown-linux-gnu', 64))
-        symbol = next(body.name for body in result.program.bodies if body.declaration == 'crash')
+        symbol = next(body.name for body in result.program.bodies if body.test)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
             (path / 'crash.o').write_bytes(artifact.object_bytes)
             import json
-            (path / 'main.c').write_text('extern long crash(void) __asm__(' + json.dumps('"' + symbol + '"') + ');\nint main(void) { return crash(); }\n')
+            (path / 'main.c').write_text('extern void crash(void) __asm__(' + json.dumps('"' + symbol + '"') + ');\nint main(void) { crash(); return 0; }\n')
             subprocess.run(['cc', str(path / 'main.c'), str(path / 'crash.o'), '-o', str(path / 'crash')], check=True, capture_output=True)
             process = subprocess.run([str(path / 'crash')], capture_output=True, text=True)
             self.assertEqual(process.returncode, -signal.SIGABRT)

@@ -1,0 +1,19 @@
+{
+  "package": {
+    "name": "examples-process",
+    "version": "0.1.0"
+  },
+  "sources": [
+    "01-spawn.sev",
+    "02-spawn-wait.sev",
+    "03-kill.sev"
+  ],
+  "dependencies": {
+    "process": {
+      "path": "../../../../library/system/process/linux_x86_64"
+    },
+    "collections": {
+      "path": "../../../../library/core/collections/collection"
+    }
+  }
+}

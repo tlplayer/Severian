@@ -5,7 +5,9 @@ import os
 test with integ "memory mapped file":
     path = "/tmp/severian-map.bin"
 
-    file.write(path, [1, 2, 3, 4])
+    data = tensor[u8](tuple[u8,4](1, 2, 3, 4))
+    assert(file.write_bytes(path, data) == 4)
+    defer os.remove(path)
 
     with file.map(path) as mapping:
         assert(bytes(mapping) == 4B)
@@ -14,5 +16,3 @@ test with integ "memory mapped file":
         assert(mapping[1] == 2)
         assert(mapping[2] == 3)
         assert(mapping[3] == 4)
-
-    os.remove(path)

@@ -1,140 +1,144 @@
-'''
-Compiler-defined hocase context.
-The important semantic distinction is:
+from collections import list
 
-@monitor_time
-@monitor_error
-search()
+# Callbacks are ordinary functions. The compiler supplies bindings at each phase.
+def started(function: string):
+    print("start:", function)
 
-executes as nested hooks:
+def timer_started(function: string):
+    print("timer start:", function)
 
-monitor_time.with
-    monitor_error.with
-        search
-    monitor_error.without
-monitor_time.without
+def report_error(function: string, error: view Error | None):
+    if error.has_value:
+        print("error:", function, error.value.message)
 
+def report_result[R](result: view R):
+    if result is int:
+        print("result:", result)
 
-For a successful call:
+def report_time(function: string, elapsed: float):
+    if elapsed < 0.0:
+        panic("negative hook duration")
+    print("timer duration:", function)
 
-context.result   = 10
-context.error    = None
-context.duration = ...
+def search_arguments(items: view list[int], item: int):
+    print("arguments:", items.len(), item)
 
-For a throw:
-
-context.result   = None
-context.error    = Error(...)
-context.duration = ...
-
-Then the error continues propagating after all without hooks have run.
-
-For panic, no such guarantee:
-
-with hooks
-    function
-    PANIC
-
-
-# without hooks are not guaranteed
-def ... with context declares a hocase implementation.
-Such a function may contain with context: and without context: phases.
-with executes before the decorated function.
-without executes on return or throw.
-without does not execute reliably on panic.
-Multiple hooks enter top-to-bottom and exit bottom-to-top.
-context.result and context.error are unavailable/None during with.
-context.duration becomes final before without begins.
-
-The last point makes this much more than decorators. It is compiler-supported structured interception with guaranteed error unwinding.
-'''
-#Context is a core trait property which houses information for hooks, tests etc.
-class HookContext: Context
-    function: string
-    args: tuple
-    result: int | None
-    error: string | None
-    duration: duration
-
-
-trait Monitor:
-    # Namespace / composed hook.
-    @monitor
-
-    # Individual hooks.
-    @monitor_error
-    def monitor_error(context: HookContext) -> None with context
-
-    @monitor_time
-    def monitor_time(context: HookContext) -> None with context
-
-
-class Metric: Monitor
-    def monitor_error(context: HookContext) -> None with context:
-        with context:
-            print("start:", context.function)
-
-        without context:
-            if context.error:
-                print("error:", context.error)
-
-
-    def monitor_time(context: HookContext) -> None with context:
-        with context:
-            print("timer start:", context.function)
-
-        without context:
-            print("timer duration:", context.duration)
-
-
-# Hooks compose top to bottom.
-@monitor_time
-@monitor_error
-def search(items: list[int], item: int) -> int:
-    for i in items:
-        print(i)
-        if i == item:
+# Hooks enter top-to-bottom and exit bottom-to-top.
+# Within one annotation, callbacks keep their written order.
+@monitor_time with {
+    prefix timer_started(F.name),
+    suffix report_time(F.name, context.duration),
+}
+@monitor_error with {
+    prefix started(F.name),
+    prefix search_arguments(F.args...),
+    suffix report_error(F.name, context.error),
+    suffix report_result(R),
+}
+def search(items: view list[int], item: int) -> int | Error:
+    for value in items:
+        if value == item:
             return item
-
     throw Error("Failed to find item in items")
-# Includes all hooks by default
-@monitor
+
+@monitor with {
+    prefix started(F.name),
+    prefix timer_started(F.name),
+    suffix report_error(F.name, context.error),
+    suffix report_time(F.name, context.duration),
+}
 def composed_hook():
     print("doing stuff")
 
-# Includes specific hooks, in order of args
-@monitor(monitor_error)
+@monitor_error with {
+    prefix started(F.name),
+    suffix report_error(F.name, context.error),
+}
 def isolated_hook():
     print("doing stuff while monitoring error")
 
-def main():
-    items = [10, 20, 30]
-    result = search(items, 10)
-    print(result)
+# A caller that propagates search's error runs its own suffix once as it exits.
+@outer with {
+    prefix started(F.name),
+    suffix report_error(F.name, context.error),
+}
+def forwarded_search(items: view list[int], item: int) -> int | Error:
+    return search(items, item)
 
 
-test with integ:
+test with integ "hooks expose result arguments and completed duration":
     result = search([10, 20, 30], 10)
-    print(("tuple:", result))
     assert(result == 10)
-    assert("timer start: search" in stdout)
-    assert("timer duration: " in stdout)
-    assert("(tuple:,10)" in stdout)
+    assert("timer start: search\nstart: search\narguments: 3 10\nresult: 10\ntimer duration: search" in stdout)
 
-test with integ:
-    result = composed_hook()
-    assert("start: composed_hook" in stdout)
-    assert("timer start: composed_hook" in stdout)
-    assert("doing stuff" in stdout)
-    assert("timer duration: " in stdout)
 
-test with integ:
+test with integ "one annotation composes callbacks in written order":
+    composed_hook()
+    assert("start: composed_hook\ntimer start: composed_hook\ndoing stuff\ntimer duration: composed_hook" in stdout)
+
+
+test with integ "explicit callbacks limit the monitoring behavior":
     isolated_hook()
     assert("start: isolated_hook" in stdout)
-    assert("timer start:" not in stdout)
     assert("doing stuff while monitoring error" in stdout)
-    assert("timer duration: " not in stdout)
+    assert("timer start:" not in stdout)
+    assert("timer duration:" not in stdout)
 
-test:
+
+test with integ "exit hooks observe an error before it reaches the caller":
+    caught = false
+    try:
+        result = search([10, 20, 30], 99)
+    catch error: Error:
+        assert(error.message == "Failed to find item in items")
+        print("caught")
+        caught = true
+    assert(caught)
+    assert("error: search Failed to find item in items\ntimer duration: search\ncaught" in stdout)
+    assert("result:" not in stdout)
+
+
+test with integ "propagated errors unwind each decorated function":
+    try:
+        result = forwarded_search([10], 99)
+    catch error: Error:
+        print("outer caught")
+    assert("timer duration: search\nerror: forwarded_search Failed to find item in items\nouter caught" in stdout)
+
+
+test "search preserves its result":
     result = search([10, 20, 30], 30)
     assert(result == 30)
+
+
+def report_variant[R](result: view R):
+    if result is E:
+        print("outcome error:", result.message)
+    elif result is int:
+        print("outcome integer:", result)
+    elif result is string:
+        print("outcome text:", result)
+
+@inspect_result with {suffix report_variant(R),}
+def choose_result(kind: int) -> int | string | E:
+    if kind == 0:
+        return 42
+    if kind == 1:
+        return "ready"
+    throw E("failed")
+
+test with integ "R preserves every returned variant before error propagation":
+    integer = choose_result(0)
+    text = choose_result(1)
+    assert(integer == 42)
+    assert(text == "ready")
+    caught = false
+    try:
+        failed = choose_result(2)
+    catch error: E:
+        caught = true
+        assert(error.message == "failed")
+    assert(caught)
+    assert("outcome integer: 42" in stdout)
+    assert("outcome text: ready" in stdout)
+    assert("outcome error: failed" in stdout)

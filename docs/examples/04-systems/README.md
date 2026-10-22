@@ -15,7 +15,7 @@ source declarations
         ↓
       ABI                 target layout and call classification
         ↓
-platform-native providers
+platform-c providers
         ↓
 system libraries          process, filesystem, files, IO, network, environment
 ```
@@ -67,7 +67,7 @@ The prelude imports ordinary declarations from system libraries:
 import print from io
 ```
 
-The native declaration belongs to the selected `io` provider, not to core.
+The c declaration belongs to the selected `io` provider, not to core.
 Bootstrap currently loads that provider source beside the prelude until package
 import resolution can follow the re-export itself. Compiler IR continues to
 represent the result as an ordinary resolved call.

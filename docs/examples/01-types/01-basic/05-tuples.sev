@@ -1,13 +1,66 @@
+from collections import list
 
+# tuple[T,N] is a fixed-size homogeneous sequence.
 def main():
-    #Init
-    array = (1,2,3,4)
-    #Index
-    print(array[2])
-    #Reverse tuple
-    print(array[::-1])
+    values =(1,2,3,4)
+    print(values[2])
+    # Fixed storage can be copied into a tensor with the requested shape.
+    reversed = values[::-1]
+    print(f"({reversed[0]},{reversed[1]},{reversed[2]},{reversed[3]})")
 
-test with integ "":
+test with integ "tuple indexing and reversal":
     main()
     assert("3" in stdout)
     assert("(4,3,2,1)" in stdout)
+
+test "tuple slices normalize bounds and preserve order":
+    values = (1, 2, 3, 4, 5)
+    assert(values[1:5:2] == (2, 4))
+    assert(values[-4:-1] == (2, 3, 4))
+    assert(values[100:-100:-2] == (5, 3, 1))
+    assert(len(values[3:1]) == 0)
+    assert(len(values[:-1:-1]) == 0)
+    assert(values[::-1] == (5, 4, 3, 2, 1))
+
+test "slices own their storage independently":
+    values = (1, 2, 3)
+    reversed = values[::-1]
+    values[2] = 99
+    drop(values)
+    assert(reversed[0] == 3 and reversed[2] == 1)
+
+test "extreme strides cannot overflow the slice length":
+    values = (1, 2, 3)
+    assert(values[::9223372036854775807] == tuple[int,1](1))
+    assert(values[::-9223372036854775808] == tuple[int,1](3))
+    empty = tuple[int,0]()
+    assert(len(empty[::-1]) == 0)
+
+test "zero stride fails before reading storage":
+    throws "slice step cannot be zero":
+        values = (1, 2, 3)
+        invalid = values[::0]
+
+test "sequence equality compares values while identity preserves storage":
+    values = [1, 2, 3]
+    fixed = (1, 2, 3)
+    assert(values == fixed)
+    assert(fixed == values)
+    assert([1, 2, 3] == (1, 2, 3))
+    assert(not ([1, 2, 3] is (1, 2, 3)))
+    assert(not (values is fixed))
+    assert(values is values)
+    assert(fixed is fixed)
+    assert(values != (1, 2))
+    assert(values != (1, 2, 4))
+    assert((1, 2, 4) != values)
+    assert(list[int]() == tuple[int,0]())
+    assert([1, 1, 2] != (1, 2, 1))
+
+test "sequence equality preserves owned elements":
+    words = ["one", "two"]
+    fixed = ("one", "two")
+    assert(words == fixed)
+    assert(fixed == words)
+    assert(words != ("one", "other"))
+    assert(words[0] == "one" and fixed[1] == "two")

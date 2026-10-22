@@ -13,3 +13,21 @@ def main():
 
     print(from_sum.value)
     print(direct.value)
+
+
+test "constructor overloads select by arity":
+    summed = X(20, 22)
+    direct = X(42)
+    assert(summed.value == 42)
+    assert(direct.value == 42)
+    zero = X(0)
+    negative = X(-10, 3)
+    assert(zero.value == 0 and negative.value == -7)
+
+test with integ "constructor example prints both results":
+    main()
+    assert("42\n42\n" in stdout)
+
+test with compiler "constructor rejects an unsupported arity":
+    reject:
+        value = X(1, 2, 3)

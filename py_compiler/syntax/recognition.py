@@ -10,6 +10,7 @@ class Syntax:
     keywords: frozenset = KEYWORDS
     symbols: tuple = SYMBOLS
     include_tests: bool = True
+    target: str = 'x86_64-unknown-linux-gnu'
 
     @cached_property
     def block_providers(self):

@@ -1,3 +1,5 @@
+from collections import list
+
 class User:
     name: string
     metadata: list[string]
@@ -6,6 +8,6 @@ class User:
 test:
     user := User("alice", ["admin"])
 
-    name := borrow user.name
+    name := view user.name
     assert(name == "alice")
 

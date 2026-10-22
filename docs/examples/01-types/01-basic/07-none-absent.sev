@@ -9,3 +9,27 @@ test "The user gave none as the name":
     update = Update(None)
     update.name = None
     assert(update.name is None)
+
+class ReorderedUpdate:
+    name: None | string | absent
+
+class OptionalName:
+    name: string | None
+
+test "omission is independent of union member order":
+    update = ReorderedUpdate()
+    assert(update.name is absent)
+    explicit = ReorderedUpdate(None)
+    assert(explicit.name is None)
+
+test "an optional field without absent defaults to None":
+    update = OptionalName()
+    assert(update.name is None)
+
+test "omitted explicit None and supplied text stay distinct":
+    missing = Update()
+    empty = Update(None)
+    named = Update("Severian")
+    assert(missing.name is absent)
+    assert(empty.name is None)
+    assert(named.name == "Severian")

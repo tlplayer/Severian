@@ -1,0 +1,11 @@
+{
+  "package": {
+    "name": "system.path",
+    "version": "0.1.0"
+  },
+  "dependencies": {
+    "string": {
+      "path": "../../../core/string/c"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "package": {
+    "name": "examples-getting-started",
+    "version": "0.1.0"
+  },
+  "sources": [
+    "01-hello.sev",
+    "02-variables.sev",
+    "03-printing.sev"
+  ],
+  "dependencies": {
+    "io": {
+      "package": "system.io",
+      "path": "../../../library/system/io/linux_x86_64"
+    },
+    "string": {
+      "package": "core.string",
+      "path": "../../../library/core/string/c"
+    },
+    "util": {
+      "package": "core.utils",
+      "path": "../../../library/core/utils/c"
+    }
+  }
+}

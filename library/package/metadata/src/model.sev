@@ -60,7 +60,7 @@ class DependencyRecord:
     interface_id: string
 
 # Specialization is an opaque compiler key, not a spelling of type arguments.
-# Empty specialization denotes a non-generic native implementation or a generic
+# Empty specialization denotes a non-generic c implementation or a generic
 # MLIR template. Ordered artifacts may include private supporting codegen units.
 class ImplementationRecord:
     symbol_id: string

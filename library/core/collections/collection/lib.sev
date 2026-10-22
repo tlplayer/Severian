@@ -1,0 +1,1414 @@
+import string
+
+# Collection algorithms use their supplied storage and indexing operations.
+# No array/vector runtime lies between these algorithms and tensor memrefs.
+def equal[Left,Right](left: Left, right: Right) -> bool:
+    if len(left) != len(right):
+        return false
+    index = 0
+    while index < len(left):
+        if left[index] != right[index]:
+            return false
+        index += 1
+    return true
+
+def _slice_bound(value: int, length: int, backwards: bool) -> int:
+    lower = -1 if backwards else 0
+    upper = length - 1 if backwards else length
+    if value < 0:
+        if value < -length:
+            return lower
+        value += length
+    if value > upper:
+        return upper
+    return value
+
+# Slice notation produces independent scalar storage, including reversed and
+# empty slices. Missing negative-stride bounds differ from an explicit -1.
+def _interval_bound(value: int, length: int, backwards: bool, first: bool, closed: bool) -> int:
+    if value < 0:
+        value = -1 if value < -length else value + length
+    if value > length:
+        value = length
+    if (first and not closed) or (not first and closed):
+        if backwards and value >= 0:
+            value -= 1
+        elif not backwards and value < length:
+            value += 1
+    lower = -1 if backwards else 0
+    upper = length - 1 if backwards else length
+    if value < lower:
+        return lower
+    if value > upper:
+        return upper
+    return value
+
+def _slice_values[T,Container](values: Container, start: int, stop: int, step: int,
+                               missing_start: bool, missing_stop: bool,
+                               start_closed: bool = true, stop_closed: bool = false) -> tensor[T]:
+    if step == 0:
+        throw Error("slice step cannot be zero")
+    length = len(values)
+    backwards = step < 0
+    begin = (length - 1 if backwards else 0) if missing_start else _interval_bound(start, length, backwards, true, start_closed)
+    end = (-1 if backwards else length) if missing_stop else _interval_bound(stop, length, backwards, false, stop_closed)
+    count = 0
+    if backwards and begin > end:
+        count = 1 - (begin - end - 1) / step
+    elif not backwards and end > begin:
+        count = 1 + (end - begin - 1) / step
+    result = tensor[T](count)
+    index = 0
+    position = begin
+    while index < count:
+        result[index] = values[position]
+        index += 1
+        if index < count:
+            position += step
+    return result
+
+# Tuple keys hash their ordered contents, never the backing allocation address.
+def _tuple_hash[Container](values: Container) -> usize:
+    result = usize(len(values))
+    index = 0
+    while index < len(values):
+        result = (result << 5) ^ (result >> 2) ^ values[index].hash()
+        index += 1
+    return result
+
+test "tuple keys compare and hash their contents":
+    first = (1, 2)
+    duplicate = (1, 2)
+    reversed = (2, 1)
+    assert(first == duplicate and first != reversed)
+    assert(first.hash() == duplicate.hash())
+    keys = set[tuple[int,2]]()
+    assert(keys.add(first))
+    assert(not keys.add(duplicate))
+    assert(keys.add(reversed))
+    assert(keys.len() == 2)
+    negative = (-1, -2)
+    same_negative = (-1, -2)
+    assert(negative.hash() == same_negative.hash())
+    empty_keys = set[tuple[int,0]]()
+    assert(empty_keys.add(tuple[int,0]()))
+    assert(not empty_keys.add(tuple[int,0]()))
+
+test with compiler "tuple key contracts preserve member types":
+    reject:
+        keys = set[tuple[f64,2]]()
+    reject:
+        pair = (1, 2)
+        triple = (1, 2, 3)
+        pair.equal(triple)
+
+def sum[K,V:Numeric,Container:C[K,V]](values: Container) -> V:
+    return values.sum()
+
+# Numeric is checked at the call, so containers can also hold nonnumeric values.
+def _sum_values[V:Numeric](values: list[V]) -> V:
+    result = V.zero()
+    for value in values:
+        following = result.add(value)
+        drop(result)
+        result = move following
+    return result
+
+test "fixed and growable scalar storage use the same algorithms":
+    source = tuple[int,3](1,2,3)
+    duplicate = copy source
+    assert(equal(source, duplicate))
+    duplicate[0] = 7
+    assert(not equal(source, duplicate))
+    values = tensor[int](source)
+    values.append(4)
+    assert(sum(values) == 10)
+
+
+# Repeat into the existing owned tensor representation in one allocation.
+def repeat[T](values: tensor[T], repetitions: usize) -> tensor[T]:
+    length = len(values)
+    if length == 0:
+        return tensor[T](0)
+    if repetitions > usize(9223372036854775807) / usize(length):
+        throw Error("repeated collection exceeds addressable storage")
+    total = int(repetitions) * length
+    result = tensor[T](total)
+    output = 0
+    while output < total:
+        index = 0
+        while index < length:
+            result[output] = values[index]
+            output += 1
+            index += 1
+    return result
+
+test "repeat preserves order and allocates independent storage":
+    source = tensor[int](tuple[int,2](4,2))
+    repeated = repeat(source, usize(3))
+    assert(len(repeated) == 6)
+    assert(repeated[0] == 4 and repeated[1] == 2)
+    assert(repeated[4] == 4 and repeated[5] == 2)
+    repeated[0] = 99
+    assert(source[0] == 4)
+
+test "zero repeats and empty input produce empty tensors":
+    source = tensor[int](tuple[int,2](4,2))
+    empty = tensor[int](0)
+    zero_repeats = repeat(source, usize(0))
+    zero_values = repeat(empty, usize(3))
+    assert(len(zero_repeats) == 0 and len(zero_values) == 0)
+
+test "repeat rejects an overflowing result extent":
+    throws "repeated collection exceeds addressable storage":
+        source = tensor[int](tuple[int,2](4,2))
+        result = repeat(source, usize(18446744073709551615))
+
+trait Equal:
+    def equal(other: Self) -> bool
+
+trait Hash:
+    def hash() -> usize
+
+trait Numeric:
+    def zero() -> Self
+    def add(other: Self) -> Self
+
+# Shared collection contracts; storage and traversal stay in the library.
+trait Sized:
+    def len(self: view Self) -> int
+
+trait Iterable[T]:
+    def iter(self: view Self) -> iterator[T]
+
+trait Indexable[K,V]:
+    def get(self: view Self, index: K) -> V
+
+trait Contains[T]:
+    def contains(self: view Self, item: T) -> bool
+
+trait MutableCollection[T]:
+    def append(item: T)
+
+# Every container exposes its own key/value types. Strings use UTF-8 byte
+# offsets (int,u8); tensors use flattened row-major offsets (int,T).
+trait C[K,V]: Sized + Indexable[K,V]
+    grammar truth["bool", "(", self, ")"]() -> bool
+    grammar indexed[self, "[", key: K, "]"]() -> V
+    grammar iterate["iterator", "(", self, ")"]() -> iterator
+
+    def keys(self: view Self) -> list[K]
+    def values(self: view Self) -> list[V]
+    def items(self: view Self) -> list[tuple[K,V]]
+
+    def enumerate(self: view Self) -> list[tuple[K,V]]:
+        return self.items()
+
+    def empty(self: view Self) -> bool:
+        return self.len() == 0
+
+    def sum(self: view Self) -> V:
+        return _sum_values(self.values())
+
+# Compatibility name for the key/value capability shared by all containers.
+trait Keyed[K,V]: C[K,V]
+    def keys(self: view Self) -> list[K]
+    def values(self: view Self) -> list[V]
+    def items(self: view Self) -> list[tuple[K,V]]
+
+trait Sequence[T]: Keyed[int,T] + Iterable[T] + MutableCollection[T]
+    def len(self: view Self) -> int
+
+class list[T]: Sequence[T] + Contains[T]
+    grammar truth["bool", "(", self, ")"]() -> bool:
+        return self.len() != 0
+
+    storage: array[T]
+    count: int
+
+    def list():
+        storage = array[T,0]()
+        count = 0
+
+    def len(self: view Self) -> int:
+        return count
+
+    def keys(self: view Self) -> list[int]:
+        result = list[int]()
+        index = 0
+        while index < count:
+            result.append(index)
+            index += 1
+        return result
+
+    def values(self: view Self) -> list[T]:
+        result = copy self
+        return result
+
+    def items(self: view Self) -> list[tuple[int,T]]:
+        result = list[tuple[int,T]]()
+        index = 0
+        while index < count:
+            result.append(tuple[int,T](index, self.get(index)))
+            index += 1
+        return result
+
+    def contains(self: view Self, item: T) -> bool:
+        index = 0
+        while index < count:
+            if self.get(index).equal(item):
+                return true
+            index += 1
+        return false
+
+    def empty(self: view Self) -> bool:
+        return count == 0
+
+    def capacity(self: view Self) -> int:
+        return len(storage)
+
+    def reserve(minimum: int):
+        if minimum < 0:
+            throw Error("capacity must be nonnegative")
+        if minimum > len(storage):
+            replacement = array[T,minimum]()
+            index = 0
+            while index < count:
+                if storage.initialized(index):
+                    replacement[index] = storage[index]
+                index += 1
+            storage = replacement
+
+    def append(item: T):
+        if count == len(storage):
+            reserve(count * 2 + 1)
+        storage[count] = item
+        count += 1
+
+    def append_owned(item: move T):
+        if count == len(storage):
+            reserve(count * 2 + 1)
+        storage[count] = move item
+        count += 1
+
+
+    def insert(index: int, item: T):
+        if index < 0 or index > count:
+            throw Error("list insertion index outside initialized storage")
+        if count == len(storage):
+            reserve(count * 2 + 1)
+        position = count
+        while position > index:
+            storage[position] = storage.take(position - 1)
+            position -= 1
+        storage[index] = item
+        count += 1
+
+    def remove(index: int) -> T:
+        if index < 0 or index >= count:
+            throw Error("list removal index outside initialized storage")
+        result = storage.take(index)
+        position = index
+        while position + 1 < count:
+            storage[position] = storage.take(position + 1)
+            position += 1
+        count -= 1
+        return result
+
+    def clear():
+        while count > 0:
+            count -= 1
+            if storage.initialized(count):
+                item = storage.take(count)
+                drop(item)
+
+    def slice(self: view Self, start: int, stop: int) -> list[T]:
+        if start < 0 or stop < start or stop > count:
+            throw Error("list slice outside initialized storage")
+        result = list[T]()
+        result.reserve(stop - start)
+        index = start
+        while index < stop:
+            result.append(self.get(index))
+            index += 1
+        return result
+
+    def __slice(self: view Self, start: int, stop: int, step: int, missing_start: bool, missing_stop: bool,
+                start_closed: bool = true, stop_closed: bool = false) -> list[T] | Error:
+        if step == 0:
+            throw Error("slice step cannot be zero")
+        backwards = step < 0
+        begin = (count - 1 if backwards else 0) if missing_start else _interval_bound(start, count, backwards, true, start_closed)
+        end = (-1 if backwards else count) if missing_stop else _interval_bound(stop, count, backwards, false, stop_closed)
+        length = 0
+        if backwards and begin > end:
+            length = 1 - (begin - end - 1) / step
+        elif not backwards and end > begin:
+            length = 1 + (end - begin - 1) / step
+        result = list[T]()
+        result.reserve(length)
+        index = 0
+        position = begin
+        while index < length:
+            result.append(self.get(position))
+            index += 1
+            if index < length:
+                position += step
+        return result
+
+    def get(self: view Self, index: int) -> T:
+        if index < 0 or index >= count:
+            throw Error("list index outside initialized storage")
+        result = copy storage[index]
+        return result
+
+    def view_at(self: view Self, index: int) -> view T:
+        if index < 0 or index >= count:
+            throw Error("list index outside initialized storage")
+        return view storage[index]
+
+    def borrow_at(self: borrow Self, index: int) -> borrow T:
+        if index < 0 or index >= count:
+            throw Error("list index outside initialized storage")
+        return borrow storage[index]
+
+    def take(index: int) -> T:
+        if index < 0 or index >= count:
+            throw Error("list index outside initialized storage")
+        return storage.take(index)
+
+    def set(index: int, item: T):
+        if index < 0 or index >= count:
+            throw Error("list index outside initialized storage")
+        storage[index] = item
+
+    def pop() -> T:
+        if count == 0:
+            throw Error("cannot pop from an empty list")
+        count -= 1
+        result = storage.take(count)
+        return result
+
+    def try_pop() -> T | None:
+        if count == 0:
+            return None
+        return self.pop()
+
+    def sort():
+        index = 1
+        while index < count:
+            position = index
+            while position > 0 and self.get(position) < self.get(position - 1):
+                left = self.get(position - 1)
+                right = self.get(position)
+                self.set(position - 1, right)
+                self.set(position, left)
+                position -= 1
+            index += 1
+
+    def iter(self: view Self) -> iterator[T]:
+        return iterator(self)
+
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[T]:
+        index = 0
+        while index < self.len():
+            yield self.get(index)
+            index += 1
+
+    grammar indexed[self, "[", index: int, "]"]() -> T:
+        return self.get(index)
+
+    grammar positions["indices", "(", self, ")"]() -> iterator[int]:
+        index = 0
+        while index < self.len():
+            yield index
+            index += 1
+
+trait Mapping[K,V]: Keyed[K,V] + Iterable[tuple[K,V]] + Contains[K]
+    def keys(self: view Self) -> list[K]
+    def values(self: view Self) -> list[V]
+    def items(self: view Self) -> list[tuple[K,V]]
+    def set(key: K, value: V)
+
+# Linear storage preserves insertion order. Equality selects a key; replacement
+# updates its value in place and never adds a duplicate key.
+class map[K:Hash+Equal,V]: Mapping[K,V]
+    grammar truth["bool", "(", self, ")"]() -> bool:
+        return self.len() != 0
+
+    key_storage: list[K]
+    value_storage: list[V]
+
+    def map():
+        key_storage = list[K]()
+        value_storage = list[V]()
+
+    def len(self: view Self) -> int:
+        return key_storage.len()
+
+    def contains(self: view Self, key: K) -> bool:
+        index = 0
+        while index < key_storage.len():
+            if key_storage.get(index).equal(key):
+                return true
+            index += 1
+        return false
+
+    def set(key: K, value: V):
+        index = 0
+        while index < key_storage.len():
+            if key_storage.get(index).equal(key):
+                value_storage.set(index, value)
+                return
+            index += 1
+        key_storage.append(key)
+        value_storage.append(value)
+
+    def get(self: view Self, key: K) -> V:
+        index = 0
+        while index < key_storage.len():
+            if key_storage.get(index).equal(key):
+                return value_storage.get(index)
+            index += 1
+        throw Error("map key is not present")
+
+    def find(self: view Self, key: K) -> V | None:
+        if self.contains(key):
+            return self.get(key)
+        return None
+
+    def remove(key: K) -> V | None:
+        index = 0
+        while index < key_storage.len():
+            if key_storage.get(index).equal(key):
+                removed_key = key_storage.remove(index)
+                drop(removed_key)
+                return value_storage.remove(index)
+            index += 1
+        return None
+
+    def set_default(key: K, value: V) -> V:
+        if not self.contains(key):
+            self.set(key, value)
+        return self.get(key)
+
+    def sorted_keys(self: view Self) -> list[K]:
+        result = copy key_storage
+        result.sort()
+        return result
+
+    def keys(self: view Self) -> list[K]:
+        return self.sorted_keys()
+
+    def values(self: view Self) -> list[V]:
+        result = list[V]()
+        for key in self.keys():
+            result.append(self.get(key))
+        return result
+
+    def items(self: view Self) -> list[tuple[K,V]]:
+        result = list[tuple[K,V]]()
+        for key in self.keys():
+            result.append(tuple[K,V](key, self.get(key)))
+        return result
+
+    def iter(self: view Self) -> iterator[tuple[K,V]]:
+        return iterator(self)
+
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[tuple[K,V]]:
+        for key in self.keys():
+            yield tuple[K,V](key, self.get(key))
+
+    grammar indexed[self, "[", key: K, "]"]() -> V:
+        return self.get(key)
+
+# Integer-keyed containers can shift their keys without requiring mutation.
+def enumerate[V,Container:C[int,V]](values: Container, start: int) -> list[tuple[int,V]]:
+    result = list[tuple[int,V]]()
+    for key, value in values.enumerate():
+        result.append(tuple[int,V](key + start, value))
+    return result
+
+# Keyed containers share enumeration while preserving K, including string keys.
+def enumerate[K,V,Container:C[K,V]](values: Container) -> list[tuple[K,V]]:
+    return values.enumerate()
+
+def keys[K,V,Container:C[K,V]](values: Container) -> list[K]:
+    return values.keys()
+
+def values[K,V,Container:C[K,V]](container: Container) -> list[V]:
+    return container.values()
+
+def items[K,V,Container:C[K,V]](values: Container) -> list[tuple[K,V]]:
+    return values.items()
+
+# Primitive storage providers call these library algorithms. Their compiler
+# adapters supply only typed length/get operations, never list construction.
+def _indexed_keys[Container](container: Container) -> list[int]:
+    result = list[int]()
+    index = 0
+    while index < len(container):
+        result.append(index)
+        index += 1
+    return result
+
+def _indexed_values[V,Container](container: Container) -> list[V]:
+    result = list[V]()
+    index = 0
+    while index < len(container):
+        result.append(container.get(index))
+        index += 1
+    return result
+
+def _indexed_items[V,Container](container: Container) -> list[tuple[int,V]]:
+    result = list[tuple[int,V]]()
+    index = 0
+    while index < len(container):
+        result.append(tuple[int,V](index, container.get(index)))
+        index += 1
+    return result
+
+def _indexed_enumerate[V,Container](container: Container) -> list[tuple[int,V]]:
+    return container.items()
+
+def _indexed_sum[V:Numeric,Container](container: Container) -> V:
+    result = V.zero()
+    index = 0
+    while index < len(container):
+        result = result.add(container.get(index))
+        index += 1
+    return result
+
+def _indexed_empty[Container](container: Container) -> bool:
+    return len(container) == 0
+
+# The storage adapter attaches this grammar to each primitive container type.
+# The traversal remains library code and uses the same suspension machinery.
+class _Indexed[V,Container]:
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[V]:
+        index = 0
+        while index < len(self):
+            yield self.get(index)
+            index += 1
+
+def _indexed_iter[V,Container](container: Container) -> iterator[V]:
+    return iterator(container)
+
+class dict[K:Hash+Equal,V]: Mapping[K,V]
+    grammar truth["bool", "(", self, ")"]() -> bool:
+        return self.len() != 0
+
+    storage: map[K,V]
+
+    def dict():
+        storage = map[K,V]()
+
+    def len(self: view Self) -> int:
+        return storage.len()
+
+    def contains(self: view Self, key: K) -> bool:
+        return storage.contains(key)
+
+    def get(self: view Self, key: K) -> V:
+        return storage.get(key)
+
+    def set(key: K, value: V):
+        storage.set(key, value)
+
+    def find(self: view Self, key: K) -> V | None:
+        return storage.find(key)
+
+    def remove(key: K) -> V | None:
+        return storage.remove(key)
+
+    def set_default(key: K, value: V) -> V:
+        return storage.set_default(key, value)
+
+    def keys(self: view Self) -> list[K]:
+        return storage.keys()
+
+    def values(self: view Self) -> list[V]:
+        return storage.values()
+
+    def items(self: view Self) -> list[tuple[K,V]]:
+        return storage.items()
+
+    def iter(self: view Self) -> iterator[tuple[K,V]]:
+        return iterator(self)
+
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[tuple[K,V]]:
+        for item in self.storage:
+            yield item
+
+    grammar indexed[self, "[", key: K, "]"]() -> V:
+        return self.get(key)
+
+test "owning list retains copied strings and transfers popped storage":
+    values = list[string]()
+    values.append("first")
+    values.append("second")
+    popped = values.pop()
+    drop(values)
+    assert(popped == "second")
+
+test "list literals use library storage and preserve iteration order":
+    values: list[int] = [10,20,12]
+    total = 0
+    for value in values:
+        total += value
+    assert(total == 42)
+
+test "map items and enumerate carry typed tuples":
+    counts: map[string,int] = {"first": 34, "second": 8}
+    counts.set("first", 34)
+    assert(counts.len() == 2)
+    total = 0
+    for key, value in counts:
+        total += value
+    assert(total == 42)
+    keys = counts.keys()
+    values = counts.values()
+    items = counts.items()
+    assert(keys.get(0) == "first" and values.get(1) == 8)
+    assert(items.get(0)[1] == 34)
+    indexed = enumerate(values, 3)
+    for index, value in indexed:
+        assert(index >= 3 and index < 5)
+        assert(value == 34 or value == 8)
+
+test "empty enumeration preserves its concrete tuple contract":
+    values = list[string]()
+    indexed = enumerate(values)
+    assert(indexed.len() == 0)
+
+
+test "dictionary enumeration preserves string keys and string values":
+    names = dict[string,string]()
+    names.set("first", "Alice")
+    names.set("second", "Bob")
+    pairs = enumerate(names)
+    assert(pairs.len() == 2)
+    for key, value in pairs:
+        assert((key == "first" and value == "Alice") or (key == "second" and value == "Bob"))
+
+trait SetLike[T]: C[T,T] + Iterable[T] + Contains[T]
+    def add(item: T) -> bool
+
+class set[T:Hash+Equal]: SetLike[T]
+    grammar truth["bool", "(", self, ")"]() -> bool:
+        return self.len() != 0
+
+    storage: list[T]
+
+    def set():
+        storage = list[T]()
+
+    def len(self: view Self) -> int:
+        return storage.len()
+
+    def contains(self: view Self, item: T) -> bool:
+        index = 0
+        while index < storage.len():
+            if storage.get(index).equal(item):
+                return true
+            index += 1
+        return false
+
+    def add(item: T) -> bool:
+        if contains(item):
+            return false
+        storage.append(item)
+        return true
+
+    def remove(item: T) -> bool:
+        index = 0
+        while index < storage.len():
+            if storage.get(index).equal(item):
+                removed = storage.remove(index)
+                drop(removed)
+                return true
+            index += 1
+        return false
+
+    def sorted_values(self: view Self) -> list[T]:
+        result = copy storage
+        result.sort()
+        return result
+
+    def get(self: view Self, key: T) -> T:
+        if not self.contains(key):
+            throw Error("set key is not present")
+        return copy key
+
+    def keys(self: view Self) -> list[T]:
+        return self.sorted_values()
+
+    def values(self: view Self) -> list[T]:
+        return self.sorted_values()
+
+    def items(self: view Self) -> list[tuple[T,T]]:
+        result = list[tuple[T,T]]()
+        for item in self.sorted_values():
+            result.append(tuple[T,T](item, item))
+        return result
+
+    def iter(self: view Self) -> iterator[T]:
+        return iterator(self)
+
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[T]:
+        for item in self.sorted_values():
+            yield item
+
+    grammar indexed[self, "[", key: T, "]"]() -> T:
+        return self.get(key)
+
+    operator ==(self: view Self, other: Self) -> bool:
+        if self.len() != other.len():
+            return false
+        for item in self:
+            if not other.contains(item):
+                return false
+        return true
+
+test "set insertion retains one value per equal key":
+    values = set[string]()
+    assert(values.add("one"))
+    assert(not values.add("one"))
+    assert(values.len() == 1 and values.contains("one"))
+
+test "list keys and items retain index and string types":
+    words: list[string] = ["alpha","beta"]
+    indices = words.keys()
+    pairs = words.items()
+    indexed = enumerate(words)
+    drop(words)
+    assert(indices.get(0) == 0 and indices.get(1) == 1)
+    for index, word in pairs:
+        assert((index == 0 and word == "alpha") or (index == 1 and word == "beta"))
+    for index, word in indexed:
+        assert(index >= 0 and index < 2)
+        assert(word == "alpha" or word == "beta")
+
+test "class pop transfers nested string storage across growth and owner destruction":
+    class OwnedItem:
+        name: string
+
+    values = list[OwnedItem]()
+    values.append(OwnedItem("first"))
+    values.append(OwnedItem("second"))
+    popped = values.pop()
+    values.append(OwnedItem("replacement"))
+    drop(values)
+    assert(popped.name == "second")
+
+test "empty pop reports the storage boundary":
+    throws "cannot pop from an empty list":
+        values = list[string]()
+        result = values.pop()
+
+test with compiler "collection key and value contracts remain concrete":
+    reject:
+        values = list[int]()
+        values.append("wrong")
+    reject:
+        values = dict[string,int]()
+        values.set(42, 10)
+
+test "map equality follows its trait contract for owning class keys":
+    class NamedKey: Hash + Equal
+        text: string
+        def hash(self: view Self) -> usize:
+            return text.hash()
+        def equal(self: view Self, other: Self) -> bool:
+            return text == other.text
+
+    counts = map[NamedKey,int]()
+    counts.set(NamedKey("first"), 34)
+    counts.set(NamedKey("second"), 8)
+    counts.set(NamedKey("first"), 35)
+    assert(counts.len() == 2)
+    assert(counts.get(NamedKey("first")) == 35)
+
+test "dictionary literals and direct enumerate retain string keys":
+    names: dict[string,string] = {"first":"Alice","second":"Bob"}
+    count = 0
+    for key, value in enumerate(names):
+        assert(key == "first" or key == "second")
+        assert(value == "Alice" or value == "Bob")
+        count += 1
+    assert(count == 2)
+
+test "the Iterable contract exposes a stored iterator":
+    words: list[string] = ["alpha","beta"]
+    cursor = words.iter()
+    count = 0
+    for word in cursor:
+        assert(word == "alpha" or word == "beta")
+        count += 1
+    assert(count == 2)
+
+# All providers satisfy one key/value contract, with owning snapshots.
+test "C enumeration preserves dictionary strings after the owner is dropped":
+    names: dict[string,string] = {"first": "Alice", "second": "Bob"}
+    snapshot: list[tuple[string,string]] = names.enumerate()
+    drop(names)
+    assert(snapshot.get(0)[0] == "first")
+    assert(snapshot.get(1)[1] == "Bob")
+
+test "C sum preserves numeric values across list map and dictionary":
+    numbers: list[int] = [34,8]
+    counts: map[string,int] = {"first": 34, "second": 8}
+    dictionary: dict[string,int] = {"first": 34, "second": 8}
+    fractions: list[f64] = [1.25,2.5]
+    assert(sum(numbers) == 42 and numbers.sum() == 42)
+    assert(sum(counts) == 42 and sum(dictionary) == 42)
+    assert(sum(fractions) == 3.75)
+    empty = list[f64]()
+    assert(sum(empty) == 0.0 and empty.empty())
+
+test "C strings expose typed UTF8 byte offsets and owning snapshots":
+    text = "AB"
+    byte_keys: list[int] = keys(text)
+    bytes: list[u8] = values(text)
+    pairs: list[tuple[int,u8]] = enumerate(text)
+    drop(text)
+    assert(byte_keys.get(1) == 1)
+    assert(bytes.get(0) == u8(65))
+    assert(pairs.get(1)[0] == 1 and pairs.get(1)[1] == u8(66))
+
+test "C tensors arrays and fixed tuples preserve their element type":
+    fixed = tuple[f64,2](1.25,2.5)
+    numbers = tensor[f64](fixed)
+    slots = array[int,2]()
+    slots[0] = 34
+    slots[1] = 8
+    assert(sum(numbers) == 3.75 and sum(fixed) == 3.75)
+    assert(sum(slots) == 42)
+    pairs: list[tuple[int,f64]] = numbers.enumerate()
+    assert(pairs.get(1)[0] == 1 and pairs.get(1)[1] == 2.5)
+    assert(slots.keys().get(1) == 1)
+
+test "C tensor keys flatten multidimensional logical coordinates":
+    grid = tensor[int,(2,2)]()
+    grid[0,0] = 10
+    grid[0,1] = 20
+    grid[1,0] = 5
+    grid[1,1] = 7
+    assert(sum(grid) == 42)
+    pairs = enumerate(grid)
+    assert(pairs.get(2)[0] == 2 and pairs.get(2)[1] == 5)
+    assert(grid.get(3) == 7)
+
+test "C sets use their elements as keys":
+    unique: set[string] = {"one", "two"}
+    pairs: list[tuple[string,string]] = enumerate(unique)
+    assert(pairs.get(0)[0] == "one" and pairs.get(0)[1] == "one")
+
+test with compiler "sum rejects nonnumeric elements at the utility boundary":
+    reject "does not satisfy":
+        words: list[string] = ["one", "two"]
+        result = sum(words)
+
+test with compiler "container constraints reject incompatible key and value signatures":
+    reject "does not satisfy":
+        def integer_values[Container:C[int,int]](container: Container) -> int:
+            return container.len()
+        words: list[string] = ["one"]
+        result = integer_values(words)
+
+test "primitive iteration retains the typed element contract":
+    text = "AB"
+    total = 0
+    cursor: iterator[u8] = text.iter()
+    for byte in cursor:
+        total += int(byte)
+    assert(total == 131)
+
+test "utilities delegate to the container implementation":
+    class OffsetCounts[T]: C[int,T]
+        grammar truth["bool", "(", self, ")"]() -> bool:
+            return self.len() != 0
+
+        storage: list[T]
+
+        def len(self: view Self) -> int:
+            return storage.len()
+        def get(self: view Self, index: int) -> T:
+            return storage.get(index)
+        def keys(self: view Self) -> list[int]:
+            return storage.keys()
+        def values(self: view Self) -> list[T]:
+            return storage.values()
+        def items(self: view Self) -> list[tuple[int,T]]:
+            return storage.items()
+        def enumerate(self: view Self) -> list[tuple[int,T]]:
+            return enumerate(storage, 10)
+        def sum(self: view Self) -> T:
+            return storage.sum().add(T(1))
+
+        grammar indexed[self, "[", key: int, "]"]() -> T:
+            return self.get(key)
+        grammar iterate["iterator", "(", self, ")"]() -> iterator[T]:
+            for value in self.storage:
+                yield value
+
+    source: list[int] = [34,8]
+    container = OffsetCounts[int](source)
+    assert(sum(container) == 43)
+    assert(enumerate(container).get(0)[0] == 10)
+    assert(items(container).get(0)[0] == 0)
+    assert(not container.empty())
+
+test "primitive for and iterator use the same library traversal":
+    source = tensor[int](tuple[int,2](34,8))
+    total = 0
+    for value in source:
+        total += value
+    assert(total == 42)
+    cursor = iterator(source)
+    assert(next(cursor).value == 34)
+    assert(next(cursor).value == 8)
+    assert(next(cursor) == None)
+
+test "multidimensional strided enumeration follows logical element order":
+    grid = tensor[int,(2,3)]()
+    grid[0,0] = 10
+    grid[0,2] = 20
+    grid[1,0] = 5
+    grid[1,2] = 7
+    subset = grid.slice(tuple[int,2](0,0), tuple[int,2](2,3), tuple[int,2](1,2))
+    assert(sum(subset) == 42)
+    pairs = enumerate(subset)
+    assert(pairs.len() == 4)
+    assert(pairs.get(1)[1] == 20 and pairs.get(3)[1] == 7)
+
+test with compiler "primitive iterators retain their source lifetime":
+    reject "borrow":
+        text = "AB"
+        cursor = text.iter()
+        drop(text)
+        next(cursor)
+    reject "borrow":
+        source = tensor[int](tuple[int,2](34,8))
+        cursor = iterator(source)
+        source.append(9)
+        next(cursor)
+    reject "borrow":
+        def escaped() -> iterator[u8]:
+            text = "AB"
+            return text.iter()
+
+test "enumeration offsets work through C without a mutation requirement":
+    text = "AB"
+    bytes: list[tuple[int,u8]] = enumerate(text, 5)
+    assert(bytes.get(0)[0] == 5 and bytes.get(1)[1] == u8(66))
+    source = tensor[int](tuple[int,2](34,8))
+    pairs = enumerate(source, -2)
+    assert(pairs.get(0)[0] == -2 and pairs.get(1)[0] == -1)
+    keyed: dict[int,string] = {10:"ten"}
+    shifted = enumerate(keyed, 3)
+    assert(shifted.get(0)[0] == 13)
+
+test "hash and equality accept signed integer boolean and character keys":
+    negative = -42
+    duplicate = -42
+    assert(negative.hash() == duplicate.hash())
+    wide = i128(18446744073709551616)
+    assert(wide.hash() == usize(1))
+    flags: dict[bool,int] = {true:34,false:8}
+    assert(sum(flags) == 42)
+    letters: map[char,int] = {'a':34,'b':8}
+    assert(sum(letters) == 42)
+    letters.set('a',10)
+    assert(letters.get('a') == 10 and letters.len() == 2)
+
+test "byte quantities preserve their Numeric contract":
+    sizes: list[byte] = [4B,8B]
+    assert(sum(sizes) == 12B)
+
+test with compiler "offsets cannot replace noninteger keys":
+    reject "does not satisfy":
+        names: dict[string,string] = {"first":"Alice"}
+        shifted = enumerate(names, 3)
+
+test "nested list pop transfers all nested owned storage":
+    inner: list[string] = ["kept"]
+    outer = list[list[string]]()
+    outer.append(inner)
+    drop(inner)
+    popped = outer.pop()
+    drop(outer)
+    assert(popped.get(0) == "kept")
+
+test "dictionary values and items preserve nested owners":
+    inner: list[string] = ["kept"]
+    dictionary = dict[string,list[string]]()
+    dictionary.set("first", inner)
+    snapshot = dictionary.values()
+    pairs = dictionary.items()
+    drop(dictionary)
+    drop(inner)
+    saved = snapshot.get(0)
+    assert(saved.get(0) == "kept")
+    pair = pairs.get(0)
+    assert(pair[0] == "first")
+    assert(pair[1].get(0) == "kept")
+
+test "Numeric sum releases each previous owning accumulator":
+    class Amount: Numeric
+        label: string
+        value: int
+
+        def zero() -> Self:
+            return Amount("zero", 0)
+
+        def add(other: Self) -> Self:
+            return Amount("sum", value + other.value)
+
+    parts = list[Amount]()
+    parts.append(Amount("first",34))
+    parts.append(Amount("second",8))
+    total = sum(parts)
+    drop(parts)
+    assert(total.value == 42 and total.label == "sum")
+    empty = list[Amount]()
+    zero = sum(empty)
+    assert(zero.value == 0 and zero.label == "zero")
+
+test "list insertion removal and slices retain independent owning strings":
+    words: list[string] = ["first", "last"]
+    words.reserve(8)
+    assert(words.capacity() >= 8 and words.len() == 2)
+    words.insert(1, "middle")
+    words.insert(0, "start")
+    words.insert(words.len(), "end")
+    assert(words.len() == 5)
+    removed = words.remove(2)
+    snapshot = words.slice(1, 3)
+    words.clear()
+    assert(words.empty() and words.capacity() >= 8)
+    words.append("reused")
+    drop(words)
+    assert(removed == "middle")
+    assert(snapshot.get(0) == "first" and snapshot.get(1) == "last")
+
+test "list insert and remove preserve scalar order at both ends":
+    values: list[int] = [10, 30]
+    values.insert(1, 20)
+    values.insert(3, 40)
+    assert(values.remove(0) == 10)
+    assert(values.pop() == 40)
+    assert(values.get(0) == 20 and values.get(1) == 30)
+    assert(values.slice(1, 1).empty())
+
+test "list insertion rejects indices beyond its initialized prefix":
+    throws "list insertion index outside initialized storage":
+        values = list[string]()
+        values.reserve(8)
+        values.insert(1, "invalid")
+
+test "list removal rejects negative indices":
+    throws "list removal index outside initialized storage":
+        values: list[int] = [42]
+        values.remove(-1)
+
+
+test "consuming append transfers the caller's owner":
+    words = list[string]()
+    value = "transferred"
+    words.append_owned(value)
+    assert(words.get(0) == "transferred")
+
+test with compiler "consuming append rejects subsequent use":
+    reject "moved":
+        words = list[string]()
+        value = "transferred"
+        words.append_owned(value)
+        assert(len(value) == 11)
+
+test "any storage retains values through replacement and copying":
+    values = list[any]()
+    values.append(42)
+    values.append("retained")
+    values.append(true)
+    saved = copy values
+    values.set(0, "replacement")
+    drop(values)
+    assert(saved.get(0) == 42)
+    assert(saved.get(0) != true)
+    assert(saved.get(1) == "retained")
+    assert(saved.get(2) == true)
+    left = saved.get(1)
+    right: any = "retained"
+    assert(left == right)
+
+# Double-ended operations share the list's initialized-slot ownership rules.
+class deque[T]: Sequence[T]
+    grammar truth["bool", "(", self, ")"]() -> bool:
+        return self.len() != 0
+
+    storage: list[T]
+
+    def deque():
+        storage = list[T]()
+
+    def len(self: view Self) -> int:
+        return storage.len()
+    def get(self: view Self, index: int) -> T:
+        return storage.get(index)
+    def set(index: int, item: T):
+        storage.set(index, item)
+    def append(item: T):
+        storage.append(item)
+    def push_back(item: T):
+        storage.append(item)
+    def push_front(item: T):
+        storage.insert(0, item)
+    def pop_back() -> T | None:
+        return storage.try_pop()
+    def pop_front() -> T | None:
+        if storage.empty():
+            return None
+        return storage.remove(0)
+    def clear():
+        storage.clear()
+    def keys(self: view Self) -> list[int]:
+        return storage.keys()
+    def values(self: view Self) -> list[T]:
+        return storage.values()
+    def items(self: view Self) -> list[tuple[int,T]]:
+        return storage.items()
+    def iter(self: view Self) -> iterator[T]:
+        return iterator(self)
+    grammar indexed[self, "[", index: int, "]"]() -> T:
+        return self.get(index)
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[T]:
+        for value in self.storage:
+            yield value
+
+# A binary min-heap keeps every duplicate and transfers each removed owner.
+class heap[T]: C[int,T] + Iterable[T]
+    grammar truth["bool", "(", self, ")"]() -> bool:
+        return self.len() != 0
+
+    storage: list[T]
+
+    def heap():
+        storage = list[T]()
+
+    def len(self: view Self) -> int:
+        return storage.len()
+    def get(self: view Self, index: int) -> T:
+        return storage.get(index)
+    def keys(self: view Self) -> list[int]:
+        return storage.keys()
+    def values(self: view Self) -> list[T]:
+        return storage.values()
+    def items(self: view Self) -> list[tuple[int,T]]:
+        return storage.items()
+    def iter(self: view Self) -> iterator[T]:
+        return iterator(self)
+
+    def push(item: T):
+        storage.append(item)
+        index = storage.len() - 1
+        while index > 0:
+            parent = (index - 1) / 2
+            if not (storage.get(index) < storage.get(parent)):
+                break
+            value = storage.get(index)
+            previous = storage.get(parent)
+            storage.set(parent, value)
+            storage.set(index, previous)
+            index = parent
+
+    def peek(self: view Self) -> T | None:
+        if storage.empty():
+            return None
+        return storage.get(0)
+
+    def pop() -> T | None:
+        if storage.empty():
+            return None
+        result = storage.get(0)
+        last = storage.pop()
+        if not storage.empty():
+            storage.set(0, last)
+            index = 0
+            while index * 2 + 1 < storage.len():
+                child = index * 2 + 1
+                if child + 1 < storage.len() and storage.get(child + 1) < storage.get(child):
+                    child += 1
+                if not (storage.get(child) < storage.get(index)):
+                    break
+                value = storage.get(index)
+                following = storage.get(child)
+                storage.set(index, following)
+                storage.set(child, value)
+                index = child
+        return result
+
+    grammar indexed[self, "[", index: int, "]"]() -> T:
+        return self.get(index)
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[T]:
+        for value in self.storage:
+            yield value
+
+class count[T:Hash+Equal]: C[T,int] + Iterable[tuple[T,int]]
+    grammar truth["bool", "(", self, ")"]() -> bool:
+        return self.len() != 0
+
+    storage: map[T,int]
+
+    def count():
+        storage = map[T,int]()
+
+    def len(self: view Self) -> int:
+        return storage.len()
+    def contains(self: view Self, key: T) -> bool:
+        return storage.contains(key)
+    def get(self: view Self, key: T) -> int:
+        if storage.contains(key):
+            return storage.get(key)
+        return 0
+    def add(key: T, amount: int = 1):
+        if amount < 0:
+            throw Error("count addition must be nonnegative")
+        if amount > 0:
+            current = self.get(key)
+            if current > 9223372036854775807 - amount:
+                throw Error("count addition overflow")
+            storage.set(key, current + amount)
+    def subtract(key: T, amount: int) -> int:
+        if amount < 0:
+            throw Error("count subtraction must be nonnegative")
+        current = self.get(key)
+        if amount >= current:
+            removed = storage.remove(key)
+            return 0
+        storage.set(key, current - amount)
+        return current - amount
+    def total(self: view Self) -> int:
+        return storage.sum()
+    def keys(self: view Self) -> list[T]:
+        return storage.keys()
+    def values(self: view Self) -> list[int]:
+        return storage.values()
+    def items(self: view Self) -> list[tuple[T,int]]:
+        return storage.items()
+    def iter(self: view Self) -> iterator[tuple[T,int]]:
+        return iterator(self)
+    grammar indexed[self, "[", key: T, "]"]() -> int:
+        return self.get(key)
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[tuple[T,int]]:
+        for entry in self.storage:
+            yield entry
+
+test "deque and heap preserve owning strings after removal":
+    jobs = deque[string]()
+    jobs.push_back("last")
+    jobs.push_front("first")
+    first = jobs.pop_front()
+    drop(jobs)
+    assert(first.has_value and first.value == "first")
+    priorities = heap[string]()
+    priorities.push("z")
+    priorities.push("a")
+    priorities.push("a")
+    assert(priorities.pop().value == "a")
+    assert(priorities.pop().value == "a")
+    assert(priorities.pop().value == "z")
+    assert(priorities.pop() == None)
+
+test "count removes exhausted keys and does not insert absent lookups":
+    frequencies = count[string]()
+    frequencies.add("one", 3)
+    frequencies.add("two")
+    assert(frequencies.get("missing") == 0 and frequencies.len() == 2)
+    assert(frequencies.subtract("one", 10) == 0)
+    assert(not frequencies.contains("one") and frequencies.total() == 1)
+
+test "dictionary default and removal retain owning values":
+    names = dict[int,string]()
+    assert(names.set_default(1, "first") == "first")
+    assert(names.set_default(1, "ignored") == "first")
+    removed = names.remove(1)
+    drop(names)
+    assert(removed.has_value and removed.value == "first")
+
+test "list growth and cleanup preserve moved-out slots":
+    values = list[string]()
+    values.append("moved")
+    values.append("retained")
+    first = move values[0]
+    values.reserve(20)
+    assert(first == "moved" and values[1] == "retained")
+    values[0] = "refilled"
+    assert(values[0] == "refilled")
+    second = move values[1]
+    values.clear()
+    assert(second == "retained" and values.empty())
+
+
+test "list slice notation copies strings and normalizes reversed bounds":
+    words = list[string]()
+    words.append("one")
+    words.append("two")
+    words.append("three")
+    reverse = words[::-1]
+    clipped = words[-20:20:2]
+    empty = words[2:1]
+    drop words
+    assert(reverse.len() == 3 and reverse[0] == "three" and reverse[2] == "one")
+    assert(clipped.len() == 2 and clipped[1] == "three")
+    assert(empty.len() == 0)
+
+test "zero stride returns an error without consuming the list":
+    values = list[int]()
+    values.append(10)
+    result ?= values[::0]
+    assert(result is Error)
+    assert(result.message == "slice step cannot be zero")
+    assert(values[0] == 10)
+    valid = values[::1]
+    assert(valid[0] == 10)
+
+
+test "C Boolean grammar uses element count without consuming storage":
+    empty: list[int] = []
+    values = [1]
+    if empty:
+        assert(false)
+    if not values:
+        assert(false)
+    assert(not [] and [1])
+    assert(not empty and values)
+    assert(bool(values) and not bool(empty))
+    assert(values[0] == 1)
+    while values:
+        values.clear()
+    assert(not values)
+    keyed = dict[int,int]()
+    assert(not keyed)
+    keyed.set(1, 0)
+    assert(keyed)
+    unique = set[int]()
+    assert(not unique)
+    unique.add(0)
+    assert(unique)
+
+
+test "collection conditions evaluate reached calls once and short circuit":
+    def produce(calls: borrow list[int]) -> move list[int]:
+        calls[0] += 1
+        return [1]
+
+    calls = [0]
+    assert(not (false and produce(calls)))
+    assert(true or produce(calls))
+    assert(calls[0] == 0)
+    if produce(calls):
+        assert(calls[0] == 1)
+    else:
+        assert(false)
+    assert(calls[0] == 1)

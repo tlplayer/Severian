@@ -18,15 +18,45 @@ test "type conversion":
     count := 10
     ratio := .5
     name := "severian"
-    assert(float(count) + ratio == 10.5)
+    assert(count + ratio == 10.5)
     assert(int(0.1010) == 0)
     assert(int(0.1010, lossy) == 0)
     wide: i64 = 12
     assert(i8(wide, checked) == 12)
-    #Cannot convert string to name but we can convert 
 
 
 test with compiler "Compiler rejects ":
     #Compiler rejects 
     reject:
         number: int = "h"+1
+
+
+def narrow_checked(value: i64) -> i8:
+    return i8(value, checked)
+
+
+def narrow_lossy(value: i64) -> i8:
+    return i8(value, lossy)
+
+
+test "lossy integer conversion keeps low bits":
+    assert(narrow_lossy(257) == 1)
+    assert(narrow_lossy(255) == -1)
+    assert(u8(-1, lossy) == 255)
+    assert(narrow_checked(127) == 127)
+
+
+test "checked narrowing rejects an out of range value":
+    throws "scalar conversion above maximum":
+        value = narrow_checked(128)
+
+
+test "lossy floating conversion still rejects invalid integer ranges":
+    throws "scalar conversion out of range":
+        value = 1e30
+        narrowed = int(value, lossy)
+
+
+test with compiler "unknown conversion policies are rejected":
+    reject "policy":
+        value = int(1.5, unchecked)

@@ -11,8 +11,10 @@ class CountFile: file.File
         index = 0
         while index < len(text):
             digit = int(text[index]) - 48
-            assert(digit >= 0 and digit <= 9)
-            assert(value <= (9223372036854775807 - digit) / 10)
+            if digit < 0 or digit > 9:
+                throw Error("count file contains a non-decimal digit")
+            if value > (9223372036854775807 - digit) / 10:
+                throw Error("count file exceeds int range")
             value = value * 10 + digit
             index += 1
         return Count(value)

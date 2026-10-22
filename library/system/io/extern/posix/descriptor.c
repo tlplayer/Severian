@@ -8,7 +8,7 @@ static _Thread_local int stream_error;
 int32_t __sev_io_error(void) { return stream_error; }
 
 /* Counted output preserves embedded NUL bytes and shares stdio buffering
- * with native scalar print overloads. Return status, not a byte count. */
+ * with c scalar print overloads. Return status, not a byte count. */
 int32_t __sev_io_stdout_write(const void *buffer, int64_t count) {
     stream_error = 0;
     if (count < 0 || (uint64_t)count > SIZE_MAX || (count != 0 && buffer == NULL)) {

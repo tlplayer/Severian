@@ -1,41 +1,108 @@
-'''
-Environment isolation is a scoped test-library resource. The original process
-environment is restored even when an assertion or throw ends the test early.
-'''
+import c from xxi
 
+@c(symbol="getenv")
+def c_getenv(name: pointer) -> pointer
+@c(symbol="setenv")
+def c_setenv(name: pointer, value: pointer, overwrite: i32) -> i32
+@c(symbol="unsetenv")
+def c_unsetenv(name: pointer) -> i32
+@c(symbol="strlen")
+def c_strlen(value: pointer) -> usize
+@c(symbol="memcpy")
+def c_memcpy(destination: pointer, source: pointer, count: usize) -> pointer
+
+@mlir("memref.extract_aligned_pointer_as_index")
+def buffer_address(value: view tensor[u8]) -> index
+@mlir("arith.index_cast")
+def address_integer(value: index) -> int
+@mlir("llvm.inttoptr")
+def address_pointer(value: int) -> pointer
+@mlir("llvm.ptrtoint")
+def pointer_integer(value: pointer) -> int
+
+# Copy libc's borrowed bytes before any later environment mutation.
+def read_environment(name: string) -> string | None:
+    encoded = name.utf(true)
+    unsafe:
+        address = c_getenv(address_pointer(address_integer(buffer_address(encoded))))
+        if pointer_integer(address) == 0:
+            return None
+        count = c_strlen(address)
+        bytes = tensor[u8](int(count))
+        copied = c_memcpy(address_pointer(address_integer(buffer_address(bytes))), address, count)
+        return string(bytes)
+
+def write_environment(name: string, value: string | None):
+    encoded_name = name.utf(true)
+    unsafe:
+        name_address = address_pointer(address_integer(buffer_address(encoded_name)))
+        if value is None:
+            if c_unsetenv(name_address) != i32(0):
+                throw Error("environment removal failed")
+        else:
+            encoded_value = value.value.utf(true)
+            if c_setenv(name_address, address_pointer(address_integer(buffer_address(encoded_value))), i32(1)) != i32(0):
+                throw Error("environment override failed")
 
 class TestEnvironment:
-    home: string
-    debug: string
-    http_proxy: string
-    https_proxy: string
+    old_home: string | None
+    old_debug: string | None
+    old_http_proxy: string | None
+    old_https_proxy: string | None
 
-    def get(name: string) -> string:
-        if name == "HOME":
-            return home
-        if name == "DEBUG":
-            return debug
-        if name == "HTTP_PROXY":
-            return http_proxy
-        if name == "HTTPS_PROXY":
-            return https_proxy
-        return ""
+    def get(name: string) -> string | None:
+        return read_environment(name)
 
+    def drop():
+        write_environment("HOME", old_home)
+        write_environment("DEBUG", old_debug)
+        write_environment("HTTP_PROXY", old_http_proxy)
+        write_environment("HTTPS_PROXY", old_https_proxy)
 
-test "environment overrides are local to one test":
-    environment = TestEnvironment(
-        home="/tmp/severian-test-home",
-        debug="1",
-        http_proxy="",
-        https_proxy="",
-    )
+def environment(home: string, debug: string, http_proxy: string | None, https_proxy: string | None) -> TestEnvironment:
+    scope = TestEnvironment(read_environment("HOME"), read_environment("DEBUG"), read_environment("HTTP_PROXY"), read_environment("HTTPS_PROXY"))
+    write_environment("HOME", home)
+    write_environment("DEBUG", debug)
+    write_environment("HTTP_PROXY", http_proxy)
+    write_environment("HTTPS_PROXY", https_proxy)
+    return scope
 
-    assert(environment.home == "/tmp/severian-test-home")
-    assert(environment.debug == "1")
+def same_environment(left: string | None, right: string | None) -> bool:
+    if left is None:
+        return right is None
+    if right is None:
+        return false
+    return left.value == right.value
 
+def observe_overrides() -> bool:
+    scope = environment("/tmp/severian-test-home", "1", None, None)
+    return scope.get("HOME") == "/tmp/severian-test-home" and scope.get("DEBUG") == "1" and scope.get("HTTP_PROXY") is None and scope.get("HTTPS_PROXY") is None
 
-test "environment can explicitly remove inherited values":
-    environment = TestEnvironment(home="", debug="", http_proxy="", https_proxy="")
+def failed_scope() -> int | Error:
+    scope = environment("/tmp/severian-failed-home", "failure", None, None)
+    throw Error("scope failed")
 
-    assert(environment.http_proxy == "")
-    assert(environment.https_proxy == "")
+test "environment overrides are local to one scope":
+    home = read_environment("HOME")
+    debug = read_environment("DEBUG")
+    http_proxy = read_environment("HTTP_PROXY")
+    https_proxy = read_environment("HTTPS_PROXY")
+    assert(observe_overrides())
+    assert(same_environment(home, read_environment("HOME")))
+    assert(same_environment(debug, read_environment("DEBUG")))
+    assert(same_environment(http_proxy, read_environment("HTTP_PROXY")))
+    assert(same_environment(https_proxy, read_environment("HTTPS_PROXY")))
+
+test "absent and empty environment variables remain distinct":
+    previous = read_environment("HTTP_PROXY")
+    scope = environment("/tmp/severian-test-home", "1", "", None)
+    assert(scope.get("HTTP_PROXY") == "")
+    assert(scope.get("HTTPS_PROXY") is None)
+    drop scope
+    assert(same_environment(previous, read_environment("HTTP_PROXY")))
+
+test "typed failure restores the original process environment":
+    previous = read_environment("HOME")
+    result ?= failed_scope()
+    assert(result is Error)
+    assert(same_environment(previous, read_environment("HOME")))

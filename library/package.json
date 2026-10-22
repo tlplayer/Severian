@@ -11,6 +11,7 @@
       "core",
       "core/bits",
       "core/collections",
+      "core/collections/collection",
       "core/collections/array",
       "core/collections/btree",
       "core/collections/deque",

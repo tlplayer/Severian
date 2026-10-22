@@ -7,6 +7,9 @@
   "lib": {
     "path": "src/lib.sev"
   },
+  "dependencies": {
+    "io": {"path": "../../../../../library/system/io/linux_x86_64"}
+  },
   "lint": {
     "enabled": false
   }

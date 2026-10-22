@@ -18,8 +18,48 @@ def foo():
 test with integ:
     #lifo stack
     foo()
-    assert("""
-    third
-    second
-    first
-    """ in stdout)
+    assert("third\nsecond\nfirst\n" in stdout)
+
+trace = 0
+
+def record(value: int):
+    module.trace = module.trace * 10 + value
+
+def return_with_cleanup(early: bool) -> int:
+    defer record(1)
+    if early:
+        defer record(2)
+        return 7
+    defer record(3)
+    return 9
+
+def loop_with_cleanup():
+    defer record(9)
+    index = 0
+    while index < 3:
+        index += 1
+        defer record(index)
+        if index == 1:
+            continue
+        break
+
+test "defer runs in LIFO order on both return paths":
+    module.trace = 0
+    assert(return_with_cleanup(true) == 7)
+    assert(module.trace == 21)
+    module.trace = 0
+    assert(return_with_cleanup(false) == 9)
+    assert(module.trace == 31)
+
+test "defer runs before continue and break leave their scope":
+    module.trace = 0
+    loop_with_cleanup()
+    assert(module.trace == 129)
+
+test "caught errors run inner cleanup without running outer cleanup early":
+    module.trace = 0
+    defer record(9)
+    throws "caught":
+        defer record(1)
+        throw Error("caught")
+    assert(module.trace == 1)

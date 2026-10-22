@@ -1,18 +1,48 @@
+import string
+
 # Linux x86-64 provider. Results are byte counts/descriptors or negative errno.
 # No libc, errno global, foreign wrapper, or source-language ABI marshalling.
 @mlir("llvm.inline_asm", asm_string="syscall", constraints="={ax},{ax},{di},{si},{dx},~{rcx},~{r11},~{memory},~{cc}", has_side_effects=true, target="x86_64-linux")
 def __syscall(number: int, first: int, second: int, third: int) -> int
 
 @mlir("memref.extract_aligned_pointer_as_index")
-def __address(data: view array[u8]) -> index
+def __address(data: view tensor[u8]) -> index
 
 @mlir("arith.index_cast")
 def __integer(value: index) -> int
 
+@mlir("memref.extract_aligned_pointer_as_index")
+def __time_address(data: view tensor[int]) -> index
+
+def monotonic_nanoseconds() -> int:
+    stamp = tuple[int,2](0,0)
+    result = __syscall(228, 1, __integer(__time_address(stamp)), 0)
+    if result != 0:
+        throw Error("monotonic clock failed")
+    if stamp[0] > 9223372036:
+        throw Error("monotonic clock exceeds nanosecond range")
+    return stamp[0] * 1000000000 + stamp[1]
+
+def sleep_nanoseconds(duration: int):
+    if duration < 0:
+        throw Error("sleep duration must be nonnegative")
+    request = tuple[int,2](duration / 1000000000, duration % 1000000000)
+    remaining = tuple[int,2](0,0)
+    while true:
+        result = __syscall(35, __integer(__time_address(request)), __integer(__time_address(remaining)), 0)
+        if result == 0:
+            break
+        if result != -4:
+            throw Error("sleep failed")
+        request[0] = remaining[0]
+        request[1] = remaining[1]
+
 # These arrays own contiguous storage; offset/count are checked before use.
-def __position(data: view array[u8], offset: int, count: int) -> int:
-    assert(offset >= 0 and offset <= len(data))
-    assert(count >= 0 and count <= len(data) - offset)
+def __position(data: view tensor[u8], offset: int, count: int) -> int:
+    if offset < 0 or offset > len(data):
+        throw Error("stream offset outside buffer")
+    if count < 0 or count > len(data) - offset:
+        throw Error("stream count outside buffer")
     return __integer(__address(data)) + offset
 
 def stdin() -> int:
@@ -27,15 +57,13 @@ def stderr() -> int:
 # access: 0 read, 1 write, 2 read/write; flags use the Linux open ABI.
 # O_CLOEXEC is always applied. Embedded NUL is rejected before opening.
 def open(path: string, flags: int = 0, mode: int = 384) -> int:
-    name = array[u8, len(path) + 1]()
     position = 0
     while position < len(path):
         value = path[position]
         if value == u8(0):
             return -22
-        name[position] = value
         position += 1
-    name[position] = u8(0)
+    name = path.utf(true)
     if flags < 0 or flags > 2147483647 or mode < 0 or mode > 4095:
         return -22
     return __syscall(2, __position(name, 0, len(name)), flags | 524288, mode)
@@ -63,7 +91,7 @@ def flush(handle: int) -> int:
         return -9
     return __syscall(74, handle, 0, 0)
 
-def read(handle: int, data: borrow array[u8], offset: int, count: int) -> int:
+def read(handle: int, data: borrow tensor[u8], offset: int, count: int) -> int:
     address = __position(data, offset, count)
     if handle < 0 or handle > 2147483647:
         return -9
@@ -75,7 +103,7 @@ def read(handle: int, data: borrow array[u8], offset: int, count: int) -> int:
         attempts += 1
     return -4
 
-def write(handle: int, data: view array[u8], offset: int, count: int) -> int:
+def write(handle: int, data: view tensor[u8], offset: int, count: int) -> int:
     address = __position(data, offset, count)
     if handle < 0 or handle > 2147483647:
         return -9
@@ -89,7 +117,7 @@ def write(handle: int, data: view array[u8], offset: int, count: int) -> int:
 
 # EOF returns a short count. Errors retain negative errno; prior progress may
 # already have changed the destination or file. No rollback is implied.
-def read_exact(handle: int, data: borrow array[u8], offset: int, count: int) -> int:
+def read_exact(handle: int, data: borrow tensor[u8], offset: int, count: int) -> int:
     __position(data, offset, count)
     used = 0
     while used < count:
@@ -101,7 +129,7 @@ def read_exact(handle: int, data: borrow array[u8], offset: int, count: int) -> 
         used += received
     return used
 
-def write_all(handle: int, data: view array[u8], offset: int, count: int) -> int:
+def write_all(handle: int, data: view tensor[u8], offset: int, count: int) -> int:
     __position(data, offset, count)
     used = 0
     while used < count:
@@ -117,7 +145,7 @@ def write_all(handle: int, data: view array[u8], offset: int, count: int) -> int
 def copy_stream(reader: int, writer: int, limit: int = 67108864) -> int:
     if limit < 0:
         return -22
-    buffer = array[u8, 4096]()
+    buffer = tensor[u8,(4096,)]()
     used = 0
     while used < limit:
         count = limit - used
@@ -134,8 +162,146 @@ def copy_stream(reader: int, writer: int, limit: int = 67108864) -> int:
         used += written
     return used
 
+# Text output is counted, so embedded NUL bytes are preserved.
+def write_string(handle: int, value: string) -> int:
+    bytes = value.utf()
+    return write_all(handle, bytes, 0, len(bytes))
+
+def __print(value: string) -> int:
+    written = write_string(stdout(), value)
+    if written < 0:
+        return written
+    ending = write_string(stdout(), "\n")
+    if ending < 0:
+        return ending
+    return written + ending
+
+def __print(value: int) -> int:
+    formatted = string(value)
+    return __print(formatted)
+
+def __print(value: bool) -> int:
+    formatted = string(value)
+    return __print(formatted)
+
+def __print(value: char) -> int:
+    formatted = string(value)
+    return __print(formatted)
+
+def __print(value: f64) -> int:
+    formatted = string(value)
+    return __print(formatted)
+
+def __print(value: f32) -> int:
+    formatted = string(value)
+    return __print(formatted)
+
+# Sequence output borrows its argument and uses the same scalar conversion path.
+def __print[Container](value: view Container) -> int:
+    formatted = "["
+    position = 0
+    while position < len(value):
+        if position > 0:
+            formatted = formatted + ", "
+        formatted = formatted + string(value[position])
+        position += 1
+    formatted = formatted + "]"
+    return __print(formatted)
+
+# Multiple values use the same standard string conversion and output path.
+def __print[A,B](first: A, second: B) -> int:
+    unsafe:
+        return __print(string(first) + " " + string(second))
+
+def __print[A,B,C](first: A, second: B, third: C) -> int:
+    unsafe:
+        return __print(string(first) + " " + string(second) + " " + string(third))
+
+# Filesystem ABI operations use the same checked UTF-8 and tensor buffers.
+def __valid_path(path: string) -> bool:
+    position = 0
+    while position < len(path):
+        if path[position] == u8(0):
+            return false
+        position += 1
+    return true
+
+def unlink(path: string) -> int:
+    if not __valid_path(path):
+        return -22
+    bytes = path.utf(true)
+    return __syscall(87, __position(bytes,0,len(bytes)),0,0)
+
+def mkdir(path: string, mode: int = 448) -> int:
+    if not __valid_path(path) or mode < 0 or mode > 4095:
+        return -22
+    bytes = path.utf(true)
+    return __syscall(83,__position(bytes,0,len(bytes)),mode,0)
+
+def rmdir(path: string) -> int:
+    if not __valid_path(path):
+        return -22
+    bytes = path.utf(true)
+    return __syscall(84,__position(bytes,0,len(bytes)),0,0)
+
+def access(path: string) -> int:
+    if not __valid_path(path):
+        return -22
+    bytes = path.utf(true)
+    return __syscall(21,__position(bytes,0,len(bytes)),0,0)
+
+def rename(source: string, destination: string) -> int:
+    if not __valid_path(source) or not __valid_path(destination):
+        return -22
+    first = source.utf(true)
+    second = destination.utf(true)
+    return __syscall(82,__position(first,0,len(first)),__position(second,0,len(second)),0)
+
+# Linux x86-64 stat is 144 bytes. Decode fields in the platform library.
+def stat_bytes(path: string, output: borrow tensor[u8]) -> int:
+    if not __valid_path(path) or len(output) < 144:
+        return -22
+    bytes = path.utf(true)
+    return __syscall(4,__position(bytes,0,len(bytes)),__position(output,0,144),0)
+
+def directory_entries(handle: int, output: borrow tensor[u8]) -> int:
+    if handle < 0 or handle > 2147483647:
+        return -9
+    received = __syscall(217,handle,__position(output,0,len(output)),len(output))
+    while received == -4:
+        received = __syscall(217,handle,__position(output,0,len(output)),len(output))
+    return received
+
+def lock(handle: int, flags: int) -> int:
+    if handle < 0 or handle > 2147483647:
+        return -9
+    result = __syscall(73,handle,flags,0)
+    while result == -4:
+        result = __syscall(73,handle,flags,0)
+    return result
+
+def __print(value: byte) -> int:
+    return __print(string(int(value)).concat("B"))
+
+__print() as print()
+
+# Test runners provide seekable stdout so comparisons can use actual emitted bytes.
+def capture_stdout() -> string:
+    count = seek(stdout(),0,1)
+    if count < 0:
+        throw Error("stdout capture requires a seekable test stream")
+    bytes = tensor[u8,(count,)]()
+    if seek(stdout(),0,0) < 0:
+        throw Error("stdout capture could not rewind")
+    received = read_exact(stdout(),bytes,0,count)
+    restored = seek(stdout(),count,0)
+    if received != count or restored != count:
+        throw Error("stdout capture could not read and restore output")
+    return string(bytes)
+
+
 test "descriptor errors are negative errno and path NUL is rejected":
-    buffer = array[u8, 1]()
+    buffer = tensor[u8,(1,)]()
     buffer[0] = u8(42)
     assert(read(-1, buffer, 0, 1) == -9)
     assert(write(-1, buffer, 0, 1) == -9)
@@ -148,6 +314,55 @@ test "descriptor errors are negative errno and path NUL is rejected":
     assert(copy_stream(-1, -1, -1) == -22)
 
 test "empty transfers do not dereference the buffer":
-    buffer = array[u8, 0]()
+    buffer = tensor[u8,(0,)]()
     assert(write_all(-1, buffer, 0, 0) == 0)
     assert(read_exact(-1, buffer, 0, 0) == 0)
+
+
+test with integ "multiple print values share string formatting":
+    print("value", 42)
+    print("point", 3.0, 4.0)
+    assert("value 42" in stdout)
+    assert("point 3" in stdout)
+
+# mmap's final three arguments use r10/r8/r9 in the Linux syscall ABI.
+@mlir("llvm.inline_asm", asm_string="syscall", constraints="={ax},{ax},{di},{si},{dx},{r10},{r8},{r9},~{rcx},~{r11},~{memory},~{cc}", has_side_effects=true, target="x86_64-linux")
+def __syscall6(number: int, first: int, second: int, third: int, fourth: int, fifth: int, sixth: int) -> int
+
+# Read-only shared mappings remain valid after closing the descriptor.
+def map_read(handle: int, length: int) -> int:
+    if handle < 0 or length <= 0:
+        return -22
+    return __syscall6(9, 0, length, 1, 1, handle, 0)
+
+def unmap(address: int, length: int) -> int:
+    if address <= 0 or length <= 0:
+        return -22
+    return __syscall(11, address, length, 0)
+
+@mlir("llvm.load")
+def __load_byte(address: pointer) -> u8
+
+# The owner supplies the mapped extent; raw access stays in this ABI boundary.
+def mapped_byte(address: int, length: int, position: int) -> u8:
+    if address <= 0 or position < 0 or position >= length:
+        throw Error("mapped byte outside allocation")
+    unsafe:
+        return __load_byte(pointer(address + position))
+
+
+def lstat_bytes(path: string, output: borrow tensor[u8]) -> int:
+    if not __valid_path(path) or len(output) < 144:
+        return -22
+    bytes = path.utf(true)
+    return __syscall(6, __position(bytes,0,len(bytes)), __position(output,0,144), 0)
+
+
+test with integ "sequence print preserves the input and scalar overloads":
+    values = tensor[int](3)
+    values[0], values[1], values[2] = 3, 2, 1
+    print(values)
+    print(42)
+    print(true)
+    assert(values[0] == 3 and values[2] == 1)
+    assert("[3, 2, 1]\n42\ntrue\n" in stdout)

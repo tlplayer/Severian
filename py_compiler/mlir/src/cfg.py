@@ -42,6 +42,18 @@ def render_body(body):
     for region in getattr(body, 'memory_regions', ()):
         lines.extend([f'    %{region.name}_size = arith.constant {region.size} : index',
                       f'    %{region.name} = memref.alloc(%{region.name}_size) {{alignment = {region.alignment} : i64}} : memref<?xi8>'])
+    entry_allocations = {}
+    for block in body.blocks:
+        for position, original in enumerate(block.operations):
+            operation = replace(original, lowering_position=(block.identity, position))
+            implementation = operation.atom.implementation if operation.atom else operation.payload
+            allocate = getattr(implementation, 'entry_allocations', None)
+            if allocate:
+                allocations = allocate(operation)
+                entry_allocations[block.identity, position] = set(allocations)
+                lines.extend('    ' + line for line in located_operations(
+                    allocations, source_location(body, operation.span)))
+
     def edge(e):
         if not e.arguments:
             return f"^bb{e.target}"
@@ -62,11 +74,13 @@ def render_body(body):
             prefix = f"    {name(value)} = " if value is not None else "    "
             if operation.atom is not None:
                 lines.extend("    " + line for line in located_operations(
-                    operation.atom.render_operation(operation), source_location(body, operation.span)))
+                    [line for line in operation.atom.render_operation(operation)
+                     if line not in entry_allocations.get((block.identity, position), ())], source_location(body, operation.span)))
                 continue
             if hasattr(operation.payload, "render_operation"):
                 lines.extend("    " + line for line in located_operations(
-                    operation.payload.render_operation(operation), source_location(body, operation.span)))
+                    [line for line in operation.payload.render_operation(operation)
+                     if line not in entry_allocations.get((block.identity, position), ())], source_location(body, operation.span)))
                 continue
             if operation.kind == "constant":
                 symbol = "__sev_constant_" + sha256(operation.payload.identity.encode()).hexdigest()
@@ -79,6 +93,8 @@ def render_body(body):
             lines.append("    cf.br " + edge(terminator.edges[0]))
         elif terminator.kind == "conditional":
             lines.append(f"    cf.cond_br {name(terminator.value)}, {edge(terminator.edges[0])}, {edge(terminator.edges[1])}")
+        elif terminator.kind == "unreachable":
+            lines.append("    llvm.unreachable")
         elif terminator.kind == "panic":
             from py_compiler.mlir.src.lib import quoted
             lines.append(f"    %panic_{block.identity} = arith.constant false")
@@ -109,7 +125,7 @@ class DebugLocationTests(unittest.TestCase):
         from py_compiler.mir.cfg.cfg import Body, ExecutionBlock, Operation, Value, Edge, Terminator
         from py_compiler.syntax.complex.array import ArrayType, MemoryOperation
         from py_compiler.syntax.recognition import Syntax
-        from py_compiler.mlir.src.lib import verify_native
+        from py_compiler.mlir.src.lib import verify_c
         source = SourceFile('repeated-store.sev', 'storage[index] = value\n')
         types = Syntax().types
         arguments = (Value(0, ArrayType(types['int'])), Value(1, types['index']), Value(2, types['int']))
@@ -130,7 +146,7 @@ class DebugLocationTests(unittest.TestCase):
         self.assertTrue(all('loc("repeated-store.sev":1:1)' in line
                             for line in text.splitlines() if 'memref.store' in line))
         self.assertIsNone(operation.lowering_position)
-        verify_native('module {\n' + text + '\n}')
+        verify_c('module {\n' + text + '\n}')
 
     def test_region_headers_and_block_labels_are_not_operations(self):
         lines = ['scf.while (%arg = %initial) : (i64) -> i64 {',
@@ -153,3 +169,58 @@ class DebugLocationTests(unittest.TestCase):
         self.assertIn('loc("/tmp/source space.sev":4:', call)
         self.assertIn('loc("/tmp/source space.sev":5:5)', returned)
         self.assertTrue(rendered.endswith('loc("/tmp/source space.sev":3:1)'))
+
+
+class RecordLoopStorageTests(unittest.TestCase):
+    def test_c_repeated_local_and_returned_records_use_bounded_stack(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.packaging.testing import test_package
+        source = '''class Pair:
+    left: int
+    right: int
+
+def make_pair(n: int) -> Pair:
+    return Pair(n, n + 1)
+
+test "Record temporaries survive repeated loop iterations":
+    index = 0
+    while index < 300000:
+        direct = Pair(index, index + 1)
+        returned = make_pair(index)
+        assert(direct.left == returned.left)
+        assert(returned.right == index + 1)
+        index += 1
+'''
+        with tempfile.TemporaryDirectory(prefix='sev-record-loop-') as directory:
+            root = Path(directory)
+            (root/'lib.sev').write_text(source)
+            (root/'package.json').write_text(json.dumps({'package':{'name':'record-loop','version':'0.1.0'},'sources':['lib.sev']}))
+            result = test_package(root, timeout=5)
+            self.assertTrue(result['success'], result)
+
+    def test_c_repeated_slice_enumeration_uses_bounded_stack(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.packaging.testing import test_package
+        source='''from collections import list, enumerate
+test "slice union and dimension temporaries reuse stack storage":
+    values = [3, 1, 2]
+    repetition = 0
+    while repetition < 30000:
+        for index, value in enumerate(values[1:]):
+            assert(value == values[index + 1])
+        repetition += 1
+    assert(values == [3, 1, 2])
+'''
+        collections=Path(__file__).resolve().parents[3]/'library/core/collections/collection'
+        with tempfile.TemporaryDirectory(prefix='sev-slice-stack-') as directory:
+            root=Path(directory)
+            (root/'main.sev').write_text(source)
+            (root/'package.json').write_text(json.dumps({'package':{'name':'slice.stack','version':'0.1.0'},
+                'sources':['main.sev'],'dependencies':{'collections':{'path':str(collections)}}}))
+            result=test_package(root,memory=True,coverage=True,timeout=10)
+            report=json.loads(Path(result['report']).read_text()) if 'report' in result else result
+            self.assertTrue(result['success'],report)

@@ -17,5 +17,5 @@ The runner builds from a fresh invocation directory, checks
 `package.pkg/bin/generic-consumer`, and verifies that the producer and consumer
 source trees receive no generated package directories. It checks the unused-file
 diagnostic for `consumer/src/unused.sev`, warm unit reuse, a `+1` behavior change,
-unchanged native-provider reuse, and downstream IR reuse after a same-line
+unchanged c-provider reuse, and downstream IR reuse after a same-line
 comment edit. JSON profiles and command evidence are retained in its work area.

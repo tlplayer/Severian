@@ -181,7 +181,7 @@ class bool: Boolean
     alignment: byte = 1B
     category: PrimitiveCategory = PrimitiveCategory.Boolean
     representation: PrimitiveRepresentation = PrimitiveRepresentation.BooleanBit
-    # Capability flag: `true`/`false` are native literals. `Default` still
+    # Capability flag: `true`/`false` are c literals. `Default` still
     # produces the value `false`.
     default_literal: bool = BoolPrimitive().default_literal
     constructors: list[Constructor] = :conversions

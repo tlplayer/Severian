@@ -1,0 +1,10 @@
+{
+  "packages": [
+    {
+      "package": "core.string",
+      "source": "c9c468b7ebc19e77b9a097b46a1ad75203feed5a4c51be252d84a45cc1b2dafe",
+      "version": "0.1.0"
+    }
+  ],
+  "version": 1
+}

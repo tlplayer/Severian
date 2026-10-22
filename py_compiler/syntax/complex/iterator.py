@@ -32,7 +32,7 @@ class Iterator:
 
     def result(self, context):
         from py_compiler.syntax.block.union import UnionType
-        return UnionType((self.element, context.type('absent'))).with_layout(context)
+        return UnionType((self.element, context.type('None'))).with_layout(context)
 
     def release(self, value, cfg, span):
         cfg.effect('iterator-destroy', (value,), IteratorCall('destroy'), span)
@@ -150,11 +150,11 @@ test "unstarted frame destruction runs no producer code":
     assert(module.calls == before)
 '''
 
-    def test_native_suspension_exhaustion_and_early_destruction(self):
+    def test_c_suspension_exhaustion_and_early_destruction(self):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         with tempfile.TemporaryDirectory(prefix='sev-iterator-frames-') as directory:
             root = Path(directory)
             (root / 'src').mkdir()
@@ -181,11 +181,11 @@ test "unstarted frame destruction runs no producer code":
         self.assertTrue(result.diagnostics)
         self.assertIn('borrow', str(result.diagnostics))
 
-    def test_native_owned_yields_and_returned_frame_lifetimes(self):
+    def test_c_owned_yields_and_returned_frame_lifetimes(self):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         source = '''class Buffer:
     values: array[int]
 class Items:

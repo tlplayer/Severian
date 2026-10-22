@@ -27,12 +27,36 @@ class ObjectType:
 
     @property
     def release(self):
-        if not self.owns_fields:
+        if not self.owns_fields and not getattr(self.declaration, 'destructor', False):
             raise AttributeError("record has no owned fields")
         return self._release
 
     def _release(self, value, cfg, span):
         cfg.context.provider_by_name[self.name].release(value, cfg, span)
+
+    def element_place(self,receiver,index,cfg,env,span):
+        return IndexedMethod(receiver,index,cfg,env)
+
+    def slice_value(self, receiver, bounds, cfg, env, span, owner=None, *, closed=(True, True)):
+        from py_compiler.syntax.grammar.expression import Expression
+        from py_compiler.syntax.function.calls import literal_value, select, invoke
+        from py_compiler.syntax.complex.tensor import ArgumentValue
+        from py_compiler.frontend.lexer.lexer import lex
+        from py_compiler.frontend.source.source import SourceFile
+        entries = cfg.context.functions.get(self.name + '.__slice', ())
+        if not entries:
+            raise ValueError('type does not supply a slicing operation')
+        token = lex(SourceFile(cfg.source.path + ':slice', 'slice'), cfg.syntax)[0]
+        start, stop, step = bounds
+        values = [cfg.expr(bound, env, cfg.context.type('int')) if bound else
+                  literal_value(default, cfg.context.type('int'), cfg, span)
+                  for bound, default in ((start, 0), (stop, 0), (step, 1))]
+        values.extend(literal_value(bound is None, cfg.context.type('bool'), cfg, span)
+                      for bound in (start, stop))
+        values.extend(literal_value(flag, cfg.context.type('bool'), cfg, span) for flag in closed)
+        arguments = tuple(Expression('capture', token, (ArgumentValue(value),)) for value in values)
+        entry, operands = select(entries, arguments, cfg, env)
+        return invoke(entry, operands, cfg, span, receiver)
 
     def copy_value(self, value, cfg, span):
         return cfg.context.provider_by_name[self.name].copy_value(value, cfg, span)
@@ -68,6 +92,11 @@ class Allocate:
         from py_compiler.syntax.primitive.catalog import primitives
         return Atom(self, (), operation.result.type, (), ('allocation',), self)
 
+    def entry_allocations(self, operation):
+        # Record storage is a fixed function-local slot. Initialization still
+        # executes at the original declaration on every loop iteration.
+        return self.render_operation(operation)[:2]
+
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name
         value = operation.result
@@ -90,6 +119,9 @@ class Invoke:
         from py_compiler.syntax.generic.atom import Atom
         return Atom(self, tuple(v.type for v in operation.operands), self.result_type if self.result_type.mlir else None,
                     self.ownership or tuple('view' for _ in operation.operands), ('call',), self)
+
+    def entry_allocations(self, operation):
+        return self.render_operation(operation)[1:3] if self.result_layout else []
 
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name
@@ -181,3 +213,52 @@ class CountBoolean:
 
 
 from py_compiler.syntax.block.union import UnionBox
+
+
+@dataclass(frozen=True)
+class IndexedMethod:
+    receiver: object
+    index: object
+    cfg: object
+    env: object
+
+    @property
+    def type(self):
+        entries=self.cfg.context.functions.get(self.receiver.type.name+'.get',())
+        types={e.result for e in entries}
+        if len(types)!=1:
+            raise ValueError('indexed getter requires one concrete result contract')
+        return self.cfg.context.type(types.pop())
+
+    def read(self,cfg,span):
+        from py_compiler.syntax.function.calls import select,invoke
+        entries=cfg.context.functions.get(self.receiver.type.name+'.get',())
+        entry,values=select(entries,(self.index,),cfg,self.env)
+        return invoke(entry,values,cfg,span,self.receiver)
+
+    def preserves_shape(self, cfg):
+        from py_compiler.syntax.complex.collection import indexed_write_preserves_shape
+        return indexed_write_preserves_shape(self.receiver.type, cfg.context)
+
+    def read_view(self, cfg, span, mode='view'):
+        from py_compiler.syntax.function.calls import select, invoke
+        entries = cfg.context.functions.get(self.receiver.type.name + ('.borrow_at' if mode == 'borrow' else '.view_at'), ())
+        entry, values = select(entries, (self.index,), cfg, self.env)
+        return invoke(entry, values, cfg, span, self.receiver)
+
+    def take(self, cfg, span, value=None):
+        from py_compiler.syntax.function.calls import select, invoke
+        entries = cfg.context.functions.get(self.receiver.type.name + '.take', ())
+        entry, values = select(entries, (self.index,), cfg, self.env)
+        return invoke(entry, values, cfg, span, self.receiver)
+
+    def write(self,cfg,value,span):
+        from py_compiler.syntax.function.calls import select,invoke
+        from py_compiler.syntax.grammar.expression import Expression
+        from py_compiler.syntax.complex.tensor import ArgumentValue
+        entries=cfg.context.functions.get(self.receiver.type.name+'.set',())
+        owner = next((binding for binding in self.env.values()
+                      if cfg.values.get(binding.identity) == value and binding.identity not in cfg.flow.moved),
+                     cfg.call_result_owners.get(value.identity))
+        entry,values=select(entries,(self.index,Expression('capture',self.index.token,(ArgumentValue(value, owner),))),cfg,self.env)
+        return invoke(entry,values,cfg,span,self.receiver)

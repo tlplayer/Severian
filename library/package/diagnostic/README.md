@@ -5,9 +5,9 @@ and build-input reporting. Compiler instrumentation supplies `CoverageRegion`
 and `CoverageTest` records through `coverage_map`; this library validates runtime
 records and applies package thresholds. It never lowers or rewrites compiler IR.
 
-`runtime/quality.c` owns the native coverage and allocation-report provider.
+`runtime/quality.c` owns the c coverage and allocation-report provider.
 The MLIR backend links it when quality instrumentation is requested, and the
-compiler records this source as a native build input so edits invalidate cached
+compiler records this source as a c build input so edits invalidate cached
 artifacts. The `__sev_quality_*` ABI and runtime record format remain stable.
 
 [package.diagnostic.lint](lint/README.md) owns lint rules, source metrics,

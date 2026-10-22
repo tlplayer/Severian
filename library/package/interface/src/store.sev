@@ -39,7 +39,7 @@ def write(root: string, value: Interface) -> metadata.InterfaceRecord | Error:
     lock_path = directory + "/.write.lock"
     if os.is_symlink(lock_path):
         throw Error("interface lock cannot be a symlink")
-    lock = file.native_lock(lock_path)
+    lock = file.c_lock(lock_path)
     if lock < 0:
         throw Error("could not lock interface output")
     stage := ""
@@ -69,7 +69,7 @@ def write(root: string, value: Interface) -> metadata.InterfaceRecord | Error:
 
 # Route a dependency .sevi to metadata only when requested. The resolver supplies
 # the locked package identity and compiler compatibility requirements. Loading
-# accepts metadata-only check results and never opens native implementation files.
+# accepts metadata-only check results and never opens c implementation files.
 def open_dependency(root: string, relative: string, expected: metadata.PackageIdentity, required: metadata.Compatibility) -> DependencyInterface | Error:
     location = metadata.resolve_path(root, relative)
     contents = file.read_checked(location)

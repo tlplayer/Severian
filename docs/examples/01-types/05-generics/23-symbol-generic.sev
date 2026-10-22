@@ -30,7 +30,9 @@ def resolve_operation[Y: SymbolTerm](
     if first.symbol.same_symbol(symbol):
         return first.operation
 
-    return second.operation
+    if second.symbol.same_symbol(symbol):
+        return second.operation
+    throw Error("unknown operation symbol")
 
 
 def apply_operation(operation: OperationKind, left: i64, right: i64) -> i64:
@@ -46,11 +48,56 @@ test:
     plus := ResolvedSymbol(1)
     multiply := ResolvedSymbol(2)
 
-    add_binding := OperationBinding[ResolvedSymbol](plus, Add)
-    multiply_binding := OperationBinding[ResolvedSymbol](multiply, Multiply)
+    add_binding := OperationBinding[ResolvedSymbol](plus, OperationKind.Add)
+    multiply_binding := OperationBinding[ResolvedSymbol](multiply, OperationKind.Multiply)
 
     add := resolve_operation(add_binding, multiply_binding, plus)
     product := resolve_operation(add_binding, multiply_binding, multiply)
 
     assert(apply_operation(add, 19, 23) == 42)
     assert(apply_operation(product, 6, 7) == 42)
+
+
+test "unknown symbol fails instead of selecting the second operation":
+    throws "unknown operation symbol":
+        plus = ResolvedSymbol(1)
+        multiply = ResolvedSymbol(2)
+        unknown = ResolvedSymbol(3)
+        first = OperationBinding[ResolvedSymbol](plus, OperationKind.Add)
+        second = OperationBinding[ResolvedSymbol](multiply, OperationKind.Multiply)
+        result = resolve_operation(first, second, unknown)
+
+class Probe:
+    calls: int
+    def read() -> OperationKind:
+        calls += 1
+        return OperationKind.Multiply
+
+test "match evaluates its subject once and carries mutated state":
+    probe = Probe(0)
+    result = 0
+    match probe.read():
+        case Add:
+            result = 1
+        case Multiply:
+            result = 2
+    assert(probe.calls == 1)
+    assert(result == 2)
+
+def fallback(operation: OperationKind) -> int:
+    match operation:
+        case Add:
+            return 1
+        case _:
+            return 9
+
+test "wildcard matches the remaining variants":
+    assert(fallback(OperationKind.Add) == 1)
+    assert(fallback(OperationKind.Multiply) == 9)
+
+test with compiler "missing enum case is rejected":
+    reject:
+        operation = OperationKind.Add
+        match operation:
+            case Add:
+                result = 1

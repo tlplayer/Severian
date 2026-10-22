@@ -1,27 +1,31 @@
 def arena_values() -> int:
-    first = allocate[int, strategy=memory.arena](8)
-    second = allocate[int, strategy=memory.arena](8)
-    first[0] = 12
-    second[0] = 30
-    return first[0] + second[0]
+    unsafe:
+        first = allocate[int, strategy=memory.arena](8)
+        second = allocate[int, strategy=memory.arena](8)
+        first[0] = 12
+        second[0] = 30
+        return first[0] + second[0]
 
 
 def pool_values() -> int:
-    first = allocate[int, strategy=memory.pool](8)
-    first[0] = 42
-    drop first
-    second = allocate[int, strategy=memory.pool](8)
-    return second[0]
+    unsafe:
+        first = allocate[int, strategy=memory.pool](8)
+        first[0] = 42
+        drop first
+        second = allocate[int, strategy=memory.pool](8)
+        return second[0]
 
 
 def local_value() -> int:
-    value = allocate[int]()
-    return value[0]
+    unsafe:
+        value = allocate[int]()
+        return value[0]
 
 
-def escaping_value() -> array[int]:
-    value = allocate[int]()
-    return value
+def escaping_value() -> tensor[int]:
+    unsafe:
+        value = allocate[int]()
+        return value
 
 
 test:

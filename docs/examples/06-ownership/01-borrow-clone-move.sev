@@ -9,18 +9,31 @@ def consume(value: move string):
 test:
     name := "severian"
 
-    inspect(borrow name)
-    inspect(borrow name)
+    inspect(name)
+    inspect(name)
 
-    copied := clone name
+    copied := copy name
     assert(copied == "severian")
 
-    consume(move name)
+    consume(name)
 
 
 test with compiler:
     value := "severian"
-    consume(move value)
+    consume(value)
 
     reject:
         print(value)
+
+test "copied string survives consuming its original":
+    original = "owned"
+    independent = copy original
+    assert(not (independent is original))
+    consume(original)
+    assert(independent == "owned")
+
+test with compiler "a consumed string cannot be copied":
+    original = "owned"
+    consume(original)
+    reject:
+        independent = copy original

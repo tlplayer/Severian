@@ -3,7 +3,7 @@
 const path = require('path');
 
 const keywords = new Set(('def class trait enum extend import from as return break continue if else elif while for in '
-  + 'match case test with true false None and or not is pass operator native async await borrow move view clone drop').split(' '));
+  + 'match case test with true false None and or not is pass operator c async await borrow move view clone drop').split(' '));
 
 // This recovery index deliberately resolves lexical scopes and explicit imports only.
 // It never guesses a workspace symbol by name. All offsets are Unicode scalars.

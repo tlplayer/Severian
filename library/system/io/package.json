@@ -6,7 +6,7 @@
     "description": "Portable streams, standard handles, and printing",
     "unsafe": {
       "capabilities": [
-        "native-abi",
+        "c-abi",
         "allocation",
         "pointers",
         "unsafe-blocks"
@@ -20,7 +20,7 @@
     "metadata": {
       "library": {
         "category": "system",
-        "implementation": "native-abi",
+        "implementation": "c-abi",
         "status": "experimental",
         "version": 1
       }

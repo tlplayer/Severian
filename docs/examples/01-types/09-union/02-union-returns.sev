@@ -1,14 +1,41 @@
+# R denotes a returned value's generic type; E is the prelude Error alias.
+def returned[R](value: R) -> R:
+    return value
 
-test "Fixed point type collapse":
-    #When we zip a union we get a fixed point colpase if there is no conflict in implementation
-    number_union = float | int
-    # T | T makes a union type
-    assert(number_union is union)
-    # R | E
+def lookup(found: bool) -> int | E:
+    if not found:
+        throw E("missing result")
+    return returned(42)
 
-    result_or_error = R | E
-    assert(result_or_error is union)
+def forwarded(found: bool) -> int | E:
+    return lookup(found)
 
+test "type unions flatten duplicates and preserve member identity":
+    number = float | int
+    assert(number is union)
+    assert((number | int) == number)
+    assert((int | float) == number)
+    assert((int | int) == int)
+    assert(not ((int | int) is union))
+    assert(E == Error)
+    assert((int | E) == (int | Error))
+    assert((int | E) != number)
 
+test "generic returned values preserve their concrete types":
+    number = returned(42)
+    text = returned("result")
+    assert(type(number) == int and number == 42)
+    assert(type(text) == string and text == "result")
 
+test "capture preserves errors and ordinary calls propagate them":
+    success ?= forwarded(true)
+    failure ?= forwarded(false)
+    assert(success == 42)
+    assert(failure is E)
+    assert(failure.message == "missing result")
+    throws(forwarded(false) -> E)
+    assert(forwarded(true) == 42)
 
+test with compiler "a type union requires types on both sides":
+    reject:
+        invalid = int | 42

@@ -1,15 +1,18 @@
-import tensor
-
-
-def simd_multiply(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+def simd_multiply(left: tensor[f64], right: tensor[f64]) -> tensor[f64]:
     with self and simd:
-        result = left * right
-    return result
+        return left * right
 
 
 test "simd tensor placement uses the host vector component":
-    left = tensor([1.0, 2.0, 3.0, 4.0], [4])
-    right = tensor([2.0, 2.0, 2.0, 2.0], [4])
+    left = tensor[f64](tuple[f64,4](1.0, 2.0, 3.0, 4.0))
+    right = tensor[f64](tuple[f64,4](2.0, 2.0, 2.0, 2.0))
     result = simd_multiply(left, right)
 
-    assert(result.values == [2.0, 4.0, 6.0, 8.0])
+    assert(result[0] == 2.0 and result[1] == 4.0)
+    assert(result[2] == 6.0 and result[3] == 8.0)
+
+test "SIMD handles a scalar tail":
+    left = tensor[f64](tuple[f64,5](1.0, 2.0, 3.0, 4.0, 5.0))
+    right = tensor[f64](tuple[f64,5](2.0, 2.0, 2.0, 2.0, 2.0))
+    result = simd_multiply(left, right)
+    assert(result[4] == 10.0)

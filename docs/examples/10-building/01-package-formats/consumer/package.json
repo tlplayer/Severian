@@ -10,6 +10,12 @@
     }
   ],
   "dependencies": {
-    "geometry": "1.0.0"
+    "geometry": {
+      "path": "../geometry",
+      "version": "1.0.0"
+    },
+    "io": {
+      "path": "../../../../../library/system/io/linux_x86_64"
+    }
   }
 }

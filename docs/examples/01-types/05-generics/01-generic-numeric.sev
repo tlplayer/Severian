@@ -1,11 +1,8 @@
-trait Numeric:
-    def add(other: Self) -> Self
-    def multiply(other: Self) -> Self
-    def less_than(other: Self) -> bool
+from math import Numeric
 
 
 def affine[T: Numeric](x: T, scale: T, bias: T) -> T:
-    y := x * scale
+    y = x * scale
     y = y + bias
 
     if y < bias:

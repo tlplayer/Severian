@@ -1,0 +1,191 @@
+def convert(value: string) -> string:
+    return string(value)
+
+def convert(value: bool) -> string:
+    if value:
+        return "true"
+    return "false"
+
+# Work in the negative range so int.min never needs a positive counterpart.
+def convert(value: int) -> string:
+    negative = value < 0
+    remaining = value
+    if remaining > 0:
+        remaining = -remaining
+    digits = tensor[u8,(20,)]()
+    used = 0
+    while remaining <= -10:
+        quotient = remaining / 10
+        remainder = remaining - quotient * 10
+        digits[used] = u8(48 - remainder)
+        used += 1
+        remaining = quotient
+    digits[used] = u8(48 - remaining)
+    used += 1
+    count = used
+    if negative:
+        count += 1
+    bytes = tensor[u8,(count,)]()
+    index = 0
+    if negative:
+        bytes[index] = u8(45)
+        index += 1
+    while used > 0:
+        used -= 1
+        bytes[index] = digits[used]
+        index += 1
+    return string(bytes)
+
+def convert(value: char) -> string:
+    scalar = int(value)
+    count = 1
+    if scalar >= 65536:
+        count = 4
+    elif scalar >= 2048:
+        count = 3
+    elif scalar >= 128:
+        count = 2
+    bytes = tensor[u8,(count,)]()
+    if count == 1:
+        bytes[0] = u8(scalar)
+    elif count == 2:
+        bytes[0] = u8(192 + scalar / 64)
+        bytes[1] = u8(128 + scalar % 64)
+    elif count == 3:
+        bytes[0] = u8(224 + scalar / 4096)
+        bytes[1] = u8(128 + scalar / 64 % 64)
+        bytes[2] = u8(128 + scalar % 64)
+    else:
+        bytes[0] = u8(240 + scalar / 262144)
+        bytes[1] = u8(128 + scalar / 4096 % 64)
+        bytes[2] = u8(128 + scalar / 64 % 64)
+        bytes[3] = u8(128 + scalar % 64)
+    return string(bytes)
+
+
+# General display uses six significant decimal digits, without a C formatter.
+# Exact binary-to-decimal serialization should use an explicit precision API.
+@mlir("arith.bitcast")
+def __float_bits(value: f64) -> i64
+
+def convert(value: f64) -> string:
+    if value != value:
+        return "nan"
+    magnitude = value
+    negative = __float_bits(value) < 0
+    if negative:
+        magnitude = -magnitude
+    if magnitude == 1.0 / 0.0:
+        if negative:
+            return "-inf"
+        return "inf"
+    if magnitude == 0.0:
+        if negative:
+            return "-0"
+        return "0"
+    exponent = 0
+    while magnitude >= 10.0:
+        magnitude /= 10.0
+        exponent += 1
+    while magnitude < 1.0:
+        magnitude *= 10.0
+        exponent -= 1
+    rounded = int(magnitude * 100000.0 + 0.5)
+    if rounded >= 1000000:
+        rounded = 100000
+        exponent += 1
+    digits = tensor[u8,(6,)]()
+    position = 6
+    while position > 0:
+        position -= 1
+        digits[position] = u8(48 + rounded % 10)
+        rounded /= 10
+    used = 6
+    while used > 1 and digits[used - 1] == u8(48):
+        used -= 1
+    output: tensor[u8] = tensor[u8,(32,)]()
+    position = 0
+    if negative:
+        output[position] = u8(45)
+        position += 1
+    scientific = exponent < -4 or exponent >= 6
+    if scientific:
+        output[position] = digits[0]
+        position += 1
+        if used > 1:
+            output[position] = u8(46)
+            position += 1
+        index = 1
+        while index < used:
+            output[position] = digits[index]
+            position += 1
+            index += 1
+        output[position] = u8(101)
+        position += 1
+        if exponent < 0:
+            output[position] = u8(45)
+            exponent = -exponent
+        else:
+            output[position] = u8(43)
+        position += 1
+        hundreds = exponent / 100
+        if hundreds > 0:
+            output[position] = u8(48 + hundreds)
+            position += 1
+        output[position] = u8(48 + exponent / 10 % 10)
+        output[position + 1] = u8(48 + exponent % 10)
+        position += 2
+    else:
+        if exponent < 0:
+            output[position] = u8(48)
+            output[position + 1] = u8(46)
+            position += 2
+            zeros = -exponent - 1
+            while zeros > 0:
+                output[position] = u8(48)
+                position += 1
+                zeros -= 1
+        index = 0
+        while index < used or index <= exponent:
+            if index == exponent + 1 and exponent >= 0:
+                output[position] = u8(46)
+                position += 1
+            if index < used:
+                output[position] = digits[index]
+            else:
+                output[position] = u8(48)
+            position += 1
+            index += 1
+    output.resize(position)
+    return string(output)
+
+def convert(value: f32) -> string:
+    return convert(f64(value))
+
+# Address display shares this library's UTF-8 formatting storage.
+def pointer_text(value: u64) -> string:
+    remaining = value
+    count = 1
+    while remaining >= u64(16):
+        remaining = remaining / u64(16)
+        count += 1
+    bytes = tensor[u8,(count + 2,)]()
+    bytes[0] = u8(48)
+    bytes[1] = u8(120)
+    remaining = value
+    position = count + 1
+    while position >= 2:
+        digit = int(remaining % u64(16))
+        bytes[position] = u8(48 + digit if digit < 10 else 87 + digit)
+        remaining = remaining / u64(16)
+        position -= 1
+    return string(bytes)
+
+
+test "float display preserves signs and common decimal values":
+    half = convert(0.5)
+    assert(len(half) == 3 and half[0] == u8(48) and half[2] == u8(53))
+    negative = convert(-12.25)
+    assert(len(negative) == 6 and negative[0] == u8(45))
+    tiny = convert(0.000001)
+    assert(len(tiny) == 5 and tiny[1] == u8(101))

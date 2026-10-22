@@ -1,7 +1,7 @@
 """dict[K:T1,V:T2,C]: key/value contracts independent of storage policy C."""
 from dataclasses import dataclass
 from py_compiler.syntax.complex.array import Array
-from py_compiler.syntax.complex.native_collection import scalar, constant, emit, require_mutable
+from py_compiler.syntax.complex.c_collection import scalar, constant, emit, require_mutable
 
 
 @dataclass(frozen=True)

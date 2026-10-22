@@ -1,7 +1,7 @@
 """vector[T,N]: N is initial capacity; append grows the owning buffer."""
 from dataclasses import dataclass
 from py_compiler.syntax.complex.array import Array
-from py_compiler.syntax.complex.native_collection import scalar, constant, emit, require_mutable
+from py_compiler.syntax.complex.c_collection import scalar, constant, emit, require_mutable
 
 
 @dataclass(frozen=True)

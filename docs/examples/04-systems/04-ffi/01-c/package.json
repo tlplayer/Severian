@@ -13,7 +13,7 @@
   "xxi": {
     "c": {
       "sources": [
-        "native.c"
+        "c.c"
       ]
     }
   }

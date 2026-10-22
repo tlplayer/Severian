@@ -68,6 +68,14 @@ class ReturnInference:
                 returns.append(self.expression(expression(tokens[1:]), env, result, caller))
             elif node.children:
                 branch = dict(env)
+                if getattr(node.provider,'spelling','') == 'for' and not isinstance(node.header[0],tuple):
+                    source = self.expression(node.header[1],env,None,caller)
+                    element = getattr(source.type,'element',None)
+                    if element is None:
+                        args=getattr(source.type,'generic_arguments',())
+                        element=args[0] if len(args)==1 else None
+                    if element is not None:
+                        branch[node.header[0].text]=Term(element,'own')
                 self.statements(node.children, branch, result, caller, returns)
                 for name in env.keys() & branch.keys():
                     if branch[name] != env[name]:
@@ -77,13 +85,16 @@ class ReturnInference:
                 if assignment is not None and tokens[0].kind == 'IDENTIFIER':
                     annotation = None
                     if tokens[1].text == ':':
-                        annotation = self.context.type(''.join(t.text for t in tokens[2:assignment]))
+                        spelling = ''.join(t.text for t in tokens[2:assignment])
+                        annotation = None if spelling == 'infer' else self.context.type(spelling)
                     env[tokens[0].text] = self.expression(expression(tokens[assignment + 1:]), env, annotation, caller)
 
     def expression(self, node, env, expected, caller):
         context = self.context
         if node.kind == 'name' and node.token.text in env:
             return env[node.token.text]
+        if node.kind == 'name' and node.token.text in context.template_types:
+            return Term(context.template_types[node.token.text], 'own')
         if node.kind == 'unary':
             operand = self.expression(node.operands[0], env, expected, caller)
             return Term(operand.type, 'own') if node.token.text in ('copy', 'mirror', 'move') else operand
@@ -93,6 +104,12 @@ class ReturnInference:
             type_, _ = resolve_literal(Literal('', node.token.span, node.token.text, node.token.kind,
                                               expected.name if expected else None), context.bound_syntax, context)
             return Term(type_, 'own')
+        if node.kind == 'conditional':
+            yes = self.expression(node.operands[1], env, expected, caller)
+            no = self.expression(node.operands[2], env, expected or yes.type, caller)
+            return Term(expected or yes.type, 'join', (yes, no))
+        if node.kind == 'identity':
+            return Term(context.type('bool'), 'own')
         if node.kind in ('binary', 'chain', 'owned'):
             # Scalar operations cannot introduce a storage dependency. Full
             # operator/type validation remains with the semantic provider.
@@ -108,6 +125,25 @@ class ReturnInference:
                 callee, arguments_node = callee.operands
                 terms = arguments_node.operands if arguments_node.kind == 'template_arguments' else (arguments_node,)
                 explicit = tuple(type_spelling(term) for term in terms)
+            if callee.kind == 'member':
+                receiver = self.expression(callee.operands[0], env, None, caller)
+                entries = context.functions.get(receiver.type.name + '.' + callee.token.text, ())
+                values = tuple(self.expression(argument, env, None, caller) for argument in arguments)
+                candidates = [entry for entry in entries if len(entry.parameters) == len(values)]
+                selected = []
+                for entry in candidates:
+                    concrete = realize(entry, explicit, values, context) if entry.templates else entry
+                    if all(value.type == context.type(annotation) for value, (_, annotation) in zip(values, concrete.parameters)):
+                        selected.append(concrete)
+                if len(selected) == 1:
+                    entry = selected[0]
+                    if entry.result_ownership == 'own' and not entry.infer_result_ownership:
+                        return Term(context.type(entry.result), 'own')
+                    if not entry.infer_result_ownership:
+                        context.compile(entry)
+                        sources = entry.body.result_sources
+                        return Term(context.type(entry.result), 'join',
+                                    tuple(receiver if index == -1 else values[index] for index in sources))
             if callee.kind == 'name':
                 name = callee.token.text
                 entries = ((context.template_functions[name],) if name in context.template_functions else

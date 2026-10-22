@@ -1,35 +1,43 @@
+from collections import dict
+
 # dict[K, V]: a hash-style key/value table.
 def main():
-    scores := dict()
+    scores := dict[int,int]()
     scores[30] = 300
     scores[10] = 100
     scores[20] = 200
     scores[10] = 150
-    assert(scores.len() == 3)
+    if not (scores.len() == 3):
+        throw Error("dict invariant failed")
 
-    value, found := scores.get(10)
-    assert(found and value == 150)
-    _, found := scores.get(99)
-    assert(not found)
+    value = scores.find(10)
+    if not (value.has_value and value.value == 150):
+        throw Error("dict invariant failed")
+    missing = scores.find(99)
+    if not (not missing.has_value):
+        throw Error("dict invariant failed")
 
     # A default is inserted only when the key is absent.
-    assert(scores.set_default(10, 999) == 150)
-    assert(scores.set_default(40, 400) == 400)
+    if not (scores.set_default(10, 999) == 150):
+        throw Error("dict invariant failed")
+    if not (scores.set_default(40, 400) == 400):
+        throw Error("dict invariant failed")
     print(scores[10])  # 150
     print(scores[40])  # 400
 
+
 test "dict replaces existing values and reports missing keys":
-    values := dict()
+    values := dict[int,int]()
     values[10] = 100
     values[10] = 150
     assert(values.len() == 1)
-    value, found := values.get(10)
-    assert(found and value == 150)
-    _, found = values.get(99)
-    assert(not found)
+    value = values.find(10)
+    assert(value.has_value and value.value == 150)
+    missing = values.find(99)
+    assert(not missing.has_value)
 
 test "dict defaults insert only absent keys":
-    values := dict()
+    values := dict[int,int]()
     values[10] = 100
     assert(values.set_default(10, 999) == 100)
     assert(values.set_default(20, 200) == 200)

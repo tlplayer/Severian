@@ -39,3 +39,19 @@ test "mock fallback handles unmatched calls":
 
     assert(fetch_price(10) == 25)
     assert(fetch_price(99) == 0)
+
+
+test "mock reaches calls made by another function":
+    mock(fetch_price(10) -> 25)
+    assert(total(10, 4) == 100)
+
+
+test "a later test uses the original callable":
+    assert(fetch_price(10) == 0)
+    assert(total(10, 4) == 0)
+
+
+test "unmatched calls fail unless a fallback is declared":
+    mock(fetch_price(10) -> 25)
+    throws(fetch_price(99) -> Error)
+    assert(fetch_price(10) == 25)

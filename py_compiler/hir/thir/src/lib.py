@@ -136,21 +136,32 @@ def prepare(module, interface=None):
         group[2].append(typed)
     result = []
     from py_compiler.syntax.complex.object import Invoke
+    from py_compiler.mir.cleanup import Cleanup
     for key, (source, substitution, callables) in groups.items():
         dependencies = set()
         for callable_ in callables:
-            for block in callable_.body.blocks:
-                for operation in block.operations:
-                    if isinstance(operation.payload, Invoke):
-                        target = body_owners.get(operation.payload.symbol)
-                        if target is None:
-                            raise ValueError('THIR call has no typed realization: ' + operation.payload.symbol)
-                        dependencies.add(target)
-                    for symbol, _, _ in getattr(operation.payload, 'symbol_contracts', ()):
-                        target = body_owners.get(symbol)
-                        if target is None:
-                            raise ValueError('THIR callback has no typed realization: ' + symbol)
-                        dependencies.add(target)
+            pending, visited = [callable_.body], set()
+            for body in pending:
+                if body.name in visited:
+                    continue
+                visited.add(body.name)
+                for block in body.blocks:
+                    for operation in block.operations:
+                        if isinstance(operation.payload, Cleanup):
+                            pending.append(operation.payload.recipe)
+                        generated = getattr(operation.payload, 'generated_bodies', None)
+                        if generated:
+                            pending.extend(generated())
+                        if isinstance(operation.payload, Invoke):
+                            target = body_owners.get(operation.payload.symbol)
+                            if target is None:
+                                raise ValueError('THIR call has no typed realization: ' + operation.payload.symbol)
+                            dependencies.add(target)
+                        for symbol, _, _ in getattr(operation.payload, 'symbol_contracts', ()):
+                            target = body_owners.get(symbol)
+                            if target is None:
+                                raise ValueError('THIR callback has no typed realization: ' + symbol)
+                            dependencies.add(target)
         result.append(TypedSubmodule(key, source.identity, source.declarations, substitution,
                                      tuple(callables), tuple(sorted(dependencies))))
     return TypedModule(module.identity, interface or module.source.path, module.source,
@@ -247,11 +258,11 @@ class ThirTests(unittest.TestCase):
     # pass implementation details, so the HIR/THIR boundary can change freely.
     point = 'class Point:\n    x: int\n'
 
-    def native_behavior(self, source):
+    def c_behavior(self, source):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         typed = self.compile(source, stop_after='thir')
         self.assertFalse(typed.diagnostics, str(typed.diagnostics))
         with tempfile.TemporaryDirectory(prefix='sev-typed-behavior-') as directory:
@@ -263,7 +274,7 @@ class ThirTests(unittest.TestCase):
             result = test_package(root)
             self.assertTrue(result['success'], result)
 
-    def test_native_inferred_views_and_owned_results_in_declaration_orders(self):
+    def test_c_inferred_views_and_owned_results_in_declaration_orders(self):
         declarations = (
             'def identity[T](value: T) -> T:\n    return value\n',
             'def duplicate[T](value: copy T) -> T:\n    return value\n',
@@ -285,9 +296,9 @@ class ThirTests(unittest.TestCase):
         for reverse in (False, True):
             with self.subTest(reverse=reverse):
                 ordered = declarations[::-1] if reverse else declarations
-                self.native_behavior(self.point + ''.join(ordered) + checks)
+                self.c_behavior(self.point + ''.join(ordered) + checks)
 
-    def test_native_return_branch_order_preserves_both_borrow_sources(self):
+    def test_c_return_branch_order_preserves_both_borrow_sources(self):
         # TDD: choosing between sources must not require one statically known owner.
         branches = (
             '    if take_left:\n        return left\n    return right\n',
@@ -305,7 +316,7 @@ class ThirTests(unittest.TestCase):
 '''
         for branch in branches:
             with self.subTest(branch=branch):
-                self.native_behavior(self.point +
+                self.c_behavior(self.point +
                     'def choose[T](left: T, right: T, take_left: bool) -> T:\n' + branch + checks)
 
     def test_either_returned_parameter_must_outlive_result(self):
@@ -326,7 +337,7 @@ class ThirTests(unittest.TestCase):
                     self.assertTrue(result.diagnostics)
                     self.assertRegex(str(result.diagnostics), 'moved or dropped|borrow|lifetime')
 
-    def test_native_mutual_recursion_preserves_views_in_all_orders(self):
+    def test_c_mutual_recursion_preserves_views_in_all_orders(self):
         # TDD: discovering a recursive return before the base return must not
         # commit the recursive callable to an owned-result contract.
         branches = (
@@ -351,7 +362,7 @@ class ThirTests(unittest.TestCase):
             for reverse in (False, True):
                 with self.subTest(branch=branch, reverse=reverse):
                     ordered = declarations[::-1] if reverse else declarations
-                    self.native_behavior(self.point + ''.join(ordered) + checks)
+                    self.c_behavior(self.point + ''.join(ordered) + checks)
 
     def test_mixed_owned_and_view_results_rejected_in_both_branch_orders(self):
         branches = (
@@ -391,8 +402,8 @@ class ThirTests(unittest.TestCase):
                 self.assertTrue(all(d.source.text == source for d in result.diagnostics))
                 self.assertFalse(result.program.typed_modules)
 
-    def test_native_inferred_types_conversions_and_callable_selection(self):
-        self.native_behavior('''def convert[T](value: T) -> int:
+    def test_c_inferred_types_conversions_and_callable_selection(self):
+        self.c_behavior('''def convert[T](value: T) -> int:
     return int(value)
 def increment(value: int) -> int:
     return value + 1
@@ -407,7 +418,7 @@ test "types and callable arguments determine behavior":
     assert(apply[i32](small) == 7)
 ''')
 
-    def test_native_shared_generic_dependencies_with_increasing_callers(self):
+    def test_c_shared_generic_dependencies_with_increasing_callers(self):
         # Linear-sized fixtures exercise shared dependencies without asserting
         # a cache implementation or using noisy wall-clock performance limits.
         declarations = (
@@ -421,7 +432,7 @@ test "types and callable arguments determine behavior":
                        for i in range(count)]
             checks = [f'    assert(caller_{i}(10) == {11 + i})' for i in range(count)]
             with self.subTest(callers=count):
-                self.native_behavior(''.join(reversed(helpers)) + declarations +
+                self.c_behavior(''.join(reversed(helpers)) + declarations +
                     'test "shared generic dependencies select the right callable":\n' +
                     '\n'.join(checks) + '\n')
 

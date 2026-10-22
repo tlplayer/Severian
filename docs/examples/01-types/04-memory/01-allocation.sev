@@ -20,7 +20,7 @@ test "raw memory allocation":
 
         assert(memory[2] == 30)
 
-        free(memory)
+        drop memory
 
 test with compiler "compiler rejects raw allocation from safe code":
     reject:
@@ -33,7 +33,7 @@ test "raw allocation by byte quantity":
         memory[6B] = u8(90)
         assert(memory[0] == u8(65))
         assert(memory[6] == u8(90))
-        free(memory)
+        drop memory
 
 test with compiler "byte allocation also requires unsafe":
     reject:

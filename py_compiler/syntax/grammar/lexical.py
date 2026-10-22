@@ -39,6 +39,15 @@ class Comment(LexicalTerm):
         return Match(self, window, end, {'kind': 'TRIVIA'})
 
 
+class FormattedString(LexicalTerm):
+    def recognize(self, window):
+        text, start = window.source.text, window.start
+        if text[start:start + 2] not in ('f"', "f'"):
+            return None
+        from py_compiler.syntax.symbol.forms import quoted_end
+        return Match(self, window, quoted_end(text, start + 1), {'kind': 'FSTRING'})
+
+
 class Word(LexicalTerm):
     def __init__(self, keywords):
         self.keywords = keywords
@@ -59,4 +68,4 @@ def providers(syntax):
     from py_compiler.syntax.catalog import grammars
     rules = grammars(syntax)
     reserved = {g.spelling for g in rules if g.role == 'Y' and hasattr(g, 'spelling')}
-    return (Whitespace(), Newline(), Comment(), Word(reserved), *rules)
+    return (Whitespace(), Newline(), Comment(), FormattedString(), Word(reserved), *rules)

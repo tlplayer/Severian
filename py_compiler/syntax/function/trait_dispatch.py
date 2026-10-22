@@ -1,4 +1,5 @@
 """Default trait bodies are fallbacks, never predicate candidates."""
+from py_compiler.syntax.block.record import implements
 from py_compiler.syntax.function.calls import select, invoke, literal_value, coerce
 from py_compiler.hir.thir.src.model import Edge, Terminator
 from py_compiler.mir.ownership.flow import Binding
@@ -37,9 +38,10 @@ def resolve_default_call(callee, arguments, cfg, env, span):
     if not defaults:
         raise ValueError('trait default body is missing from the imported interface')
     default, values = select(defaults, arguments, cfg, env)
+    cfg.deferred_call_arguments = getattr(cfg, 'deferred_call_arguments', set()) | {v.identity for v in values}
     if direct:
         return invoke(default, values, cfg, span)
-    candidates = [(d, e) for d in context.declarations if contract.name in d.traits
+    candidates = [(d, e) for d in context.declarations if implements(d, contract.name, context)
                   for e in context.functions.get(d.name + '.' + method, ())
                   if not getattr(e, 'trait_fallback', False) and
                   tuple(context.type(t) for _, t in e.parameters) == tuple(v.type for v in values)]

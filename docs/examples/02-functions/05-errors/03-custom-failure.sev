@@ -1,0 +1,22 @@
+def withdraw(balance: i64, amount: i64) -> i64 with
+{
+    amount > 0,
+    amount <= balance -> Error("insufficient balance"),
+}:
+    return balance - amount
+
+test "withdraw handles partial and full balance":
+    assert(withdraw(100, 42) == 58)
+    assert(withdraw(100, 100) == 0)
+
+test "withdraw rejects overdraft with its custom diagnostic":
+    throws "insufficient balance":
+        result = withdraw(10, 11)
+
+test "withdraw rejects zero amount":
+    throws "prefix contract failed":
+        result = withdraw(10, 0)
+
+test "withdraw rejects negative amount":
+    throws "prefix contract failed":
+        result = withdraw(10, -1)

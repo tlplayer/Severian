@@ -1,7 +1,13 @@
 {
   "package": {
     "name": "system.io",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Python compiler Linux x86-64 streams through library MLIR operations"
+  },
+  "dependencies": {
+    "string": {
+      "package": "core.string",
+      "path": "../../../core/string/c"
+    }
   }
 }

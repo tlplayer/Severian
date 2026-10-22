@@ -7,5 +7,19 @@
   },
   "lib": {
     "path": "src/lib.sev"
+  },
+  "sources": [
+    "src/lib.sev"
+  ],
+  "dependencies": {
+    "string": {
+      "path": "../../core/string/c"
+    },
+    "collections": {
+      "path": "../../core/collections/collection"
+    },
+    "util": {
+      "path": "../../core/utils/c"
+    }
   }
 }

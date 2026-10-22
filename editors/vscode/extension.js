@@ -2,6 +2,7 @@
 
 const childProcess = require('child_process');
 const fs = require('fs');
+const { createHash } = require('crypto');
 const path = require('path');
 const vscode = require('vscode');
 const { registerSemantic } = require('./semantic');
@@ -12,6 +13,7 @@ const {
   buildFileCoverage,
   normalizeFilePath,
   parseCoverageMap,
+  parsePythonCoverage,
   parseHits,
 } = require('./coverage-data');
 
@@ -26,14 +28,14 @@ function activate(context) {
   const coveredDecoration = vscode.window.createTextEditorDecorationType({
     gutterIconPath: context.asAbsolutePath('images/coverage-covered.svg'),
     gutterIconSize: 'contain',
-    overviewRulerColor: new vscode.ThemeColor('charts.blue'),
+    overviewRulerColor: '#3fb950',
     overviewRulerLane: vscode.OverviewRulerLane.Left,
     isWholeLine: true,
   });
   const uncoveredDecoration = vscode.window.createTextEditorDecorationType({
     gutterIconPath: context.asAbsolutePath('images/coverage-uncovered.svg'),
     gutterIconSize: 'contain',
-    overviewRulerColor: new vscode.ThemeColor('testing.iconFailed'),
+    overviewRulerColor: '#f85149',
     overviewRulerLane: vscode.OverviewRulerLane.Left,
     isWholeLine: true,
   });
@@ -65,7 +67,7 @@ function activate(context) {
     const coverage = files.get(normalizeFilePath(editor.document.uri.fsPath));
     const covered = [];
     const uncovered = [];
-    if (coverage) {
+    if (coverage && !editor.document.isDirty) {
       for (const line of coverage.lines.values()) {
         (line.covered ? covered : uncovered).push(lineDecoration(line));
       }
@@ -84,7 +86,7 @@ function activate(context) {
       editor && editor.document.uri.scheme === 'file'
         ? files.get(normalizeFilePath(editor.document.uri.fsPath))
         : undefined;
-    if (!editor || editor.document.languageId !== 'severian' || !coverage) {
+    if (!editor || editor.document.languageId !== 'severian' || !coverage || editor.document.isDirty) {
       status.hide();
       return;
     }
@@ -104,7 +106,7 @@ function activate(context) {
   async function loadCoverage(showResult = false) {
     const serial = ++refreshSerial;
     const mapUris = await vscode.workspace.findFiles(
-      '**/package.pkg/{coverage,debug/coverage/run-*}/coverage-map.json',
+      '**/package.pkg/{coverage/coverage-map.json,debug/coverage/run-*/coverage-map.json,debug/test/coverage/*/summary.json}',
       '**/{.git,node_modules}/**',
       200,
     );
@@ -126,6 +128,28 @@ function activate(context) {
       latest.map(async ({ uri: mapUri }) => {
         try {
           const mapContents = decoder.decode(await vscode.workspace.fs.readFile(mapUri));
+          if (path.basename(mapUri.fsPath) === 'summary.json') {
+            const summary = JSON.parse(mapContents);
+            const marker = mapUri.fsPath.lastIndexOf(`${path.sep}package.pkg${path.sep}`);
+            const root = mapUri.fsPath.slice(0, marker);
+            const directory = vscode.Uri.joinPath(mapUri, '..', 'files');
+            for (const name of Object.keys(summary.files || {})) {
+              const relative = path.relative(root, path.resolve(root, name));
+              if (relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) continue;
+              const contents = decoder.decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(directory, name + '.json')));
+              const parsed = parsePythonCoverage(contents, root);
+              if (parsed.sourceHash) {
+                const source = await vscode.workspace.fs.readFile(vscode.Uri.file(path.resolve(root, name)));
+                if (createHash('sha256').update(source).digest('hex') !== parsed.sourceHash) {
+                  output.appendLine(`Coverage is stale: ${name}; rerun coverage.`);
+                  continue;
+                }
+              }
+              allRegions.push(...parsed.regions);
+              for (const hit of parsed.hits) allHits.add(hit);
+            }
+            return;
+          }
           allRegions.push(...parseCoverageMap(mapContents));
           const directory = vscode.Uri.joinPath(mapUri, '..');
           const consolidated = vscode.Uri.joinPath(directory, 'coverage.hits');
@@ -272,10 +296,10 @@ function activate(context) {
   async function buildWith() {
     const choice = await vscode.window.showQuickPick(
       [
-        { label: '$(tools) Native executable', description: 'Build the default native artifact', options: [] },
-        { label: '$(verified) Native + verifier', description: 'Verify after every compiler stage', options: ['--verify-each'] },
+        { label: '$(tools) C executable', description: 'Build the default c artifact', options: [] },
+        { label: '$(verified) C + verifier', description: 'Verify after every compiler stage', options: ['--verify-each'] },
         { label: '$(file-code) LLVM IR', description: 'Emit LLVM intermediate representation', options: ['--emit', 'llvm'] },
-        { label: '$(file-binary) Assembly', description: 'Emit native assembly', options: ['--emit', 'asm'] },
+        { label: '$(file-binary) Assembly', description: 'Emit c assembly', options: ['--emit', 'asm'] },
         { label: '$(symbol-structure) XLA StableHLO', description: 'Emit StableHLO for the XLA target', options: ['--emit', 'stablehlo', '--target', 'xla'] },
       ],
       { placeHolder: 'Build the active Severian target with…' },
@@ -302,7 +326,7 @@ function activate(context) {
     refreshTimer = setTimeout(() => void loadCoverage(false), 250);
   }
 
-  const watcher = vscode.workspace.createFileSystemWatcher('**/package.pkg/{coverage,debug/coverage/run-*}/{coverage-map.json,*.hits}');
+  const watcher = vscode.workspace.createFileSystemWatcher('**/package.pkg/{coverage,debug/coverage/run-*,debug/test/coverage/*}/{coverage-map.json,*.hits,summary.json}');
   watcher.onDidCreate(scheduleRefresh);
   watcher.onDidChange(scheduleRefresh);
   watcher.onDidDelete(scheduleRefresh);
@@ -331,6 +355,8 @@ function activate(context) {
       try { await makeImportsExplicit(vscode, run, toolingOutput); }
       catch (error) { void vscode.window.showErrorMessage(`Could not make imports explicit: ${messageFor(error)}`); }
     }),
+    vscode.workspace.onDidChangeTextDocument(render),
+    vscode.workspace.onDidSaveTextDocument(scheduleRefresh),
     vscode.window.onDidChangeVisibleTextEditors(render),
     vscode.window.onDidChangeActiveTextEditor(render),
     vscode.workspace.onDidChangeConfiguration((event) => {

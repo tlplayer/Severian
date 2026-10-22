@@ -11,7 +11,7 @@
     { "include": "#characters" },
     { "include": "#strings" },
     { "include": "#decorators" },
-    { "include": "#native-declarations" },
+    { "include": "#c-declarations" },
     { "include": "#function-declarations" },
     { "include": "#type-declarations" },
     { "include": "#tests" },
@@ -25,11 +25,27 @@
     { "include": "#member-access" },
     { "include": "#function-calls" },
     { "include": "#operators" },
-    { "include": "#punctuation" }
+    { "include": "#punctuation" },
+    { "include": "#variables" }
   ],
   "repository": {
     "comments": {
       "patterns": [
+        {
+          "name": "comment.block.severian",
+          "begin": "'''",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.begin.severian"
+            }
+          },
+          "end": "'''",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.end.severian"
+            }
+          }
+        },
         {
           "name": "comment.line.number-sign.severian",
           "begin": "#",
@@ -69,7 +85,8 @@
                 { "include": "#member-access" },
                 { "include": "#function-calls" },
                 { "include": "#operators" },
-                { "include": "#punctuation" }
+                { "include": "#punctuation" },
+                { "include": "#variables" }
               ]
             }
           ]
@@ -105,7 +122,8 @@
                 { "include": "#member-access" },
                 { "include": "#function-calls" },
                 { "include": "#operators" },
-                { "include": "#punctuation" }
+                { "include": "#punctuation" },
+                { "include": "#variables" }
               ]
             }
           ]
@@ -171,12 +189,12 @@
         }
       ]
     },
-    "native-declarations": {
+    "c-declarations": {
       "patterns": [
         {
           "match": "\\b(extern)\\b",
           "captures": {
-            "1": { "name": "storage.modifier.native.severian" }
+            "1": { "name": "storage.modifier.c.severian" }
           }
         }
       ]
@@ -347,6 +365,14 @@
         {
           "match": "(?<![A-Za-z0-9_])X(?![A-Za-z0-9_])",
           "name": "keyword.operator.matrix.severian"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b",
+          "name": "variable.other.readwrite.severian"
         }
       ]
     },

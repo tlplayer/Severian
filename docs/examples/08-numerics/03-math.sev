@@ -1,4 +1,5 @@
 import math
+from math import pow, log, log2, log10, ln, exp, floor, ceil, round, approximate, isfinite, isnan
 
 
 test "powers and logarithms":
@@ -6,7 +7,7 @@ test "powers and logarithms":
     assert(log(1.0) == 0.0)
     assert(log2(8.0) == 3.0)
     assert(log10(100.0) == 2.0)
-    assert(approximate(ln(e), 1.0))
+    assert(approximate(ln(exp(1.0)), 1.0))
 
 
 test "trigonometry":

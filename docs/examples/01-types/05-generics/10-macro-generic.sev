@@ -1,39 +1,55 @@
+from collections import repeat
+
 # M - Macro
 # Expand compiler input through the concrete macro implementation.
 
 trait MacroTerm:
-    def expand(input_tokens: list[i64]) -> list[i64]
+    def expand(input_tokens: tensor[i64]) -> tensor[i64]
 
 
 class RepeatMacro: MacroTerm
     repetitions: usize
 
-    def expand(input_tokens: list[i64]) -> list[i64]:
+    def expand(input_tokens: tensor[i64]) -> tensor[i64]:
         return repeat_tokens(input_tokens, repetitions)
 
 
-def repeat_tokens(input_tokens: list[i64], repetitions: usize) -> list[i64]:
-    output: list[i64] = []
-    remaining := repetitions
-
-    while remaining > 0:
-        for token in input_tokens:
-            output.append(token)
-
-        remaining -= 1
-
-    return output
+def repeat_tokens(input_tokens: tensor[i64], repetitions: usize) -> tensor[i64]:
+    return repeat(input_tokens, repetitions)
 
 
--> expand_macro[M: MacroTerm](macro_term: M, input_tokens: list[i64]) -> list[i64]:
+-> expand_macro[M: MacroTerm](macro_term: M, input_tokens: tensor[i64]) -> tensor[i64]:
     return macro_term.expand(input_tokens)
 
 
 test:
-    expanded := expand_macro[RepeatMacro](RepeatMacro(3), [4, 2])
+    macro_term = RepeatMacro(3)
+    input_tokens = tensor[i64](tuple[i64,2](4,2))
+    expanded = expand_macro[RepeatMacro](macro_term, input_tokens)
 
-    assert(size(expanded) == 6)
+    assert(len(expanded) == 6)
     assert(expanded[0] == 4)
     assert(expanded[1] == 2)
     assert(expanded[4] == 4)
     assert(expanded[5] == 2)
+
+
+test "zero expansion produces no tokens":
+    macro_term = RepeatMacro(0)
+    input_tokens = tensor[i64](tuple[i64,2](4,2))
+    expanded = expand_macro(macro_term, input_tokens)
+    assert(len(expanded) == 0)
+
+test "empty token input remains empty":
+    macro_term = RepeatMacro(3)
+    input_tokens = tensor[i64](0)
+    expanded = expand_macro(macro_term, input_tokens)
+    assert(len(expanded) == 0)
+
+test "expanded tokens are independent of the input":
+    macro_term = RepeatMacro(2)
+    input_tokens = tensor[i64](tuple[i64,2](4,2))
+    expanded = expand_macro(macro_term, input_tokens)
+    expanded[0] = 99
+    assert(input_tokens[0] == 4)
+    assert(expanded[2] == 4)

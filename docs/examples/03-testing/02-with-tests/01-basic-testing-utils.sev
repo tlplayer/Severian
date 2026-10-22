@@ -1,0 +1,40 @@
+'''
+The testing language only needs three control primitives: `when`, `assert`,
+and `throws`. Richer behavior belongs in test modifiers and library helpers.
+
+One-line operations use calls. Multiline checks use an indented block.
+'''
+
+
+class ParseError: Error
+    message: string
+
+
+def parse_port(value: string) -> int | ParseError:
+    if value == "8080":
+        return 8080
+    throw ParseError("invalid port")
+
+
+test "assert keeps the original expression":
+    port ?= parse_port("8080")
+
+    when port is int:
+        assert(port > 0 and port < 65536)
+
+
+test "when uses a block when one condition needs multiple checks":
+    result ?= parse_port("8080")
+    when result is int:
+        assert(result > 0)
+        assert(result < 65536)
+
+
+test "throws describes the expected failure boundary":
+    throws(parse_port("not-a-port") -> ParseError)
+
+
+test "throws also supports multiline checks":
+    throws(parse_port("still-not-a-port")):
+        ParseError(message):
+            assert(message == "invalid port")

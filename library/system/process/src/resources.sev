@@ -1,5 +1,5 @@
 # Hosted Linux command budgets. These limits apply before compilation starts
-# and are inherited by native tools and test executables launched by it.
+# and are inherited by c tools and test executables launched by it.
 # Keep this helper separate from the target-program prelude.
 def memory_budget(value: string) -> int | Error:
     units = ["GiB", "MiB", "KiB", "GB", "MB", "KB", "B"]

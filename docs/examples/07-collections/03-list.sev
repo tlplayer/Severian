@@ -1,21 +1,28 @@
+from collections import list
+
 # list[T]: a growable owned sequence.
 def main():
-    scores := list(10, 30)
+    scores := [10, 30]
     scores.reserve(4)  # Make room without adding elements.
-    assert(scores.len() == 2)
+    if not (scores.len() == 2):
+        throw Error("list invariant failed")
 
     scores.insert(1, 20)
     scores.append(40)
-    assert(scores.len() == 4)
-    assert(scores[1] == 20)
+    if not (scores.len() == 4):
+        throw Error("list invariant failed")
+    if not (scores[1] == 20):
+        throw Error("list invariant failed")
 
-    last, found := scores.pop()
-    assert(found and last == 40)
+    last = scores.try_pop()
+    if not (last.has_value and last.value == 40):
+        throw Error("list invariant failed")
     for score in scores.iter():
         print(score)  # 10, 20, 30 on successive lines.
 
+
 test "list grows while preserving element order":
-    values := list(10, 30)
+    values := [10, 30]
     values.reserve(4)
     assert(values.len() == 2)
     values.insert(1, 20)
@@ -25,15 +32,15 @@ test "list grows while preserving element order":
     assert(values[2] == 30 and values[3] == 40)
 
 test "list pop reports presence and then absence":
-    values := list(10)
-    value, found := values.pop()
-    assert(found and value == 10)
+    values := [10]
+    value = values.try_pop()
+    assert(value.has_value and value.value == 10)
     assert(values.len() == 0)
-    _, found = values.pop()
-    assert(not found)
+    missing = values.try_pop()
+    assert(not missing.has_value)
 
 test "list can declare a union of element types":
-    values := list[int | string](10, "ready")
+    values: list[int | string] = [10, "ready"]
     values.append("done")
     values.append(20)
     assert(values.len() == 4)
@@ -49,3 +56,41 @@ test "list of any accepts different value types":
     assert(values[0] == 10)
     assert(values[1] == "ready")
     assert(values[2] == true)
+
+
+test "list slices own their elements and preserve iteration type":
+    words = ["one", "two", "three"]
+    reversed = words[::-1]
+    clipped = words[-20:20:2]
+    empty = words[2:1]
+    chosen = words[:1] if words.len() == 3 else words[1:]
+    drop words
+    assert(reversed.len() == 3 and reversed[0] == "three" and reversed[2] == "one")
+    assert(clipped.len() == 2 and clipped[1] == "three")
+    assert(empty.len() == 0)
+    assert(chosen.len() == 1 and chosen[0] == "one")
+    characters = 0
+    for word in reversed[1:]:
+        characters += len(word)
+    assert(characters == 6)
+
+test "zero stride is rejected":
+    values = [1, 2]
+    throws(values[::0]):
+        Error(message, call_stack):
+            assert(message == "slice step cannot be zero")
+    assert(values[0] == 1 and values[1] == 2)
+    valid = values[::1]
+    assert(valid[0] == 1 and valid[1] == 2)
+
+test "runtime zero stride reaches the caller catch":
+    values = [3, 4]
+    step = values[0] - 3
+    caught = false
+    try:
+        invalid = values[::step]
+    catch error: Error:
+        assert(error.message == "slice step cannot be zero")
+        caught = true
+    assert(caught)
+    assert(values[0] == 3 and values[1] == 4)

@@ -1,4 +1,16 @@
 {
-  "package": {"name": "system.file", "version": "0.1.0"},
-  "dependencies": {"io": {"package": "system.io", "path": "../../io/linux_x86_64"}}
+  "package": {
+    "name": "system.file",
+    "version": "0.1.0"
+  },
+  "dependencies": {
+    "io": {
+      "package": "system.io",
+      "path": "../../io/linux_x86_64"
+    },
+    "string": {
+      "package": "core.string",
+      "path": "../../../core/string/c"
+    }
+  }
 }

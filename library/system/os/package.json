@@ -6,7 +6,7 @@
     "description": "Hosted filesystem operations and metadata",
     "unsafe": {
       "capabilities": [
-        "native-abi"
+        "c-abi"
       ],
       "sources": [
         "src/lib.sev"

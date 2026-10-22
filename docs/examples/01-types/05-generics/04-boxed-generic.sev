@@ -5,7 +5,7 @@ class Box[T]:
         return value
 
     def addition(addition: T):
-        value += addition
+        value = value + addition
 
 
 def main():
@@ -19,3 +19,29 @@ def main():
     print(ints.value)
     print(floats.value)
     print(strings.value())
+
+
+test "generic boxes preserve numeric specializations":
+    integers = Box[int](10)
+    floats = Box[f64](2.5)
+    integers.addition(20)
+    floats.addition(4.5)
+    assert(integers.value() == 30)
+    assert(floats.value() == 7.0)
+
+test "inferred string box owns its appended result":
+    original = "Hello,"
+    strings = Box(original)
+    strings.addition("World!")
+    drop original
+    assert(strings.value() == "Hello,World!")
+
+test with integ "boxed generic main executes all specializations":
+    main()
+    assert("30" in stdout)
+    assert("Hello,World!" in stdout)
+
+test with compiler "box rejects a mismatched argument type":
+    integers = Box[int](10)
+    reject:
+        integers.addition("ten")

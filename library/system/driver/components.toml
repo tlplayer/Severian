@@ -89,6 +89,6 @@ os = ["arch", "manjaro"]
 program = "pacman"
 arguments = ["-S", "--needed", "--noconfirm", "rocmlir"]
 
-# XLA and Triton are optional donor-backed consumers. Installing the native
+# XLA and Triton are optional donor-backed consumers. Installing the c
 # Triton bridge makes it a candidate for eligible GPU fusion regions without
 # adding a user-facing backend flag.

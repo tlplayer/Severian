@@ -1,3 +1,7 @@
+import string
+from collections import list
+from util import range
+
 # Edges point from a consumer to its dependency. Package discovery and version
 # selection remain with package.resolve; this library operates on a snapshot.
 class Edge:
@@ -14,9 +18,10 @@ class Graph:
     next_outgoing: list[int]
     next_incoming: list[int]
 
-def node(graph: Graph, index: int) -> unit | Error:
+def node(graph: Graph, index: int) -> absent | Error:
     if index < 0 or index >= int(len(graph.names)):
         throw Error("dependency graph node is out of range: " + string(index))
+    return absent
 
 def graph(names: list[string], edges: list[Edge]) -> Graph | Error:
     outgoing: list[int] = []
@@ -34,7 +39,7 @@ def graph(names: list[string], edges: list[Edge]) -> Graph | Error:
         next_outgoing.append(-1)
         next_incoming.append(-1)
     # Prepending backwards preserves the supplied edge order in both indexes.
-    cursor := int(len(edges))
+    cursor = int(len(edges))
     while cursor > 0:
         cursor -= 1
         edge = copied[cursor]
@@ -64,7 +69,7 @@ def build_order(graph: Graph, roots: list[int] = []) -> list[int] | Error:
         stack.append(root)
         state[root] = 1
         while len(stack) > 0:
-            current = stack[-1]
+            current = stack[len(stack) - 1]
             edge_index = cursors[current]
             if edge_index < 0:
                 stack.pop()
@@ -78,7 +83,7 @@ def build_order(graph: Graph, roots: list[int] = []) -> list[int] | Error:
                 for member in stack:
                     chain.append(graph.names[member])
                 chain.append(graph.names[child])
-                throw Error("package dependency cycle: " + chain.join(" -> "))
+                throw Error("package dependency cycle: " + join_names(chain))
             if state[child] == 0:
                 state[child] = 1
                 stack.append(child)
@@ -96,11 +101,11 @@ def closure(graph: Graph, roots: list[int], reverse: bool = false) -> list[int] 
         if not seen[root]:
             seen[root] = true
             result.append(root)
-    cursor := 0
+    cursor = 0
     while cursor < int(len(result)):
         current = result[cursor]
         cursor += 1
-        edge_index := graph.incoming[current] if reverse else graph.outgoing[current]
+        edge_index = graph.incoming[current] if reverse else graph.outgoing[current]
         while edge_index >= 0:
             edge = graph.edges[edge_index]
             child = edge.parent if reverse else edge.child
@@ -116,8 +121,35 @@ def affected(graph: Graph, changed: list[int]) -> list[int] | Error:
 def link_order(graph: Graph, roots: list[int] = []) -> list[int] | Error:
     ordered = build_order(graph, roots)
     result: list[int] = []
-    cursor := int(len(ordered))
+    cursor = int(len(ordered))
     while cursor > 0:
         cursor -= 1
         result.append(ordered[cursor])
     return result
+
+
+def join_names(names: list[string]) -> string:
+    result = ""
+    index = 0
+    while index < names.len():
+        if index > 0:
+            result = result + " -> "
+        result = result + names[index]
+        index += 1
+    return result
+
+test "diamond dependencies build providers first and link consumers first":
+    value = graph(["app", "left", "right", "shared"], [Edge(0,1), Edge(0,2), Edge(1,3), Edge(2,3)])
+    built = build_order(value, [0])
+    linked = link_order(value, [0])
+    assert(built.len() == 4 and built[0] == 3 and built[3] == 0)
+    assert(linked[0] == 0 and linked[3] == 3)
+    changed = affected(value, [3])
+    assert(changed.len() == 4 and changed[0] == 3)
+
+test "cycles and invalid edges are errors":
+    cycle = graph(["a", "b"], [Edge(0,1), Edge(1,0)])
+    result ?= build_order(cycle)
+    assert(result is Error)
+    invalid ?= graph(["a"], [Edge(0,1)])
+    assert(invalid is Error)

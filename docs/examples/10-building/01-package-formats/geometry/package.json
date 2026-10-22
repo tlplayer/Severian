@@ -18,7 +18,7 @@
   "xxi": {
     "c": {
       "sources": [
-        "native/scale.c"
+        "c/scale.c"
       ],
       "exports": [
         "geometry_scale"
@@ -30,7 +30,7 @@
     },
     "rust": {
       "sources": [
-        "native/provider.rs"
+        "c/provider.rs"
       ]
     }
   },
@@ -47,5 +47,8 @@
       "name": "geometry-tool",
       "path": "src/main.sev"
     }
+  ],
+  "sources": [
+    "src/lib.sev"
   ]
 }

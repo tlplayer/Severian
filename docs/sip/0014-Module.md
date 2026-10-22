@@ -186,7 +186,7 @@ test "typed submodules reach MIR":
     assert all retain source identities and resolved callable contracts
     assert hash[int](42) and hash[int, simple_hash](42) share a realization
     assert no ReadyMir
-    assert no native objects or archive recorded for this build
+    assert no c objects or archive recorded for this build
 
 test "completed static target matches package layout":
     assert interface index references existing lib.sevi

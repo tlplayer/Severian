@@ -144,9 +144,9 @@ class TypedBody:
                     raise ValueError("duplicate SSA definition")
                 definitions[value.identity] = (index, value.type)
             term = block.terminator
-            if term.kind not in ("jump", "conditional", "finish", "panic"):
+            if term.kind not in ("jump", "conditional", "finish", "panic", "unreachable"):
                 raise ValueError("unknown CFG terminator")
-            expected_edges = {"jump": 1, "conditional": 2, "finish": 0, "panic": 0}[term.kind]
+            expected_edges = {"jump": 1, "conditional": 2, "finish": 0, "panic": 0, "unreachable": 0}[term.kind]
             if len(term.edges) != expected_edges:
                 raise ValueError("CFG terminator edge count mismatch")
             if term.kind == "conditional" and (term.value is None or term.value.type.name != "bool"):

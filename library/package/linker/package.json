@@ -3,27 +3,32 @@
     "name": "package.linker",
     "version": "0.1.0",
     "edition": "2026",
-    "description": "Verified native link plans and atomic output publication"
+    "description": "Verified c link plans and atomic output publication"
   },
   "lib": {
     "path": "src/lib.sev"
   },
   "dependencies": {
     "file": {
-      "path": "../../system/file"
+      "path": "../../system/file/linux_x86_64"
     },
     "os": {
-      "path": "../../system/os"
+      "path": "../../system/os/linux_x86_64"
     },
     "path": {
-      "path": "../../system/path"
+      "path": "../../system/path/c"
     },
     "process": {
-      "path": "../../system/process"
+      "path": "../../system/process/linux_x86_64"
     },
-    "metadata": {
-      "package": "package.metadata",
-      "path": "../metadata"
+    "string": {
+      "path": "../../core/string/c"
+    },
+    "collections": {
+      "path": "../../core/collections/collection"
     }
-  }
+  },
+  "sources": [
+    "src/lib.sev"
+  ]
 }

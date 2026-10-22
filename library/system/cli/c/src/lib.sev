@@ -1,0 +1,83 @@
+import process
+import string
+from collections import list, dict
+
+class Argument:
+    name: string
+    help: string
+    required: bool
+    multiple: bool
+
+class Command:
+    name: string
+    about: string
+    arguments: list[Argument]
+
+class Matches:
+    entries: dict[string,list[string]]
+
+class CliError: Error
+    message: string
+
+def argument(name: string, help: string = "", required: bool = true, multiple: bool = false) -> Argument:
+    return Argument(name, help, required, multiple)
+
+def command(name: string, about: string, arguments: copy list[Argument]) -> Command:
+    return Command(name, about, arguments)
+
+def parse(specification: Command, input: list[string]) -> Matches | CliError:
+    entries = dict[string,list[string]]()
+    position = 0
+    index = 0
+    while index < specification.arguments.len():
+        item = specification.arguments[index]
+        name = copy item.name
+        if name == "" or name in entries:
+            throw CliError("argument names must be nonempty and unique")
+        if item.multiple and index + 1 != specification.arguments.len():
+            throw CliError("only the last positional argument may accept multiple values")
+        captured = list[string]()
+        if position < input.len():
+            captured.append(input[position])
+            position += 1
+            if item.multiple:
+                while position < input.len():
+                    captured.append(input[position])
+                    position += 1
+        if item.required and captured.len() == 0:
+            throw CliError("missing required argument: " + item.name)
+        entries[name] = captured
+        index += 1
+    if position < input.len():
+        throw CliError("too many positional arguments")
+    return Matches(entries)
+
+def parse_process(specification: Command) -> Matches | CliError:
+    input = process.arguments()
+    values = list[string]()
+    index = 1
+    while index < input.len():
+        values.append(input[index])
+        index += 1
+    return parse(specification, values)
+
+def values(matches: Matches, name: string) -> list[string]:
+    if name not in matches.entries:
+        return list[string]()
+    return matches.entries[name]
+
+def render_error(error: CliError) -> string:
+    return "error: " + error.message
+
+test "optional multiple arguments retain literal strings":
+    specification = command("example", "", [argument("values", required=false, multiple=true)])
+    parsed = parse(specification, ["a b", "$HOME"])
+    result = values(parsed, "values")
+    assert(result.len() == 2 and result[0] == "a b" and result[1] == "$HOME")
+    empty = parse(specification, [])
+    assert(values(empty, "values").len() == 0)
+
+test "required and excess positional values are errors":
+    specification = command("example", "", [argument("value")])
+    throws(parse(specification, []) -> CliError)
+    throws(parse(specification, ["a", "b"]) -> CliError)

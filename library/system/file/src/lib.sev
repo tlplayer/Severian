@@ -36,10 +36,10 @@ def map(path: string) -> list[u8] | Error:
     return streams.read(path)
 
 @c(symbol = "__sev_file_lock")
-def native_lock(path: string) -> int
+def c_lock(path: string) -> int
 
 def lock(path: string) -> int | None:
-    handle = native_lock(path)
+    handle = c_lock(path)
     if handle < 0:
         return None
     return handle

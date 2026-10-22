@@ -1,27 +1,37 @@
-import tensor
+import tensor_math
 
-
-@tensor(X)
-def contract(left: Tensor[f64], right: Tensor[f64]) -> Tensor[f64]:
+# Select the library's contraction symbol only inside this function.
+# The operator calls the existing c matmul implementation.
+@tensor_math(X)
+def contract(left: tensor[f64,(None,None)], right: tensor[f64,(None,None)]) -> tensor[f64,(None,None)]:
     return left X right
 
 
-test:
-    left = tensor(
-        [1.0, 0.0,
-         0.0, 1.0],
-        [2, 2],
-    )
-
-    right = tensor(
-        [2.0, 3.0,
-         4.0, 5.0],
-        [2, 2],
-    )
-
+test "selected contraction multiplies matrices":
+    left = tensor[f64,(2,2)]((1.0, 0.0, 0.0, 1.0))
+    right = tensor[f64,(2,2)]((2.0, 3.0, 4.0, 5.0))
     result = contract(left, right)
+    assert(result.dim(0) == 2 and result.dim(1) == 2)
+    assert(result[0,0] == 2.0 and result[0,1] == 3.0)
+    assert(result[1,0] == 4.0 and result[1,1] == 5.0)
 
-    assert(tensor.values(result) == [
-        2.0, 3.0,
-        4.0, 5.0,
-    ])
+
+test "contraction preserves rectangular output shape":
+    left = tensor[f64,(2,3)]((1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
+    right = tensor[f64,(3,1)]((7.0, 8.0, 9.0))
+    result = contract(left, right)
+    assert(result.dim(0) == 2 and result.dim(1) == 1)
+    assert(result[0,0] == 50.0 and result[1,0] == 122.0)
+
+
+test "contraction checks inner dimensions":
+    throws "matrix multiplication inner dimensions do not match":
+        left = tensor[f64,(2,3)]((1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
+        right = tensor[f64,(2,1)]((7.0, 8.0))
+        result = contract(left, right)
+
+
+test with compiler "word operators remain lexical to their selected pack":
+    reject:
+        def unselected(left: tensor[f64,(None,None)], right: tensor[f64,(None,None)]) -> tensor[f64,(None,None)]:
+            return left X right

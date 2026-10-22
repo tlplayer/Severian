@@ -12,4 +12,4 @@ test "unit graph excludes consumers and remaps diamond edges":
     assert(unit.packages[1].identity.name == "shared")
     assert(unit.edges[0].parent == 0 and unit.edges[0].child == 1)
     assert(unit.edges[0].alias == "shared")
-    assert(package.native_arguments(resolution, []) == ["/app.a", "/right.a", "/left.a", "/shared.a"])
+    assert(package.c_arguments(resolution, []) == ["/app.a", "/right.a", "/left.a", "/shared.a"])

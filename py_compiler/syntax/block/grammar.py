@@ -57,8 +57,11 @@ def capture_expression(node, captures):
 class Grammar(DeclarationProvider):
     spelling = 'grammar'
 
+    def has_body(self, node):
+        return node.tokens[-1].text == ':'
+
     def parse_header(self, items):
-        header = tuple(items[1:-1])
+        header = tuple(items[1:-1] if items[-1].text == ':' else items[1:])
         if len(header) >= 8 and header[0].kind == 'IDENTIFIER' and header[1].text == '(':
             from py_compiler.syntax.block.procedural import Procedure
             if tuple(t.text for t in header[3:7]) != (':', 'SourceWindow', ')', '->'):
@@ -117,6 +120,8 @@ class Grammar(DeclarationProvider):
         context.declared_nodes.add(node.identity)
 
     def declare_member(self, node, context, owner):
+        if not node.children:
+            raise ValueError('class grammar requires an implementation body')
         name, arrangement, result_name = node.header
         from py_compiler.syntax.block.procedural import Procedure
         if isinstance(arrangement, Procedure):
@@ -275,6 +280,11 @@ def expression_grammar(term, cfg, env):
     tokens = getattr(term, 'tokens', ())
     if not tokens or term.kind == 'capture':
         return None
+    if (term.kind == 'call' and len(term.operands) == 2
+            and term.operands[0].kind == 'name' and term.operands[0].token.text == 'iterator'):
+        from py_compiler.syntax.generic.place import expression_type
+        from py_compiler.syntax.complex.collection import collection_iterator
+        collection_iterator(expression_type(term.operands[1], cfg, env), cfg.context)
     providers = [BoundGrammar(d, cfg, env) for d in cfg.context.sentence_grammars
                  if d[3] is not None and visible(d, cfg)
                  and d[0].identity not in cfg.active_grammars]
@@ -282,6 +292,40 @@ def expression_grammar(term, cfg, env):
         return None
     window = SourceWindow(tokens[0].lexeme.source, tokens[0].span.start, tokens[-1].span.end, tokens)
     return Registry(providers).recognize('O.custom', window, optional=True)
+
+
+def boolean_provider(actual, cfg):
+    """Resolve a condition contract without evaluating the source expression."""
+    boolean = cfg.context.type('bool')
+    candidates = []
+    for declaration in cfg.context.sentence_grammars:
+        if declaration[3] != boolean or not visible(declaration, cfg):
+            continue
+        arrangement = declaration[1]
+        if (isinstance(arrangement, tuple) and len(arrangement) == 4
+                and arrangement[:2] == ('bool', '(') and arrangement[-1] == ')'
+                and isinstance(arrangement[2], tuple) and arrangement[2][1] == actual
+                and declaration[0].identity not in cfg.active_grammars):
+            candidates.append(declaration)
+    owned = [g for g in actual.grammars() if g.role == 'F.condition']
+    if len(candidates) + len(owned) != 1:
+        raise ValueError(actual.name + ' requires exactly one Boolean condition grammar')
+    return candidates[0] if candidates else owned[0]
+
+
+def boolean_grammar(value, node, cfg, env):
+    """Select the source-owned bool(self) grammar after evaluating self once."""
+    from py_compiler.syntax.complex.tensor import ArgumentValue
+    from py_compiler.syntax.generic.storage import root_binding
+    selected = boolean_provider(value.type, cfg)
+    if not isinstance(selected, tuple):
+        return selected.expand(value, node, cfg, env)
+    declaration = selected
+    capture = ArgumentValue(value, root_binding(node, cfg, env))
+    window = SourceWindow(node.token.lexeme.source, node.token.span.start, node.token.span.end, (node.token,))
+    match = Match(BoundGrammar(declaration, cfg, env), window, window.end,
+                  {declaration[1][2][0]: capture})
+    return lower_result(match, cfg)
 
 
 def lower_result(match, cfg):
@@ -326,6 +370,7 @@ def lower_result(match, cfg):
             raise ValueError('grammar result cannot retain a borrow of local storage')
         if value.identity in cfg.stack_values:
             raise ValueError('grammar result cannot escape local stack storage')
+        cfg.run_defers(depth)
         for loop in reversed(cfg.loops):
             leave = getattr(loop, 'leave', None)
             if leave:
@@ -478,15 +523,15 @@ def work():
             {'name': 'Buffer', 'fields': [('value', 'int')], 'defaults': [0], 'memory-defaults': []}]}
         result = compile_source('imported-grammar.sev',
             'import library\ntest:\n    value = library.Buffer()\n    value[0] = 1\n',
-            Syntax(include_tests=True), native_packages={'library': package})
+            Syntax(include_tests=True), c_packages={'library': package})
         self.assertTrue(result.diagnostics)
         self.assertIn('no indexed storage contract', str(result.diagnostics))
 
-    def test_native_result_grammar_control_flow_and_owned_results(self):
+    def test_c_result_grammar_control_flow_and_owned_results(self):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         source = '''class Numbers:
     value: int
     grammar sum[self, "[", count: int, "]"]() -> int:

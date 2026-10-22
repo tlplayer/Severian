@@ -1,0 +1,22 @@
+'''
+Assert is a pass/fail function on a condition for a test block. This is not available within a normal 
+code block scope similar to compiler. 
+
+for one or two checks use the functional form
+Otherwise the block form makes more sense
+'''
+
+
+def divide(a: f64, b: f64) -> f64:
+    return a / b
+
+
+test:
+    #Single check has compact function form
+    assert(divide(1,2) == .5)
+    #Many checks have block form
+    assert:
+        divide(1,3) == 1.0/3.0
+        divide(8,4) == 2
+        divide(10,5) == 2
+

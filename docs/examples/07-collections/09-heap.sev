@@ -1,49 +1,62 @@
+from collections import heap
+
 # heap[T]: a priority queue that removes the smallest value first.
 def main():
-    priorities := heap()
+    priorities := heap[int]()
     priorities.push(30)
     priorities.push(10)
     priorities.push(20)
 
-    next_priority, found := priorities.peek()
-    assert(found and next_priority == 10)
-    assert(priorities.len() == 3)  # Peeking does not remove the value.
+    next_priority = priorities.peek()
+    if not (next_priority.has_value and next_priority.value == 10):
+        throw Error("heap invariant failed")
+    if not (priorities.len() == 3):
+        throw Error("heap invariant failed")
 
     while priorities.len() > 0:
-        priority, found := priorities.pop()
-        assert(found)
-        print(priority)  # 10, 20, 30 on successive lines.
+        priority = priorities.pop()
+        if not (priority.has_value):
+            throw Error("heap invariant failed")
+        print(priority.value)  # 10, 20, 30 on successive lines.
 
-    _, found := priorities.pop()
-    assert(not found)
+    missing = priorities.pop()
+    if not (not missing.has_value):
+        throw Error("heap invariant failed")
+
 
 test "heap pops in priority order and retains duplicates":
-    values := heap()
+    values := heap[int]()
     values.push(30)
     values.push(10)
     values.push(20)
     values.push(10)
     for expected in [10, 10, 20, 30]:
-        value, found := values.pop()
-        assert(found and value == expected)
-    _, found := values.pop()
-    assert(not found)
+        value = values.pop()
+        assert(value.has_value and value.value == expected)
+    missing = values.pop()
+    assert(not missing.has_value)
 
 test "heap peek leaves the minimum in place":
-    values := heap()
+    values := heap[int]()
     values.push(20)
     values.push(10)
-    value, found := values.peek()
-    assert(found and value == 10)
+    value = values.peek()
+    assert(value.has_value and value.value == 10)
     assert(values.len() == 2)
-    value, found = values.pop()
-    assert(found and value == 10)
+    value = values.pop()
+    assert(value.has_value and value.value == 10)
 
 test "heap infers ordered string elements":
     names := heap()
     names.push("grace")
     names.push("ada")
-    first, found := names.pop()
-    assert(found and first == "ada")
-    second, found := names.pop()
-    assert(found and second == "grace")
+    first = names.pop()
+    assert(first.has_value and first.value == "ada")
+    second = names.pop()
+    assert(second.has_value and second.value == "grace")
+
+test with compiler "empty heap inference rejects conflicting element types":
+    reject "conflicting":
+        values = heap()
+        values.push("text")
+        values.push(42)

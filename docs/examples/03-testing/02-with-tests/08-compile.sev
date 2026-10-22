@@ -4,10 +4,14 @@ def foo(x: int) -> int:
 test with compiler "checks accepted and rejected semantic fragments":
     # This fragment reaches semantic analysis and must be rejected.
     reject:
+        def foo(x: int) -> int:
+            return x + 1
         foo("bar")
 
     # This fragment must be accepted.
     accept:
+        def foo(x: int) -> int:
+            return x + 1
         value = foo(1)
 
 test with compiler "rejects duplicate declarations":

@@ -11,8 +11,7 @@ trait BinaryStringOperator:
     operator |(left: string, right: string) -> string
 
 
-class BinaryString:
-    trait BinaryStringOperator
+class BinaryString: BinaryStringOperator
 
     operator |(left: string, right: string) -> string:
         return "binary:" + left + ":" + right
@@ -24,8 +23,7 @@ trait AlternativeOperator:
     operator |(left: string, right: string) -> string
 
 
-class AlternativeString:
-    trait AlternativeOperator
+class AlternativeString: AlternativeOperator
 
     operator |(left: string, right: string) -> string:
         return "alternative:" + left + ":" + right

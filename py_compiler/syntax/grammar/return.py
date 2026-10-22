@@ -7,12 +7,34 @@ class Return:
         return node.tokens[0].text == "return"
 
     def lower(self, node, cfg, env, local_names):
+        if len(node.tokens) > 2 and node.tokens[1].text in ('copy', 'mirror', 'move'):
+            if node.tokens[1].text == 'move' and cfg.body.result_ownership == 'own':
+                source = expression(node.tokens[2:])
+                binding = cfg.lookup(source, env) if source.kind in ('name', 'reference') else None
+                if binding and binding.ownership in ('view', 'borrow'):
+                    raise ValueError('cannot move a view into an owned return')
+            # Ownership expressions use the same binding rules as an explicit
+            # local followed by return; projections and views keep their checks.
+            from dataclasses import replace
+            from py_compiler.syntax.grammar.assignment import Assignment
+            temporary = node.tokens[0].with_text('<return ownership ' + str(cfg.next_value) + '>', kind='IDENTIFIER')
+            assignment = replace(node, tokens=(temporary, node.tokens[0].with_text('=', kind='OPERATOR'), *node.tokens[1:]), provider=None)
+            Assignment().lower(assignment, cfg, env, local_names, declare_local=True)
+            node = replace(node, tokens=(node.tokens[0], temporary))
         if cfg.return_handler is not None:
             return cfg.return_handler(node, env)
         term = expression(node.tokens[1:]) if len(node.tokens) > 1 else None
         explicit = term.token.text if term is not None and term.kind == 'unary' else None
         if explicit in ('borrow', 'view'):
             term = term.operands[0]
+        if (term is not None and term.kind == 'name' and explicit not in ('borrow', 'view')
+                and cfg.body.result_ownership == 'own'
+                and term.token.text in getattr(cfg, 'inferred_parameters', {})):
+            from dataclasses import replace
+            binding = cfg.lookup(term, env)
+            env[binding.name] = replace(binding, ownership='own')
+            cfg.callable_entry.parameter_ownership[binding.name] = 'move'
+            cfg.value_sources[cfg.values[binding.identity].identity] = set()
         value = cfg.expr(term, env, cfg.body.result_type) if term is not None else None
         contract = getattr(cfg, 'result_contract', None)
         if contract is not None:
@@ -34,10 +56,13 @@ class Return:
             if not sources or value.identity in cfg.stack_values:
                 raise ValueError('returned borrow escapes the lifetime of its source binding')
             cfg.body.result_sources = tuple(sorted(set(cfg.body.result_sources) | sources))
+            cfg.run_defers()
             for loop in reversed(cfg.loops):
                 leave = getattr(loop, 'leave', None)
                 if leave:
                     leave(cfg)
+            if getattr(cfg,'hooks',None):
+                cfg.hooks.finish(value)
             if cfg.phases:
                 cfg.phases.leave()
             cfg.cleanup_memory((b for scope in cfg.active_scopes for b in scope.values()), node.span)
@@ -54,7 +79,7 @@ class Return:
                     raise ValueError('returned value retains a borrow of local storage; storage belongs to this callable')
                 cfg.body.retained_result_sources = tuple(sorted(set(cfg.body.retained_result_sources) |
                     {cfg.parameter_bindings[source] for source in dependencies}))
-                if value.type.family in ('iterator', 'array'):
+                if value.type.family in ('iterator', 'array', 'tensor', 'tuple'):
                     cfg.value_sources[value.identity] = set()
         if value and value.type.family == 'record':
             if value.identity in cfg.call_result_modes:
@@ -63,7 +88,7 @@ class Return:
             binding = cfg.lookup(term, env) if term.kind in ('name', 'reference') else None
             if binding and binding.ownership in ('view', 'borrow'):
                 raise ValueError('returning a class by value requires ownership; use an explicit copy')
-            if term.kind not in ('name', 'call'):
+            if term.kind not in ('name', 'call') and value.identity not in cfg.owned_results:
                 raise ValueError('returning a class field requires an explicit owned copy')
             # Borrowed fields use the parameter-source contract recorded above;
             # the record itself is returned through the ordinary owned-value ABI.
@@ -73,7 +98,11 @@ class Return:
             raise ValueError("cannot return an object/view whose storage belongs to this callable")
         if value:
             cfg.body.result_sources = tuple(sorted(set(cfg.body.result_sources) | cfg.value_sources.get(value.identity, set())))
-        if value and callable(getattr(value.type, 'release', None)):
+        if value and value.type.family == 'pointer':
+            binding = cfg.lookup(term, env) if term.kind in ('name', 'reference') else None
+            if binding and binding.ownership not in ('view', 'borrow'):
+                cfg.flow.move(binding)
+        if value and value.type.family != 'pointer' and callable(getattr(value.type, 'release', None)):
             term = expression(node.tokens[1:])
             binding = cfg.lookup(term, env) if term.kind in ('name', 'reference') else None
             if value.identity in cfg.owned_results and (binding is None or binding.type != value.type):
@@ -88,11 +117,64 @@ class Return:
                 raise ValueError('memory return requires ownership')
             elif term.operands[0].kind == 'index' and term.operands[0].operands[0].token.text == 'pointer' and not cfg.value_sources.get(value.identity):
                 raise ValueError('returning a pointer view requires a result lifetime contract')
+        cfg.run_defers()
         for loop in reversed(cfg.loops):
             leave = getattr(loop, 'leave', None)
             if leave:
                 leave(cfg)
+        if getattr(cfg,'hooks',None):
+            cfg.hooks.finish(value)
         if cfg.phases:
             cfg.phases.leave()
         cfg.cleanup_memory((binding for scope in cfg.active_scopes for binding in scope.values()), node.span)
         cfg.current.terminator = Terminator("finish", value=value, span=node.span)
+
+
+import unittest
+
+
+class OwnedReturnTests(unittest.TestCase):
+    def compile(self, source):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        return compile_source('owned-return.sev', source, Syntax(include_tests=True))
+
+    def valid(self, source):
+        from py_compiler.mlir.src.lib import lower, render
+        result = self.compile(source)
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        render(lower(result.program))
+        return result
+
+    def test_explicit_copy_returns_owned_generic_storage(self):
+        result = self.valid('''class Item:
+    name: string
+def snapshot[T](value: T) -> T:
+    return copy value
+test:
+    original = Item("retained")
+    result = snapshot(original)
+    drop(original)
+    assert(len(result.name) == 8)
+''')
+        body = next(body for body in result.program.bodies if body.declaration == 'snapshot')
+        self.assertEqual(body.result_ownership, 'own')
+        self.assertEqual(body.result_sources, ())
+
+    def test_explicit_move_returns_local_owner(self):
+        self.valid('''def make() -> string:
+    value = "retained"
+    return move value
+test:
+    result = make()
+    assert(len(result) == 8)
+''')
+
+    def test_moving_a_view_does_not_create_ownership(self):
+        result = self.compile('''class Item:
+    name: string
+def invalid(value: view Item) -> Item:
+    return move value
+''')
+        self.assertTrue(result.diagnostics)
+        self.assertIn('move', str(result.diagnostics))

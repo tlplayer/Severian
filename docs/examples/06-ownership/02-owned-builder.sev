@@ -4,9 +4,7 @@ class Server:
 
 
 def server(host: string, port: int) -> Server:
-    result := Server()
-    result.host = host
-    result.port = port
+    result := Server(host, port)
     return result
 
 
@@ -15,3 +13,10 @@ test:
 
     assert(server.host == "localhost")
     assert(server.port == 8080)
+
+test "builders preserve independent records":
+    first = server("localhost", 80)
+    second = server("example", 443)
+    first.port = 8080
+    assert(second.port == 443)
+    assert(first.host == "localhost")

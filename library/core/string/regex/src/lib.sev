@@ -1,12 +1,12 @@
 import abi
 import * from "ffi.sev" as externs
 
-def native_handle(value: isize) -> abi.Handle:
+def c_handle(value: isize) -> abi.Handle:
     return abi.Handle(value)
 
 def collect_strings(output: abi.OutHandle) -> list[string]:
     values := []
-    handle = native_handle(output.value)
+    handle = c_handle(output.value)
     length = externs.strings_length(handle)
     for index in range(length):
         values.append(externs.strings_at(handle, index))
@@ -41,7 +41,7 @@ def sub(pattern: string, replacement: string, text: string) -> string:
     output = abi.OutHandle(0)
     if externs.substitute(abi.StringView(text), abi.StringView(pattern), abi.StringView(replacement), output) != 0:
         return text
-    handle = native_handle(output.value)
+    handle = c_handle(output.value)
     value = externs.text_value(handle)
     externs.text_release(handle)
     return value

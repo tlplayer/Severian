@@ -9,7 +9,7 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Numerics | `math`, `tensor`, `statistics`, `random` | `math`, `tensor`, and `random` experimental |
 | Visualization | `graphics`, `plot` | deterministic headless canvas and charts experimental; windows and GPU backends planned |
 | Machine learning | `model`, `model.neuralnet`, `autodiff`, `optimization` | `tensor` is the canonical container; `model` owns the public machine-learning hierarchy |
-| Text processing | `regex`, `unicode`, `format` | `regex` native baseline implemented |
+| Text processing | `regex`, `unicode`, `format` | `regex` c baseline implemented |
 | Data formats | `json`, `csv`, `yaml`, `base64`, `binary` | format packages own codecs and documents; `file.read()` provides extension dispatch |
 | Files and I/O | `io`, `file`, `path`, `os` | typed contents in `file`; namespace operations and metadata in `os` |
 | Foreign interfaces | `ffi` | stable C ABI views, handles, and output parameters experimental |
@@ -18,9 +18,9 @@ The catalog is grouped for discovery, while package imports stay flat.
 | Parallel computing | `parallel`, `distributed` | placement/fusion contracts and local execution experimental; device runtimes planned |
 | Networking | `network`, `tls`, `http`, `url` | dual-stack byte streams, verified TLS, and streaming HTTP/1.1 clients experimental |
 | Observability | `log`, `trace`, `metrics` | logging sinks experimental |
-| Security | `hash`, `crypto` | `hash` native baseline implemented; general cryptography provider policy remains planned |
-| Data and storage | `pql`, `storage`, `database`, `mysql`, `compression`, `archive` | PQL validation, SQLite/database server, and native MariaDB/MySQL clients experimental |
-| Virtualization | `vm`, `container`, `hypervisor` | typed plans and native host discovery experimental |
+| Security | `hash`, `crypto` | `hash` c baseline implemented; general cryptography provider policy remains planned |
+| Data and storage | `pql`, `storage`, `database`, `mysql`, `compression`, `archive` | PQL validation, SQLite/database server, and c MariaDB/MySQL clients experimental |
+| Virtualization | `vm`, `container`, `hypervisor` | typed plans and c host discovery experimental |
 | Operating systems | `os`, `kernel` | host filesystem metadata plus a hosted kernel laboratory experimental |
 | Orchestration | `orchestrator` | scheduling and reconciliation baseline experimental |
 | Development | `testing`, `benchmark`, `profile` | language design |
@@ -46,5 +46,5 @@ Foreign capabilities use typed `@c(symbol = "...")` declarations. Compiler
 operations instead use `@mlir`, `@xla`, or a policy such as
 `@compile(mlir, stablehlo, xla)`; those declarations never enter ABI
 resolution. ABI vocabulary comes from `ffi`; each domain package owns its
-declarations and providers. Package acceptance requires native compilation,
+declarations and providers. Package acceptance requires c compilation,
 execution, and exact output validation.

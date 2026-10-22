@@ -1,0 +1,35 @@
+# First use the existing c library with an explicit selective import.
+import dot from tensor_math
+
+# Packs select the same implementations; composition does not copy algorithms.
+with arithmetic as:
+    import multiply, sum from tensor_math
+
+with numerics as:
+    with arithmetic
+    import dot from tensor_math
+
+
+def direct(left: tensor[f64], right: tensor[f64]) -> f64:
+    return dot(left, right)
+
+
+def packed(left: tensor[f64], right: tensor[f64]) -> f64:
+    with numerics:
+        product = multiply(left, right)
+        return sum(product)
+
+
+test with numerics "static imports and composed packs agree":
+    left = tensor[f64,(3,)](tuple[f64,3](1.0,2.0,3.0))
+    right = tensor[f64,(3,)](tuple[f64,3](4.0,5.0,6.0))
+    assert(direct(left,right) == 32.0)
+    assert(packed(left,right) == dot(left,right))
+
+
+test "loop pack imports are local to the loop":
+    data = tensor[f64,(2,)](tuple[f64,2](2.0,3.0))
+    total = 0.0
+    for value in [1,2] with arithmetic:
+        total += sum(data)
+    assert(total == 10.0)

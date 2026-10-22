@@ -10,7 +10,7 @@ def roundtrip() -> bool:
     if destination < 0:
         io.close(source)
         return false
-    bytes = array[u8, 4]()
+    bytes = tensor[u8](4)
     bytes[0] = u8(65)
     bytes[1] = u8(0)
     bytes[2] = u8(255)
@@ -24,7 +24,7 @@ def roundtrip() -> bool:
         ok = io.flush(destination) == 0
     if ok:
         ok = io.seek(destination, 0) == 0
-    received = array[u8, 8]()
+    received = tensor[u8](8)
     received[0] = u8(99)
     received[7] = u8(88)
     if ok:

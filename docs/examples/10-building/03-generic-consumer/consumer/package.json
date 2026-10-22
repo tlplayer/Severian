@@ -11,6 +11,8 @@
     }
   ],
   "dependencies": {
+    "io": {"path": "../../../../../library/system/io/linux_x86_64"},
+    "util": {"path": "../../../../../library/core/utils/c"},
     "printer": {
       "package": "generic-printer",
       "path": "../producer"

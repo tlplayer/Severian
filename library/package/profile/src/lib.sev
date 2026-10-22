@@ -57,7 +57,7 @@ class ProfileSession:
     records: list[string] = []
     json_path: string = ""
 
-# Preserve the compiler's TSV hook while making native JSON profiles package
+# Preserve the compiler's TSV hook while making c JSON profiles package
 # owned. RSS here is process peak, not an allocation delta for one IR pass.
 def profile_begin() -> ProfileSession | Error:
     selected = environment.get("SEVERIAN_TIMINGS", "")

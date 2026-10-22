@@ -167,23 +167,23 @@ class LoweringTests(unittest.TestCase):
         bad = self.compile('trait Named:\n    name: string\nclass Person: Named:\n    name: int\n')
         self.assertTrue(bad.diagnostics)
 
-    def test_control_flow_passes_native_dialect_verification(self):
+    def test_control_flow_passes_c_dialect_verification(self):
         import shutil
-        from py_compiler.mlir.src.lib import verifier_path, verify_native, render, lower
+        from py_compiler.mlir.src.lib import verifier_path, verify_c, render, lower
         if not shutil.which(verifier_path()):
-            self.skipTest("install mlir-opt for native dialect verification")
+            self.skipTest("install mlir-opt for c dialect verification")
         result = self.compile('def choose(flag: bool) -> int:\n    x = 1\n    if flag and true:\n        x += 2\n    else:\n        x = 4\n    return x\n')
         self.assertFalse(result.diagnostics, str(result.diagnostics))
-        verify_native(render(lower(result.program)))
+        verify_c(render(lower(result.program)))
 
-    def test_scope_storage_and_unimplemented_pass_native_verification(self):
+    def test_scope_storage_and_unimplemented_pass_c_verification(self):
         import shutil
-        from py_compiler.mlir.src.lib import verifier_path, verify_native, render, lower
+        from py_compiler.mlir.src.lib import verifier_path, verify_c, render, lower
         if not shutil.which(verifier_path()):
-            self.skipTest("install mlir-opt for native dialect verification")
+            self.skipTest("install mlir-opt for c dialect verification")
         result = self.compile('x = 0\nclass foo:\n    x = 1\n    def add(a):\n        local.x: local int = 2 + self.x\n        return local.x + a\n    def outer() -> int:\n        return module.x\n    def pending() -> int:\n        unimplemented\n')
         self.assertFalse(result.diagnostics, "\n".join(map(str, result.diagnostics)))
-        verify_native(render(lower(result.program)))
+        verify_c(render(lower(result.program)))
 
 
 class AtomPipelineTests(unittest.TestCase):

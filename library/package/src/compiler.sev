@@ -7,7 +7,7 @@ import canonical, capture, command, copy_file, digest, exists, files, manifest_f
 import inside, open, parse_manifest, prelude_exclusions, reference, safe_name, write_document from "manifest.sev"
 import add, append_number, append_text, archive_text, dependency_source, fetch, init, library_target, module_source, new, number, options, publication_files, registry_discovery_state, registry_release, registry_root, remove, render_legacy_manifest, render_manifest, resolve, semantic_plan, semantic_plan_json, semantic_source_unit, semantic_unit_key, source_checksum, standalone_source, update, verify_publication, versions, write_archive from "edit.sev"
 import portable_graph, portable_inputs, portable_path, relocated_path, reusable_inputs from "reuse.sev"
-import LinkInput, LinkPlan, LinkResult, artifact_kind, execute_link, installed_realization, interfaces, library_sidecars, payload_copy, payload_text, plan_link, restore_realization, retain_container, retain_cross_native, retain_file, retain_native_interface, retain_payload, retain_realization, sidecars_match from "realization.sev"
+import LinkInput, LinkPlan, LinkResult, artifact_kind, execute_link, installed_realization, interfaces, library_sidecars, payload_copy, payload_text, plan_link, restore_realization, retain_container, retain_cross_c, retain_file, retain_c_interface, retain_payload, retain_realization, sidecars_match from "realization.sev"
 import PreparedGenerators, prepare_generators, reset_generators from "generators.sev"
 import compilation_error, compilation_frames, report from "compilation_error.sev"
 import path
@@ -140,7 +140,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
     stage := ""
     phase := "prepare compilation unit"
     cache_lock := -1
-    result := Artifact(unit.target, unit.platform, unit.profile, emit if emit != "" else "native", unit.output)
+    result := Artifact(unit.target, unit.platform, unit.profile, emit if emit != "" else "c", unit.output)
     try:
         if unit.output != "":
             mkdir(path.dirname(unit.output))
@@ -152,7 +152,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
         input = canonical(source_path) if source_path != "" else inside(scoped.packages[0].root, unit.target.path)
         root = source_cache_root(input) if source_path != "" else scoped.packages[0].root
         sysroot = canonical(compiler.sysroot)
-        phase = "identify compiler and native toolchain"
+        phase = "identify compiler and c toolchain"
         identity := "unit-cache-6\n" + portable_graph(scoped) + "\n" + digest(compiler.executable) + "\n" + portable_path(input, scoped, root, sysroot) + "\n" + emit + "\n" + unit.platform + "\n" + unit.profile + "\n" + string(unit.include_tests)
         identity += "\n" + registry_discovery_state()
         for tool in [environment.get("SEVERIAN_CLANG", "clang-21"), environment.get("SEVERIAN_MLIR_OPT", "mlir-opt-21"), environment.get("SEVERIAN_MLIR_TRANSLATE", "mlir-translate-21"), environment.get("SEVERIAN_LLVM_OPT", "opt-21"), environment.get("SEVERIAN_AR", "llvm-ar-21")]:
@@ -169,7 +169,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
         cache = realization_root(resolution, unit.package_index) + "/build/" + build_id
         phase = "load compilation cache"
         mkdir(cache)
-        cache_lock = file.native_lock(cache + "/lock")
+        cache_lock = file.c_lock(cache + "/lock")
         if cache_lock < 0:
             throw Error("could not lock compilation cache")
         if not os.is_file(cache + "/output") and published_project(root):
@@ -186,7 +186,7 @@ def compile_unit(compiler: Compiler, unit: BuildUnit, resolution: Resolution, em
             if reused and unit.include_tests and len(scoped.packages) > 0 and setting(scoped.packages[0].manifest.entries, "test", "coverage", "true") != "false":
                 reused = os.is_file(cache + "/artifact.coverage.json") and os.is_file(cache + "/coverage.digest") and digest(cache + "/artifact.coverage.json") == read_text(cache + "/coverage.digest")
         if not reused:
-            phase = "compile " + (emit if emit != "" else "native")
+            phase = "compile " + (emit if emit != "" else "c")
             process.write_error("compiling " + input + "\n")
             # Never let a failed compilation validate a previous artifact.
             if os.is_file(cache + "/output"):

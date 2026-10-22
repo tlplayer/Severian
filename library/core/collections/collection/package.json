@@ -1,0 +1,18 @@
+{
+  "package": {
+    "name": "core.collections",
+    "version": "0.1.0"
+  },
+  "dependencies": {
+    "string": {
+      "package": "core.string",
+      "version": "0.1.0"
+    }
+  },
+  "sources": [
+    "lib.sev"
+  ],
+  "lib": {
+    "path": "lib.sev"
+  }
+}

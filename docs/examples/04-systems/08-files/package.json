@@ -1,0 +1,32 @@
+{
+  "package": {
+    "name": "examples-08-files",
+    "version": "0.1.0"
+  },
+  "sources": [
+    "01-read-write.sev",
+    "02-binary.sev",
+    "05-locking.sev",
+    "03-dispatch.sev"
+  ],
+  "dependencies": {
+    "string": {
+      "path": "../../../../library/core/string/c"
+    },
+    "file": {
+      "path": "../../../../library/system/file/linux_x86_64"
+    },
+    "os": {
+      "path": "../../../../library/system/os/linux_x86_64"
+    },
+    "path": {
+      "path": "../../../../library/system/path/c"
+    },
+    "collections": {
+      "path": "../../../../library/core/collections/collection"
+    },
+    "json_format": {
+      "path": "../../../../library/formats/json/c"
+    }
+  }
+}

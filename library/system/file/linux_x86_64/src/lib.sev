@@ -1,16 +1,17 @@
 import io
+import string
 
 # Trait bodies are reusable defaults. Imported/local implementations with
 # matching predicates replace them; default bodies never compete in dispatch.
 trait File:
     def read(path: string) -> string:
-        return read_text(path)
+        return read_string(path)
 
     def write(path: string, contents: string) -> int:
-        return write_text(path, contents)
+        return write_string(path, contents)
 
 # UTF-8 validation belongs to the file text boundary, independent of suffix.
-def valid_utf8(data: view array[u8]) -> bool:
+def valid_utf8(data: view tensor[u8]) -> bool:
     position = 0
     while position < len(data):
         first = int(data[position])
@@ -46,13 +47,14 @@ def valid_utf8(data: view array[u8]) -> bool:
     return true
 
 # Bounded streaming read handles empty files, short reads and non-seekable files.
-# IO failures currently use the Python compiler's assertion diagnostic boundary.
+# IO failures use Error after closing any opened descriptor.
 # Every opened descriptor is closed before a failure is reported.
-def read_text(path: string) -> string:
+def read_bytes(path: string) -> tensor[u8]:
     handle = io.open(path)
-    assert(handle >= 0)
+    if handle < 0:
+        throw Error("file open failed")
     capacity = 4096
-    data = array[u8, capacity]()
+    data = tensor[u8,(capacity,)]()
     used = 0
     failure = 0
     done = false
@@ -60,20 +62,14 @@ def read_text(path: string) -> string:
         if used == capacity:
             if capacity >= 67108864:
                 # Probe EOF so exactly-limit files remain valid.
-                probe = array[u8, 1]()
+                probe = tensor[u8,(1,)]()
                 extra = io.read(handle, probe, 0, 1)
                 if extra != 0:
                     failure = -27
                 done = true
             else:
                 capacity *= 2
-                grown = array[u8, capacity]()
-                index = 0
-                while index < used:
-                    grown[index] = data[index]
-                    index += 1
-                drop data
-                data = move grown
+                data.resize(capacity)
         if not done:
             received = io.read(handle, data, used, capacity - used)
             if received < 0:
@@ -84,22 +80,19 @@ def read_text(path: string) -> string:
             else:
                 used += received
     closed = io.close(handle)
-    assert(failure == 0 and closed == 0)
-    bytes = array[u8, used]()
-    index = 0
-    while index < used:
-        bytes[index] = data[index]
-        index += 1
-    assert(valid_utf8(bytes))
+    if failure != 0 or closed != 0:
+        throw Error("file read or close failed")
+    data.resize(used)
+    return data
+
+def read_string(path: string) -> string:
+    bytes = read_bytes(path)
+    if not valid_utf8(bytes):
+        throw Error("file contains invalid UTF-8")
     return string(bytes)
 
 # Returns bytes written or negative errno. Opening truncates the destination.
-def write_text(path: string, contents: string) -> int:
-    bytes = array[u8, len(contents)]()
-    index = 0
-    while index < len(contents):
-        bytes[index] = contents[index]
-        index += 1
+def write_bytes(path: string, bytes: view tensor[u8]) -> int:
     handle = io.open(path, 577, 384)
     if handle < 0:
         return handle
@@ -111,8 +104,28 @@ def write_text(path: string, contents: string) -> int:
         return closed
     return written
 
+def write_string(path: string, contents: string) -> int:
+    bytes = contents.utf()
+    return write_bytes(path,bytes)
+
+def lock(path: string) -> int:
+    handle = io.open(path,2)
+    if handle < 0:
+        throw Error("file lock open failed")
+    result = io.lock(handle,2)
+    if result != 0:
+        io.close(handle)
+        throw Error("file lock failed")
+    return handle
+
+def unlock(handle: int):
+    result = io.lock(handle,8)
+    closed = io.close(handle)
+    if result != 0 or closed != 0:
+        throw Error("file unlock failed")
+
 test "text validates UTF-8 without rejecting embedded NUL":
-    bytes = array[u8, 2]()
+    bytes = tensor[u8,(2,)]()
     bytes[0] = u8(206)
     bytes[1] = u8(187)
     assert(valid_utf8(bytes))
@@ -121,3 +134,77 @@ test "text validates UTF-8 without rejecting embedded NUL":
     bytes[0] = u8(0)
     bytes[1] = u8(0)
     assert(valid_utf8(bytes))
+
+class MappingState:
+    address: int
+    length: int
+
+    def drop():
+        if length > 0:
+            io.unmap(address, length)
+
+# Copies retain the same mapping; the final owner unmaps it exactly once.
+class Mapping:
+    state: share MappingState
+
+    def len(self: view Self) -> int:
+        return state.length
+
+    def bytes(self: view Self) -> byte:
+        return byte(state.length)
+
+    def get(self: view Self, position: int) -> u8:
+        return io.mapped_byte(state.address, state.length, position)
+
+    grammar indexed[self, "[", position: int, "]"]() -> u8:
+        return self.get(position)
+
+# Closing the descriptor after mmap does not close the mapping.
+def map(path: string) -> Mapping:
+    handle = io.open(path)
+    if handle < 0:
+        throw Error("file mapping open failed")
+    length = io.seek(handle, 0, 2)
+    if length < 0:
+        io.close(handle)
+        throw Error("file mapping size failed")
+    address = 0
+    if length > 0:
+        address = io.map_read(handle, length)
+    io.close(handle)
+    if address < 0:
+        throw Error("file mapping failed")
+    owner = MappingState(address, length)
+    reference = share owner
+    return Mapping(reference)
+
+test "empty files have a valid empty mapping":
+    path = "/tmp/severian-empty-mapping-test.bin"
+    assert(write_string(path, "") == 0)
+    defer io.unlink(path)
+    with map(path) as mapping:
+        assert(len(mapping) == 0)
+        assert(bytes(mapping) == 0B)
+
+test "copying a mapping retains its allocation":
+    path = "/tmp/severian-copy-mapping-test.bin"
+    assert(write_string(path, "AB") == 2)
+    defer io.unlink(path)
+    original = map(path)
+    retained = copy original
+    drop(original)
+    assert(retained[0] == u8(65) and retained[1] == u8(66))
+
+
+def read_checked(path: string) -> string:
+    return read_string(path)
+
+def c_lock(path: string) -> int:
+    handle = io.open(path, 66)
+    if handle < 0:
+        return handle
+    status = io.lock(handle, 2)
+    if status != 0:
+        io.close(handle)
+        return status
+    return handle

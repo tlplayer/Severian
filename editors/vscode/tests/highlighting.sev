@@ -27,7 +27,7 @@ trait Bits[T]:
     operator &(a: T, b: T) -> T
     operator ^(a: T, b: T) -> T
 
-def native_print(value: i64):
+def c_print(value: i64):
     print(value)
 
 @tensor(target, amd, ^)
@@ -57,7 +57,7 @@ status=ready
         rest = values[...]
         return size(values_view)
 
-    test with integ "native output":
+    test with integ "c output":
         assert(size([1, 2, 3]) == 3)
 
     test with  chaos "ownership":

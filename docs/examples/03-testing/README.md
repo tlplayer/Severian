@@ -45,7 +45,7 @@ is rejected for now instead of being silently ignored.
 Run every test with `sev test`. In a directory without `package.toml`, this
 discovers `.sev` files in the current directory and its subdirectories. Use
 `sev test path/to/directory` to select another directory, or `sev test file.sev`
-to select one file. The native source compiler tests each discovered file in a
+to select one file. The c source compiler tests each discovered file in a
 separate process, continues after failures, and prints a file summary. It skips
 `package.pkg`, `errors`, hidden entries, and symlinks. An empty batch or any
 failed file returns a nonzero exit status. A directory with `package.toml`

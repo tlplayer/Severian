@@ -1,9 +1,10 @@
 import process
 
 
-test with integ "kill terminates a process":
-    child = process.spawn("exec sleep 30")
-
-    assert(child > 0)
+test with integ "kill terminates a child with SIGTERM":
+    child = process.spawn(["/bin/sleep", "30"])
+    assert(child.pid > 0)
     assert(process.kill(child))
-    assert(process.wait(child) == 128)
+    # Signal termination retains the signal number: 128 + SIGTERM(15).
+    assert(process.wait(child) == 143)
+    assert(child.completed)

@@ -1,0 +1,10 @@
+{
+  "packages": [
+    {
+      "package": "system.io",
+      "source": "e0b3ff58c398aaadc6feb5e21e7630e420de327fbff760bd9c981e6cc3b5e4c9",
+      "version": "0.1.1"
+    }
+  ],
+  "version": 1
+}

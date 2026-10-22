@@ -19,6 +19,9 @@ class Node:
     imports: tuple = ()
     scope: object = None
     mlir_operation: object = None
+    decorators: tuple = ()
+    returning_match: bool = False
+    match_target: tuple = ()
 
 
 def parse_blocks(source, tokens, syntax=None):

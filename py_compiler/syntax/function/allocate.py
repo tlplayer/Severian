@@ -30,7 +30,7 @@ def resolve_plan(type_, overrides, context):
                          ('lifetime', ('infer', 'function'))):
         if values.get(key, 'infer') not in allowed:
             raise ValueError(f'allocation {key}={values[key]} has no supported lowering contract')
-    natural = layout_of(type_, context).alignment if type_.family != 'array' else storage_layout(type_.element, context).alignment
+    natural = layout_of(type_, context).alignment if type_.family not in ('array', 'tensor', 'tuple') else storage_layout(type_.element, context).alignment
     alignment = values.get('alignment', 'infer')
     alignment = natural if alignment == 'infer' else int(alignment)
     if alignment < natural or alignment & (alignment - 1):
@@ -50,7 +50,7 @@ class Allocate:
     def resolve_arguments(self, argument, context):
         from py_compiler.syntax.grammar.expression import type_spelling
         if argument is None:
-            raise ValueError('allocate[T] requires a concrete type')
+            return None
         terms = argument.operands if argument.kind == 'template_arguments' else (argument,)
         type_ = context.type(type_spelling(terms[0]))
         overrides = {}
@@ -70,22 +70,49 @@ class Allocate:
         require_unsafe(cfg, 'allocate[T] calls')
         from py_compiler.syntax.function.calls import literal_value
         from py_compiler.syntax.generic.owned import select
-        element, plan = request
+        if request is None:
+            if len(arguments) != 1:
+                raise ValueError('allocate without a type requires a byte quantity')
+            from py_compiler.syntax.grammar.expression import Expression
+            from py_compiler.syntax.complex.tensor import ArgumentValue
+            quantity = cfg.expr(arguments[0], env)
+            if quantity.type.family != 'byte':
+                raise ValueError('allocate without a type requires a byte quantity')
+            element = cfg.context.type('u8')
+            plan = resolve_plan(element, {}, cfg.context)
+            arguments = (Expression('capture', arguments[0].token, (ArgumentValue(quantity),)),)
+        else:
+            element, plan = request
         if element.family == 'record':
             if arguments or plan.location != 'stack':
                 raise ValueError('class allocation currently requires default construction in function storage')
             provider = cfg.context.provider_by_name[element.name]
             return provider.instantiate(element.declaration, (), cfg, env, span, allocation_plan=plan)
-        count_hint = element.count if isinstance(element, ArrayType) else None
+        from py_compiler.syntax.complex.tensor import TensorType, TensorOperation
+        if isinstance(element, TensorType):
+            from dataclasses import replace
+            result = replace(element, location=plan.location)
+            if result.aggregate:
+                raise ValueError('explicit tensor allocation requires a scalar element layout')
+            if plan.strategy != 'default' and result.shape != (None,):
+                raise ValueError('arena/pool tensor allocation currently requires a dynamic rank-one shape')
+            operation = MemoryOperation('allocate',plan) if result.shape == (None,) else TensorOperation('allocate',plan.alignment)
+            value = cfg.emit('allocate-tensor', result, result.allocation_dimensions(arguments, cfg, env, span), operation, span)
+            if plan.location == 'stack':
+                cfg.stack_values.add(value.identity)
+            return value
+        legacy_array = isinstance(element, ArrayType)
+        count_hint = element.count if legacy_array else None
         if isinstance(element, ArrayType):
             element = element.element
         if len(arguments) > 1 or (count_hint is not None and arguments):
             raise ValueError('allocate[T] accepts one count, or a fixed array extent')
-        result = ArrayType(element, count=count_hint, location=plan.location)
+        result = (ArrayType(element, count=count_hint, location=plan.location) if legacy_array or ArrayType(element).aggregate
+                  else TensorType(element, shape=(count_hint,), location=plan.location))
         count = (select(cfg.context.type('index'), 'F.constructor', 'construct').expand(cfg, arguments, env)
                  if arguments else literal_value(count_hint if count_hint is not None else 1, cfg.context.type('index'), cfg, span))
         from py_compiler.syntax.complex.array import record_operation
-        operation = record_operation(result, 'allocate', cfg).with_plan(plan) if result.aggregate else MemoryOperation('allocate', plan)
+        operation = record_operation(result, 'allocate', cfg).with_plan(plan) if result.aggregate else MemoryOperation('allocate',plan)
         value = cfg.emit('allocate-array', result, (count,), operation, span)
         if plan.location == 'stack':
             cfg.stack_values.add(value.identity)

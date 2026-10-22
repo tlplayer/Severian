@@ -1,9 +1,13 @@
+from collections import list
+
+
 def main():
     names = ["ada", "grace", "katherine"]
     origin = (0.0, 0.0)
 
     first = names[0]
-    #Ranges can be expressed with (:) exclusive, or inclusive [:] or partial [:) or (:]
+    # Square brackets include an endpoint; parentheses exclude it.
+    # -1 identifies the last element, so these select the first/last two names.
     first_second = names[0:-1)
     second_third = names(0:-1]
     x = origin[0]
@@ -12,3 +16,59 @@ def main():
     print(first_second)
     print(second_third)
     print(x)
+
+
+test "list and tuple literals retain their indexed values":
+    names = ["ada", "grace", "katherine"]
+    origin = (0.0, 0.0)
+    assert(names.len() == 3)
+    assert(names[0] == "ada" and names[2] == "katherine")
+    assert(len(origin) == 2)
+    assert(origin[0] == 0.0 and origin[1] == 0.0)
+
+
+test "mixed boundaries select the first and last two names":
+    names = ["ada", "grace", "katherine"]
+    first_second = names[0:-1)
+    second_third = names(0:-1]
+    assert(first_second.len() == 2)
+    assert(first_second[0] == "ada" and first_second[1] == "grace")
+    assert(second_third.len() == 2)
+    assert(second_third[0] == "grace" and second_third[1] == "katherine")
+
+
+test "closed and open boundaries include or exclude both endpoints":
+    names = ["ada", "grace", "katherine"]
+    closed = names[0:-1]
+    open = names(0:-1)
+    assert(closed.len() == 3)
+    assert(closed[0] == "ada" and closed[2] == "katherine")
+    assert(open.len() == 1 and open[0] == "grace")
+
+
+test "equal endpoints distinguish a singleton from an empty slice":
+    names = ["ada", "grace", "katherine"]
+    singleton = names[1:1]
+    right_open = names[1:1)
+    left_open = names(1:1]
+    open = names(1:1)
+    assert(singleton.len() == 1 and singleton[0] == "grace")
+    assert(right_open.len() == 0 and left_open.len() == 0 and open.len() == 0)
+
+
+test "negative endpoints work in reverse traversal":
+    names = ["ada", "grace", "katherine"]
+    reversed = names[-1:0:-1]
+    middle = names(-1:0:-1)
+    assert(reversed.len() == 3)
+    assert(reversed[0] == "katherine" and reversed[2] == "ada")
+    assert(middle.len() == 1 and middle[0] == "grace")
+
+
+test "string slices remain valid after their source is dropped":
+    names = ["ada", "grace", "katherine"]
+    first_second = names[0:-1)
+    second_third = names(0:-1]
+    drop names
+    assert(first_second[0] == "ada" and first_second[1] == "grace")
+    assert(second_third[0] == "grace" and second_third[1] == "katherine")

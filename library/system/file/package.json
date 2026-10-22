@@ -6,7 +6,7 @@
     "description": "Typed file access",
     "unsafe": {
       "capabilities": [
-        "native-abi"
+        "c-abi"
       ],
       "sources": [
         "src/lib.sev",

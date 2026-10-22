@@ -1,6 +1,6 @@
 import document_quote, entries_json, parse_document, relative_path, setting, string_array, text_setting, toml_quote, unquote from "document.sev"
 import canonical, capture, command, copy_file, digest, exists, files, manifest_file, mkdir, mutable_project, project_lock_file, published_project, read_bytes, read_text, remove_tree, replace_file, require_command, sorted_strings, temporary, write_bytes, write_text from "host.sev"
-import Archive, ArchiveEntry, Artifact, Build, BuildPlan, BuildResult, BuildUnit, Check, Clean, Compiler, DependencyEdge, Entry, Install, LinkInput, LinkPlan, LinkResult, PackageIdentity, Project, Publish, Requirements, Resolution, Resolve, ResolvedPackage, Run, Selection, Target, Test, TestReport, TestResult, execute_link, plan_link, retain_cross_native from "cross_native.sev"
+import Archive, ArchiveEntry, Artifact, Build, BuildPlan, BuildResult, BuildUnit, Check, Clean, Compiler, DependencyEdge, Entry, Install, LinkInput, LinkPlan, LinkResult, PackageIdentity, Project, Publish, Requirements, Resolution, Resolve, ResolvedPackage, Run, Selection, Target, Test, TestReport, TestResult, execute_link, plan_link, retain_cross_c from "cross_c.sev"
 import "model.sev" as _dependency_87
 import inside, open, parse_manifest, prelude_exclusions, reference, safe_name, write_document from "manifest.sev"
 import add, append_number, append_text, archive_text, dependency_source, fetch, init, library_target, module_source, new, number, options, publication_files, registry_discovery_state, registry_release, registry_root, remove, render_legacy_manifest, render_manifest, resolve, semantic_plan, semantic_plan_json, semantic_source_unit, semantic_unit_key, source_checksum, standalone_source, update, verify_publication, versions, write_archive from "edit.sev"
@@ -31,7 +31,7 @@ def artifact_kind(location: string) -> string:
         return "mlir"
     if location.ends_with(".bc") or location.ends_with(".ll"):
         return "llvm-ir"
-    return "interface" if location.starts_with("package.pkgi/") else "native"
+    return "interface" if location.starts_with("package.pkgi/") else "c"
 
 
 def retain_payload(owner: ResolvedPackage, cache: string, root: string, prefix: string, name: string, build_id: string, triple: string, profile: string) -> list[string] | Error:
@@ -52,7 +52,7 @@ def retain_payload(owner: ResolvedPackage, cache: string, root: string, prefix: 
     payload_copy(cache + "/artifact.rs", root + "/" + rust + "/src/lib.rs")
     payload_text(root + "/" + rust + "/Cargo.toml", "[package]\nname = " + toml_quote(name.replace("_", "-")) + "\nversion = " + toml_quote(owner.identity.version) + "\nedition = \"2024\"\nbuild = \"build.rs\"\n[lib]\npath = \"src/lib.rs\"\n[workspace]\n")
     # Cargo computes the path after relocation; no producer checkout is baked in.
-    payload_text(root + "/" + rust + "/build.rs", "fn main() {\n let root = std::path::PathBuf::from(std::env::var_os(\"CARGO_MANIFEST_DIR\").unwrap());\n println!(\"cargo:rustc-link-search=native={}\", root.join(" + toml_quote("../../../" + prefix + "/archive") + ").display());\n println!(\"cargo:rustc-link-lib=static=" + name + "\");\n println!(\"cargo:rustc-link-lib=m\");\n}\n")
+    payload_text(root + "/" + rust + "/build.rs", "fn main() {\n let root = std::path::PathBuf::from(std::env::var_os(\"CARGO_MANIFEST_DIR\").unwrap());\n println!(\"cargo:rustc-link-search={}\", root.join(" + toml_quote("../../../" + prefix + "/archive") + ").display());\n println!(\"cargo:rustc-link-lib=static=" + name + "\");\n println!(\"cargo:rustc-link-lib=m\");\n}\n")
     for relative in [c, rust + "/Cargo.toml", rust + "/src/lib.rs", rust + "/build.rs"]:
         paths.append(relative)
     index = root + "/package.pkgi/index.json"
@@ -89,7 +89,7 @@ def retain_payload(owner: ResolvedPackage, cache: string, root: string, prefix: 
         write_document(root + "/" + prefix + "/archive/" + provider_name + ".toolchain.json", "compiler = " + toml_quote(capture([compiler, "-vV"])) + "\ntarget = " + toml_quote(triple) + "\n")
         paths.append(prefix + "/archive/" + provider_name + ".toolchain.json")
         remove_tree(stage)
-    for relative in retain_cross_native(owner, root, profile, build_id):
+    for relative in retain_cross_c(owner, root, profile, build_id):
         paths.append(relative)
     return paths
 

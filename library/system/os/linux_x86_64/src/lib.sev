@@ -1,0 +1,265 @@
+import io
+import process
+import string
+
+def wait(delay: duration):
+    if delay < 0s:
+        throw Error("wait duration must be nonnegative")
+    io.sleep_nanoseconds(int(delay / 1ns))
+
+class Metadata:
+    path: string
+    is_file: bool
+    is_directory: bool
+    size: byte
+
+def __little_endian(data: tensor[u8], position: int, width: int) -> int:
+    result = 0
+    index = width
+    while index > 0:
+        index -= 1
+        result = result * 256 + int(data[position + index])
+    return result
+
+def stat(path: string) -> Metadata:
+    buffer = tensor[u8,(144,)]()
+    result = io.stat_bytes(path,buffer)
+    if result != 0:
+        throw Error("file metadata lookup failed")
+    mode = __little_endian(buffer,24,4) & 61440
+    length = __little_endian(buffer,48,8)
+    return Metadata(path,mode == 32768,mode == 16384,byte(length))
+
+def exists(path: string) -> bool:
+    return io.access(path) == 0
+
+def is_dir(path: string) -> bool:
+    if not exists(path):
+        return false
+    information = stat(path)
+    return information.is_directory
+
+def remove(path: string):
+    if io.unlink(path) != 0:
+        throw Error("file removal failed")
+
+def remove_directory(path: string):
+    if io.rmdir(path) != 0:
+        throw Error("directory removal failed")
+
+def rename(source: string, destination: string):
+    if io.rename(source,destination) != 0:
+        throw Error("file rename failed")
+
+def make_directories(path: string):
+    index = 1
+    while index <= len(path):
+        if index == len(path) or path[index] == u8(47):
+            part = path[:index]
+            result = io.mkdir(part)
+            if result != 0 and not (result == -17 and is_dir(part)):
+                throw Error("directory creation failed")
+        index += 1
+
+def copy(source: string, destination: string):
+    reader = io.open(source)
+    if reader < 0:
+        throw Error("copy source open failed")
+    # Exclusive creation avoids truncating the source through an aliased path.
+    writer = io.open(destination,193)
+    if writer < 0:
+        io.close(reader)
+        throw Error("copy destination open failed")
+    result = io.copy_stream(reader,writer)
+    closed_reader = io.close(reader)
+    closed_writer = io.close(writer)
+    if result < 0 or closed_reader != 0 or closed_writer != 0:
+        throw Error("file copy failed")
+
+# Directory results retain the c records in standard tensor storage.
+# Names are decoded on access, so listing needs no separate array/vector ABI.
+class DirectoryEntries:
+    records: tensor[u8]
+    count: int
+
+    def len(self: view Self) -> int:
+        return count
+
+    def name(self: view Self, requested: int) -> string:
+        if requested < 0 or requested >= count:
+            throw Error("directory entry index outside listing")
+        position = 0
+        index = 0
+        while index < requested:
+            position += __little_endian(records,position + 16,2)
+            index += 1
+        end = position + 19
+        while records[end] != u8(0):
+            end += 1
+        length = end - position - 19
+        bytes = tensor[u8,(length,)]()
+        index = 0
+        while index < length:
+            bytes[index] = records[position + 19 + index]
+            index += 1
+        return string(bytes)
+
+def list(path: string) -> DirectoryEntries:
+    handle = io.open(path,65536)
+    if handle < 0:
+        throw Error("directory open failed")
+    records = tensor[u8](0)
+    buffer = tensor[u8,(4096,)]()
+    used = 0
+    count = 0
+    failed = false
+    done = false
+    while not done:
+        received = io.directory_entries(handle,buffer)
+        if received <= 0:
+            failed = received < 0
+            done = true
+        elif used > 67108864 - received:
+            failed = true
+            done = true
+        else:
+            records.resize(used + received)
+            index = 0
+            while index < received:
+                records[used + index] = buffer[index]
+                index += 1
+            position = used
+            used += received
+            while position < used and not failed:
+                if used - position < 20:
+                    failed = true
+                else:
+                    length = __little_endian(records,position + 16,2)
+                    if length < 20 or length > used - position:
+                        failed = true
+                    else:
+                        end = position + 19
+                        while end < position + length and records[end] != u8(0):
+                            end += 1
+                        if end == position + length:
+                            failed = true
+                        else:
+                            count += 1
+                            position += length
+            if failed:
+                done = true
+    closed = io.close(handle)
+    if failed or closed != 0:
+        throw Error("directory listing failed")
+    return DirectoryEntries(records,count)
+
+test "little endian decoding uses standard tensor elements":
+    data = tuple[u8,4](u8(1),u8(2),u8(3),u8(4))
+    assert(__little_endian(data,0,4) == 67305985)
+
+# Polling owns the deadline and sleeps between observations. The observer is
+# invoked each time, so callers supply a callable rather than an eager value.
+class Observation[T]:
+    value: T
+    matched: bool
+    attempts: int
+
+def eventually_value[T](observe: ()->T, ready: (T)->bool, timeout_ms: int = 1000, interval_ms: int = 1) -> Observation[T]:
+    if timeout_ms < 0 or timeout_ms > 9223372036854 or interval_ms <= 0 or interval_ms > 9223372036854:
+        throw Error("polling requires nonnegative timeout and positive interval")
+    start = io.monotonic_nanoseconds()
+    timeout = timeout_ms * 1000000
+    interval = interval_ms * 1000000
+    attempts = 0
+    while true:
+        value = observe()
+        attempts += 1
+        matched = ready(value)
+        elapsed = io.monotonic_nanoseconds() - start
+        if matched or elapsed >= timeout:
+            return Observation[T](value, matched, attempts)
+        delay = interval
+        if delay > timeout - elapsed:
+            delay = timeout - elapsed
+        io.sleep_nanoseconds(delay)
+
+def eventually(condition: ()->bool, timeout_ms: int = 1000, interval_ms: int = 1) -> bool:
+    result = eventually_value[bool](condition, lambda value: value, timeout_ms, interval_ms)
+    return result.matched
+
+test "zero timeout observes once and retains the final value":
+    observed = eventually_value[int](lambda: 42, lambda value: value == 0, 0)
+    assert(not observed.matched)
+    assert(observed.value == 42 and observed.attempts == 1)
+
+test "polling sleeps to its deadline":
+    start = io.monotonic_nanoseconds()
+    assert(not eventually(lambda: false, 2, 1))
+    assert(io.monotonic_nanoseconds() - start >= 2000000)
+
+test "successful first observation does not wait":
+    assert(eventually(lambda: true, 0))
+
+
+def is_file(path: string) -> bool:
+    return exists(path) and stat(path).is_file
+
+def canonical(path: string) -> string:
+    result = process.execute(["/usr/bin/realpath", "-z", "-e", "--", path])
+    if result.status != 0 or len(result.stdout) == 0:
+        throw Error("cannot canonicalize path: " + path)
+    return result.stdout[:len(result.stdout) - 1]
+
+def temporary(parent: string, name_prefix: string = ".sev-") -> string:
+    if name_prefix.contains("/") or name_prefix.contains("\0"):
+        throw Error("temporary directory prefix must be a filename")
+    attempts = 0
+    while attempts < 16:
+        location = parent + "/" + name_prefix + process.temporary_token()
+        status = io.mkdir(location)
+        if status == 0:
+            return location
+        if status != -17:
+            throw Error("cannot create temporary directory")
+        attempts += 1
+    throw Error("cannot reserve temporary directory")
+
+# lstat distinguishes links from directories; recursive removal never follows
+# a symlink into another tree, including dangling links.
+def remove_tree(path: view string) -> absent:
+    data = tensor[u8,(144,)]()
+    status = io.lstat_bytes(path, data)
+    if status == -2:
+        return
+    if status != 0:
+        throw Error("cannot inspect removal path")
+    if (__little_endian(data,24,4) & 61440) != 16384:
+        remove(path)
+        return
+    entries = list(path)
+    index = 0
+    while index < entries.len():
+        name = entries.name(index)
+        if name != "." and name != "..":
+            remove_tree(path + "/" + name)
+        index += 1
+    remove_directory(path)
+
+test "temporary directories are distinct and recursive cleanup removes children":
+    first = temporary("/tmp", ".sev-os-")
+    second = temporary("/tmp", ".sev-os-")
+    assert(first != second)
+    make_directories(first + "/child/grandchild")
+    assert(is_dir(canonical(first + "/child/..")))
+    remove_tree(first)
+    remove_tree(second)
+    assert(not exists(first) and not exists(second))
+
+
+test "recursive cleanup removes a symlink without following its target":
+    tree = temporary("/tmp", ".sev-cleanup-")
+    target = temporary("/tmp", ".sev-retained-")
+    assert(process.run(["/bin/ln", "-s", target, tree + "/link"]) == 0)
+    remove_tree(tree)
+    assert(is_dir(target))
+    remove_tree(target)

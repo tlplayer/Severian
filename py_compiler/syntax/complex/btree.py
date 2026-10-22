@@ -1,4 +1,4 @@
-"""Ordered dictionary storage policy; native nodes use minimum degree eight."""
+"""Ordered dictionary storage policy; c nodes use minimum degree eight."""
 from dataclasses import dataclass
 
 

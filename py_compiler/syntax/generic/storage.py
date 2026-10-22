@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 
-def descriptor_type(bits):
-    return f'!llvm.struct<(!llvm.ptr, !llvm.ptr, i{bits}, !llvm.array<1 x i{bits}>, !llvm.array<1 x i{bits}>)>'
+def descriptor_type(bits, rank=1):
+    return f'!llvm.struct<(!llvm.ptr, !llvm.ptr, i{bits}, !llvm.array<{rank} x i{bits}>, !llvm.array<{rank} x i{bits}>)>'
 
 
 def stored_type(type_, context):
@@ -15,7 +15,7 @@ def stored_type(type_, context):
     if type_.family == 'record':
         return context.provider_by_name[type_.name].layout(type_.declaration, context)
     if type_.mlir.startswith('memref'):
-        return descriptor_type(context.type('usize').bits)
+        return descriptor_type(context.type('usize').bits, getattr(type_, 'rank', 1))
     return type_.mlir
 
 
@@ -81,7 +81,7 @@ def contains_borrowed_fields(type_, context, active=()):
         return any(contains_borrowed_fields(context.type(t), context, active) for _, t in type_.declaration.fields)
     if type_.family == 'shared':
         return contains_borrowed_fields(type_.payload, context, active)
-    if type_.family == 'array':
+    if type_.family in ('array', 'tensor', 'tuple'):
         return contains_borrowed_fields(type_.element, context, active)
     if type_.family == 'union':
         return any(contains_borrowed_fields(t, context, active) for t in type_.variants)
@@ -110,6 +110,12 @@ def element_slot(term):
 
 def root_binding(node, cfg, env):
     while node.kind in ('member', 'index'):
+        if node.kind == 'member' and node.operands[0].kind == 'name':
+            key = node.operands[0].token.text + '.' + node.token.text
+            place = cfg.context.imported_globals.get(key)
+            if place is not None:
+                from py_compiler.mir.ownership.flow import Binding
+                return Binding(place.identity, key, place.type, place.constant, 'view' if place.constant else 'borrow', node.token.span)
         node = node.operands[0]
     if node.kind == 'capture':
         return node.operands[0].binding(cfg)
@@ -131,9 +137,14 @@ class GlobalPlace:
         return "__sev_global_" + sha256(self.identity.encode()).hexdigest()
 
     def declaration(self):
+        if self.external_symbol and hasattr(self.type, 'global_storage_type'):
+            return f'llvm.mlir.global external @{self.symbol}() : {self.type.global_storage_type}'
         if self.external_symbol:
-            return f'memref.global "private" @{self.symbol} : memref<{self.type.mlir}>'
-        declaration = self.type.module_storage(self.symbol)
+            return f'memref.global "public" @{self.symbol} : memref<{self.type.mlir}>'
+        storage = getattr(self.type, 'module_storage', None)
+        if storage is None:
+            raise ValueError(self.type.name + ' has no module storage contract; bind it in a local scope')
+        declaration = storage(self.symbol)
         return declaration.replace('memref.global "private"', 'memref.global "public"', 1) if self.exported_name else declaration
 
     def read(self, cfg, span):
@@ -159,6 +170,17 @@ class GlobalPlace:
         from py_compiler.mlir.src.cfg import name, temporary_suffix
         suffix = temporary_suffix(operation)
         address = f"%global_{suffix}"
+        if hasattr(self.type, 'global_storage_type'):
+            storage = self.type.global_storage_type
+            lines = [f'{address} = llvm.mlir.addressof @{self.symbol} : !llvm.ptr']
+            descriptor = f'%global_descriptor_{suffix}'
+            if operation.result:
+                lines += [f'{descriptor} = llvm.load {address} : !llvm.ptr -> {storage}',
+                          f'{name(operation.result)} = builtin.unrealized_conversion_cast {descriptor} : {storage} to {self.type.mlir}']
+            else:
+                lines += [f'{descriptor} = builtin.unrealized_conversion_cast {name(operation.operands[0])} : {self.type.mlir} to {storage}',
+                          f'llvm.store {descriptor}, {address} : {storage}, !llvm.ptr']
+            return lines
         lines = [f"{address} = memref.get_global @{self.symbol} : memref<{self.type.mlir}>"]
         if operation.result:
             lines.append(f"{name(operation.result)} = memref.load {address}[] : memref<{self.type.mlir}>")
@@ -302,6 +324,9 @@ class StorageTransfer:
         from py_compiler.syntax.generic.atom import Atom
         return Atom(self, (operation.operands[0].type,), operation.result.type, ('move',), (), self)
 
+    def entry_allocations(self, operation):
+        return self.render_operation(operation)[1:3] if operation.result.type.family == 'record' else []
+
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name, temporary_suffix
         tag = temporary_suffix(operation)
@@ -316,7 +341,7 @@ class BindingPlace:
     def __init__(self, binding, rebind=True):
         self.binding, self.type, self.rebind = binding, binding.type, rebind
 
-    def capture(self, cfg, ownership):
+    def capture(self, cfg, ownership, *, preserve_shape=False):
         from contextlib import contextmanager
         @contextmanager
         def lease():
@@ -328,8 +353,9 @@ class BindingPlace:
             if self.rebind and self.binding.constant and self.binding.ownership != "borrow":
                 raise ValueError('cannot update a constant binding')
             identity = cfg.flow.resolve(self.binding.identity)
-            cfg.record_lifetime('check', identity, self.binding.name, (self.binding.identity,))
-            conflicts = [loan for loan, owner in cfg.flow.loans.items() if identity in (owner if isinstance(owner, frozenset) else (owner,)) and loan != self.binding.identity]
+            cfg.record_lifetime('element-check' if preserve_shape else 'check', identity, self.binding.name, (self.binding.identity,))
+            conflicts = [loan for loan, owner in cfg.flow.loans.items() if identity in (owner if isinstance(owner, frozenset) else (owner,)) and loan != self.binding.identity
+                         and not (preserve_shape and loan in cfg.flow.shape_loans)]
             if conflicts or cfg.flow.borrowers(identity):
                 raise ValueError('cannot acquire writable self while a borrow is live')
             key = self.binding.identity + ':grammar-borrow'
@@ -359,7 +385,11 @@ class AddressPlace:
     def capture(self, cfg, ownership):
         from contextlib import nullcontext
         if self.binding:
-            return BindingPlace(self.binding, rebind=False).capture(cfg, ownership)
+            from py_compiler.syntax.complex.array import ElementPlace, RecordElementPlace
+            stable = isinstance(self.place, (ElementPlace, RecordElementPlace))
+            if hasattr(self.place, 'preserves_shape'):
+                stable = self.place.preserves_shape(cfg)
+            return BindingPlace(self.binding, rebind=False).capture(cfg, ownership, preserve_shape=stable)
         if ownership != 'borrow':
             raise ValueError('field store requires borrow self')
         return nullcontext()
@@ -375,10 +405,10 @@ import unittest
 
 
 class FieldStateTests(unittest.TestCase):
-    def test_initialized_and_cleared_flags_pass_native_verification(self):
+    def test_initialized_and_cleared_flags_pass_c_verification(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax
-        from py_compiler.mlir.src.lib import lower, render, verify_native
+        from py_compiler.mlir.src.lib import lower, render, verify_c
         source = '''class Buffer:
     data: array[int]
 def work():
@@ -390,4 +420,4 @@ def work():
         result = compile_source('field-state.sev', source, Syntax())
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         text = render(lower(result.program))
-        verify_native(text)
+        verify_c(text)

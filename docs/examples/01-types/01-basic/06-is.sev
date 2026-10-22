@@ -1,7 +1,11 @@
-test:
-    a = [1,2,3]
+from collections import equal
+
+test "copies have independent storage and equal elements":
+    a = tuple[int,3](1,2,3)
     b = copy a
-    #Copies aren't eachother
     assert(!(a is b))
-    #They are equivalent though
-    assert(a == b)
+    assert(a is not b)
+    assert(equal(a, b))
+    b[0] = 7
+    assert(a[0] == 1)
+    assert(not equal(a, b))

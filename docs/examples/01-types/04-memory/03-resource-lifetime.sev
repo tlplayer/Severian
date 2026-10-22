@@ -1,3 +1,5 @@
+from io import capture_stdout
+
 class Resource:
     name: string
 
@@ -19,10 +21,60 @@ def main():
     use_resource()
     print("finished")
 
-test:
+test with compiler "dropped resource cannot be read":
     resource := Resource("temporary")
 
     drop resource
 
     reject:
         print(resource.name)
+
+test "scope cleanup calls drop before releasing fields":
+    main()
+    assert(capture_stdout() == "open: database\ndatabase\nclose: database\nfinished\n")
+
+test "explicit drop runs once":
+    resource = Resource("temporary")
+    drop(resource)
+    assert(capture_stdout() == "open: temporary\nclose: temporary\n")
+
+class Marker:
+    id: int
+    def drop():
+        print("drop:", id)
+
+def markers():
+    first = Marker(1)
+    second = Marker(2)
+
+test "scalar-only resources clean up in reverse declaration order":
+    markers()
+    assert(capture_stdout() == "drop: 2\ndrop: 1\n")
+
+class Outer:
+    child: Resource
+    def drop():
+        print("outer")
+
+def nested_resource():
+    inner = Resource("nested")
+    outer = Outer(inner)
+
+test "outer destructor runs before owned field destructor":
+    nested_resource()
+    assert(capture_stdout() == "open: nested\nouter\nclose: nested\n")
+
+def early_return():
+    resource = Resource("early")
+    return
+
+test "return cleans up its resource":
+    early_return()
+    assert(capture_stdout() == "open: early\nclose: early\n")
+
+test with compiler "drop hook cannot take arguments":
+    reject:
+        class Invalid:
+            value: int
+            def drop(extra: int):
+                return

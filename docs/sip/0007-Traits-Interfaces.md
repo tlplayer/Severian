@@ -524,3 +524,69 @@ If shapes are dynamic, the same selector can be evaluated at runtime, provided i
 
 
 ## Performance
+
+## Structured annotation phases: example, problem, test
+
+Function annotations can supply ordered callback phases without declaring a special `HookContext` class or `with context` / `without context` bodies.
+
+```sev
+@monitor_time with {
+    prefix timer_started(F.name),
+    suffix report_time(F.name, context.duration),
+}
+@monitor_error with {
+    prefix started(F.name),
+    prefix search_arguments(F.args...),
+    suffix report_error(F.name, context.error),
+    suffix report_result(R),
+}
+def search(items: view list[int], item: int) -> int | Error:
+    for value in items:
+        if value == item:
+            return item
+    throw Error("Failed to find item in items")
+```
+
+- `F.name`: the decorated function's name.
+- `F.args...`: argument values in parameter order, checked using ordinary ownership rules.
+- `F.params[index]`: compile-time parameter metadata with `.name`, `.type`, `.ownership`, and `.default` string fields. The index must be constant; empty default source means no default. Select a field rather than materializing the metadata as runtime storage.
+- `R` / `context.result`: optional typed result, available only in suffix callbacks.
+- `context.error`: optional typed error, preserving its fields; success supplies `None`.
+- `context.duration`: elapsed seconds, finalized before the first suffix callback. It includes prefixes and the function body, excludes suffixes.
+- Callback arguments are read-only. Callbacks must not propagate errors; panic remains a terminal failure without an unwinding guarantee.
+- Nested calls in callback arguments are rejected; put that work inside a nonthrowing callback so argument evaluation cannot bypass the phase checks.
+- Annotation names label explicit phase groups. Multiple annotations enter top-to-bottom and exit bottom-to-top. Callbacks within a group keep their written order.
+- Error propagation uses the existing declared error-result contract (`int | Error` above). A locally caught error does not exit the decorated function.
+
+```text
+success -> time.prefix -> error.prefix -> search
+        -> error.suffix(result=10, error=None)
+        -> time.suffix -> return 10
+
+throw -> time.prefix -> error.prefix -> search
+      -> error.suffix(result=None, error=original Error)
+      -> time.suffix -> propagate original Error
+
+prefix reads R -> compile error
+suffix consumes or mutates a borrowed argument -> compile error
+suffix reads an argument already moved by the function -> compile error
+callback propagates Error -> compile error
+function hook reads T.fields -> compile error: wrong target
+phase annotation on a type -> compile error: execution phase not defined
+panic -> suffix execution is not guaranteed
+```
+
+Problem: a raw decorator wrapper can erase argument ownership, change an error into a string, or skip an outer hook when an inner callback throws. Here phase calls are checked and lowered inside the decorated function's control flow. Recoverable error exits execute suffix callbacks before returning the error. Observer callbacks receive typed optional values and cannot replace the pending outcome.
+
+```sev
+test with integ "suffixes run before the caller catches the error":
+    try:
+        result = search([10, 20, 30], 99)
+    catch error: Error:
+        assert(error.message == "Failed to find item in items")
+        print("caught")
+    assert("error: search Failed to find item in items\ntimer duration: search\ncaught" in stdout)
+    assert("result:" not in stdout)
+```
+
+The executable callbacks and tests are in `docs/examples/01-types/07-traits/05-trait-hook.sev`. Parser and binding rejection tests follow the implementation in `py_compiler/syntax/block/hooks.py`. Type-target lifecycle phases and trait-level reusable phase-group declarations need their own execution semantics; this implementation handles explicit function annotations.

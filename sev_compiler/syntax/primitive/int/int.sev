@@ -597,7 +597,7 @@ class int: Integer
         return 0
 
     def hash(self) -> u64:
-        return hash(self.native_endian())
+        return hash(self.c_endian())
 
     def print(self) -> string:
         return string.from_integer(self, base=10)
@@ -646,7 +646,7 @@ class int: Integer
                 result[index] = mlir(arith.trunci, shifted, to=u8)
         return result
 
-    def native_endian(self) -> bytes[int.bits / 8]:
+    def c_endian(self) -> bytes[int.bits / 8]:
         if target.endian == Endian.Little:
             return self.little_endian()
         return self.big_endian()

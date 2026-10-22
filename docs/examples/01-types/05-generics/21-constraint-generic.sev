@@ -1,3 +1,5 @@
+from collections import list
+
 # W - With-clause operation (constraint)
 # Evaluate every semantic constraint against the same candidate value.
 

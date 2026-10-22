@@ -32,6 +32,7 @@ enum BigO:
     undefined(3)
     exponential(4)
     combinatorial(5)
+    twoN(6)
 
 class FunctionComplexity:
     time: BigO = undefined
@@ -134,7 +135,4 @@ test:
     assert(foobar() == ())
     assert(foobar([]) == ())
 ```
-
-## Testing
-
 

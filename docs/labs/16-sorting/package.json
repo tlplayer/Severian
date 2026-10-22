@@ -1,0 +1,27 @@
+{
+  "bin": [
+    {
+      "name": "16-sorting",
+      "path": "src/main.sev"
+    }
+  ],
+  "dependencies": {
+    "collections": {
+      "path": "../../../library/core/collections/collection"
+    },
+    "util": {
+      "path": "../../../library/core/utils/c"
+    }
+  },
+  "lint": {
+    "enabled": true
+  },
+  "package": {
+    "edition": "2026",
+    "name": "16-sorting",
+    "version": "0.1.0"
+  },
+  "sources": [
+    "src/main.sev"
+  ]
+}

@@ -1,4 +1,6 @@
-def increment(values: list[int]):
+from collections import list
+
+def increment(values: borrow list[int]):
     for index in indices(values):
         values[index] += 1
 
@@ -7,4 +9,26 @@ def increment(values: list[int]):
 def main():
     values := [10, 20, 30]
     increment(values)
-    print(values)
+    for value in values:
+        print(value)
+
+test "indices permits element updates while preserving the collection shape":
+    values: list[int] = [10, 20, 30]
+    increment(values)
+    assert(values[0] == 11 and values[1] == 21 and values[2] == 31)
+    assert(len(values) == 3)
+
+test with compiler "indices rejects resizing through the owner or an alias":
+    reject "borrow":
+        values: list[int] = [10, 20]
+        for index in indices(values):
+            values.pop()
+    reject "borrow":
+        values: list[int] = [10, 20]
+        for index in indices(values):
+            values.append(30)
+    reject "borrow":
+        values: list[int] = [10, 20]
+        alias = borrow values
+        for index in indices(alias):
+            alias.clear()

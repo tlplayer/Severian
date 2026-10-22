@@ -1,3 +1,5 @@
+from collections import list
+
 # R - Result
 # Merge pass results while preserving the concrete result representation.
 
@@ -18,7 +20,7 @@ class AnalysisResult: ResultTerm
 
 
 def merge_results[R: ResultTerm](results: list[R]) -> R:
-    merged := R.empty()
+    merged = R.empty()
 
     for result in results:
         merged = merged.merge(result)
@@ -28,7 +30,7 @@ def merge_results[R: ResultTerm](results: list[R]) -> R:
 
 test:
     results := [AnalysisResult(12, 1), AnalysisResult(30, 2)]
-    merged := merge_results(results)
+    merged = merge_results(results)
 
     assert(merged.facts == 42)
     assert(merged.warnings == 3)

@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-#include "../../../core/memory/native/memory.h"
+#include "../../../core/memory/c/memory.h"
 #include <errno.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -116,7 +116,7 @@ static int ranked(const void *left, const void *right) {
     return strcmp(a->name, b->name);
 }
 
-/* Streaming provider for large native traces. Only distinct function rows and
+/* Streaming provider for large c traces. Only distinct function rows and
  * one input line remain live, independent of the trace's allocation count. */
 int64_t __sev_profile_function_table(const char *allocations, const char *peak,
                                     const char *retained, const char *output) {

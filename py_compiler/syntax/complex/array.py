@@ -29,7 +29,7 @@ class Array:
         from py_compiler.syntax.generic.owned import select
         from py_compiler.syntax.function.allocate import resolve_plan
         terms = argument.operands if argument and argument.kind == 'template_arguments' else ()
-        if len(terms) != 2 or arguments:
+        if len(terms) != 2 or (arguments and (len(arguments) != 1 or arguments[0].kind not in ('list', 'tuple'))):
             raise ValueError('use array[T, N]() with an element type and element count')
         element = cfg.context.type(type_spelling(terms[0]))
         result = ArrayType(element)
@@ -40,7 +40,16 @@ class Array:
             cfg.effect('array-extent', (count,), ArrayExtent(result.count), span)
         plan = resolve_plan(result, {'location': 'heap'}, cfg.context)
         operation = record_operation(result, 'allocate', cfg).with_plan(plan) if result.aggregate else MemoryOperation('allocate', plan)
-        return cfg.emit('allocate-array', result, (count,), operation, span)
+        value = cfg.emit('allocate-array', result, (count,), operation, span)
+        if arguments:
+            from py_compiler.syntax.function.calls import literal_value
+            cfg.effect('array-extent', (count,), ArrayExtent(len(arguments[0].operands)), span)
+            for position, term in enumerate(arguments[0].operands):
+                index = literal_value(position, count.type, cfg, span)
+                place = RecordElementPlace(value, index, element) if result.aggregate else ElementPlace(value, index, element)
+                place.write(cfg, cfg.expr(term, env, element), span)
+        cfg.owned_results.add(value.identity)
+        return value
 
 
 @dataclass(frozen=True)
@@ -69,7 +78,8 @@ class ArrayType:
     parameter_ownership: str = 'view'
 
     def grammars(self):
-        return ()
+        from py_compiler.syntax.complex.collection import CollectionCondition
+        return (CollectionCondition(self),)
 
     def __post_init__(self):
         if not self.aggregate and not (self.element.mlir.startswith('i') and self.element.mlir[1:].isdigit() or self.element.mlir in ('f16', 'bf16', 'f32', 'f64')):
@@ -77,7 +87,7 @@ class ArrayType:
 
     @property
     def aggregate(self):
-        return self.element.family in ('record', 'string', 'array', 'union', 'dynamic', 'shared', 'iterator')
+        return self.element.family in ('record', 'string', 'array', 'tensor', 'tuple', 'union', 'dynamic', 'shared', 'iterator', 'function')
 
     @property
     def name(self):
@@ -97,6 +107,28 @@ class ArrayType:
         from py_compiler.syntax.generic.owned import select
         index = select(cfg.context.type('index'), 'F.constructor', 'construct').expand(cfg, (index,), env)
         return RecordElementPlace(receiver, index, self.element) if self.aggregate else ElementPlace(receiver, index, self.element)
+
+    def call_method(self, receiver, method, arguments, cfg, env, span, owner=None):
+        if method == 'initialized' and len(arguments) == 1:
+            place = self.element_place(receiver, arguments[0], cfg, env, span)
+            if self.aggregate:
+                return cfg.emit('element-initialized', cfg.context.type('bool'), (receiver, place.index),
+                                place.operation('initialized', cfg), span)
+            # Scalars have no moved-out owning payload. Read checks bounds.
+            from py_compiler.syntax.function.calls import literal_value
+            place.read(cfg, span)
+            return literal_value(True, cfg.context.type('bool'), cfg, span)
+        if method != 'take' or len(arguments) != 1:
+            raise ValueError('array supports take(index) and initialized(index)')
+        if owner is None or owner.ownership == 'view':
+            raise ValueError('taking an element requires an owner or exclusive borrow')
+        from py_compiler.syntax.generic.storage import BindingPlace
+        with BindingPlace(owner, rebind=False).capture(cfg, 'borrow'):
+            place = self.element_place(receiver, arguments[0], cfg, env, span)
+            value = place.take(cfg, span) if self.aggregate else place.read(cfg, span)
+        cfg.owned_results.add(value.identity)
+        cfg.value_sources[value.identity] = set()
+        return value
 
     def copy_value(self, value, cfg, span):
         from dataclasses import replace
@@ -173,8 +205,8 @@ class MemoryOperation:
         if self.kind == 'copy':
             return [f'%zero_{tag} = arith.constant 0 : index',
                     f'%size_{tag} = memref.dim {memory}, %zero_{tag} : {type_}',
-                    f'{name(operation.result)} = memref.alloc(%size_{tag}) : {type_}',
-                    f'memref.copy {memory}, {name(operation.result)} : {type_} to {type_}']
+                    f'{name(operation.result)} = memref.alloc(%size_{tag}) : {operation.result.type.mlir}',
+                    f'memref.copy {memory}, {name(operation.result)} : {type_} to {operation.result.type.mlir}']
         index = name(values[1])
         lines = [f'%zero_{tag} = arith.constant 0 : index',
                  f'%length_{tag} = memref.dim {memory}, %zero_{tag} : {type_}',
@@ -280,8 +312,11 @@ class RecordElementPlace:
         # Copy before replacement so a[i] = a[i] remains valid.
         from py_compiler.syntax.generic.storage import copy_storage
         copied = copy_storage(value, cfg, span)
+        self.write_owned(cfg, copied, span)
+
+    def write_owned(self, cfg, value, span):
         self.destroy(cfg, span)
-        cfg.effect('element-store', (self.receiver, self.index, copied), self.operation('store', cfg), span)
+        cfg.effect('element-store', (self.receiver, self.index, value), self.operation('store', cfg), span)
 
 
 @dataclass(frozen=True)
@@ -444,11 +479,11 @@ class ArrayTypeTests(unittest.TestCase):
         result = self.compile('def work():\n    unsafe:\n        a = allocate[int,location=memory.heap]()\n        p: pointer[int] = move a\n        deallocate(a)\n')
         self.assertTrue(result.diagnostics)
 
-    def test_native_aggregate_storage_copies_and_destroys_initialized_slots(self):
+    def test_c_aggregate_storage_copies_and_destroys_initialized_slots(self):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         source = '''union Value:
     string
     array[int]
@@ -468,6 +503,40 @@ test "string slots survive replacement and copying":
     assert(len(saved[1]) == 5)
     assert(saved[1][0] == u8(102))
 
+test "initialized slots follow moves and can be refilled":
+    values = array[string,2]()
+    assert(not values.initialized(0))
+    values[0] = "owned"
+    assert(values.initialized(0))
+    taken = values.take(0)
+    assert(not values.initialized(0) and len(taken) == 5)
+    values[0] = "refilled"
+    assert(values.initialized(0) and len(values[0]) == 8)
+
+test "moving into an element transfers ownership and replaces its old value":
+    values = array[string,1]()
+    first = "first"
+    values[0] = move first
+    second = "replacement"
+    values[0] = move second
+    taken = values.take(0)
+    drop values
+    assert(len(taken) == 11)
+
+test with compiler "a moved element source cannot be used again":
+    reject "moved":
+        values = array[string,1]()
+        source = "owned"
+        values[0] = move source
+        assert(len(source) == 5)
+
+test with compiler "element storage cannot steal a borrowed source":
+    reject:
+        values = array[string,1]()
+        source = "owned"
+        alias = view source
+        values[0] = move alias
+
 test "nested arrays have independent owners":
     values = array[array[int],2]()
     inner = array[int,1]()
@@ -478,6 +547,44 @@ test "nested arrays have independent owners":
     drop inner
     drop values
     assert(saved[0][0] == 42)
+
+test "tuple slots copy replace and transfer their backing storage":
+    values = array[tuple[int,2],1]()
+    original = (3, 7)
+    values[0] = original
+    original[0] = 99
+    saved = copy values
+    values[0] = (11, 13)
+    taken = values.take(0)
+    drop values
+    assert(taken[0] == 11 and taken[1] == 13)
+    assert(saved[0][0] == 3 and saved[0][1] == 7)
+
+test "ranked tensor slots preserve shape and independent ownership":
+    values = array[tensor[int,(2,2)],1]()
+    original = tensor[int,(2,2)]((1, 2, 3, 4))
+    values[0] = original
+    original[0,0] = 99
+    taken = values.take(0)
+    drop values
+    drop original
+    assert(taken[0,0] == 1 and taken[1,1] == 4)
+
+test "optional tuples can replace and clear owned payloads":
+    selected: tuple[int,2] | None = None
+    selected = (5, 8)
+    saved = copy selected
+    selected = (13, 21)
+    assert(saved.value[0] == 5 and selected.value[0] == 13)
+    selected = None
+    assert(not selected.has_value and saved.value[1] == 8)
+
+test with compiler "an optional cannot replace a borrowed tuple payload":
+    reject "borrow":
+        selected: tuple[int,2] | None = (5, 8)
+        payload = view selected.value
+        selected = (13, 21)
+        assert(payload[0] == 5)
 
 test "class string fields own their storage":
     text = Text("hello")
@@ -509,11 +616,11 @@ test "unions own and destroy only their active variant":
             result = test_package(root)
             self.assertTrue(result['success'], str(result))
 
-    def test_native_borrowed_record_slots_track_source_lifetimes(self):
+    def test_c_borrowed_record_slots_track_source_lifetimes(self):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         source = '''class Handle:
     value: pointer[int]
 

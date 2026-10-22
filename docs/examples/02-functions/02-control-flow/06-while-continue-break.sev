@@ -1,20 +1,23 @@
-def find_goal(grid: list[list[int]]) -> tuple[int, int] | None:
-    queue := [(0, 0)]
-    visited := set()
+from collections import list, set
+
+def find_goal(grid: list[list[int]]) -> tuple[int,2] | None:
+    queue = [(0, 0)]
+    visited = set[tuple[int,2]]()
+    result: tuple[int,2] | None = None
 
     while queue with
     {
-        defer 0 <= i < len(grid) -> continue,
-        defer 0 <= j < len(grid[i]) -> continue,
+        i, j = queue.pop(),
+        fix 0 <= i < len(grid) -> continue,
+        fix 0 <= j < len(grid[i]) -> continue,
     }:
-        i, j := queue.pop()
-
-        if (i, j) in visited:
+        position = (i, j)
+        if position in visited:
             continue
-
-        visited.add((i, j))
+        visited.add(position)
 
         if grid[i][j] == 1:
+            result = (i, j)
             break
 
         queue.append((i + 1, j))
@@ -22,19 +25,62 @@ def find_goal(grid: list[list[int]]) -> tuple[int, int] | None:
         queue.append((i, j + 1))
         queue.append((i, j - 1))
 
-    if grid[i][j] == 1:
-        return (i, j)
-
-    return None
+    return result
 
 
-test:
-    grid := [
-        [0, 0, 0],
-        [0, 0, 1],
-        [0, 0, 0],
-    ]
+test "search finds a goal after visiting boundary cells":
+    grid = [[0, 0, 0], [0, 0, 1], [0, 0, 0]]
+    result = find_goal(grid)
+    assert(result.has_value)
+    assert(result.value == (1, 2))
 
-    result := find_goal(grid)
 
-    assert(result == (1, 2))
+test "empty and exhausted grids have no goal":
+    empty = list[list[int]]()
+    assert(find_goal(empty) == None)
+    grid = [[0, 0], [0, 0]]
+    assert(find_goal(grid) == None)
+
+
+test "goal at the starting cell breaks immediately":
+    grid = [[1]]
+    result = find_goal(grid)
+    assert(result.has_value)
+    assert(result.value == (0, 0))
+
+
+test "ragged rows are bounded independently":
+    grid = [[0, 0], [0], [0, 1, 0]]
+    result = find_goal(grid)
+    assert(result.has_value)
+    assert(result.value == (2, 1))
+
+
+test "an empty first row does not allow an invalid access":
+    grid = list[list[int]]()
+    row = list[int]()
+    grid.append(row)
+    assert(find_goal(grid) == None)
+
+
+test "tuple unpacking snapshots before swapping":
+    left, right = (3, 7)
+    left, right = (right, left)
+    assert(left == 7 and right == 3)
+
+
+test "tuple unpacking owns copied members":
+    source = tuple[string,int]("kept", 42)
+    word, number := source
+    drop(source)
+    assert(word == "kept" and number == 42)
+
+
+test with compiler "tuple unpacking rejects an arity mismatch":
+    reject:
+        left, right := (1, 2, 3)
+
+
+test with compiler "tuple unpacking rejects duplicate names":
+    reject:
+        value, value := (1, 2)

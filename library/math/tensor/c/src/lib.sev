@@ -1,0 +1,145 @@
+# Numerical algorithms share the standard ranked tensor memory layout.
+def add(left: tensor[f64], right: tensor[f64]) -> tensor[f64]:
+    length = len(left)
+    if length != len(right):
+        throw Error("tensor elementwise shapes do not match")
+    result = tensor[f64,(length,)]()
+    index = 0
+    while index < length:
+        result[index] = left[index] + right[index]
+        index += 1
+    return result
+
+def add(left: tensor[f64,(None,None)], right: tensor[f64,(None,None)]) -> tensor[f64,(None,None)]:
+    rows = left.dim(0)
+    columns = left.dim(1)
+    if rows != right.dim(0) or columns != right.dim(1):
+        throw Error("tensor elementwise shapes do not match")
+    result = tensor[f64,(rows,columns)]()
+    row = 0
+    while row < rows:
+        column = 0
+        while column < columns:
+            result[row,column] = left[row,column] + right[row,column]
+            column += 1
+        row += 1
+    return result
+
+def multiply(left: tensor[f64], right: tensor[f64]) -> tensor[f64]:
+    length = len(left)
+    if length != len(right):
+        throw Error("tensor elementwise shapes do not match")
+    result = tensor[f64,(length,)]()
+    index = 0
+    while index < length:
+        result[index] = left[index] * right[index]
+        index += 1
+    return result
+
+def multiply(left: tensor[f64,(None,None)], right: tensor[f64,(None,None)]) -> tensor[f64,(None,None)]:
+    rows = left.dim(0)
+    columns = left.dim(1)
+    if rows != right.dim(0) or columns != right.dim(1):
+        throw Error("tensor elementwise shapes do not match")
+    result = tensor[f64,(rows,columns)]()
+    row = 0
+    while row < rows:
+        column = 0
+        while column < columns:
+            result[row,column] = left[row,column] * right[row,column]
+            column += 1
+        row += 1
+    return result
+
+def add(left: tensor[f64,(None,None)], bias: tensor[f64]) -> tensor[f64,(None,None)]:
+    rows = left.dim(0)
+    columns = left.dim(1)
+    if columns != len(bias):
+        throw Error("tensor trailing broadcast dimension does not match")
+    result = tensor[f64,(rows,columns)]()
+    row = 0
+    while row < rows:
+        column = 0
+        while column < columns:
+            result[row,column] = left[row,column] + bias[column]
+            column += 1
+        row += 1
+    return result
+
+def sum(values: tensor[f64]) -> f64:
+    result = 0.0
+    index = 0
+    while index < len(values):
+        result += values[index]
+        index += 1
+    return result
+
+def sum(values: tensor[f64,(None,None)]) -> f64:
+    result = 0.0
+    row = 0
+    while row < values.dim(0):
+        column = 0
+        while column < values.dim(1):
+            result += values[row,column]
+            column += 1
+        row += 1
+    return result
+
+def matmul(left: tensor[f64,(None,None)], right: tensor[f64,(None,None)]) -> tensor[f64,(None,None)]:
+    rows = left.dim(0)
+    inner = left.dim(1)
+    columns = right.dim(1)
+    if inner != right.dim(0):
+        throw Error("matrix multiplication inner dimensions do not match")
+    result = tensor[f64,(rows,columns)]()
+    row = 0
+    while row < rows:
+        column = 0
+        while column < columns:
+            total = 0.0
+            index = 0
+            while index < inner:
+                total += left[row,index] * right[index,column]
+                index += 1
+            result[row,column] = total
+            column += 1
+        row += 1
+    return result
+
+# Explicit namespace selection exposes contraction without a second algorithm.
+operator X(left: tensor[f64,(None,None)], right: tensor[f64,(None,None)]) -> tensor[f64,(None,None)]:
+    return matmul(left, right)
+
+# Direct reduction avoids allocating an intermediate elementwise product.
+def dot(left: tensor[f64], right: tensor[f64]) -> f64:
+    length = len(left)
+    if length != len(right):
+        throw Error("tensor dot shapes do not match")
+    result = 0.0
+    index = 0
+    while index < length:
+        result += left[index] * right[index]
+        index += 1
+    return result
+
+test "matrix product uses ranked storage":
+    left = tensor[f64,(2,2)](tuple[f64,4](1.0,2.0,3.0,4.0))
+    right = tensor[f64,(2,2)](tuple[f64,4](5.0,6.0,7.0,8.0))
+    result = matmul(left,right)
+    assert(result[0,0] == 19.0 and result[0,1] == 22.0)
+    assert(result[1,0] == 43.0 and result[1,1] == 50.0)
+    assert(sum(result) == 134.0)
+
+
+test "dot product and empty identity":
+    left = tensor[f64,(3,)](tuple[f64,3](1.0,2.0,3.0))
+    right = tensor[f64,(3,)](tuple[f64,3](4.0,5.0,6.0))
+    assert(dot(left,right) == 32.0)
+    empty = tensor[f64,(0,)]()
+    assert(dot(empty,empty) == 0.0)
+
+test "dot rejects different lengths":
+    throws "tensor dot shapes do not match":
+        left = tensor[f64,(1,)](tuple[f64,1](1.0))
+        right = tensor[f64,(0,)]()
+        value = dot(left,right)

@@ -6,7 +6,7 @@
     "description": "Process environment available to every Severian compilation",
     "unsafe": {
       "capabilities": [
-        "native-abi"
+        "c-abi"
       ],
       "sources": [
         "src/lib.sev"

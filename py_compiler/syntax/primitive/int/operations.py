@@ -124,7 +124,7 @@ class IntegerOperationTests(unittest.TestCase):
         self.assertIn('arith.shrui', text)
         self.assertNotIn('exponent must be nonnegative', text)
 
-    def test_native_results(self):
+    def test_c_results(self):
         import ctypes
         import shutil
         import subprocess
@@ -133,7 +133,7 @@ class IntegerOperationTests(unittest.TestCase):
         from py_compiler.lir.src.lib import lower, compile_object
         from py_compiler.mlir.src.lib import verifier_path
         if not shutil.which(verifier_path()) or not shutil.which('cc'):
-            self.skipTest('install MLIR/LLVM tools and cc for native execution')
+            self.skipTest('install MLIR/LLVM tools and cc for c execution')
         cases = (('divide', 'a / b', -7, 2, -3), ('floor', 'a // b', -7, 2, -4),
                  ('remainder', 'a % b', -7, 2, -1), ('power', 'a ** b', 3, 5, 243),
                  ('zero_power', 'a ** b', 0, 0, 1), ('shift', 'a >> b', -8, 2, -2),

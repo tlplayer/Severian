@@ -1,6 +1,6 @@
 # package.linker
 
-Native linking in ordinary Severian source, independently of package resolution
+C linking in ordinary Severian source, independently of package resolution
 and compiler-owned artifact layouts. Declare package name `package.linker` with
 an import alias such as `linker`.
 

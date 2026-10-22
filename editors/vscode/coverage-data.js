@@ -13,7 +13,7 @@ function normalizeFilePath(file) {
 
   let normalized = path.resolve(file);
   try {
-    normalized = fs.realpathSync.native(normalized);
+    normalized = fs.realpathSync.c(normalized);
   } catch {
     // Coverage can include a source that has been moved since the report ran.
   }
@@ -180,3 +180,46 @@ module.exports = {
   parseCoverageMap,
   parseHits,
 };
+
+
+// Python compiler reports store u64 point identities as decimal strings.
+function parsePythonCoverage(contents, root) {
+  const document = JSON.parse(contents);
+  if (!Array.isArray(document.points)) throw new Error('coverage report has no points');
+  const regions = [], hits = new Set();
+  const kinds = { line: 'Statement', branch: 'Branch', function: 'Function' };
+  for (const point of document.points) {
+    if (!point || !kinds[point.kind] || typeof point.id !== 'string'
+        || typeof point.file !== 'string' || !Number.isInteger(point.line) || point.line < 1
+        || !Number.isFinite(point.hits) || point.hits < 0) continue;
+    const file = normalizeFilePath(path.resolve(root, point.file));
+    const relative = path.relative(root, file);
+    if (relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) continue;
+    const id = file + ':' + point.id;
+    regions.push({ id, file, kind: kinds[point.kind], functionName: point.function || '',
+      startLine: point.line - 1, endLine: point.line - 1,
+      startColumn: Math.max(0, (point.column || 1) - 1), endColumn: 0 });
+    if (point.hits > 0) hits.add(id);
+  }
+  return { regions, hits, sourceHash: document['source-sha256'] };
+}
+module.exports.parsePythonCoverage = parsePythonCoverage;
+
+if (require.main === module) {
+  const { test } = require('node:test');
+  const assert = require('node:assert/strict');
+  test('Python reports show covered and uncovered LOC without losing u64 IDs', () => {
+    const root = path.resolve('/tmp/sev-coverage');
+    const report = parsePythonCoverage(JSON.stringify({ points: [
+      { id: '18446744073709551615', kind: 'line', file: 'main.sev', line: 2, hits: 3 },
+      { id: '18446744073709551614', kind: 'line', file: 'main.sev', line: 3, hits: 0 },
+      { id: '4', kind: 'branch', file: 'main.sev', line: 2, hits: 0 },
+      { id: '5', kind: 'line', file: '../outside.sev', line: 1, hits: 1 },
+    ] }), root);
+    const file = buildFileCoverage(report.regions, report.hits).get(path.join(root, 'main.sev'));
+    assert.deepEqual(file.metrics.lines, { count: 2, covered: 1, percent: 50 });
+    assert.equal(file.metrics.branches.covered, 0);
+    assert.equal(file.lines.get(2).covered, false);
+    assert.equal(report.regions.length, 3);
+  });
+}

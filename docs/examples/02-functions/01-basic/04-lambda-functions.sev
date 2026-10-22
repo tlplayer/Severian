@@ -6,7 +6,7 @@ def apply(op: (int,int) -> int, left: int, right: int) -> int:
 
 test:
     assert(apply(add, 20, 22) == 42)
-    offset := 3
+    offset = 3
     operation = lambda value, unused: value + offset + unused
     offset = 10
     assert(apply(operation, 4, 0) == 7)

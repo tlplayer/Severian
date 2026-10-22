@@ -21,6 +21,9 @@ class TypeDeclaration:
     template_name: str = ''
     arguments: tuple = ()
     memory_defaults: tuple = ()
+    destructor: bool = False
+    field_constraints: tuple = ()
+    grammar_requirements: tuple = ()
 
     @property
     def binding_ownership(self):
@@ -31,6 +34,22 @@ class TypeDeclaration:
         from py_compiler.syntax.generic.owned import WordGrammar
         return (WordGrammar(self, self.name, "IDENTIFIER"),)
 
+
+
+def implements(declaration, contract, context):
+    """Follow declared trait contracts, including inherited contracts."""
+    pending, visited = list(declaration.traits), set()
+    while pending:
+        name = pending.pop()
+        if name == contract:
+            return True
+        if name in visited:
+            continue
+        visited.add(name)
+        parent = context.by_name.get(name)
+        if parent is not None:
+            pending.extend(parent.traits)
+    return False
 
 
 class RecordProvider(DeclarationProvider):
@@ -56,9 +75,13 @@ class RecordProvider(DeclarationProvider):
             if items[position].text not in ("=", ":="):
                 raise ValueError("expected a field initializer")
             term = expression(items[position + 1:])
-            if term.kind != "literal":
+            signed_literal = (term.kind == 'unary' and term.token.text in ('+', '-')
+                              and term.operands[0].kind == 'literal')
+            if term.kind != "literal" and not signed_literal:
                 raise ValueError("field initializer requires a literal provider in this milestone")
-            type_, default = resolve_literal(Literal(child.identity, term.token.span, term.token.text, term.token.kind, annotation), context.bound_syntax, context)
+            token = term.operands[0].token if signed_literal else term.token
+            spelling = term.token.text + token.text if signed_literal else token.text
+            type_, default = resolve_literal(Literal(child.identity, term.token.span, spelling, token.kind, annotation), context.bound_syntax, context)
             annotation = type_.name
         if annotation is None:
             raise ValueError("field requires a type or initializer")
@@ -122,12 +145,20 @@ class RecordTemplate:
     parameters: tuple
     scope: tuple
 
+    family = 'type-provider'
+
+    def grammars(self):
+        from py_compiler.syntax.generic.owned import WordGrammar
+        return (WordGrammar(self,self.name,'IDENTIFIER'),)
+
     def realize(self, arguments, context):
         from dataclasses import replace
         from py_compiler.syntax.complex.generic import template_argument, substitute, check_constraints, record_clone
         if len(arguments) > len(self.parameters):
             raise ValueError('too many record template arguments')
-        bindings = {p.name: template_argument(value, context) for p, value in zip(self.parameters, arguments)}
+        from py_compiler.syntax.complex.generic import named_arguments
+        supplied = named_arguments(self.parameters, arguments, context)
+        bindings = {name: template_argument(value, context) for name, value in supplied.items()}
         previous = context.scope, context.template_types, context.active_provider
         context.scope = self.scope
         try:
@@ -143,7 +174,7 @@ class RecordTemplate:
             if name in context.types:
                 existing = context.types[name]
                 if self.provider.spelling == 'class' and not existing.declaration.template_name:
-                    # Native exports can contain only the members realized in
+                    # C exports can contain only the members realized in
                     # the producer. Supply other members from its template.
                     hydrated = getattr(context, 'hydrated_records', None)
                     if hydrated is None:
@@ -166,14 +197,25 @@ class RecordTemplate:
             try:
                 _, header, _ = record_header(self.node.header)
                 node = record_clone(self.node, bindings, suffix)
-                node.header = tuple(token.with_text(substitute(token.text, bindings)) for token in header)
+                node.header = tuple(token.with_text(substitute(token.text, bindings))
+                                    if index == 0 or header[index-1].text != '.' else token
+                                    for index, token in enumerate(header))
                 node.header = (node.header[0].with_text(node.header[0].text + suffix), *node.header[1:])
                 node.record_arguments = tuple(bindings[p.name] for p in self.parameters)
                 node.record_template = self.name
                 context.active_provider = self.provider
                 self.provider.declare(node, context)
                 context.scopes[node.identity] = node.scope
-                context.resolve_contracts()
+                for template, extension, scope in getattr(context,'generic_extensions',()):
+                    if template is self:
+                        previous_scope=context.scope
+                        context.scope=scope
+                        try:
+                            extension.provider.declare(record_clone(extension,bindings,suffix),context)
+                        finally:
+                            context.scope=previous_scope
+                if len(context.realizing_records) == 1:
+                    context.resolve_contracts()
                 return context.types[name]
             finally:
                 context.realizing_records.remove(name)

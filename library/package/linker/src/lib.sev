@@ -1,8 +1,4 @@
-import link_digest, link_mkdir, link_quote, link_write from "host.sev"
-import file
-import os
-import path
-import process
+import * from "host.sev"
 
 class LinkInput:
     path: string
@@ -25,17 +21,17 @@ class LinkResult:
     reused: bool = false
 
 def input(location: string, kind: string = "object", target: string = "") -> LinkInput | Error:
-    if kind not in ["object", "archive", "shared-library", "llvm-ir", "native-source", "response", "script"]:
+    if kind not in ["object", "archive", "shared-library", "llvm-ir", "c-source", "response", "script"]:
         throw Error("unsupported link input kind: " + kind)
     if not os.is_file(location):
         throw Error("missing link input: " + location)
     absolute = os.canonical(location)
     return LinkInput(absolute, kind, link_digest(absolute), target)
 
-def validate(plan: LinkPlan) -> unit | Error:
+def validate(plan: LinkPlan) -> absent | Error:
     if plan.target == "" or plan.output == "" or plan.kind not in ["static-archive", "shared-library", "executable"] or len(plan.arguments) == 0 or len(plan.inputs) == 0:
-        throw Error("invalid native link plan")
-    bound := false
+        throw Error("invalid c link plan")
+    bound = false
     for argument in plan.arguments[1:]:
         if argument == plan.output or argument == "/out:" + plan.output:
             bound = true
@@ -48,6 +44,7 @@ def validate(plan: LinkPlan) -> unit | Error:
             throw Error("link input changed: " + item.path)
         if os.is_file(plan.output) and os.canonical(plan.output) == os.canonical(item.path):
             throw Error("link output overwrites an input: " + item.path)
+    return absent
 
 # Structured, ordered inputs. Never sort archives: consumers precede providers.
 # Options may refer to implicit toolchain inputs, so reuse is opt-in. Callers
@@ -76,7 +73,7 @@ def plan_inputs(target: string, kind: string, output: string, tool: string, inpu
 # Raw commands can contain implicit headers/libraries; they always execute.
 def plan_link(target: string, kind: string, output: string, arguments: list[string]) -> LinkPlan | Error:
     inputs: list[LinkInput] = []
-    option_value := false
+    option_value = false
     for argument in arguments[1:]:
         if option_value:
             option_value = false
@@ -84,18 +81,18 @@ def plan_link(target: string, kind: string, output: string, arguments: list[stri
         if argument in ["-install_name", "-soname", "-rpath", "-L", "-F", "-arch", "--sysroot", "-isysroot", "--target", "-target", "-framework", "-undefined"]:
             option_value = true
             continue
-        if argument == output or argument.starts_with("/out:"):
+        if argument == output or link_starts(argument, "/out:"):
             continue
-        if argument.starts_with("/implib:") or argument.starts_with("/pdb:") or argument.starts_with("/export:"):
+        if link_starts(argument, "/implib:") or link_starts(argument, "/pdb:") or link_starts(argument, "/export:"):
             continue
-        response = argument.starts_with("@")
-        location = argument[1:] if response else argument
+        response = link_starts(argument, "@")
+        location = argument[1:] if response else argument.concat("")
         extension = path.extension(location)
         if not os.is_file(location):
-            if response or (not argument.starts_with("-") and extension in [".o", ".obj", ".a", ".lib", ".ll", ".bc", ".c"]):
+            if response or (not link_starts(argument, "-") and extension in [".o", ".obj", ".a", ".lib", ".ll", ".bc", ".c"]):
                 throw Error("missing link input: " + location)
             continue
-        role = "response" if response else "native-source" if extension == ".c" else "archive" if extension in [".a", ".lib"] else "llvm-ir" if extension in [".ll", ".bc"] else "shared-library" if extension in [".so", ".dylib", ".dll"] else "object"
+        role = "response" if response else "c-source" if extension == ".c" else "archive" if extension in [".a", ".lib"] else "llvm-ir" if extension in [".ll", ".bc"] else "shared-library" if extension in [".so", ".dylib", ".dll"] else "object"
         inputs.append(input(location, role))
     plan = LinkPlan(target, kind, output, arguments[:], inputs)
     validate(plan)
@@ -108,29 +105,32 @@ def record(plan: LinkPlan, checksum: string, tool: string) -> string:
         arguments.append(link_quote(argument))
     for item in plan.inputs:
         inputs.append("{\"path\":" + link_quote(item.path) + ",\"kind\":" + link_quote(item.kind) + ",\"checksum\":" + link_quote(item.checksum) + ",\"target\":" + link_quote(item.target) + "}")
-    return "{\"format\":1,\"target\":" + link_quote(plan.target) + ",\"kind\":" + link_quote(plan.kind) + ",\"output\":" + link_quote(plan.output) + ",\"checksum\":" + link_quote(checksum) + ",\"linker\":" + link_quote(tool) + ",\"cwd\":" + link_quote(process.current_directory()) + ",\"arguments\":[" + arguments.join(",") + "],\"input\":[" + inputs.join(",") + "]}\n"
+    return "{\"format\":1,\"target\":" + link_quote(plan.target) + ",\"kind\":" + link_quote(plan.kind) + ",\"output\":" + link_quote(plan.output) + ",\"checksum\":" + link_quote(checksum) + ",\"linker\":" + link_quote(tool) + ",\"cwd\":" + link_quote(process.current_directory()) + ",\"arguments\":[" + link_join(arguments) + "],\"input\":[" + link_join(inputs) + "]}\n"
 
 def execute_locked(plan: LinkPlan, stage: string) -> LinkResult | Error:
     validate(plan)
-    located = process.execute(["which", plan.arguments[0]])
-    if located.status != 0:
+    located = process.find_executable(plan.arguments[0])
+    if not os.is_file(located):
         throw Error("linker not found: " + plan.arguments[0])
     # Driver symlink names select modes (lld-link, ld64.lld, clang++).
     # Hash the resolved executable but invoke the selected spelling.
-    tool := located.stdout.strip()
-    if not tool.starts_with("/"):
-        tool = process.current_directory() + "/" + tool
+    tool = located.concat("") if link_starts(located, "/") else process.current_directory() + "/" + located
     identity = os.canonical(tool) + " " + link_digest(tool)
     receipt = plan.output + ".link.json"
     if plan.incremental and os.is_file(plan.output) and os.is_file(receipt):
         checksum = link_digest(plan.output)
         if file.read_checked(receipt) == record(plan, checksum, identity):
-            return LinkResult(plan.output, checksum, plan, true)
+            return LinkResult(plan.output, checksum, copy plan, true)
     # A fresh archive cannot retain obsolete members from an earlier link.
     temporary = stage + "/" + path.basename(plan.output)
     arguments: list[string] = [tool]
     for argument in plan.arguments[1:]:
-        arguments.append(temporary if argument == plan.output else "/out:" + temporary if argument == "/out:" + plan.output else argument)
+        if argument == plan.output:
+            arguments.append(temporary)
+        elif argument == "/out:" + plan.output:
+            arguments.append("/out:" + temporary)
+        else:
+            arguments.append(argument)
     result = process.execute(arguments)
     if result.status != 0:
         throw Error("linker failed: " + plan.arguments[0] + ": " + result.stderr)
@@ -141,19 +141,17 @@ def execute_locked(plan: LinkPlan, stage: string) -> LinkResult | Error:
         throw Error("linker changed during execution")
     checksum = link_digest(temporary)
     link_write(stage + "/link.json", record(plan, checksum, identity))
-    if os.rename(temporary, plan.output) != 0:
-        throw Error("could not publish link output: " + plan.output)
-    if os.rename(stage + "/link.json", receipt) != 0:
-        throw Error("could not publish link record: " + receipt)
-    return LinkResult(plan.output, checksum, plan)
+    os.rename(temporary, plan.output)
+    os.rename(stage + "/link.json", receipt)
+    return LinkResult(plan.output, checksum, copy plan)
 
 def execute_link(plan: LinkPlan) -> LinkResult | Error:
     validate(plan)
     link_mkdir(path.dirname(plan.output))
-    lock = file.native_lock(plan.output + ".link.lock")
+    lock = file.c_lock(plan.output + ".link.lock")
     if lock < 0:
         throw Error("could not lock link output: " + plan.output)
-    stage := ""
+    stage = ""
     try:
         stage = os.temporary(path.dirname(plan.output), ".sev-link-")
         result = execute_locked(plan, stage)

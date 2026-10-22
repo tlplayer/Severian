@@ -66,7 +66,7 @@ def open(location: string = ".") -> Project | Error:
         for target in manifest.targets:
             inside(root, target.path)
         return Project(root, manifest, original, lock)
-    handle = file.native_lock(root + "/.sev-edit.lock")
+    handle = file.c_lock(root + "/.sev-edit.lock")
     if handle < 0:
         throw Error("could not lock project snapshot")
     original := ""

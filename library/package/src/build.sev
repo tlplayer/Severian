@@ -16,7 +16,7 @@ from diagnostic import
     coverage_metric,
     coverage_finish,
 }
-import LinkInput, LinkPlan, LinkResult, PreparedGenerators, add, artifact_kind, compilation_error, compilation_frames, compile_unit, decode_resolution, execute_link, fork_compilation_unit, init, installed_realization, interfaces, library_sidecars, new, options, payload_copy, payload_text, plan_link, portable_graph, portable_inputs, portable_path, prepare_generators, relocated_path, remove, render_legacy_manifest, render_manifest, report, reset_generators, restore_realization, retain_container, retain_cross_native, retain_file, retain_native_interface, retain_payload, retain_realization, reusable_inputs, sidecars_match, unit_resolution, update, wait_compilation_unit from "compiler.sev"
+import LinkInput, LinkPlan, LinkResult, PreparedGenerators, add, artifact_kind, compilation_error, compilation_frames, compile_unit, decode_resolution, execute_link, fork_compilation_unit, init, installed_realization, interfaces, library_sidecars, new, options, payload_copy, payload_text, plan_link, portable_graph, portable_inputs, portable_path, prepare_generators, relocated_path, remove, render_legacy_manifest, render_manifest, report, reset_generators, restore_realization, retain_container, retain_cross_c, retain_file, retain_c_interface, retain_payload, retain_realization, reusable_inputs, sidecars_match, unit_resolution, update, wait_compilation_unit from "compiler.sev"
 import canonical, capture, command, copy_file, digest, exists, files, manifest_file, mkdir, mutable_project, project_lock_file, published_project, read_bytes, read_text, remove_tree, replace_file, require_command, sorted_strings, temporary, write_bytes, write_text from "host.sev"
 import "model.sev" as _dependency_408
 import inside, open, parse_manifest, prelude_exclusions, reference, safe_name, write_document from "manifest.sev"
@@ -38,7 +38,7 @@ def plan(project: Project, request: Build, mode: string = "build") -> BuildPlan 
     diagnostic.format_sources(project)
     resolution = resolve(project, Resolve("test" if mode == "test" else "build", request.locked, ""))
     if not request.locked and project.lock_text != resolution.lock:
-        lock = file.native_lock(project.root + "/.sev-edit.lock")
+        lock = file.c_lock(project.root + "/.sev-edit.lock")
         if lock < 0:
             throw Error("could not lock package resolution")
         try:

@@ -1,0 +1,93 @@
+union Numeric:
+    i8
+    i16
+    i32
+    i64
+    u8
+    u16
+    u32
+    u64
+    f32
+    f64
+
+# Scalar math maps directly to typed MLIR math operations.
+@mlir("math.sin")
+def sin(value: f64) -> f64
+
+@mlir("math.cos")
+def cos(value: f64) -> f64
+
+@mlir("math.exp")
+def exp(value: f64) -> f64
+
+@mlir("math.exp2")
+def exp2(value: f64) -> f64
+
+@mlir("math.log")
+def log(value: f64) -> f64
+
+@mlir("math.log2")
+def log2(value: f64) -> f64
+
+@mlir("math.log10")
+def log10(value: f64) -> f64
+
+@mlir("math.sqrt")
+def sqrt(value: f64) -> f64
+
+@mlir("math.floor")
+def floor(value: f64) -> f64
+
+@mlir("math.ceil")
+def ceil(value: f64) -> f64
+
+@mlir("math.trunc")
+def trunc(value: f64) -> f64
+
+@mlir("math.absf")
+def abs(value: f64) -> f64
+
+@mlir("math.powf")
+def pow(base: f64, exponent: f64) -> f64
+
+def ln(value: f64) -> f64:
+    return log(value)
+
+def tan(value: f64) -> f64:
+    return sin(value) / cos(value)
+
+def isnan(value: f64) -> bool:
+    return value != value
+
+def isfinite(value: f64) -> bool:
+    return value == value and abs(value) != 1.0 / 0.0
+
+# Decimal rounding, with halfway values rounded away from zero.
+def round(value: f64, digits: int = 0) -> f64:
+    if digits < -308 or digits > 308:
+        throw Error("round precision outside f64 decimal range")
+    scale = pow(10.0, float(digits))
+    scaled = value * scale
+    if not isfinite(scaled):
+        return value
+    rounded = floor(scaled + 0.5) if scaled >= 0.0 else ceil(scaled - 0.5)
+    return rounded / scale
+
+def approximate(actual: f64, expected: f64, rtol: f64 = 0.000000001, atol: f64 = 0.0) -> bool:
+    if rtol < 0.0 or atol < 0.0:
+        throw Error("approximation tolerance must be nonnegative")
+    if actual == expected:
+        return true
+    if not isfinite(actual) or not isfinite(expected):
+        return false
+    tolerance = rtol * abs(expected)
+    if tolerance < atol:
+        tolerance = atol
+    return abs(actual - expected) <= tolerance
+
+test "rounding, approximate equality, and non-finite values":
+    assert(round(1.23456, 3) == 1.235)
+    assert(round(-1.25, 1) == -1.3)
+    assert(approximate(log(exp(1.0)), 1.0))
+    assert(not approximate(1.0 / 0.0, 42.0))
+    assert(isnan(0.0 / 0.0))

@@ -1,6 +1,26 @@
+from collections import list
+
 def main():
     values = [1, 2, 3, 4]
     doubled = [value * 2 for value in values]
     evens = [value for value in doubled if value % 2 == 0]
 
-    print(evens)
+    for value in evens:
+        print(value)
+
+
+test "comprehensions transform and filter through list iteration":
+    values: list[int] = [1, 2, 3, 4]
+    doubled = [value * 2 for value in values]
+    selected = [value for value in doubled if value > 4]
+    assert(len(doubled) == 4)
+    assert(selected[0] == 6 and selected[1] == 8)
+    assert(len(values) == 4 and values[0] == 1)
+
+test "empty and fully filtered comprehensions preserve their result type":
+    empty = list[int]()
+    mapped = [value * 2 for value in empty]
+    assert(len(mapped) == 0)
+    values: list[int] = [1, 2]
+    filtered = [value for value in values if value > 10]
+    assert(len(filtered) == 0)

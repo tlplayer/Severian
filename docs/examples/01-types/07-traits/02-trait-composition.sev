@@ -1,3 +1,5 @@
+from io import capture_stdout
+
 trait Named:
     def name() -> string
 
@@ -23,12 +25,58 @@ class Button: Drawable + Color
         print(shade)
 
 def render(item: Drawable):
-    print(item.name())
+    label = item.name()
+    print(label)
     item.draw()
 
 def main():
     button = Button("Save","mauve")
     render(button)
 
-test:
+test "composed trait dispatch":
     main()
+    assert(capture_stdout() == "Save\nSave\n")
+
+def named[T: Named](item: T) -> string:
+    return item.name()
+
+def parent_name(item: Named) -> string:
+    return item.name()
+
+test "inherited contract accepts generic and boxed calls":
+    button = Button("Save", "mauve")
+    assert(named(button) == "Save")
+    assert(parent_name(button) == "Save")
+    button.paint()
+    assert(capture_stdout() == "mauve\n")
+
+test with compiler "inherited method remains required":
+    reject:
+        class Incomplete: Drawable
+            def draw():
+                print("missing name")
+
+test with compiler "inherited fields cannot conflict":
+    reject:
+        trait Incompatible: Color
+            shade: int
+
+trait Titled: Named
+    def title() -> string
+
+class Dialog: Titled
+    def name() -> string:
+        return "dialog"
+    def title() -> string:
+        return "Preferences"
+
+test "header inheritance retains both methods":
+    dialog = Dialog()
+    assert(parent_name(dialog) == "dialog")
+    assert(dialog.title() == "Preferences")
+
+test "boxed owned string result outlives the source record":
+    button = Button("Save", "mauve")
+    result = parent_name(button)
+    drop(button)
+    assert(result == "Save")

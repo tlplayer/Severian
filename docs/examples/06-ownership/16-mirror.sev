@@ -1,4 +1,22 @@
-import * from "array.sev"
+from collections import equal
+
+test with profile "mirrors retain storage until a writer detaches":
+    owner = array[int,1024]()
+    owner[0] = 42
+    before = allocations
+    first = mirror owner
+    second = mirror owner
+    assert(allocations == before + 1)
+    first[0] = 99
+    assert(owner[0] == 42 and second[0] == 42 and first[0] == 99)
+
+test with compiler "conditional mutation cannot authorize a mirror chain":
+    reject:
+        owner = array[int,2]([1,2])
+        first = mirror owner
+        if false:
+            first[0] = 3
+        second = mirror first
 
 
 '''
@@ -56,24 +74,24 @@ test "owner can have many mirrors":
 
 test "mirror reads observe the owner while storage is unchanged":
     owner := array[i32, 4]([1, 2, 3, 4])
-    view := mirror owner
+    snapshot :=  mirror owner
 
-    assert(view[0] == owner[0])
-    assert(view[1] == owner[1])
-    assert(view[2] == owner[2])
-    assert(view[3] == owner[3])
+    assert(snapshot[0] == owner[0])
+    assert(snapshot[1] == owner[1])
+    assert(snapshot[2] == owner[2])
+    assert(snapshot[3] == owner[3])
 
 
 test "writing a mirror detaches it":
     owner := array[i32, 4]([1, 2, 3, 4])
-    view := mirror owner
+    snapshot :=  mirror owner
 
-    view[0] = 99
+    snapshot[0] = 99
 
     assert(owner[0] == 1)
-    assert(view[0] == 99)
+    assert(snapshot[0] == 99)
     assert(owner[1] == 2)
-    assert(view[1] == 2)
+    assert(snapshot[1] == 2)
 
 
 test "detaching one mirror does not affect sibling mirrors":
@@ -147,9 +165,9 @@ test "new mirror of detached owner follows detached storage":
 
 test "dropping a mirror does not drop owner storage":
     owner := array[i32, 2]([10, 20])
-    view := mirror owner
+    snapshot :=  mirror owner
 
-    drop view
+    drop snapshot
 
     assert(owner[0] == 10)
     assert(owner[1] == 20)
@@ -157,12 +175,12 @@ test "dropping a mirror does not drop owner storage":
 
 test "dropping owner keeps mirrored snapshot alive":
     owner := array[i32, 2]([10, 20])
-    view := mirror owner
+    snapshot :=  mirror owner
 
     drop owner
 
-    assert(view[0] == 10)
-    assert(view[1] == 20)
+    assert(snapshot[0] == 10)
+    assert(snapshot[1] == 20)
 
 
 test with compiler "cannot mirror a mirror":
@@ -175,10 +193,10 @@ test with compiler "cannot mirror a mirror":
 test with compiler "mirror remains read-shared until mutation":
     accept:
         owner := array[i32, 4]([1, 2, 3, 4])
-        view := mirror owner
+        snapshot :=  mirror owner
 
-        x := view[0]
-        y := view[1]
+        x := snapshot[0]
+        y := snapshot[1]
 
         assert(x == 1)
         assert(y == 2)

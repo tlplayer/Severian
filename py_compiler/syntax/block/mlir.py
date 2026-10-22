@@ -61,6 +61,18 @@ class Mlir(BlockProvider):
         return False
 
     def parse_header(self, items):
+        if len(items)>1 and items[1].text != 'mlir':
+            if items[1].kind != 'IDENTIFIER':
+                raise ValueError('annotation requires a namespace name')
+            if len(items)>2 and items[2].text == 'with':
+                from py_compiler.syntax.block.hooks import parse_phases
+                return NamespaceAnnotation(items[1].text, phases=parse_phases(items[3:]))
+            args=()
+            if len(items)>2:
+                if items[2].text != '(' or items[-1].text != ')':
+                    raise ValueError('annotation arguments require parentheses')
+                args=tuple(t.text for t in items[3:-1] if t.text != ',')
+            return NamespaceAnnotation(items[1].text,args)
         text = ' '.join(t.text for t in items[1:])
         try:
             call = ast.parse(text, mode='eval').body
@@ -96,7 +108,7 @@ class MlirTests(unittest.TestCase):
         return compile_source('operations.sev', source, Syntax())
 
     def test_library_operation_is_typed_and_survives_mir(self):
-        from py_compiler.mlir.src.lib import lower, render, verify_native, verifier_path
+        from py_compiler.mlir.src.lib import lower, render, verify_c, verifier_path
         result = self.compile('@mlir("arith.addi")\ndef add(a: int, b: int) -> int\ndef run() -> int:\n    return add(2, 3)\n')
         self.assertFalse(result.diagnostics, str(result.diagnostics))
         text = render(lower(result.program))
@@ -104,7 +116,7 @@ class MlirTests(unittest.TestCase):
         self.assertNotIn('__sev_io_', text)
         import shutil
         if shutil.which(verifier_path()):
-            verify_native(text)
+            verify_c(text)
 
     def test_annotation_requires_a_bodyless_callable(self):
         for source in ('@mlir("arith.addi")\n', '@mlir("arith.addi")\ndef bad():\n    return\n'):
@@ -117,3 +129,10 @@ class MlirTests(unittest.TestCase):
         for target, bits in (('aarch64-unknown-linux-gnu', 64), ('x86_64-apple-darwin', 64), ('x86_64-unknown-linux-gnu', 32)):
             with self.assertRaisesRegex(ValueError, 'requires x86_64 Linux'):
                 operation.validate_target(target, bits)
+
+
+@dataclass(frozen=True)
+class NamespaceAnnotation:
+    name: str
+    arguments: tuple = ()
+    phases: tuple = ()

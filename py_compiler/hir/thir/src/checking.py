@@ -56,6 +56,7 @@ class Checker:
         self.imported = {}
         self.unsafe_depth = 0
         self.active_scopes = []
+        self.deferred_actions = []
         self.loops = []
         self.value_sources = {}
         self.call_result_owners = {}
@@ -119,7 +120,7 @@ class Checker:
             self.value_origins[result.identity] = set().union(*(self.value_origins.get(v.identity, set()) for v in operands)) if kind != 'memory-copy' else set()
         if kind != 'memory-copy' and type_ and type_.binding_ownership != 'copy':
             self.value_sources[result.identity] = set().union(*(self.value_sources.get(v.identity, set()) for v in operands))
-        if kind != "memory-copy" and type_ and type_.family in ("record", "trait", "union", "dynamic", "array", "pointer") and any(v.identity in self.stack_values for v in operands):
+        if kind != "memory-copy" and type_ and type_.family in ("record", "trait", "union", "dynamic", "array", "tensor", "tuple", "pointer") and any(v.identity in self.stack_values for v in operands):
             self.stack_values.add(result.identity)
         if kind == 'constant' and type_ and type_.family == 'string':
             self.owned_results.add(result.identity)
@@ -158,9 +159,13 @@ class Checker:
         from py_compiler.syntax.generic.storage import FieldPlace
         place = self.storage.get(identity)
         origins = self.value_origins.get(place.receiver.identity, {identity}) if isinstance(place, FieldPlace) else {identity}
+        if value.type.family == 'pointer' and binding.identity in self.flow.view_sources:
+            origins = {self.flow.resolve(source) for source in self.flow.view_sources[binding.identity]}
         self.value_origins[value.identity] = set(origins)
         dependencies = set().union(*(self.flow.sources(origin) for origin in origins)) | self.flow.sources(binding.identity)
-        if value.type.family in ('pointer', 'trait'):
+        if value.type.family == 'pointer':
+            dependencies.update(set().union(*(self.flow.sources(origin) or {origin} for origin in origins)))
+        elif value.type.family == 'trait':
             dependencies.update(origins)
         if identity in self.parameter_bindings:
             from py_compiler.syntax.generic.storage import contains_borrowed_fields
@@ -171,6 +176,12 @@ class Checker:
 
     def _read_binding(self, binding, span):
         identity = self.flow.resolve(binding.identity)
+        locked_tasks = {b.identity for b in self.body.bindings
+                        if b.type is not None and b.type.family == 'task' and b.type.locked}
+        if (self.flow.borrowers(identity) & locked_tasks
+                and not (getattr(self, 'async_expression', None) is not None
+                         and 'lock' in getattr(self, 'async_options', ()))):
+            raise ValueError('await locked tasks before accessing their shared receiver')
         if identity in self.uninitialized_fields:
             raise ValueError("constructor reads a field before initialization")
         if binding.type.family == 'pointer' and binding.identity in self.values and binding.identity != identity:
@@ -178,7 +189,7 @@ class Checker:
         if identity in self.storage:
             return self.storage[identity].read(self, span)
         value = self.values[identity]
-        if binding.type.family in ('record', 'array', 'shared', 'string', 'union', 'dynamic', 'iterator') and binding.identity in self.values and binding.type != value.type:
+        if binding.type.family in ('record', 'array', 'tensor', 'tuple', 'shared', 'string', 'union', 'dynamic', 'iterator') and binding.identity in self.values and binding.type != value.type:
             # A nested record view borrows the containing binding's lifetime,
             # but retains the address and type of its own field.
             value = self.values[binding.identity]
@@ -230,12 +241,23 @@ class Checker:
         return value
 
     def check_expression(self, node, env, expected=None):
+        if expected is not None and expected.family == 'bool':
+            return expected.condition(node, self, env)
         require_context = getattr(expected, 'require_context', None)
         if require_context is not None:
             require_context(self)
-        value = self.expression_value(self.capture_expression(node), env, expected)
+        previous_capture = getattr(self, 'preserve_error_result', False)
+        previous_async = getattr(self, 'spawning_async', False)
+        self.spawning_async = node is getattr(self, 'async_expression', None)
+        self.preserve_error_result = node is getattr(self, 'captured_error_expression', None)
+        try:
+            value = self.expression_value(self.capture_expression(node), env, expected)
+        finally:
+            self.preserve_error_result = previous_capture
+            self.spawning_async = previous_async
         if (value is not None and expected is not None and value.type != expected
-                and value.type.family == expected.family == 'integer'):
+                and (value.type.family == expected.family == 'integer' or
+                     value.type.family in ('tensor', 'tuple') and expected.family in ('tensor', 'tuple'))):
             from py_compiler.syntax.function.calls import coerce
             value = coerce(value, expected, self, node.token.span)
         require_context = getattr(value.type, 'require_context', None) if value is not None else None
@@ -245,10 +267,37 @@ class Checker:
 
     def expression_value(self, node, env, expected=None):
         token = node.token
+        if getattr(self, 'profiling', False):
+            from py_compiler.syntax.complex.profile import read
+            metric = read(node, self, env)
+            if metric is not None:
+                return metric
         from py_compiler.syntax.block.grammar import expression_grammar, lower_result
         match = expression_grammar(node, self, env)
         if match is not None:
             return lower_result(match, self)
+        if node.kind == 'tuple':
+            value = self.context.type('tuple').construct_expression(None, node.operands, self, env, node.token.span, expected)
+            if expected is not None and expected.family == 'union':
+                from py_compiler.syntax.function.calls import coerce
+                from py_compiler.syntax.generic.storage import release_storage
+                boxed = coerce(value, expected, self, node.token.span)
+                release_storage(value, self, node.token.span)
+                return boxed
+            return value
+        if node.kind == 'interpolation':
+            from py_compiler.syntax.complex.interpolation import lower
+            return lower(node, self, env)
+        if node.kind in ('list', 'map', 'set'):
+            from py_compiler.syntax.complex.collection import lower_literal
+            return lower_literal(node, self, env, expected)
+        if node.kind == 'fallback':
+            from py_compiler.syntax.block.union import fallback_expression
+            return fallback_expression(node, self, env, expected)
+        if node.kind in ('conditional', 'identity'):
+            from py_compiler.syntax.operator.logical import conditional_expression, identity_expression
+            lower = conditional_expression if node.kind == 'conditional' else identity_expression
+            return lower(node, self, env, expected)
         if node.kind == 'capture':
             return node.operands[0].lower(self, expected)
         if node.kind == 'address':
@@ -256,6 +305,22 @@ class Checker:
             from py_compiler.syntax.function.allocate import resolve_plan
             from py_compiler.syntax.function.calls import literal_value
             source = node.operands[0]
+            if source.kind == 'index':
+                from py_compiler.syntax.generic.storage import root_binding
+                from py_compiler.syntax.primitive.pointer.operations import ElementAddress
+                binding = root_binding(source, self, env)
+                if binding is None:
+                    raise ValueError('address requires a live binding')
+                receiver = self.expr(source.operands[0], env)
+                if (getattr(receiver.type, 'rank', 1) != 1 or
+                        not hasattr(receiver.type, 'element') or
+                        receiver.type.element.family not in ('integer', 'float', 'bool', 'char', 'byte')):
+                    raise ValueError('indexed address requires rank-one scalar storage')
+                place = receiver.type.element_place(receiver, source.operands[1], self, env, token.span)
+                position = place.indices[0] if hasattr(place, 'indices') else place.index
+                target = self.context.type('pointer[' + place.type.name + ']')
+                target.require_context(self)
+                return self.emit('element-address', target, (receiver, position), ElementAddress(target.bits), token.span)
             binding = self.lookup(source, env) if source.kind in ('name', 'reference') else None
             if binding is None:
                 raise ValueError('address requires a live binding')
@@ -276,6 +341,9 @@ class Checker:
                 place.write(self, value, token.span)
                 self.storage[binding.identity] = place
             return target.from_value(storage, self, token.span)
+        if node.kind == 'comprehension':
+            from py_compiler.syntax.complex.collection import lower_comprehension
+            return lower_comprehension(node, self, env, expected)
         if node.kind == 'owned':
             return node.operands[0].lower_expression(node, self, env, expected)
         if expected and expected.family == 'dynamic':
@@ -289,8 +357,30 @@ class Checker:
             if callable(getattr(definition, 'construct_expression', None)):
                 return definition.construct_expression(argument, (), self, env, token.span, expected)
             receiver = self.expr(node.operands[0], env)
+            if argument.kind == 'slice':
+                slicing = getattr(receiver.type, 'slice_value', None)
+                if slicing is None:
+                    raise ValueError('type does not supply a slicing operation')
+                from py_compiler.syntax.generic.storage import root_binding
+                owner = root_binding(subject, self, env) or self.call_result_owners.get(receiver.identity)
+                if owner is None and callable(getattr(receiver.type, 'release', None)):
+                    # Slices may borrow their source. Keep an unnamed owning
+                    # receiver alive until the enclosing lexical scope exits.
+                    temporary = f'<slice receiver {receiver.identity}>'
+                    owner = Binding(self.body.identity + ':' + temporary, temporary,
+                                    receiver.type, False, 'own', token.span)
+                    env[temporary] = owner
+                    self.local_names.add(temporary)
+                    self.values[owner.identity] = receiver
+                    self.body.bindings.append(owner)
+                    self.record_lifetime('declare', owner.identity, owner.name)
+                return slicing(receiver, argument.operands, self, env, token.span, owner,
+                               closed=argument.interval or (True, True))
             place = receiver.type.element_place(receiver, node.operands[1], self, env, token.span)
             value = place.read(self, token.span)
+            if receiver.type.family == 'array' and value.type.binding_ownership != 'copy':
+                self.value_sources[value.identity] = set(self.value_sources.get(receiver.identity, ()))
+                self.value_dependencies[value.identity] = set(self.value_dependencies.get(receiver.identity, ()))
             if receiver.identity in self.call_result_owners and value.type.binding_ownership != 'copy':
                 self.call_result_owners[value.identity] = self.call_result_owners[receiver.identity]
                 self.call_result_modes[value.identity] = self.call_result_modes.get(receiver.identity, 'view')
@@ -320,11 +410,41 @@ class Checker:
         if node.kind in ("name", "reference"):
             binding = self.lookup(node, env)
             if binding is None:
+                if node.kind == 'name':
+                    entries = self.context.lookup_functions(token.text, self.declaration_scope)
+                    if entries:
+                        from importlib import import_module
+                        return import_module('py_compiler.syntax.function.lambda').named_function(node, entries, self, env, expected)
+                    declaration_name = self.context.declaration_name(token.text, self.declaration_scope)
+                    variant_enum = getattr(self.context, 'enum_variants', {}).get(declaration_name)
+                    if variant_enum is not None:
+                        from py_compiler.syntax.function.calls import coerce
+                        declaration = self.context.by_name[declaration_name]
+                        if declaration.fields:
+                            raise ValueError('payload enum variant requires constructor arguments')
+                        value = self.context.provider_by_name[declaration_name].instantiate(declaration, (), self, env, token.span)
+                        return coerce(coerce(value, variant_enum, self, token.span), expected, self, token.span)
+                    declared = self.context.types.get(self.context.declaration_name(token.text, self.declaration_scope))
+                    if declared is not None and getattr(declared, 'mlir', None):
+                        from py_compiler.syntax.complex.type import type_value
+                        return type_value(declared, self, token.span)
+                    candidates = [t for name, t in self.context.types.items()
+                                  if t.family == 'enum' and token.text in t.variants
+                                  and name == self.context.declaration_name(name.rsplit('.', 1)[-1], self.declaration_scope)]
+                    candidates = list(dict.fromkeys(candidates))
+                    if len(candidates) > 1:
+                        raise ValueError(f'ambiguous enum variant {token.text!r}; qualify its enum')
+                    if candidates:
+                        from py_compiler.syntax.function.calls import literal_value, coerce
+                        enum = candidates[0]
+                        return coerce(literal_value(enum.variant(token.text), enum, self, token.span), expected, self, token.span)
                 raise ValueError(f"unknown binding {token.text!r}")
             if binding.type is None:
                 binding = self.infer(binding, expected, env)
             self.flow.read(binding)
             value = self.read_binding(binding, token.span)
+            from py_compiler.syntax.operator.logical import refined_value
+            value = refined_value(binding, value, self, token.span)
             if expected and binding.type != expected:
                 from py_compiler.syntax.function.calls import coerce
                 return coerce(value, expected, self, token.span)
@@ -332,7 +452,7 @@ class Checker:
         if node.kind == "unary":
             if token.text in OWNERSHIP:
                 raise ValueError("ownership modifiers must apply to the entire binding initializer")
-            operand = self.expr(node.operands[0], env, expected)
+            operand = self.expr(node.operands[0], env, self.context.type('bool') if token.text == 'not' else expected)
             from py_compiler.syntax.generic.owned import select
             return select(operand.type, "F.unary", token.text).expand(self, operand, token.span)
         if node.kind == "chain":
@@ -341,8 +461,19 @@ class Checker:
             exits = []
             for index in range(1, len(node.operands), 2):
                 operator, term = node.operands[index:index + 2]
-                right = self.expr(term, env, left.type)
-                condition = self.emit('binary', self.syntax.types['bool'], (left, right), operator.text, operator.span)
+                from py_compiler.syntax.generic.place import expression_type
+                dimensioned = left.type.family == 'unit'
+                if not dimensioned:
+                    try:
+                        dimensioned = expression_type(term, self, env).family == 'unit'
+                    except ValueError:
+                        pass
+                right = self.expr(term, env, None if dimensioned else left.type)
+                if dimensioned:
+                    from py_compiler.syntax.complex.units import calculate
+                    condition = calculate(operator.text, left, right, self, operator.span)
+                else:
+                    condition = self.emit('binary', self.syntax.types['bool'], (left, right), operator.text, operator.span)
                 if index + 2 < len(node.operands):
                     following = self.block()
                     skipped = self.block()
@@ -360,6 +491,8 @@ class Checker:
 
     @located
     def sentence(self, node, env, local_names):
+        if node.identity in self.declared_nodes:
+            return
         from py_compiler.syntax.block.grammar import expand_sentence
         if expand_sentence(node, self, env):
             return
@@ -397,7 +530,13 @@ class Checker:
             if binding.identity not in self.parameter_bindings:
                 self.flow.end_retained(binding.identity)
 
-    def scope(self, nodes, env, declarations=False, local_names=None):
+    def run_defers(self, depth=0):
+        for scope_depth, actions in reversed(self.deferred_actions):
+            if scope_depth >= depth:
+                for node, env in reversed(actions):
+                    self.sentence(node, env, set())
+
+    def scope(self, nodes, env, declarations=False, local_names=None, cleanup=True):
         local_names = set() if local_names is None else local_names
         previous_scope = self.declaration_scope
         previous_context_scope = self.context.scope if self.context else None
@@ -411,12 +550,16 @@ class Checker:
         self.local_names = local_names
         index = 0
         self.active_scopes.append(env)
+        self.deferred_actions.append((len(self.active_scopes) - 1, []))
         try:
             while index < len(nodes):
                 node = nodes[index]
+                self.remaining_nodes = nodes[index + 1:]
                 def referenced_names(terms):
                     return {token.text for term in terms for token in term.tokens} | set().union(*(referenced_names(term.children) for term in terms))
                 remaining = referenced_names(nodes[index:])
+                remaining.update(token.text for _, actions in self.deferred_actions
+                                 for action, _ in actions for token in action.tokens)
                 for binding in env.values():
                     if (binding.name in local_names and binding.type and (binding.type.family == 'pointer' or binding.ownership == 'borrow')
                             and binding.name not in remaining):
@@ -436,8 +579,11 @@ class Checker:
                     if self.phases and self.current.terminator is None:
                         self.phases.during()
             if nodes and self.current.terminator is None:
-                self.cleanup_memory((env[n] for n in local_names if n in env), nodes[-1].span)
+                self.run_defers(len(self.active_scopes) - 1)
+            if cleanup and nodes and self.current.terminator is None:
+                self.cleanup_memory((env[n] for n in local_names if n in env and env[n].identity not in self.context.global_storage), nodes[-1].span)
         finally:
+            self.deferred_actions.pop()
             self.active_scopes.pop()
             self.local_names = previous
             self.declaration_scope = previous_scope
@@ -489,3 +635,30 @@ def check_module(module):
     context.initial_flow = initializer.flow.fork()
     context.resolve()
     return (initializer.finish(), *context.bodies), tuple(context.declarations)
+
+
+import unittest
+
+
+class SliceTemporaryTests(unittest.TestCase):
+    def test_owning_slice_receiver_gets_scope_cleanup(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('slice-temporary.sev', '''class Values:
+    storage: array[int]
+    def Values():
+        storage = array[int,4]()
+    def __slice(self: view Self, start: int, stop: int, step: int, missing_start: bool,
+                missing_stop: bool, start_closed: bool, stop_closed: bool) -> int:
+        return 42
+def use() -> int:
+    value = Values()[::-1]
+    return value
+''', Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies
+                    if any(b.name.startswith('<slice receiver ') for b in body.bindings))
+        owners = [b for b in body.bindings if b.name.startswith('<slice receiver ')]
+        self.assertEqual(len(owners), 1)
+        self.assertTrue(any(op.kind == 'deallocate'
+                            for block in body.blocks for op in block.operations))

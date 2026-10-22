@@ -20,7 +20,10 @@ class Class(RecordProvider):
     def declare(self, node, context):
         if register_template(self, node, context):
             return
-        fields, defaults, members = self.fields(node, context)
+        from dataclasses import replace
+        from py_compiler.syntax.complex.fields import split_constraints
+        clean, constraints = split_constraints(node)
+        fields, defaults, members = self.fields(clean, context)
         _, _, contracts = record_header(node.header)
         traits = tuple(context.type(name).name if '[' in name else context.declaration_name(name, context.scope) for name in contracts)
         declaration = TypeDeclaration(node.identity, ".".join((*context.scope, node.header[0].text)), self.spelling,
@@ -35,7 +38,16 @@ class Class(RecordProvider):
                 if key not in PROPERTIES or len(child.tokens) < 3 or child.tokens[1].text != '=' or key in defaults:
                     raise ValueError('invalid or duplicate class memory default')
                 defaults[key] = ''.join(t.text for t in child.tokens[2:])
-        declaration = replace(declaration, memory_defaults=tuple(defaults.items()))
+        destructors = [member for member in members if getattr(member.provider, 'spelling', '') == 'def'
+                       and member.header[0].text == 'drop']
+        if len(destructors) > 1:
+            raise ValueError('class requires at most one drop method')
+        if destructors:
+            from py_compiler.syntax.function.contracts import signature
+            hook = signature(destructors[0], declaration.name)
+            if hook.parameters or hook.templates or hook.result not in (None, 'absent') or hook.guards:
+                raise ValueError('drop method must have no arguments, result, templates, or guards')
+        declaration = replace(declaration, memory_defaults=tuple(defaults.items()), destructor=bool(destructors), field_constraints=constraints)
         context.register(declaration)
         context.types[declaration.name] = ObjectType(declaration.name, "record", "!llvm.ptr", declaration=declaration,
             owns_fields=any(owns_storage(context.type(t)) for _, t in fields))
@@ -80,6 +92,7 @@ class Class(RecordProvider):
         layout = self.layout(declaration, cfg.context)
         value = cfg.emit("allocate", cfg.context.type(declaration.name), (), Allocate(layout, allocation_plan), span)
         cfg.stack_values.add(value.identity)
+        cfg.owned_results.add(value.identity)
         constructor_name = (declaration.template_name or declaration.name.split('[', 1)[0]).rsplit('.', 1)[-1]
         constructors = cfg.context.functions.get(declaration.name + "." + constructor_name, [])
         if constructors:
@@ -88,9 +101,27 @@ class Class(RecordProvider):
             return value
         if len(arguments) > len(declaration.fields):
             raise ValueError("too many constructor arguments")
+        if any(argument.kind == 'named_argument' for argument in arguments):
+            from py_compiler.syntax.grammar.expression import Expression
+            from py_compiler.syntax.generic.storage import root_binding
+            from py_compiler.syntax.complex.tensor import ArgumentValue
+            names = [name for name, _ in declaration.fields]
+            arranged = [None] * len(names)
+            for position, argument in enumerate(arguments):
+                named = argument.kind == 'named_argument'
+                field_name = argument.token.text if named else names[position]
+                if field_name not in names:
+                    raise ValueError('constructor has no field ' + field_name)
+                index = names.index(field_name)
+                if arranged[index] is not None:
+                    raise ValueError('duplicate constructor field ' + field_name)
+                term = argument.operands[0] if named else argument
+                field = cfg.expr(term, env, cfg.context.type(declaration.fields[index][1]))
+                arranged[index] = Expression('capture',term.token,(ArgumentValue(field,root_binding(term,cfg,env)),))
+            arguments = tuple(arranged)
         for index, ((_, type_name), default) in enumerate(zip(declaration.fields, declaration.defaults)):
             type_ = cfg.context.type(type_name)
-            if index < len(arguments):
+            if index < len(arguments) and arguments[index] is not None:
                 place = FieldPlace(value, index, layout, type_, self.storage_type(type_, cfg.context))
                 if owns_storage(type_):
                     store_field(place, arguments[index], cfg, env, span, initialized=False)
@@ -100,9 +131,18 @@ class Class(RecordProvider):
                 field = literal_value(default, type_, cfg, span)
                 if type_.family == "string":
                     field = copy_storage(field, cfg, span)
+            elif type_.family == 'union' and any(t.name in ('absent','None') for t in type_.variants):
+                from py_compiler.syntax.block.union import UnionNone
+                # An omitted field is absent when the contract distinguishes
+                # omission from an explicitly supplied None.
+                missing = 'absent' if any(t.name == 'absent' for t in type_.variants) else 'None'
+                index_absent = next(i for i, t in enumerate(type_.variants) if t.name == missing)
+                field = cfg.emit('union-absent', type_, (), UnionNone(index_absent), span)
             else:
                 raise ValueError(f"constructor requires field {declaration.fields[index][0]!r}")
             FieldPlace(value, index, layout, type_, self.storage_type(type_, cfg.context)).write(cfg, field, span)
+        from py_compiler.syntax.complex.fields import validate_object
+        validate_object(value, cfg, env, span)
         return value
 
     def copy_value(self, value, cfg, span):
@@ -121,12 +161,19 @@ class Class(RecordProvider):
                 FieldPlace(result, index, layout, type_, storage).write(cfg, field, span)
             place.when_initialized(cfg, span, copy_field)
         cfg.value_dependencies[result.identity] = set(cfg.value_dependencies.get(value.identity, ()))
+        cfg.owned_results.add(result.identity)
         return result
 
 
     def release(self, value, cfg, span):
         from py_compiler.syntax.generic.storage import FieldPlace
         declaration = value.type.declaration
+        if declaration.destructor:
+            from py_compiler.syntax.function.calls import invoke
+            entries = cfg.context.functions.get(declaration.name + '.drop', ())
+            if len(entries) != 1:
+                raise ValueError('class destructor requires exactly one drop implementation')
+            invoke(entries[0], (), cfg, span, value)
         layout = self.layout(declaration, cfg.context)
         for index in reversed(range(len(declaration.fields))):
             type_ = cfg.context.type(declaration.fields[index][1])
@@ -142,12 +189,21 @@ def store_field(place, expression, cfg, env, span, owner=None, initialized=True,
     source = root_binding(term, cfg, env)
     if value is None:
         value = cfg.expr(term, env, place.type)
+    if (term.kind == 'index' and term.operands[1].kind == 'slice'
+            and value.identity in cfg.owned_results
+            and value.identity not in cfg.call_result_owners
+            and not cfg.value_sources.get(value.identity)):
+        # A copying slice is a new owner, not a move from the source view.
+        source = None
+    if initialized and callable(getattr(place.type, 'check_assignment', None)):
+        place.type.check_assignment(place.read(cfg, span), value, cfg)
     if owner:
         from py_compiler.syntax.generic.storage import BindingPlace
         with BindingPlace(owner, rebind=False).capture(cfg, 'borrow'):
             pass
     if place.type.family == 'string':
-        value = copy_storage(value, cfg, span)
+        if source is not None or value.identity not in cfg.owned_results:
+            value = copy_storage(value, cfg, span)
         if initialized:
             place.destroy(cfg, span)
     elif owns_storage(place.type):
@@ -346,11 +402,11 @@ test "partially moved records compose inside arrays":
         self.assertIn('read of moved or uninitialized record field', text)
         self.assertIn('field_flag', text)
 
-    def test_native_compositional_storage(self):
+    def test_c_compositional_storage(self):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         with tempfile.TemporaryDirectory(prefix='sev-compositional-storage-') as directory:
             root = Path(directory)
             (root / 'src').mkdir()
@@ -358,3 +414,24 @@ test "partially moved records compose inside arrays":
             (root / 'package.json').write_text(json.dumps({'package': {'name': 'compositional-storage', 'version': '0.1.0'}}))
             result = test_package(root)
             self.assertTrue(result['success'], result)
+
+
+class DestructorTests(unittest.TestCase):
+    def compile(self, source):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        return compile_source('destructor.sev', source, Syntax())
+
+    def test_scalar_resource_has_a_cleanup_call_without_owned_field_flags(self):
+        result = self.compile('class Item:\n    x: int\n    def drop():\n        return\n'
+                              'def work():\n    item = Item(1)\n')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(b for b in result.program.bodies if b.declaration == 'work')
+        calls = [op.payload.symbol for block in body.blocks for op in block.operations if op.kind == 'call']
+        self.assertEqual(sum('Item.drop' in symbol for symbol in calls), 1)
+
+    def test_invalid_destructor_contracts_are_rejected(self):
+        for header in ('drop(x: int)', 'drop() -> int', 'drop[T]()', 'drop() with {true,}'):
+            result = self.compile('class Item:\n    x: int\n    def ' + header + ':\n        return 1\n')
+            self.assertTrue(result.diagnostics)
+            self.assertIn('drop method', str(result.diagnostics[0]))

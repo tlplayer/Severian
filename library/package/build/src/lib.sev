@@ -76,7 +76,7 @@ def compiler_step(pipeline: CompilerPipeline, name: string, version: string, inp
         directory = pipeline.root + "/steps/" + name
         mkdir(directory)
         receipt = directory + "/" + key + ".json"
-        handle = file.native_lock(directory + "/" + key + ".lock")
+        handle = file.c_lock(directory + "/" + key + ".lock")
         if handle < 0:
             throw Error("could not lock compiler stage: " + name)
         if digest(input.path) != input.checksum:

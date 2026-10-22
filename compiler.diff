@@ -334,7 +334,7 @@ index 748c8af..bc1c0e0 100644
 +    }
 +
      #[test]
-     fn core_native_declarations_use_xxi_instead_of_legacy_extern_syntax() {
+     fn core_c_declarations_use_xxi_instead_of_legacy_extern_syntax() {
          let context = severian_bootstrap::load().unwrap();
 diff --git a/compiler/frontend/ast/src/statement/mod.rs b/compiler/frontend/ast/src/statement/mod.rs
 index 61d18c6..f90e7dc 100644

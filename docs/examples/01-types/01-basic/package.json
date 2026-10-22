@@ -1,0 +1,33 @@
+{
+  "package": {
+    "name": "examples-basic-types",
+    "version": "0.1.0"
+  },
+  "sources": [
+    "00-constants.sev",
+    "01-primitives.sev",
+    "02-inference.sev",
+    "03-conversion.sev",
+    "04-strings.sev",
+    "05-tuples.sev",
+    "06-is.sev",
+    "07-none-absent.sev",
+    "08-optionals.sev"
+  ],
+  "dependencies": {
+    "util": {
+      "package": "core.utils",
+      "path": "../../../../library/core/utils/c"
+    },
+    "io": {
+      "path": "../../../../library/system/io/linux_x86_64"
+    },
+    "string": {
+      "path": "../../../../library/core/string/c"
+    },
+    "collections": {
+      "path": "../../../../library/core/collections/collection",
+      "package": "core.collections"
+    }
+  }
+}

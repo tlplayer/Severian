@@ -1,51 +1,67 @@
-# Stable namespace values. Package semantic analysis carries these immutable
-# literals into qualified references such as `platform.LittleEndian`.
+import string
+from collections import list
+
 LittleEndian = "little"
 BigEndian = "big"
 Processes = "processes"
 ProcessPipes = "process-pipes"
 
 class Target:
-    pointer_bits: data_size
+    pointer_bits: byte
     byte_order: string
     architecture: string
     operating_system: string
     capabilities: list[string]
 
 class FieldLayout:
-    offset: data_size
-    alignment: data_size
+    offset: byte
+    alignment: byte
 
 class Layout[T]:
-    size: data_size
-    alignment: data_size
+    size: byte
+    alignment: byte
 
-    # Compiler-resolved because the queried source type is retained by
-    # `Layout[T]`; this is reflection over target layout, not a runtime lookup.
     def field(name: string) -> FieldLayout:
-        return FieldLayout(0B, 1B)
+        return FieldLayout(offset[T](name), alignment[T](name))
 
-@c(symbol = "__sev_platform_pointer_bits")
-def pointer_bits() -> data_size
+def pointer_bits() -> byte:
+    return bytes[usize]()
 
-@c(symbol = "__sev_platform_byte_order")
-def byte_order() -> string
+def byte_order() -> string:
+    return target("byte_order")
 
-@c(symbol = "__sev_platform_architecture")
-def architecture() -> string
+def architecture() -> string:
+    return target("architecture")
 
-@c(symbol = "__sev_platform_operating_system")
-def operating_system() -> string
+def operating_system() -> string:
+    return target("operating_system")
 
 def current() -> Target:
-    return Target(
-        pointer_bits(),
-        byte_order(),
-        architecture(),
-        operating_system(),
-        [Processes, ProcessPipes],
-    )
+    capabilities = list[string]()
+    system = operating_system()
+    if system == "linux" or system == "windows" or system == "win32" or system == "darwin" or system == "freebsd":
+        capabilities.append(Processes)
+        capabilities.append(ProcessPipes)
+    return Target(pointer_bits(), byte_order(), architecture(), system, capabilities)
 
-# Lowered by semantic target-layout resolution. The declaration preserves an
-# ordinary package API while keeping type reflection out of the runtime ABI.
-def layout[T](target: Target) -> Layout[T]
+def layout[T](selected: Target) -> Layout[T]:
+    return Layout[T](bytes[T](), alignment[T]())
+
+test "target facts describe the selected compiler target":
+    selected = current()
+    assert(selected.pointer_bits == bytes[usize]())
+    assert(selected.architecture == target("architecture"))
+    assert(selected.byte_order == target("byte_order"))
+
+test "generic field layout uses real field offsets and alignment":
+    class Header:
+        tag: u8
+        length: u32
+    selected = current()
+    result = layout[Header](selected)
+    assert(result.size == 8B)
+    assert(result.alignment == 4B)
+    name = "length"
+    assert(result.field(name).offset == 4B)
+    assert(result.field(name).alignment == 4B)
+    assert(result.field("tag").alignment == 1B)

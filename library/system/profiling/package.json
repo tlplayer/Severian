@@ -3,10 +3,10 @@
     "name": "profiling",
     "version": "0.1.0",
     "edition": "2026",
-    "description": "Structured native records emitted by with/without hook contexts",
+    "description": "Structured c records emitted by with/without hook contexts",
     "unsafe": {
       "capabilities": [
-        "native-abi"
+        "c-abi"
       ],
       "sources": [
         "src/measurement.sev"

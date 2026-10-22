@@ -1,1 +1,42 @@
-#TODO: make a sip for this
+# Cooperative cancellation uses an explicit stop message. The task reaches its
+# own return boundary, releases local storage, and is joined by its owner.
+# TODO: make a SIP for cancellation of work blocked outside a channel protocol.
+
+def cancellable_sum(commands: channel[int], progress: channel[int]) -> int:
+    total = tensor[int](1)
+    while true:
+        command = commands.receive()
+        if command < 0:
+            return total[0]
+        total[0] += command
+        progress.send(total[0])
+
+test "cancel after acknowledged work and join the task":
+    commands = channel[int]
+    progress = channel[int]
+    worker = async cancellable_sum(commands, progress)
+    commands.send(20)
+    assert(progress.receive() == 20)
+    commands.send(22)
+    assert(progress.receive() == 42)
+    commands.send(-1)
+    completed = await worker
+    assert(completed == 42)
+
+test "cancel before any work is consumed":
+    commands = channel[int]
+    progress = channel[int]
+    commands.send(-1)
+    worker = async cancellable_sum(commands, progress)
+    completed = await worker
+    assert(completed == 0)
+
+
+test with compiler "the task retains its cancellation channels until completion":
+    reject "borrow":
+        def invalid():
+            commands = channel[int]
+            progress = channel[int]
+            worker = async cancellable_sum(commands, progress)
+            drop commands
+            completed = await worker

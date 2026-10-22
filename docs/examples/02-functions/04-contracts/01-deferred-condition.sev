@@ -1,8 +1,9 @@
+from collections import list
 def consume(items: list[i64]) -> i64 with
 {
-    defer items.size() <= 10,
+    defer items.len() <= 10,
 }:
-    total := i64(0)
+    total = i64(0)
 
     for item in items:
         total += item
@@ -10,9 +11,9 @@ def consume(items: list[i64]) -> i64 with
     return total
 
 
-def fill(buffer: list[i64]) with
+def fill(buffer: borrow list[i64]) with
 {
-    defer buffer.size() <= 4,
+    defer buffer.len() <= 4,
 }:
     buffer.append(1)
     buffer.append(2)
@@ -25,4 +26,4 @@ test:
     result = consume(items)
 
     assert(result == 10)
-    assert(items.size() <= 10)
+    assert(items.len() <= 10)

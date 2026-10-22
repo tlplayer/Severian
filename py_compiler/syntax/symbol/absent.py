@@ -28,6 +28,16 @@ import unittest
 
 
 class AbsentTests(unittest.TestCase):
+    def test_absent_success_is_boxed_at_its_declared_union_position(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = ('def check(fail: bool) -> Error | absent:\n'
+                  '    if fail:\n        throw Error("failure")\n    return absent\n'
+                  'test:\n    ok ?= check(false)\n    assert(ok is absent)\n'
+                  '    failed ?= check(true)\n    assert(failed is Error)\n')
+        result = compile_source('absent-result.sev', source, Syntax())
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+
     def test_absent_replaces_the_no_result_type(self):
         from py_compiler.syntax.recognition import Syntax
         types = Syntax().types
@@ -39,7 +49,7 @@ class AbsentTests(unittest.TestCase):
     def test_explicit_and_inferred_absent_returns_lower_without_values(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax
-        from py_compiler.mlir.src.lib import lower, render, verify_native, verifier_path
+        from py_compiler.mlir.src.lib import lower, render, verify_c, verifier_path
         import shutil
         result = compile_source('absent.sev', 'def explicit() -> absent:\n    return absent\ndef inferred():\n    explicit()\n    return\n', Syntax())
         self.assertFalse(result.diagnostics, str(result.diagnostics))
@@ -49,4 +59,4 @@ class AbsentTests(unittest.TestCase):
         ir = render(lower(result.program))
         self.assertNotIn(' -> !llvm.ptr', ir)
         if shutil.which(verifier_path()):
-            verify_native(ir)
+            verify_c(ir)

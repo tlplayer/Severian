@@ -1,8 +1,15 @@
-def process(value: string):
+def process(value: move string):
     print(value)
 
 
 test:
     value := "request"
 
-    task := async process(move value) with self
+    task := async process(value) with self
+
+
+test with compiler "moved task argument is no longer readable":
+    value = "request"
+    task = async process(value)
+    reject:
+        print(value)

@@ -1,3 +1,4 @@
+from util import range
 '''
 Profile limits belong in the test contract block. Deferred contracts are
 checked after the measured body has completed.
@@ -5,7 +6,7 @@ checked after the measured body has completed.
 
 
 def bounded_work(limit: int) -> int:
-    total := 0
+    total = 0
     for value in range(0, limit):
         total += value
     return total
@@ -18,3 +19,11 @@ test with profile "bounded work stays within its resource budget" with
     defer allocations < 50000,
 }:
     assert(bounded_work(4096) == 8386560)
+
+test with profile "allocation metrics include called functions":
+    values = tensor[int,(1024,)]()
+    assert(allocations > 0)
+    assert(memory >= 8KB)
+    assert(profile.time >= 0s)
+    values[0] = 42
+    assert(values[0] == 42)

@@ -1,3 +1,5 @@
+from io import capture_stdout
+
 def print_values(values...):
     for value in values:
         print(value)
@@ -9,3 +11,4 @@ test with integ "Multiple params to a single function":
     y = 2
     print_values("x =", x, "y =", y)
     print_values(...(0..10))
+    assert(capture_stdout() == "x =\n1\ny =\n2\n0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n")

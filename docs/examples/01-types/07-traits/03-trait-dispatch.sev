@@ -1,21 +1,18 @@
 trait File:
-    def read(path: string) -> string with 
-    {
-        (path) -> bool 
-    }
+    def read(path: string) -> string
 
 #LuaFile implements the filetype for .lua so when read takes place 
 class LuaFile: File
     def read(path: string) -> string with 
     {
-        ".lua" in path
+        ".lua" in path,
     }:
         return "lua"
 
 class JsonFile: File
     def read(path: string) -> string with 
     {
-        ".json" in path
+        ".json" in path,
     }:
         return "json"
 
@@ -23,7 +20,38 @@ def main():
     print("File registry: JSON, text, YAML, Lua")
 
 test:
-    lua_path = file.read("test.lua")
-    json_path = file.read("test.json")
+    lua_path = File.read("test.lua")
+    json_path = File.read("test.json")
     assert(lua_path == "lua")
     assert(json_path == "json")
+
+
+test "unmatched path has no selected provider":
+    throws "trait dispatch requires exactly one match":
+        result = File.read("notes.txt")
+
+test "overlapping providers are rejected at runtime":
+    throws "trait dispatch requires exactly one match":
+        result = File.read("test.lua.json")
+
+
+test "string membership handles presence absence and empty needles":
+    path = "test.lua"
+    assert(".lua" in path)
+    assert(".json" not in path)
+    assert("" in path)
+    assert(not ".json" in path)
+
+path_evaluations = 0
+
+def temporary_path() -> string:
+    module.path_evaluations += 1
+    return "computed.lua"
+
+test "dispatch evaluates and retains an owning argument through every guard":
+    module.path_evaluations = 0
+    selected = File.read(temporary_path())
+    assert(selected == "lua")
+    assert(module.path_evaluations == 1)
+    selected_again = File.read("computed.json")
+    assert(selected_again == "json")

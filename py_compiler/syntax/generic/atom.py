@@ -89,15 +89,15 @@ class AtomTests(unittest.TestCase):
         from py_compiler.lir.src.lib import lower
         integer = primitives()['i64']
         argument, result = Value(0, integer), Value(1, integer)
-        atom = Atom(integer, (integer,), integer, ('view',), ('IO',), ExternalSymbol('native_step', 'C', ('native.o',)))
+        atom = Atom(integer, (integer,), integer, ('view',), ('IO',), ExternalSymbol('c_step', 'C', ('c.o',)))
         operation = Operation('external', result, (argument,), atom, None, atom)
         body = Body('run', 'run', 'atom.sev', integer, [ExecutionBlock(0, (argument,), [operation], Terminator('finish', value=result))])
         from py_compiler.mir.verification import prepare_body
         prepare_body(body)
         lir = lower(Program((), (), (body,)), 'x86_64-unknown-linux-gnu', 64)
-        self.assertEqual(lir.dependencies, ('native.o',))
-        self.assertIn('func.func private @native_step(i64) -> i64', lir.text())
-        self.assertIn('func.call @native_step(%v0)', lir.text())
+        self.assertEqual(lir.dependencies, ('c.o',))
+        self.assertIn('func.func private @c_step(i64) -> i64', lir.text())
+        self.assertIn('func.call @c_step(%v0)', lir.text())
 
     def test_move_on_predecessor_rejects_later_use(self):
         from py_compiler.mir.cfg.cfg import Body, ExecutionBlock, Operation, Terminator, Edge, Value

@@ -1,4 +1,4 @@
-# Dependency graphs and native linking
+# Dependency graphs and c linking
 
 This example uses the `package.dependency` and `package.linker` libraries to
 build a diamond: `app` uses `left` and `right`, both of which use `shared`.

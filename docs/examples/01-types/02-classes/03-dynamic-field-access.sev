@@ -1,128 +1,91 @@
-'''
-Objects expose generic get() and set() operations to avoid getX()/setX()
-methods for every field.
-
-get(name) dynamically reads a field.
-set(name, value) dynamically updates one field.
-set({...}) validates and updates multiple fields together.
-
-Statically-known invalid accesses are compiler errors.
-Runtime-invalid dynamic accesses throw errors.
-'''
 class Point:
     x: int {0 <= x <= 100}
     y: int {0 <= y <= 100}
 
+def runtime_string(value: string) -> string:
+    return value
 
-def main():
-    point := Point(3, 4)
+def runtime_int(value: int) -> int:
+    return value
 
-    # Static field access.
-    assert(point.x == 3)
-    assert(point.y == 4)
-
-    # Dynamic get/set.
-    axis := "x"
-
+test "dynamic fields and atomic grouped updates":
+    point = Point(3,4)
+    axis = runtime_string("x")
     assert(point.get(axis) == 3)
-
-    point.set(axis, 10)
-
+    point.set(axis,10)
     assert(point.x == 10)
-    assert(point.get(axis) == 10)
+    point.set({"x":20,"y":30})
+    assert(point.x == 20 and point.y == 30)
+    x_axis = runtime_string("x")
+    y_axis = runtime_string("y")
+    point.set({x_axis:40,y_axis:50})
+    assert(point.x == 40 and point.y == 50)
 
-    # Group update.
-    point.set({
-        "x": 20,
-        "y": 30,
-    })
+test "unknown runtime field names raise without modifying the object":
+    point = Point(3,4)
+    axis = runtime_string("z")
+    throws "FieldError":
+        point.get(axis)
+    throws "FieldError":
+        point.set(axis,10)
+    assert(point.x == 3 and point.y == 4)
 
-    assert(point.x == 20)
-    assert(point.y == 30)
+test "failed single and grouped validation leave every field unchanged":
+    point = Point(3,4)
+    value = runtime_int(200)
+    throws "ConstraintError":
+        point.set("x",value)
+    assert(point.x == 3 and point.y == 4)
+    throws "ConstraintError":
+        point.set({"x":20,"y":value})
+    assert(point.x == 3 and point.y == 4)
 
-    # Computed group update.
-    x_axis := "x"
-    y_axis := "y"
-
-    point.set({
-        x_axis: 40,
-        y_axis: 50,
-    })
-
-    assert(point.get("x") == 40)
-    assert(point.get("y") == 50)
-
-
-test:
-    point := Point(3, 4)
-
-    point.set("x", 10):
-    assert(point.x == 10)
-    assert(point.get("x") == 10)
-
-    point.set({
-        "x": 20,
-        "y": 30,
-    }):
-        assert(point.x == 20)
-        assert(point.y == 30)
-
-
-test:
-    point := Point(3, 4)
-    axis := runtime_string("z")
-
-    # The compiler cannot know the runtime field name.
-    throws(point.get(axis) -> FieldError)
-    throws( point.set(axis, 10)  -> FieldError)
-
-
-    # Runtime values still obey field constraints.
-    value := runtime_int(200)
-
-    throws(point.set("x", value) -> ConstraintError)
-
-    # Group updates are atomic: no field changes if one update fails.
-    throws(point.set({
-            "x": 20,
-            "y": value,
-    }) -> ConstraintError)
-
-
-    assert(point.x == 3)
-    assert(point.y == 4)
-
-
-# A literal field name can be checked at compile time.
-test with compiler: 
+test with compiler "static names and concrete field types are checked":
     reject:
-        point := Point(3, 4)
+        point = Point(3,4)
         point.get("z")
-
-
-test with compiler: 
     reject:
-        point := Point(3, 4)
-        point.set("z", 10)
-
-
-# A statically-known wrong field type is also rejected.
-test with compiler: 
+        point = Point(3,4)
+        point.set("z",10)
     reject:
-        point := Point(3, 4)
-        point.set("x", "ten")
-
-
-# Group updates get the same static checking.
-test with compiler: 
+        point = Point(3,4)
+        point.set("x","ten")
     reject:
-        point := Point(3, 4)
+        point = Point(3,4)
+        point.set({"x":10,"z":20})
 
-        point.set({
-        "x": 10,
-        "z": 20,
-    })
+class Interval:
+    low: int {low <= high}
+    high: int {high >= low}
 
+test "grouped constraints observe the complete proposed state":
+    interval = Interval(1,4)
+    interval.set({"low":10,"high":20})
+    assert(interval.low == 10 and interval.high == 20)
+    throws "ConstraintError":
+        interval.set({"low":30,"high":15})
+    assert(interval.low == 10 and interval.high == 20)
 
-test with integ:
-    main()
+test "runtime group names validate the complete proposed state":
+    interval = Interval(1,4)
+    lower = runtime_string("low")
+    upper = runtime_string("high")
+    interval.set({lower:10,upper:20})
+    assert(interval.low == 10 and interval.high == 20)
+    throws "ConstraintError":
+        interval.set({lower:30,upper:15})
+    assert(interval.low == 10 and interval.high == 20)
+
+test "temporary runtime names are evaluated once and retained through dispatch":
+    point = Point(3,4)
+    assert(point.get(runtime_string("y")) == 4)
+    point.set(runtime_string("y"),20)
+    assert(point.y == 20)
+
+test "unknown runtime group member prevents every update":
+    point = Point(3,4)
+    known = runtime_string("x")
+    unknown = runtime_string("z")
+    throws "FieldError":
+        point.set({known:20,unknown:30})
+    assert(point.x == 3 and point.y == 4)

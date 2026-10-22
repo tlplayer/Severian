@@ -1,4 +1,4 @@
-from os import wait
+from system import wait
 
 def fetch(url: string) -> bool | Error:
     wait(0.1s)
@@ -6,7 +6,7 @@ def fetch(url: string) -> bool | Error:
 
 test with profile with 
 {
-    0.1s < time -> Error("Await didn't actually wait ")
+    defer 0.1s < time -> Error("Await didn't actually wait"),
 }:
     task = async fetch("https://example.test") with self
     result = await task

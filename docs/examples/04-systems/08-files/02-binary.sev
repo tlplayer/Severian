@@ -1,15 +1,11 @@
 import file
 import os
+from collections import equal
 
-
-test with integ "binary file round trip":
+test with integ "binary file round trip preserves every byte":
     path = "/tmp/severian-binary.bin"
-
-    file.write(path, [0x01, 0x02, 0xFE, 0xFF])
-
-    with file.open(path) as fp:
-        data = file.read(fp, 4B)
-
-        assert(data == [0x01, 0x02, 0xFE, 0xFF])
-
+    bytes = tuple[u8,4](u8(0x01),u8(0x02),u8(0xFE),u8(0xFF))
+    assert(file.write_bytes(path,bytes) == 4)
+    data = file.read_bytes(path)
+    assert(equal(data,bytes))
     os.remove(path)

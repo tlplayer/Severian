@@ -94,11 +94,11 @@ def save(root: string, value: Realization) -> string | Error:
     if not os.make_directories(directory + "/realizations"):
         throw Error("could not create metadata realizations directory")
     directory = resolve_path(base, "metadata/realizations")
-    # Reject a pre-existing lock symlink before the native lock opens it.
+    # Reject a pre-existing lock symlink before the c lock opens it.
     lock_path = directory + "/.write.lock"
     if os.is_symlink(lock_path):
         throw Error("metadata lock cannot be a symlink")
-    lock = file.native_lock(lock_path)
+    lock = file.c_lock(lock_path)
     if lock < 0:
         throw Error("could not lock metadata directory")
     stage := ""

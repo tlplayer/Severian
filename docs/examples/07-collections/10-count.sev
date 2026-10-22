@@ -1,24 +1,34 @@
+from collections import count
+
 # count[T]: a frequency map; absent values have frequency zero.
 def main():
-    frequencies := count()
+    frequencies := count[int]()
     frequencies.add(10)
     frequencies.add(20)
     frequencies.add(10, 2)
 
-    assert(frequencies[10] == 3)
-    assert(frequencies[99] == 0)
-    assert(frequencies.len() == 2)    # Distinct values.
-    assert(frequencies.total() == 4)  # Total occurrences.
+    if not (frequencies[10] == 3):
+        throw Error("count invariant failed")
+    if not (frequencies[99] == 0):
+        throw Error("count invariant failed")
+    if not (frequencies.len() == 2):
+        throw Error("count invariant failed")
+    if not (frequencies.total() == 4):
+        throw Error("count invariant failed")
     print(frequencies[10])  # 3
 
     remaining := frequencies.subtract(10, 10)  # Cannot go below zero.
-    assert(remaining == 0)
-    assert(not frequencies.contains(10))
-    assert(frequencies.len() == 1)
+    if not (remaining == 0):
+        throw Error("count invariant failed")
+    if not (not frequencies.contains(10)):
+        throw Error("count invariant failed")
+    if not (frequencies.len() == 1):
+        throw Error("count invariant failed")
     print(frequencies.total())  # 1
 
+
 test "count distinguishes unique values from total occurrences":
-    values := count()
+    values := count[int]()
     values.add(10, 3)
     values.add(20)
     assert(values[10] == 3 and values[20] == 1)
@@ -27,7 +37,7 @@ test "count distinguishes unique values from total occurrences":
     assert(values.len() == 2)  # Looking up an absent value does not insert it.
 
 test "count subtraction floors at zero and removes exhausted values":
-    values := count()
+    values := count[int]()
     values.add(10, 3)
     assert(values.subtract(10, 1) == 2)
     assert(values.total() == 2)
@@ -35,8 +45,8 @@ test "count subtraction floors at zero and removes exhausted values":
     assert(not values.contains(10))
     assert(values.len() == 0 and values.total() == 0)
 
-test "count infers string elements":
-    words := count()
+test "count groups string elements":
+    words := count[string]()
     words.add("red")
     words.add("blue")
     words.add("red")

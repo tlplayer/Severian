@@ -13,6 +13,9 @@ class ByteLiteral(OwnedGrammar):
         super().__init__(owner, 'Y', ('byte-literal',))
 
     def recognize(self, window):
+        from py_compiler.syntax.complex.units import match_literal
+        if match_literal(window.source.text, window.start, window.end):
+            return None
         found = NUMBER.match(window.source.text, window.start, window.end)
         if found is None:
             return None

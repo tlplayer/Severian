@@ -1,5 +1,6 @@
 def main():
     count: int = 10
+    large: i64 = 9223372036854775807
     ratio: float = 0.5
     enabled: bool = true
     letter: char = 'a'
@@ -12,3 +13,23 @@ def main():
     print(enabled)
     print(letter)
     print(word)
+
+test with integ "primitive example prints every declared value":
+    main()
+    assert("9223372036854775807" in stdout)
+    assert("true" in stdout)
+    assert("hello" in stdout)
+
+test "primitive types preserve values and concrete types":
+    count: int = 10
+    large: i64 = 9223372036854775807
+    ratio: float = 0.5
+    enabled: bool = true
+    letter: char = 'a'
+    word: string = "hello"
+    assert(count == 10 and large == 9223372036854775807)
+    assert(ratio == 0.5 and enabled)
+    assert(letter == 'a' and word == "hello")
+    assert(type(count) == int and type(large) == i64)
+    assert(type(ratio) == float and type(enabled) == bool)
+    assert(type(letter) == char and type(word) == string)

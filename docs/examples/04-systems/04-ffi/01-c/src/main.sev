@@ -8,8 +8,7 @@ def add(left: i32, right: i32) -> i32
 def main():
     unsafe:
         result := add(20, 22)
-
-    print(result)
+        print(result)
 
 
 test:

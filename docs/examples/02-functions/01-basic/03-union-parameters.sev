@@ -8,3 +8,18 @@ test:
 
 def main():
     print(to_float("4.5"))
+
+
+test "union conversion retains a borrowed string for repeated reads":
+    value: string | int | float = "-1.25e2"
+    assert(to_float(value) == -125.0)
+    assert(to_float(value) == -125.0)
+
+test "temporary union converts its active payload":
+    def source() -> string | int:
+        return "12.5"
+    assert(float(source()) == 12.5)
+
+test "union conversion rejects invalid float strings":
+    throws "invalid float digit":
+        value = to_float("4.5x")

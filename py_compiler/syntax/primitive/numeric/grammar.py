@@ -10,6 +10,9 @@ class NumericLiteral(OwnedGrammar):
         self.literal_kind = literal_kind
 
     def recognize(self, window):
+        from py_compiler.syntax.complex.units import match_literal
+        if match_literal(window.source.text, window.start, window.end):
+            return None
         found = NUMBER.match(window.source.text, window.start, window.end)
         if found is None:
             return None
@@ -86,6 +89,8 @@ class CompoundAssignment(OwnedGrammar):
         with place.capture(cfg, self.captures[0].ownership):
             previous = place.read(cfg, span)
             result = select(self.owner, 'F.operator', self.operation).expand(cfg, previous, value, span)
+            if result.type != self.owner:
+                raise ValueError('compound assignment cannot change the destination type or dimensions')
             place.write(cfg, result, span)
         return result
 

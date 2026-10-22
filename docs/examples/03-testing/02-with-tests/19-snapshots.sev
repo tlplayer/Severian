@@ -4,12 +4,6 @@ a named value; `sev test --update-snapshots` deliberately accepts changes.
 '''
 
 
-def snapshot(name: string, value: string):
-    # The test library replaces this contract check with persisted snapshot IO.
-    assert(size(name) > 0)
-    assert(size(value) > 0)
-
-
 def parse_source(source: string) -> string:
     return "Module(" + source + ")"
 

@@ -5,14 +5,26 @@ The runner should report a seed, minimized input, and reproduction command.
 '''
 
 
-class ParseError:
+class ParseError: Error
     message: string
 
 
 def parse_integer(value: string) -> int | ParseError:
     if value == "":
         throw ParseError("empty integer")
-    return 0
+    position = 0
+    if value[0] == u8(45) or value[0] == u8(43):
+        position = 1
+    if position == len(value):
+        throw ParseError("missing digits")
+    # Bound the accepted decimal domain before the checked integer conversion.
+    if len(value) - position > 18:
+        throw ParseError("integer outside the supported decimal domain")
+    while position < len(value):
+        if value[position] < u8(48) or value[position] > u8(57):
+            throw ParseError("invalid integer digit")
+        position += 1
+    return int(value)
 
 
 test with fuzz "parse and format agree":
@@ -27,12 +39,12 @@ test with fuzz "parse and format agree":
         assert(reparsed == result)
 
     when result is ParseError:
-        assert(input == "")
         assert(result.message != "")
 
 
 def text_does_not_crash(data: string) -> bool:
-    return true
+    result ?= parse_integer(data)
+    return result is int or result is ParseError
 
 
 test with fuzz "text parsing remains memory safe":

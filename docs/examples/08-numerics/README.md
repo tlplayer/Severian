@@ -10,7 +10,7 @@ bin/sev_compiler test docs/examples/08-numerics/01-numeric-types.sev
 
 Most files express their behavior in `test` blocks, so building their program
 entry alone does not validate their numerical operations. Audit every file's
-native build, program execution, and tests with:
+c build, program execution, and tests with:
 
 ```sh
 python3 tests/sev_compiler/numerics_examples.py

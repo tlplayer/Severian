@@ -1,5 +1,7 @@
-def length(values: list[int]) -> usize:
-    return values.length()
+from collections import list
+
+def length(values: list[int]) -> int:
+    return values.len()
 
 
 def clear(values: list[int]):
@@ -18,24 +20,24 @@ test:
 
     # Mutation infers exclusive access without requiring boundary syntax.
     clear(values)
-    assert(values.length() == 0)
+    assert(values.len() == 0)
 
     # Returning the value infers an ownership-carrying result.
     stored := store(values)
-    assert(stored.length() == 0)
+    assert(stored.len() == 0)
 
 
 test with compiler:
     values := [1, 2, 3]
-    view := borrow values
+    observed := borrow values
 
     reject:
         clear(values)
-        assert(view.length() == 3)
+        assert(observed.len() == 3)
 
 
 test with compiler:
     reject:
         values := [1, 2, 3]
         stored := store(values)
-        assert(values.length() == 3)
+        assert(values.len() == 3)

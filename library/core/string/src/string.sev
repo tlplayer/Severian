@@ -338,6 +338,26 @@ class string[T: u8 | u32 = u8, N = 32]: String + StringOperations
                 return false
         return true
 
+    def concat(other: string) -> string:
+        result = string()
+        result.append(self)
+        result.append(other)
+        return result
+
+    # Return owned UTF-8 units; storage placement is a container decision.
+    def utf(terminated: bool = false) -> array[u8]:
+        encoded = encode[u8]()
+        if not terminated:
+            return encoded
+        result = arrays.allocate[u8](arrays.length(encoded) + 1)
+        for index in range(arrays.length(encoded)):
+            value = arrays.read(encoded, index)
+            if value == u8(0):
+                throw Error("C string contains an embedded NUL")
+            arrays.write(result, index, value)
+        arrays.write(result, arrays.length(encoded), u8(0))
+        return result
+
     # Transcode only initialized units, independently of reserved capacity.
     def encode[Unit: u8 | u32]() -> array[Unit]:
         converted = string[Unit]()

@@ -20,11 +20,13 @@ class FlowState:
     retained: dict = field(default_factory=dict)
     reporter: object = field(default=None, compare=False, repr=False)
     view_sources: dict = field(default_factory=dict)
+    shape_loans: set = field(default_factory=set)
+    mirror_readers: set = field(default_factory=set)
 
     def fork(self):
         return FlowState(set(self.moved), dict(self.loans), dict(self.views),
                          {owner: dict(slots) for owner, slots in self.retained.items()}, self.reporter,
-                         dict(self.view_sources))
+                         dict(self.view_sources), set(self.shape_loans), set(self.mirror_readers))
 
     def read(self, binding):
         self.resolve(binding.identity)
@@ -103,21 +105,31 @@ class FlowState:
         self.view_sources.pop(binding.identity, None)
         self.end_retained(binding.identity)
 
-    def begin_loan(self, identity, source):
+    def begin_loan(self, identity, source, *, shape=False):
         self.loans[identity] = source
+        if shape:
+            self.shape_loans.add(identity)
         if self.reporter:
-            self.reporter('retain', identity, 'loan', (source,))
+            self.reporter('retain', identity, 'shape' if shape else 'loan', (source,))
 
     def end_loan(self, identity):
         if identity in self.loans:
             self.loans.pop(identity)
             if self.reporter:
-                self.reporter('end-loan', identity, 'loan', ())
+                self.reporter('end-loan', identity, 'shape' if identity in self.shape_loans else 'loan', ())
+            self.shape_loans.discard(identity)
 
     def loan(self, binding, owner):
         self.read(owner)
+        if binding.ownership == 'borrow':
+            identity = self.resolve(owner.identity)
+            conflicts = [loan for loan, sources in self.loans.items()
+                         if loan != owner.identity and identity in
+                         (sources if isinstance(sources, frozenset) else (sources,))]
+            if conflicts or self.borrowers(identity):
+                raise ValueError('cannot acquire a borrow while another borrow is live')
         captures_storage = (getattr(binding.type, 'family', None) == 'pointer' or
-                            (getattr(binding.type, 'family', None) in ('array', 'record', 'shared', 'string', 'union', 'dynamic') and binding.type != owner.type))
+                            (getattr(binding.type, 'family', None) in ('array', 'tensor', 'tuple', 'record', 'shared', 'string', 'union', 'dynamic') and binding.type != owner.type))
         if binding.ownership == 'borrow' or (captures_storage and getattr(owner.type, 'binding_ownership', None) != 'copy'):
             self.begin_loan(binding.identity, self.resolve(owner.identity))
         self.views[binding.identity] = owner.identity
@@ -155,11 +167,14 @@ class FlowState:
                 raise ValueError('view escapes the lifetime of a possible source binding')
         self.view_sources = {view: sources for view, sources in self.view_sources.items() if view in live}
         self.moved.intersection_update(live)
+        self.mirror_readers.intersection_update(live)
 
     @staticmethod
     def join(states):
         result = FlowState()
         for state in states:
+            result.mirror_readers.update(state.mirror_readers)
+            result.shape_loans.update(state.shape_loans)
             for view, sources in state.view_sources.items():
                 result.view_sources[view] = result.view_sources.get(view, frozenset()) | sources
             result.moved.update(state.moved)
@@ -227,6 +242,17 @@ import unittest
 
 
 class OwnershipTests(unittest.TestCase):
+    def test_exclusive_borrow_cannot_overlap_an_existing_loan(self):
+        owner = Binding('owner', 'values', None, False, 'own', None)
+        first = Binding('first', 'first', None, False, 'borrow', None)
+        second = Binding('second', 'second', None, False, 'borrow', None)
+        state = FlowState()
+        state.loan(first, owner)
+        with self.assertRaisesRegex(ValueError, 'another borrow is live'):
+            state.loan(second, owner)
+        state.end_loan(first.identity)
+        state.loan(second, owner)
+
     def test_constant_binding_and_loan_are_distinct(self):
         owner = Binding("owner", "text", None, False, "own", None)
         alias = Binding("alias", "alias", None, True, "borrow", None)
@@ -324,9 +350,10 @@ def verify_retained_lifetimes(body):
                 state.pop(key, None)
             elif event.kind == 'end':
                 state = {key: sources for key, sources in state.items() if key[0] != event.owner}
-            elif check and event.kind == 'check' and any(
+            elif check and event.kind in ('check', 'element-check') and any(
                     event.owner in sources for key, sources in state.items()
-                    if not (key[1] == 'loan' and key[0] in event.sources)):
+                    if not (key[1] == 'loan' and key[0] in event.sources)
+                    and not (key[1] == 'shape' and event.kind == 'element-check')):
                 ownership_failure(body, operation, f'cannot replace, move or drop {event.slot!r} while a stored borrow is live on a control-flow path')
         return state
     def merge(states):

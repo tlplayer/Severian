@@ -1,0 +1,26 @@
+{
+  "package": {
+    "name": "examples-07-filesystem",
+    "version": "0.1.0"
+  },
+  "sources": [
+    "01-paths.sev",
+    "02-directories.sev",
+    "03-metadata.sev",
+    "04-copy-move-remove.sev"
+  ],
+  "dependencies": {
+    "string": {
+      "path": "../../../../library/core/string/c"
+    },
+    "file": {
+      "path": "../../../../library/system/file/linux_x86_64"
+    },
+    "os": {
+      "path": "../../../../library/system/os/linux_x86_64"
+    },
+    "path": {
+      "path": "../../../../library/system/path/c"
+    }
+  }
+}

@@ -1,7 +1,10 @@
 import process
 
 
-test with integ "run waits for completion":
-    status = process.run("exit 3")
-
-    assert(status == 3)
+test with integ "spawn returns a child and wait retains its exit status":
+    child = process.spawn(["/bin/sh", "-c", "exit 7"])
+    assert(child.pid > 0)
+    assert(process.wait(child) == 7)
+    assert(child.completed)
+    assert(process.wait(child) == 7)
+    assert(not process.kill(child))

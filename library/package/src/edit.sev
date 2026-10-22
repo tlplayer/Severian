@@ -44,7 +44,7 @@ class Edit:
         text = render_manifest(entries)
         candidate = Project(original.root, parse_manifest(text), text, "")
         resolution = resolve(candidate, Resolve("edit", false, ""))
-        lock = file.native_lock(original.root + "/.sev-edit.lock")
+        lock = file.c_lock(original.root + "/.sev-edit.lock")
         if lock < 0:
             throw Error("could not lock package edit")
         try:

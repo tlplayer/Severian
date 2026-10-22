@@ -2,10 +2,15 @@
 def main():
     messages = channel[string,10]
 
-    producer = async messages.send("hello") with self
-    producer = async messages.send("hello") with self
+    first = async messages.send("hello") with self
+    second = async messages.send("hello") with self
     message = await messages
     print(message)
-    message = message.receive()
+    message = messages.receive()
 
     print(message)
+
+
+test with integ "both queued messages are received":
+    main()
+    assert(stdout == "hello\nhello\n")

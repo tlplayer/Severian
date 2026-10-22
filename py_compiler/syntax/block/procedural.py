@@ -250,11 +250,11 @@ class ProceduralTests(unittest.TestCase):
         from py_compiler.syntax.recognition import Syntax
         return compile_source('procedural.sev', text, Syntax())
 
-    def test_native_source_windows_delegate_blocks_and_typed_expressions(self):
+    def test_c_source_windows_delegate_blocks_and_typed_expressions(self):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         source = '''grammar whenever(input: SourceWindow) -> B:
     if not input.text.startswith("whenever "):
         return None

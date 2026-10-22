@@ -111,9 +111,9 @@ class Body:
                     raise ValueError("duplicate SSA definition")
                 definitions[value.identity] = (index, value.type)
             term = block.terminator
-            if term.kind not in ("jump", "conditional", "finish", "panic"):
+            if term.kind not in ("jump", "conditional", "finish", "panic", "unreachable"):
                 raise ValueError("unknown CFG terminator")
-            expected_edges = {"jump": 1, "conditional": 2, "finish": 0, "panic": 0}[term.kind]
+            expected_edges = {"jump": 1, "conditional": 2, "finish": 0, "panic": 0, "unreachable": 0}[term.kind]
             if len(term.edges) != expected_edges:
                 raise ValueError("CFG terminator edge count mismatch")
             if term.kind == "conditional" and (term.value is None or term.value.type.name != "bool"):
@@ -160,7 +160,7 @@ class Body:
             available = {v.identity for v in self.blocks[b].parameters}
             def check(value):
                 if value.identity in moved:
-                    raise ValueError("atom uses a value moved on a control-flow path")
+                    raise ValueError(f"atom uses a value moved on a control-flow path: {self.name}, block {b}, value {value.identity}")
                 owner = definitions.get(value.identity)
                 if owner is None or owner[1] != value.type or owner[0] not in dominators[b]:
                     raise ValueError("SSA use lacks a dominating typed definition")

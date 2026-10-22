@@ -6,7 +6,7 @@ import "../char/utf8.sev" as primitive_character
 import "../../../../library/core/string/src/core.sev" as core_string
 import "../../../../library/core/string/format/src/lib.sev" as core_format
 
-union NativeInteger:
+union CInteger:
     i8
     i16
     i32
@@ -16,7 +16,7 @@ union NativeInteger:
     u32
     u64
 
-union NativeSignedInteger:
+union CSignedInteger:
     i8
     i16
     i32

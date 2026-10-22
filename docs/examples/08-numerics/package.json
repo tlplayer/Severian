@@ -1,0 +1,34 @@
+{
+  "package": {
+    "name": "examples-numerics",
+    "version": "0.1.0"
+  },
+  "sources": [
+    "00-decorator-symbol-pack.sev",
+    "01-numeric-types.sev",
+    "02-promotion.sev",
+    "03-math.sev",
+    "04-tensor-vector.sev",
+    "05-tensor.sev",
+    "06-shapes.sev",
+    "07-indexing.sev",
+    "08-broadcasting.sev",
+    "09-reductions.sev",
+    "10-matmul.sev",
+    "11-import-packs.sev"
+  ],
+  "dependencies": {
+    "io": {
+      "path": "../../../library/system/io/linux_x86_64"
+    },
+    "math": {
+      "path": "../../../library/math/c"
+    },
+    "tensor_math": {
+      "path": "../../../library/math/tensor/c"
+    },
+    "collections": {
+      "path": "../../../library/core/collections/collection"
+    }
+  }
+}

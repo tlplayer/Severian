@@ -1,5 +1,5 @@
 #define _GNU_SOURCE
-#include "../../../core/memory/native/memory.h"
+#include "../../../core/memory/c/memory.h"
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -124,7 +124,7 @@ const char *__sev_os_temporary(const char *parent, const char *prefix) {
     return path;
 }
 
-// Handles avoid exposing dirent layouts or native collection storage to users.
+// Handles avoid exposing dirent layouts or c collection storage to users.
 int64_t __sev_os_directory_open(const char *path) {
     return (int64_t)(intptr_t)opendir(path);
 }

@@ -1,6 +1,6 @@
 trait Drawable:
     def magnitude() -> float
-    def draw() -> None
+    def draw()
 
 class Point: Drawable
     x: float
@@ -9,7 +9,7 @@ class Point: Drawable
     def magnitude() -> float:
         return (x*x + y*y) ** .5
 
-    def draw() -> None:
+    def draw():
         print("point", x, y)
 
 def main():
@@ -22,3 +22,19 @@ test with integ:
     main()
     p = Point(2.0,1.0)
     assert((2**2+1**2)**.5 == p.magnitude())
+
+
+test "point magnitude follows the drawable contract":
+    point = Point(3.0, 4.0)
+    assert(point.magnitude() == 5.0)
+    origin = Point(0.0, 0.0)
+    assert(origin.magnitude() == 0.0)
+    negative = Point(-3.0, -4.0)
+    assert(negative.magnitude() == 5.0)
+
+def magnitude(value: Drawable) -> float:
+    return value.magnitude()
+
+test "boxed drawable dispatch preserves numeric result":
+    point = Point(3.0, 4.0)
+    assert(magnitude(point) == 5.0)

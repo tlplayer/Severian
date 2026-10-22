@@ -59,7 +59,7 @@ class FloatOperationTests(unittest.TestCase):
             result = compile_source('reject.sev', f'def calculate(a: float, b: float) -> float:\n    return {expression}\n', Syntax())
             self.assertTrue(result.diagnostics, expression)
 
-    def test_native_float_results(self):
+    def test_c_float_results(self):
         import ctypes
         import shutil
         import subprocess
@@ -68,7 +68,7 @@ class FloatOperationTests(unittest.TestCase):
         from py_compiler.lir.src.lib import lower, compile_object
         from py_compiler.mlir.src.lib import verifier_path
         if not shutil.which(verifier_path()) or not shutil.which('cc'):
-            self.skipTest('install MLIR/LLVM tools and cc for native execution')
+            self.skipTest('install MLIR/LLVM tools and cc for c execution')
         source = ''.join(f'def {label}(a: float, b: float) -> float:\n    return a {op} b\n'
                          for label, op in (('divide', '/'), ('floor', '//'), ('modulo', '%'), ('power', '**')))
         program = self.compile(source)

@@ -1,4 +1,5 @@
 import cli
+from collections import list
 
 
 def interface() -> cli.Command:
@@ -21,3 +22,10 @@ def main():
     matches = cli.parse_process(application)
     for value in cli.values(matches, "values"):
         print(value)
+
+test "CLI captures each positional argument literally":
+    application = interface()
+    matches = cli.parse(application, ["one", "two words", "$HOME"])
+    values = cli.values(matches, "values")
+    assert(values.len() == 3)
+    assert(values[1] == "two words" and values[2] == "$HOME")

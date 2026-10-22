@@ -22,15 +22,18 @@ class ScopedSyntax:
         result = dict(self.parent.block_providers)
         for imported in self.imports:
             for grammar in imported.grammars:
-                if grammar.spelling in result:
+                key = grammar.spelling or type(grammar)
+                if key in result:
                     raise ValueError(f'ambiguous imported grammar {grammar.spelling!r}')
-                result[grammar.spelling] = grammar
+                result[key] = grammar
         return result
 
     @cached_property
     def grammar_catalog(self):
-        from py_compiler.syntax.catalog import collect_grammars
-        return collect_grammars(self)
+        from py_compiler.syntax.catalog import collect_grammars, grammars
+        selected = tuple(grammar for grammar in grammars(self.parent)
+                         if getattr(grammar, 'lexical_namespace', None) is not None)
+        return (*collect_grammars(self), *selected)
 
     def recognition_order(self):
         from py_compiler.syntax.grammar.lexical import providers
@@ -81,12 +84,27 @@ def integration():
     return GrammarImport('integ')
 
 
+def chaos():
+    from py_compiler.syntax.complex.chaos import ChaosAdd
+    return GrammarImport('chaos', (ChaosAdd(),))
+
+
+def benchmark():
+    return GrammarImport('bench')
+
+
 def test():
     from py_compiler.syntax.block.mock import Mock
     from py_compiler.syntax.block.throws import Throws
     from py_compiler.syntax.block.when import When
-    return GrammarImport('test', (Mock(), Throws(), When()))
+    from py_compiler.syntax.function.assertion import Assertion, Snapshot, AssertionBlock
+    return GrammarImport('test', (Mock(), Throws(), When(), AssertionBlock()), (*utility().exports, ('expect', Assertion()), ('snapshot', Snapshot())))
+
+
+def utility():
+    from py_compiler.syntax.function.assertion import Assertion
+    return GrammarImport('util', exports=(('assert', Assertion()),))
 
 
 def standard_expansions():
-    return {'compiler': compiler, 'integ': integration, 'test': test}
+    return {'compiler': compiler, 'integ': integration, 'bench': benchmark, 'chaos': chaos, 'test': test, 'util': utility}

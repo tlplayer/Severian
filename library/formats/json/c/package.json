@@ -1,0 +1,7 @@
+{
+  "package": {"name": "formats.json", "version": "0.1.0"},
+  "dependencies": {
+    "file": {"path": "../../../system/file/linux_x86_64"},
+    "string": {"path": "../../../core/string/c"}
+  }
+}

@@ -1,11 +1,13 @@
+from collections import list
+
 test:
     values := ["a", "b", "c"]
     value := "d"
 
-    values.append(move value)
+    values.append_owned(value)
     moved := move values[0]
-    borrowed := borrow values[1]
-    copied := clone values[2]
+    borrowed := view values[1]
+    copied := copy values[2]
 
     assert(moved == "a")
     assert(borrowed == "b")
@@ -17,5 +19,5 @@ test with compiler:
     first := borrow values
 
     reject:
-        mutation := borrow mut values
-        assert(first.length() == 3)
+        mutation := borrow values
+        assert(first.len() == 3)

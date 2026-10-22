@@ -1,0 +1,36 @@
+# An owned return transfers storage beyond the local scope.
+def make_values() -> tensor[int]:
+    values = tensor[int](2)
+    values[0] = 20
+    values[1] = 22
+    return values
+
+# A borrowed result remains tied to its caller-owned argument.
+def borrow_values(values: view tensor[int]) -> view tensor[int]:
+    return view values
+
+def copy_text(text: view string) -> string:
+    return copy text
+
+test "owned results survive the function that allocated them":
+    values = make_values()
+    assert(values[0] + values[1] == 42)
+    borrowed = borrow_values(values)
+    assert(borrowed[1] == 22)
+    text = "before"
+    saved = copy_text(text)
+    text = "after"
+    assert(saved == "before")
+
+test with compiler "a borrowed result cannot outlive its input":
+    reject "borrow":
+        values = make_values()
+        borrowed = borrow_values(values)
+        drop values
+        item = borrowed[0]
+
+test with compiler "returning a view into a local allocation is rejected":
+    reject:
+        def invalid() -> view tensor[int]:
+            local_values = tensor[int](1)
+            return view local_values

@@ -1,5 +1,5 @@
 #define _GNU_SOURCE
-#include "../../../core/memory/native/memory.h"
+#include "../../../core/memory/c/memory.h"
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>

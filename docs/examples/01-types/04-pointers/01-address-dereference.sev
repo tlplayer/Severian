@@ -1,12 +1,11 @@
-
 def main():
     print(1+1)
 
 test:
-    value := 42
+    value = 42
 
     unsafe:
-        p: pointer[int] := &value
+        p: pointer[int] = borrow &value
 
         # Indexing keeps raw access explicit; there is no unary dereference.
         assert(p[0] == 42)

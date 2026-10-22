@@ -75,10 +75,12 @@ def contract_call_boundary(box: borrow ContractBox) with
     fix 0 <= box.value <= 100 -> contract_failed(),
 }:
     transient_contract_change(box)
-    assert(module.contract_failures == 0)
+    if module.contract_failures != 0:
+        throw Error("transient contract change escaped its call")
     lasting_contract_change(box)
     box.value = 50
-    assert(module.contract_failures == 1)
+    if module.contract_failures != 1:
+        throw Error("lasting contract change was not observed")
 
 test "default and explicit prefix run only at entry":
     module.contract_failures = 0
@@ -209,7 +211,6 @@ test "return cleans the while with initializer":
         while true with {scratch = array[int, 1](),}:
             scratch[0] = 42
             return scratch[0]
-        return 0
     assert(first() == 42)
 
 
@@ -218,7 +219,7 @@ test with compiler "while with binding cannot escape the loop":
         def invalid():
             while position < 2 with {position = 0,}:
                 position += 1
-            assert(position == 2)
+            return position
 
 
 test "braced while suffix runs once per entered iteration":
@@ -287,8 +288,8 @@ test "loop fix guards skip one value and break before visiting three":
     suffixes = 0
     while i < 5 with
     {
-        fix i == 1 -> continue,
-        fix i == 3 -> break,
+        fix i != 1 -> continue,
+        fix i != 3 -> break,
         suffix i += 1,
         suffix suffixes += 1,
     }:
@@ -305,7 +306,7 @@ test "loop fix guard checks a body mutation before the next sentence":
     suffixes = 0
     while i < 5 with
     {
-        fix i == 3 -> break,
+        fix i != 3 -> break,
         suffix suffixes += 1,
     }:
         i = 3
@@ -344,7 +345,7 @@ test "single inline loop suffix runs at each iteration exit":
 
 test "single inline loop guard exits before the body":
     i = 0
-    while i < 5 with fix i == 3 -> break:
+    while i < 5 with fix i != 3 -> break:
         assert(i < 3)
         i += 1
     assert(i == 3)

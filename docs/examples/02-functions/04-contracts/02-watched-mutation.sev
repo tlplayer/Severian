@@ -3,9 +3,33 @@ def update_temperature() -> i64 with
     defer temperature >= 0 -> Error("temperature below minimum"),
     defer temperature <= 100 -> Error("temperature above maximum"),
 }:
-    temperature := i64(50)
+    temperature = i64(50)
 
     temperature = 75
     temperature = 90
 
     return temperature
+
+
+test "valid updates satisfy the return-time temperature contract":
+    assert(update_temperature() == 90)
+
+def set_temperature(value: i64) -> i64 with
+{
+    defer temperature >= 0 -> Error("temperature below minimum"),
+    defer temperature <= 100 -> Error("temperature above maximum"),
+}:
+    temperature = value
+    return temperature
+
+test "temperature contract accepts inclusive boundaries":
+    assert(set_temperature(0) == 0)
+    assert(set_temperature(100) == 100)
+
+test "temperature below the minimum fails on return":
+    throws "temperature below minimum":
+        value = set_temperature(-1)
+
+test "temperature above the maximum fails on return":
+    throws "temperature above maximum":
+        value = set_temperature(101)

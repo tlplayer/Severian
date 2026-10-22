@@ -1,23 +1,9 @@
-from tensor import matmul
-
+from tensor_math import matmul
 
 test "matrix multiplication":
-    left = tensor(
-        [1.0, 2.0,
-         3.0, 4.0],
-        [2, 2],
-    )
-
-    right = tensor(
-        [5.0, 6.0,
-         7.0, 8.0],
-        [2, 2],
-    )
-
-    result = matmul(left, right)
-
-    assert(tensor.shape(result) == [2, 2])
-    assert(tensor.values(result) == [
-        19.0, 22.0,
-        43.0, 50.0,
-    ])
+    left = tensor[f64,(2,2)](tuple[f64,4](1.0,2.0,3.0,4.0))
+    right = tensor[f64,(2,2)](tuple[f64,4](5.0,6.0,7.0,8.0))
+    result = matmul(left,right)
+    assert(result.dim(0) == 2 and result.dim(1) == 2)
+    assert(result[0,0] == 19.0 and result[0,1] == 22.0)
+    assert(result[1,0] == 43.0 and result[1,1] == 50.0)

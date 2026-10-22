@@ -378,7 +378,7 @@ test "recursive calls preserve each invocation's locals":
     assert(sum_down(10) == 55)
 
 
-test "recursive assertion exposes the native call stack":
+test "recursive assertion exposes the c call stack":
     throws "assertion failed":
         def crash_leaf(depth: int) -> absent:
             if depth > 0:
@@ -456,7 +456,7 @@ test "imported Vector realizes i32 and f64 independently":
     assert(snapshot.get(0) == i32(42))
 
 
-test "native imported factory returns owning Vector by value":
+test "c imported factory returns owning Vector by value":
     values = vector.make_vector(42)
     values.push(7)
     assert(values.size() == 2)

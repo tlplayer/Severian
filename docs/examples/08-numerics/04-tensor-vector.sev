@@ -1,37 +1,21 @@
-import tensor
+import tensor_math
+from tensor_math import sum
+from collections import equal
 
-'''
-A tensor looks something like this:
-Tensor[T]
-    dtype: T
-    shape: list[int]
-    strides: list[int]
-    type: TensorType (RANKED, UNRANKED...)
-    values: ...
-    operations:...
-'''
+# Rank-one data uses the same tensor type as multidimensional data.
+test "rank one tensor shape and values":
+    initial = tuple[f64,3](1.0,2.0,3.0)
+    values = tensor[f64,(3,)](initial)
+    shape = values.shape
+    assert(shape[0] == 3)
+    flat = values.values
+    assert(equal(flat, initial))
 
-test "rank one tensor is a tensor_vector":
-    tensor_vector = tensor([1.0, 2.0, 3.0], [3])
-
-    assert(tensor.shape(tensor_vector) == [3])
-    assert(tensor.values(tensor_vector) == [1.0, 2.0, 3.0])
-
-
-test "tensor_tensor_vector addition":
-    left = tensor([1.0, 2.0, 3.0], [3])
-    right = tensor([4.0, 5.0, 6.0], [3])
-
-    result = left + right
-
-    assert(result.values == [5.0, 7.0, 9.0])
-
-
-test "dot product":
-    left = tensor([1.0, 2.0, 3.0], [3])
-    right = tensor([4.0, 5.0, 6.0], [3])
-
-    products = left * right 
-    result = sum(products)
-
-    assert(result.values == [32.0])
+test "elementwise addition and dot product":
+    left = tensor[f64,(3,)](tuple[f64,3](1.0,2.0,3.0))
+    right = tensor[f64,(3,)](tuple[f64,3](4.0,5.0,6.0))
+    added = left + right
+    expected = tuple[f64,3](5.0,7.0,9.0)
+    assert(equal(added, expected))
+    products = left * right
+    assert(sum(products) == 32.0)

@@ -9,4 +9,4 @@ in Severian. `core.storage` checks allocation requests and delegates them to
 ownership. The vector owns its length and growth policy. `clear` retains
 capacity, while `copy` allocates independent storage.
 
-Native tests live alongside the implementation in `src/vector.sev`.
+C tests live alongside the implementation in `src/vector.sev`.

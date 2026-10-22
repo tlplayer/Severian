@@ -6,7 +6,7 @@
     "description": "Selected target facts, capabilities, and data layout",
     "unsafe": {
       "capabilities": [
-        "native-abi"
+        "c-abi"
       ],
       "sources": [
         "src/lib.sev"
@@ -15,7 +15,7 @@
     "metadata": {
       "library": {
         "category": "system",
-        "implementation": "native-abi",
+        "implementation": "c-abi",
         "status": "experimental",
         "version": 1
       }
@@ -23,5 +23,13 @@
   },
   "lib": {
     "path": "src/lib.sev"
+  },
+  "dependencies": {
+    "string": {
+      "path": "../../core/string/c"
+    },
+    "collections": {
+      "path": "../../core/collections/collection"
+    }
   }
 }

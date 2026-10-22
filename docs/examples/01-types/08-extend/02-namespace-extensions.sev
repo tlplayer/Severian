@@ -1,3 +1,5 @@
+from collections import set
+
 '''
 E2E: namespaced additive extensions.
 
@@ -17,7 +19,7 @@ The operations do not become part of set globally.
 extend set[T]:
 
     operator +(other: set[T]) -> set[T]:
-        result := self
+        result := copy self
 
         for value in other:
             result.add(value)
@@ -70,9 +72,9 @@ test  "set subtraction":
 
 test  "extensions preserve set type":
     values := set_union({1, 2}, {2, 3})
-    values = set_difference(values, {1})
+    remaining = set_difference(values, {1})
 
-    assert(values == {2, 3})
+    assert(remaining == {2, 3})
 
 
 test  "combinatorics operation selection":
@@ -97,3 +99,35 @@ test with compiler "set operators require namespace":
 
         # Reject: + only exists while @combinatorics(+) is active.
         result := left + right
+
+@intersection
+extend set[T]:
+    operator +(other: set[T]) -> set[T]:
+        result = set[T]()
+        for value in self:
+            if value in other:
+                result.add(value)
+        return result
+
+@intersection(+)
+def common(left: set[int], right: set[int]) -> set[int]:
+    return left + right
+
+test "operator implementations stay in their selected namespace":
+    left: set[int] = {1,2,3}
+    right: set[int] = {3,4}
+    assert(common(left,right) == {3})
+    assert(set_union(left,right) == {1,2,3,4})
+
+test with compiler "selecting two implementations of the same operator is ambiguous":
+    reject "ambiguous operator namespace":
+        @combinatorics(+)
+        @intersection(+)
+        def ambiguous(left: set[int], right: set[int]) -> set[int]:
+            return left + right
+
+    reject "cannot overwrite existing member":
+        @intersection
+        extend set[T]:
+            operator +(other: set[T]) -> set[T]:
+                return copy self

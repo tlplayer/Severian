@@ -1,6 +1,7 @@
 """Resolve local placement and scoped arena/pool slabs before MIR registration."""
 from dataclasses import dataclass, replace
 from py_compiler.syntax.complex.array import MemoryOperation, RecordMemory
+from py_compiler.syntax.complex.tensor import TensorOperation
 
 
 @dataclass(frozen=True)
@@ -142,7 +143,7 @@ def resolve(body):
     for block in body.blocks:
         for index, op in enumerate(block.operations):
             payload = replacements.get(op.result.identity) if op.result else None
-            if isinstance(op.payload, MemoryOperation) and op.payload.kind == 'release' and roots.get(op.operands[0].identity, set()) and roots[op.operands[0].identity] <= local:
+            if isinstance(op.payload, (MemoryOperation, TensorOperation)) and op.payload.kind == 'release' and roots.get(op.operands[0].identity, set()) and roots[op.operands[0].identity] <= local:
                 payload = EndLocal()
             if payload is not None:
                 updated = replace(op, payload=payload)
@@ -183,11 +184,11 @@ import unittest
 
 
 class PlacementTests(unittest.TestCase):
-    def test_native_regions_temporaries_and_loop_replacement(self):
+    def test_c_regions_temporaries_and_loop_replacement(self):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         source = '''class Buffer:
     data: array[int]
     def size(self: view Self) -> int:
@@ -253,7 +254,7 @@ test "pool keeps simultaneously live branch allocations separate":
     def test_record_regions_preserve_owned_field_cleanup(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax
-        from py_compiler.mlir.src.lib import lower, render, verify_native
+        from py_compiler.mlir.src.lib import lower, render, verify_c
         for strategy in ('arena', 'pool'):
             source = ('class Buffer:\n    data: array[int]\n'
                       f'def work(flag: bool) -> int:\n    unsafe:\n        values = allocate[array[Buffer],strategy=memory.{strategy}](2)\n'
@@ -265,7 +266,7 @@ test "pool keeps simultaneously live branch allocations separate":
             self.assertIn('memref.view %memory_region_0', text)
             self.assertIn('read of uninitialized array element', text)
             self.assertGreaterEqual(text.count('memref.dealloc'), 3)
-            verify_native(text)
+            verify_c(text)
 
     def test_branches_have_distinct_pool_slots(self):
         from py_compiler.frontend.src.lib import compile_source
@@ -291,7 +292,7 @@ test "pool keeps simultaneously live branch allocations separate":
     def test_arena_and_pool_reuse(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax
-        from py_compiler.mlir.src.lib import lower, render, verify_native
+        from py_compiler.mlir.src.lib import lower, render, verify_c
         for strategy, size in (('arena', 128), ('pool', 64)):
             result = compile_source('region.sev', f'def work():\n    unsafe:\n        a = allocate[int,strategy=memory.{strategy}](8)\n        drop a\n        b = allocate[int,strategy=memory.{strategy}](8)\n', Syntax())
             self.assertFalse(result.diagnostics, str(result.diagnostics))
@@ -299,4 +300,4 @@ test "pool keeps simultaneously live branch allocations separate":
             self.assertEqual(body.memory_regions[0].size, size)
             text = render(lower(result.program))
             self.assertEqual(text.count('memref.dealloc'), 1)
-            verify_native(text)
+            verify_c(text)

@@ -2,7 +2,7 @@ def following_view() -> string:
     text = "old"
     alias := text
     text = "new"
-    return alias
+    return copy alias
 
 def copied_value() -> string:
     text = "old"
@@ -28,3 +28,8 @@ test "move and drop are prefix operators":
     item = 3
     moved := move item
     drop moved
+
+
+test "returned alias copies its current value before the owner expires":
+    assert(following_view()[0] == u8(110))
+    assert(copied_value()[0] == u8(111))

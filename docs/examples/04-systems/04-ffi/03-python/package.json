@@ -13,7 +13,7 @@
   "xxi": {
     "python": {
       "sources": [
-        "native.py"
+        "c.py"
       ]
     }
   }

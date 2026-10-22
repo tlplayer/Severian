@@ -32,7 +32,7 @@ def session_limits(seconds: int, bytes: int) -> bool
 def session_wait(worker: int) -> int
 
 # Materialized by the runtime from the process entry boundary. The semantic
-# layer lowers this list-valued native surface without exposing its storage.
+# layer lowers this list-valued c surface without exposing its storage.
 def arguments() -> list[string]
 
 # Hosted working-directory boundary; an empty result indicates an OS failure.
@@ -64,17 +64,17 @@ def profile_function_table(allocations: string, peak: string, retained: string, 
 def hook_function_table(records: string, output: string) -> int
 
 @c(symbol = "__sev_command_create")
-def native_command() -> int
+def c_command() -> int
 @c(symbol = "__sev_command_argument")
-def native_argument(command: int, argument: string)
+def c_argument(command: int, argument: string)
 @c(symbol = "__sev_command_execute")
-def native_execute(command: int, capture: bool) -> int
+def c_execute(command: int, capture: bool) -> int
 @c(symbol = "__sev_command_stdout")
-def native_stdout(command: int) -> string
+def c_stdout(command: int) -> string
 @c(symbol = "__sev_command_stderr")
-def native_stderr(command: int) -> string
+def c_stderr(command: int) -> string
 @c(symbol = "__sev_command_drop")
-def native_drop(command: int)
+def c_drop(command: int)
 
 class Output:
     status: int
@@ -84,26 +84,26 @@ class Output:
 def command_handle(arguments: list[string]) -> int | Error:
     if len(arguments) == 0:
         throw Error("process requires an executable")
-    command = native_command()
+    command = c_command()
     for argument in arguments:
-        native_argument(command, argument)
+        c_argument(command, argument)
     return command
 
 # Argument arrays preserve spaces, quotes and shell metacharacters literally.
 def run(arguments: list[string]) -> int | Error:
     command = command_handle(arguments)
-    status = native_execute(command, false)
-    native_drop(command)
+    status = c_execute(command, false)
+    c_drop(command)
     if status < 0:
         throw Error("could not execute process: " + arguments[0])
     return status
 
 def execute(arguments: list[string]) -> Output | Error:
     command = command_handle(arguments)
-    status = native_execute(command, true)
-    output = native_stdout(command)
-    errors = native_stderr(command)
-    native_drop(command)
+    status = c_execute(command, true)
+    output = c_stdout(command)
+    errors = c_stderr(command)
+    c_drop(command)
     if status < 0:
         throw Error("could not execute process: " + arguments[0])
     return Output(status, output, errors)

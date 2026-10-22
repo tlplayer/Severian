@@ -1,0 +1,272 @@
+import string
+import io
+from collections import list
+
+@mlir("llvm.inline_asm", asm_string="syscall", constraints="={ax},{ax},{di},{si},{dx},~{rcx},~{r11},~{memory},~{cc}", has_side_effects=true, target="x86_64-linux")
+def __syscall(number: int, first: int, second: int, third: int) -> int
+
+@mlir("llvm.inline_asm", asm_string="syscall", constraints="={ax},{ax},{di},{si},{dx},{r10},~{rcx},~{r11},~{memory},~{cc}", has_side_effects=true, target="x86_64-linux")
+def __syscall4(number: int, first: int, second: int, third: int, fourth: int) -> int
+
+@mlir("llvm.inline_asm", asm_string="movq environ@GOTPCREL(%rip), $0; movq ($0), $0", constraints="=r,~{memory}", has_side_effects=true, target="x86_64-linux")
+def __environment() -> int
+
+@mlir("memref.extract_aligned_pointer_as_index")
+def __bytes_address(data: view tensor[u8]) -> index
+
+@mlir("memref.extract_aligned_pointer_as_index")
+def __words_address(data: view tensor[int]) -> index
+
+@mlir("arith.index_cast")
+def __integer(value: index) -> int
+
+# wait4 writes a 32-bit status. The zeroed 64-bit slot also supports decoding
+# without an unaligned pointer cast. EINTR retries do not lose the child.
+def __wait(pid: int) -> int:
+    storage = tuple[int,1](0)
+    while true:
+        result = __syscall4(61, pid, __integer(__words_address(storage)), 0, 0)
+        if result == -4:
+            continue
+        if result < 0:
+            return result
+        signal = storage[0] & 127
+        if signal == 0:
+            return (storage[0] >> 8) & 255
+        return 128 + signal
+
+class Child:
+    pid: int
+    status: int = -1
+    completed: bool = false
+
+    def drop():
+        if not completed and pid > 0:
+            status = __wait(pid)
+            completed = true
+
+def wait(child: borrow Child) -> int:
+    if not child.completed:
+        child.status = __wait(child.pid)
+        child.completed = true
+    return child.status
+
+def kill(child: view Child) -> bool:
+    if child.completed or child.pid <= 0 or child.pid > 2147483647:
+        return false
+    return __syscall(62, child.pid, 15, 0) == 0
+
+# Arguments remain literal. Resolve PATH before fork, then only invoke syscalls.
+def __spawn(arguments: list[string], output: int = -1, error: int = -1) -> Child:
+    if arguments.len() == 0:
+        throw Error("process requires an executable")
+    encoded: list[tensor[u8]] = []
+    addresses = tensor[int,(arguments.len() + 1,)]()
+    for argument in arguments:
+        for character in argument:
+            if character == u8(0):
+                throw Error("process argument contains NUL")
+        encoded.append(argument.utf(true))
+    position = 0
+    while position < encoded.len():
+        bytes = encoded.view_at(position)
+        addresses[position] = __integer(__bytes_address(bytes))
+        position += 1
+    addresses[position] = 0
+    executable_name = find_executable(arguments[0]).utf(true)
+    executable = __integer(__bytes_address(executable_name))
+    argv = __integer(__words_address(addresses))
+    environment = __environment()
+    pid = __syscall(57, 0, 0, 0)
+    if pid < 0:
+        throw Error("process creation failed")
+    if pid == 0:
+        # No allocator or runtime lock is touched between fork and exec.
+        if output >= 0 and __syscall(33, output, 1, 0) < 0:
+            __syscall(60, 126, 0, 0)
+        if error >= 0 and __syscall(33, error, 2, 0) < 0:
+            __syscall(60, 126, 0, 0)
+        failure = __syscall(59, executable, argv, environment)
+        status = 126
+        if failure == -2:
+            status = 127
+        __syscall(60, status, 0, 0)
+        while true:
+            __syscall(60, status, 0, 0)
+    return Child(pid)
+
+def run(arguments: list[string]) -> int:
+    child = spawn(arguments)
+    return wait(child)
+
+# Linux exposes the original NUL-delimited argv without shell reparsing.
+def arguments() -> list[string]:
+    handle = io.open("/proc/self/cmdline")
+    if handle < 0:
+        throw Error("cannot read process arguments")
+    defer io.close(handle)
+    result = list[string]()
+    current = tensor[u8](0)
+    chunk = tensor[u8,(4096,)]()
+    while true:
+        count = io.read(handle, chunk, 0, len(chunk))
+        if count < 0:
+            throw Error("process argument read failed")
+        if count == 0:
+            break
+        position = 0
+        while position < count:
+            if chunk[position] == u8(0):
+                result.append(string(current))
+                current.resize(0)
+            else:
+                current.append(chunk[position])
+            position += 1
+    if len(current) > 0:
+        result.append(string(current))
+    return result
+
+test "process arguments include the executable":
+    input = arguments()
+    assert(input.len() >= 1 and len(input[0]) > 0)
+
+test "wait decodes normal child status":
+    child = spawn(["/bin/sh", "-c", "exit 7"])
+    assert(wait(child) == 7)
+    assert(wait(child) == 7)
+    assert(not kill(child))
+
+test "failed executable has a distinct status":
+    assert(run(["/severian-no-such-executable"]) == 127)
+
+test "arguments preserve whitespace and shell metacharacters":
+    assert(run(["/bin/sh", "-c", "test \"$1\" = 'a b;$HOME'", "example", "a b;$HOME"]) == 0)
+
+
+def spawn(arguments: list[string]) -> Child:
+    return __spawn(arguments)
+
+def current_directory() -> string:
+    data = tensor[u8,(4096,)]()
+    count = __syscall(79, __integer(__bytes_address(data)), len(data), 0)
+    if count < 1:
+        throw Error("cannot determine current directory")
+    return string(data[:count - 1])
+
+def __environment_path() -> string:
+    handle = io.open("/proc/self/environ")
+    if handle < 0:
+        throw Error("cannot read process environment")
+    defer io.close(handle)
+    chunk = tensor[u8,(4096,)]()
+    entry = ""
+    while true:
+        count = io.read(handle, chunk, 0, len(chunk))
+        if count < 0:
+            throw Error("cannot read process environment")
+        if count == 0:
+            return "/bin:/usr/bin"
+        position = 0
+        while position < count:
+            if chunk[position] == u8(0):
+                if len(entry) >= 5 and entry[:5] == "PATH=":
+                    return entry[5:]
+                entry = ""
+            else:
+                entry = entry + string(chunk[position:position + 1])
+            position += 1
+
+def find_executable(name: string) -> string:
+    if name.contains("/"):
+        return name
+    search = __environment_path()
+    start = 0
+    end = 0
+    while end <= len(search):
+        if end == len(search) or search[end] == u8(58):
+            directory = search[start:end]
+            candidate = directory + "/" + name if directory != "" else "./" + name
+            bytes = candidate.utf(true)
+            if __syscall(21, __integer(__bytes_address(bytes)), 1, 0) == 0:
+                return candidate
+            start = end + 1
+        end += 1
+    return ""
+
+def temporary_token() -> string:
+    data = tensor[int,(1,)]()
+    received = __syscall(318, __integer(__words_address(data)), 8, 0)
+    while received == -4:
+        received = __syscall(318, __integer(__words_address(data)), 8, 0)
+    if received != 8:
+        throw Error("cannot generate temporary file name")
+    return string(__syscall(39, 0, 0, 0)) + "-" + string(data[0])
+
+# Unlinked, exclusive temporary descriptors avoid pipe deadlocks when both
+# output streams exceed pipe capacity, and leave no paths after the call.
+def __capture_file() -> int:
+    attempts = 0
+    while attempts < 16:
+        location = "/tmp/.sev-capture-" + temporary_token()
+        handle = io.open(location, 194, 384)
+        if handle >= 0:
+            if io.unlink(location) != 0:
+                io.close(handle)
+                throw Error("cannot unlink captured output")
+            if handle < 3:
+                duplicated = __syscall(72, handle, 1030, 3)
+                io.close(handle)
+                if duplicated < 0:
+                    throw Error("cannot reserve captured descriptor")
+                return duplicated
+            return handle
+        if handle != -17:
+            throw Error("cannot open captured output")
+        attempts += 1
+    throw Error("cannot reserve captured output")
+
+def __captured(handle: int) -> string:
+    if io.seek(handle, 0, 0) < 0:
+        throw Error("cannot seek captured output")
+    bytes = tensor[u8](0)
+    chunk = tensor[u8,(4096,)]()
+    while true:
+        count = io.read(handle, chunk, 0, len(chunk))
+        if count < 0:
+            throw Error("cannot read captured output")
+        if count == 0:
+            return string(bytes)
+        if len(bytes) > 67108864 - count:
+            throw Error("captured output exceeds 64 MiB")
+        start = len(bytes)
+        bytes.resize(start + count)
+        index = 0
+        while index < count:
+            bytes[start + index] = chunk[index]
+            index += 1
+
+class ProcessResult:
+    status: int
+    stdout: string
+    stderr: string
+
+def execute(arguments: list[string]) -> ProcessResult:
+    output = __capture_file()
+    defer io.close(output)
+    error = __capture_file()
+    defer io.close(error)
+    child = __spawn(arguments, output, error)
+    status = wait(child)
+    return ProcessResult(status, __captured(output), __captured(error))
+
+test "PATH execution captures independent streams and exit status":
+    result = execute(["sh", "-c", "printf 'a b;$HOME'; printf error >&2; exit 7"])
+    assert(result.status == 7)
+    assert(result.stdout == "a b;$HOME")
+    assert(result.stderr == "error")
+    assert(current_directory()[0] == u8(47))
+
+test "capture drains output beyond pipe capacity":
+    result = execute(["sh", "-c", "head -c 131072 /dev/zero; head -c 131072 /dev/zero >&2"])
+    assert(result.status == 0)
+    assert(len(result.stdout) == 131072 and len(result.stderr) == 131072)

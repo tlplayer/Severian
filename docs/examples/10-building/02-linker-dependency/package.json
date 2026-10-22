@@ -20,13 +20,25 @@
       "path": "../../../../library/package/linker"
     },
     "file": {
-      "path": "../../../../library/system/file"
+      "path": "../../../../library/system/file/linux_x86_64"
     },
     "os": {
-      "path": "../../../../library/system/os"
+      "path": "../../../../library/system/os/linux_x86_64"
     },
     "process": {
-      "path": "../../../../library/system/process"
+      "path": "../../../../library/system/process/linux_x86_64"
+    },
+    "io": {
+      "path": "../../../../library/system/io/linux_x86_64"
+    },
+    "string": {
+      "path": "../../../../library/core/string/c"
+    },
+    "collections": {
+      "path": "../../../../library/core/collections/collection"
     }
-  }
+  },
+  "sources": [
+    "main.sev"
+  ]
 }

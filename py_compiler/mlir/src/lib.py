@@ -1,4 +1,4 @@
-"""SIP-0030: typed construction, pure rendering, native dialect verification."""
+"""SIP-0030: typed construction, pure rendering, c dialect verification."""
 from dataclasses import dataclass
 from decimal import Decimal
 import json
@@ -61,6 +61,34 @@ def lower(program):
 
 
 def render(program):
+    # Generated ownership/dispatch helpers participate in the same symbol and
+    # constant collection as ordinary bodies. Rendering nested modules would
+    # duplicate external declarations when a helper calls an imported library.
+    from dataclasses import replace
+    from hashlib import sha256
+    bodies, functions = list(program.bodies), list(program.functions)
+    defined = {body.name for body in bodies}
+    constants = {function.constant.identity for function in functions}
+    auxiliary_names, auxiliary_constants = set(), set()
+    for body in bodies:
+        for block in body.blocks:
+            for operation in block.operations:
+                implementation = operation.atom.implementation if operation.atom else None
+                auxiliary = getattr(implementation, 'auxiliary_bodies', None)
+                if auxiliary is not None:
+                    for helper in auxiliary():
+                        if helper.name not in defined:
+                            defined.add(helper.name)
+                            auxiliary_names.add(helper.name)
+                            bodies.append(helper)
+                            for region in helper.blocks:
+                                for item in region.operations:
+                                    if isinstance(item.payload, Constant) and item.payload.identity not in constants:
+                                        constant = item.payload
+                                        constants.add(constant.identity)
+                                        auxiliary_constants.add(constant.identity)
+                                        functions.append(MlirFunction('__sev_constant_' + sha256(constant.identity.encode()).hexdigest(), constant))
+    program = replace(program, bodies=tuple(bodies), functions=tuple(functions))
     program.verify()
     globals_, functions = [], []
     declarations = {place.identity: place for body in program.bodies for place in body.storage}
@@ -80,7 +108,8 @@ def render(program):
         elif place.identity in program.defined_globals:
             declaration = place.declaration().replace('"private"', '"public"', 1)
         else:
-            declaration = f'memref.global "public" @{place.symbol} : memref<{place.type.mlir}>'
+            from dataclasses import replace
+            declaration = replace(place, external_symbol=place.symbol).declaration()
         globals_.append('  ' + declaration)
     for function in program.functions:
         c, symbol = function.constant, function.symbol
@@ -90,7 +119,10 @@ def render(program):
         body.append(f"func.return %value : {type_}" if type_ else "func.return")
         result = f" -> {type_}" if type_ else ""
         attributes = f" attributes {{sev.type = {quoted(c.type.name)}, sev.source = {quoted(c.source)}, sev.scalar_start = {c.span.start} : i64, sev.scalar_end = {c.span.end} : i64}}"
-        functions.append(f"  func.func @{symbol}(){result}{attributes} {{\n" +
+        visibility = 'private ' if c.identity in auxiliary_constants else ''
+        if c.identity in auxiliary_constants:
+            attributes = attributes.replace(' attributes {', ' attributes {llvm.linkage = #llvm.linkage<internal>, ', 1)
+        functions.append(f"  func.func {visibility}@{symbol}(){result}{attributes} {{\n" +
                          "\n".join("    " + line for line in body) + "\n  }")
     from py_compiler.mlir.src.cfg import render_body
     from py_compiler.syntax.generic.atom import ExternalSymbol
@@ -102,7 +134,7 @@ def render(program):
         for block in body.blocks:
             for operation in block.operations:
                 implementation = operation.atom.implementation if operation.atom else None
-                for symbol, inputs, result in getattr(implementation, 'symbol_contracts', ()):
+                for symbol, inputs, result in (*getattr(implementation, 'symbol_contracts', ()), *getattr(implementation, 'external_symbol_contracts', ())):
                     if symbol not in defined:
                         external[symbol] = (inputs, result)
                 definitions = getattr(implementation, 'global_definitions', None)
@@ -121,7 +153,9 @@ def render(program):
     for symbol, (inputs, result) in sorted(external.items()):
         suffix = " -> " + result if result else ""
         functions.append(f"  func.func private {symbol_ref(symbol)}({', '.join(inputs)}){suffix}")
-    functions.extend(render_body(body) for body in program.bodies)
+    functions.extend(render_body(body).replace('func.func ', 'func.func private ', 1)
+                     .replace(' {\n', ' attributes {llvm.linkage = #llvm.linkage<internal>} {\n', 1)
+                     if body.name in auxiliary_names else render_body(body) for body in program.bodies)
     contracts = [{"name": d.name, "kind": d.kind, "fields": d.fields, "variants": d.variants, "traits": d.traits}
                  for d in program.declarations]
     attributes = " attributes {sev.declarations = " + quoted(json.dumps(contracts)) + "}" if contracts else ""
@@ -136,7 +170,7 @@ def verifier_path():
     return "mlir-opt"
 
 
-def verify_native(text, executable=None):
+def verify_c(text, executable=None):
     executable = executable or verifier_path()
     completed = subprocess.run([executable], input=text, text=True, capture_output=True, timeout=60)
     if completed.returncode:
@@ -151,7 +185,7 @@ from py_compiler.syntax.prelude import type_definitions
 class MlirTests(unittest.TestCase):
     def test_quoted_function_symbols_escape_source_characters(self):
         self.assertEqual(symbol_ref('__sev_fn_identity[i32]'), '@"__sev_fn_identity[i32]"')
-        self.assertEqual(symbol_ref('native_step'), '@native_step')
+        self.assertEqual(symbol_ref('c_step'), '@c_step')
         self.assertEqual(symbol_ref('fn"\\name'), '@' + quoted('fn"\\name'))
 
     def test_render_is_pure_and_retains_semantic_types(self):
@@ -165,7 +199,7 @@ class MlirTests(unittest.TestCase):
         self.assertIn("memref<2xi8>", text)
         self.assertIn("arith.constant 128512 : i32", text)
 
-    def test_all_declared_representations_with_native_verifier(self):
+    def test_all_declared_representations_with_c_verifier(self):
         import shutil
         if not shutil.which(verifier_path()):
             self.skipTest("install mlir-opt to verify emitted dialect contracts")
@@ -174,12 +208,12 @@ class MlirTests(unittest.TestCase):
         types = {t.name: t for t in type_definitions(64).values() if t.family in values}
         constants = tuple(Constant(t.name, t.name, t, values[t.family], Span("s", 0, 1), "x.sev", "=")
                           for t in types.values())
-        verify_native(render(lower(Program(constants, ()))))
+        verify_c(render(lower(Program(constants, ()))))
 
-    def test_empty_string_and_nonzero_pointer_with_native_verifier(self):
+    def test_empty_string_and_nonzero_pointer_with_c_verifier(self):
         if not shutil.which(verifier_path()):
             self.skipTest("install mlir-opt to verify emitted dialect contracts")
         types = type_definitions(64)
         constants = (Constant("empty", "empty", types["string"], "", Span("s", 0, 2), "x.sev", "="),
                      Constant("address", "address", types["pointer"], 4096, Span("s", 3, 7), "x.sev", "="))
-        verify_native(render(lower(Program(constants, ()))))
+        verify_c(render(lower(Program(constants, ()))))

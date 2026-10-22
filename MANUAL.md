@@ -10,6 +10,42 @@ Severian is a programming language that deals with these cyclical problems:
 - Code should be fast and flexible
 - Rewriting code is a waste, extending code and improving one place should apply broadly to many places
 
+
+## Variables
+
+```
+# Type safe and inferred options
+a:int = 1
+b = 2
+c = 1/2 # nice type conversion to float for you
+
+character = 'c' # standard character
+word = "This is a string"
+formatted = f"This is a formatted string {character}!"
+
+
+# There are familiar container/collection types
+tuples = (1,2,'c')
+lists = [1,2,3,4]
+
+[1,2,3](0:]       # [2,3]
+[2,3][:1]        # [2,3]
+[2,3](0:1)       # []
+
+
+maps = {"A":0,"B":"C"}
+dictionaries = dict()
+dictionaries["a"] = 1
+stacks = stack[int]()
+stacks.push(1)
+stacks.pop()
+decks = deck[int]()
+decks.push(1)
+decks.pop()
+# Doubly-Linked List (sorta a chain)
+chains = chain[int]()
+```
+
 ## Package structure and layout
 
 Severian has 3 core files in the package:
@@ -32,6 +68,9 @@ def move foobar():
 
 This is a dynamic function which the caller owns. 
 ```
+
+
+
 ## Scopes
 
 Severian has the following scopes:

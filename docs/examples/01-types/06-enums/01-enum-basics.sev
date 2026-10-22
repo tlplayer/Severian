@@ -8,7 +8,7 @@ enum Color:
     # Mixed type values
     Purple {"purple"} 
 
-def name(color: Color) -> string:
+def name(color: Color) -> string | int:
     match color:
         case Red:
             return Red.key
@@ -30,3 +30,7 @@ test "Getting enum keys and values":
     assert(name(Purple) == "purple")
     assert(name(Blue) == "Blue")
     assert(Blue.value is absent)
+
+
+test "variant default is selected from its allowed value set":
+    assert(Red.value == 2)

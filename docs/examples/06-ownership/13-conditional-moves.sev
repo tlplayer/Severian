@@ -1,3 +1,20 @@
+from io import capture_stdout
+
+def read_branch(condition: bool):
+    value := "hello"
+    if condition:
+        print(value)
+    else:
+        print(value)
+    print(value)
+
+def consume_branch(condition: bool) -> int:
+    value := "hello"
+    if condition:
+        consumed := move value
+        return len(consumed)
+    return len(value)
+
 test with compiler:
     reject:
         value := "hello"
@@ -8,12 +25,19 @@ test with compiler:
 
         print(value)
 
-test:
-    value := "hello"
+test with integ "both read-only branches preserve their owner":
+    read_branch(true)
+    read_branch(false)
+    assert(capture_stdout() == "hello\nhello\nhello\nhello\n")
 
-    if true:
-        print(borrow value)
-    else:
-        print(borrow value)
+test "moving on a returning branch preserves the other path":
+    assert(consume_branch(true) == 5)
+    assert(consume_branch(false) == 5)
 
-    print(value)
+test with compiler "a possible move forbids a read after the merge":
+    reject:
+        def invalid(condition: bool):
+            value := "hello"
+            if condition:
+                consumed := move value
+            print(value)

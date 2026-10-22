@@ -1,5 +1,7 @@
+from util import range
+
 def main():
-    while count < 3 with count := 0:
+    while count < 3 with count = 0:
         print(count)
         count += 1
 

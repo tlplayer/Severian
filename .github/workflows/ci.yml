@@ -31,7 +31,7 @@ jobs:
           HEALTH_BASE: origin/${{ github.base_ref }}
         run: cargo xtask health --changed "$HEALTH_BASE" --coverage package.pkg/coverage.json
 
-  checked-native-core:
+  checked-c-core:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -41,7 +41,7 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Install LLVM, MLIR, and native libraries
+      - name: Install LLVM, MLIR, and c libraries
         run: |
           wget -q https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
@@ -60,7 +60,7 @@ jobs:
       - name: Workspace tests
         run: cargo test --locked --workspace
 
-      - name: Generated native status
+      - name: Generated c status
         run: python3 tools/example_status.py --check
 
       - name: Official packages

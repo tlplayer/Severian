@@ -1,0 +1,67 @@
+import string
+
+# Lexical path operations are source string/buffer operations. Filesystem
+# queries and canonicalization belong to the os package.
+def join(left: string, right: string) -> string:
+    end = int(len(left))
+    while end > 1 and left[end - 1:end] == "/":
+        end -= 1
+    start = 0
+    while start < int(len(right)) and right[start:start + 1] == "/":
+        start += 1
+    head = left[:end]
+    separator = "/" if end != 0 and head[end - 1:end] != "/" else ""
+    return head + separator + right[start:]
+
+def basename(value: string) -> string:
+    end = int(len(value))
+    while end > 1 and value[end - 1:end] == "/":
+        end -= 1
+    start = end
+    while start > 0 and value[start - 1:start] != "/":
+        start -= 1
+    return value[start:end]
+
+def dirname(value: string) -> string:
+    end = int(len(value))
+    while end > 1 and value[end - 1:end] == "/":
+        end -= 1
+    while end > 0 and value[end - 1:end] != "/":
+        end -= 1
+    while end > 1 and value[end - 1:end] == "/":
+        end -= 1
+    parent = value[:end]
+    return "." if end == 0 else parent.concat("")
+
+def extension(value: string) -> string:
+    end = int(len(value))
+    dot = -1
+    while end > 0 and value[end - 1:end] != "/":
+        if dot < 0 and value[end - 1:end] == ".":
+            dot = end - 1
+        end -= 1
+    if dot > end:
+        ending = value[dot:]
+        return ending.concat("")
+    return ""
+
+
+test "lexical path boundaries":
+    assert(join("/tmp/", "/example.txt") == "/tmp/example.txt")
+    assert(basename("/tmp/example.txt") == "example.txt")
+    assert(dirname("example.txt") == ".")
+    assert(dirname("/example.txt") == "/")
+    assert(extension("/tmp/example.txt") == ".txt")
+    assert(extension(".hidden") == "")
+    assert(extension("/dir.dot/file") == "")
+
+
+test "path results own storage across input cleanup":
+    def parent() -> string:
+        source = "/tmp".concat("/file.txt")
+        return dirname(source)
+    def ending() -> string:
+        source = "/tmp/file".concat(".txt")
+        return extension(source)
+    assert(parent() == "/tmp")
+    assert(ending() == ".txt")

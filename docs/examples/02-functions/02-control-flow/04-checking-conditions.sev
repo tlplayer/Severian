@@ -1,11 +1,11 @@
 #divisor will throw an error on entry before value is set to 0.  
 def divide(value: f64, divisor: f64) -> f64 | Error with
 {
-    divisor != 0.0 -> Error("Passed arguement to divide cannot be zero!"),
+    divisor != 0.0 -> Error("Passed argument to divide cannot be zero!"),
 }:
     return value / divisor
 
 test:
-    assert(divide(10.0, 2.0) == 5.0)
+    assert(divide(10, 2.0) == 5.0)
     divide(1,0) else error:
-        assert(error == Error)
+        assert(error is Error)

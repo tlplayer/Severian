@@ -1,24 +1,19 @@
-'''
-`eventually` polls a condition without requiring every concurrency test to
-hand-roll sleeping, deadlines, cancellation, and failure diagnostics.
-'''
+import os
+from math import approximate
 
+observations: int = 0
 
-def eventually(condition: bool) -> bool:
-    # The test-library implementation polls; this deterministic example is the
-    # condition shape supplied to that helper.
-    return condition
-
-
-def eventually_value(value: f64) -> f64:
-    return value
-
+def worker_ready() -> bool:
+    module.observations += 1
+    return module.observations >= 3
 
 test with timeout(5s) "worker eventually becomes ready":
-    worker_ready = true
-    assert(eventually(worker_ready))
+    module.observations = 0
+    assert(os.eventually(worker_ready, timeout_ms=100, interval_ms=1))
+    assert(module.observations == 3)
 
-
-test "eventually can retain a useful final observation":
-    result = eventually_value(2.00000001)
-    assert(approximate(result, 2.0, atol=1e-7))
+test "eventually retains its final observation at the deadline":
+    result = os.eventually_value[f64](lambda: 2.00000001, lambda value: value == 3.0, timeout_ms=0)
+    assert(not result.matched)
+    assert(result.attempts == 1)
+    assert(approximate(result.value, 2.0, atol=1e-7))

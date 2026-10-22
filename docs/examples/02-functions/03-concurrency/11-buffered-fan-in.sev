@@ -1,3 +1,5 @@
+from collections import list
+
 # Tags: concurrency, channel, queue, fan-in
 
 test "two producers":
@@ -6,8 +8,8 @@ test "two producers":
     second = async messages.send("beta") with self
     left = await messages
     right = await messages
-    received = [left, right].sorted()
-    assert(received == ["alpha", "beta"])
+    assert((left == "alpha" and right == "beta") or
+           (left == "beta" and right == "alpha"))
 
 test "integer channel":
     values = Channel[int](3)
@@ -16,3 +18,34 @@ test "integer channel":
     three = async values.send(8)
     assert(await values + await values + await values == 16)
     await one, two, three
+
+
+test "bounded producers wait for the receiver to make space":
+    values = channel[int](1)
+    first = async values.send(13)
+    second = async values.send(29)
+    left = await values
+    right = await values
+    assert(left + right == 42)
+    await first, second
+
+
+test "unbounded queue grows and preserves FIFO order":
+    values = channel[int]()
+    index = 0
+    while index < 40:
+        values.send(index)
+        index += 1
+    index = 0
+    while index < 40:
+        assert(values.receive() == index)
+        index += 1
+
+
+test "queued messages own their storage":
+    messages = channel[string]()
+    original = "owned" + " message"
+    messages.send(original)
+    drop(original)
+    received = messages.receive()
+    assert(received == "owned message")

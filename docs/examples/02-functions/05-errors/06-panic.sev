@@ -9,8 +9,8 @@ test:
     assert(require_positive(10) == 10)
 
 test with integ:
-    throws(impossible_state_wrapper -> error)
-    assert(error.message == "compiler invariant violated")
+    throws "compiler invariant violated":
+        impossible_state()
 
 
 def impossible_state():

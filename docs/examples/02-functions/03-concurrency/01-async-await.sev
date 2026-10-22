@@ -2,12 +2,19 @@ def work(value: int) -> int:
     return value * 2
 
 test:
-    task = async work(21) with self
+    task = async work(21) with local
     assert(await task == 42)
 
 def main():
     # Tasks owned by self cannot outlive main.
-    first = async work(10) with self
-    second = async work(21) with self
+    first = async work(10) with local
+    second = async work(21) with local
 
     print(await first + await second)
+
+
+test with compiler "await consumes a task handle":
+    task = async work(21)
+    value = await task
+    reject:
+        again = await task

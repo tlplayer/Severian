@@ -15,7 +15,8 @@ class ContextualError[E]:
 
 
 def contextualize_error[E: Error](error: E, pass_id: u64, offset: usize) -> ContextualError[E]:
-    return ContextualError[E](error, pass_id, offset)
+    preserved = copy error
+    return ContextualError[E](preserved, pass_id, offset)
 
 
 test:
@@ -25,3 +26,23 @@ test:
     assert(contextualized.error.code == 17)
     assert(contextualized.pass_id == 4)
     assert(contextualized.offset == 128)
+
+
+
+class DetailedFailure: Error
+    code: u64
+    reason: string
+
+test "context preserves owned fields of the concrete error":
+    original = DetailedFailure(17,"invalid instruction")
+    context = contextualize_error(original,4,128)
+    drop(original)
+    assert(context.error is DetailedFailure)
+    assert(context.error.code == 17)
+    assert(context.error.reason == "invalid instruction")
+
+test with compiler "an identical record without Error does not satisfy E":
+    reject "does not satisfy Error":
+        class OrdinaryRecord:
+            code: u64
+        context = contextualize_error(OrdinaryRecord(17),4,128)

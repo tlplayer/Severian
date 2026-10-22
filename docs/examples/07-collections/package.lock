@@ -1,0 +1,15 @@
+{
+  "packages": [
+    {
+      "package": "core.string",
+      "source": "c9c468b7ebc19e77b9a097b46a1ad75203feed5a4c51be252d84a45cc1b2dafe",
+      "version": "0.1.0"
+    },
+    {
+      "package": "system.io",
+      "source": "e0b3ff58c398aaadc6feb5e21e7630e420de327fbff760bd9c981e6cc3b5e4c9",
+      "version": "0.1.1"
+    }
+  ],
+  "version": 1
+}

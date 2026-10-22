@@ -40,14 +40,20 @@ class Conditional(BlockProvider):
             if validate:
                 validate(cfg, env)
             if node.provider.has_condition:
-                condition = cfg.expr(expression(node.header), env, cfg.syntax.types["bool"])
+                evaluate = getattr(node.provider, 'condition_value', None)
+                condition = evaluate(cfg, node, env) if evaluate else cfg.expr(expression(node.header), env, cfg.syntax.types["bool"])
                 if condition.type.name != "bool":
                     raise ValueError("if/elif condition must satisfy bool")
                 body, following = cfg.block(), cfg.block()
                 cfg.current.terminator = Terminator("conditional", (Edge(body.identity), Edge(following.identity)), condition)
                 next_values, next_flow = dict(cfg.values), cfg.flow.fork()
                 cfg.current = body
-            cfg.scope(node.children, dict(env))
+            if node.provider.has_condition and evaluate is None:
+                from py_compiler.syntax.operator.logical import refinement
+                with refinement(cfg, expression(node.header), env):
+                    cfg.scope(node.children, dict(env))
+            else:
+                cfg.scope(node.children, dict(env))
             cfg.flow.end_scope(cfg.live_binding_ids(env) | {b.identity for scope in cfg.active_scopes for b in scope.values()})
             if cfg.current.terminator is None:
                 exits.append((cfg.current, dict(cfg.values), cfg.flow.fork()))
@@ -82,11 +88,11 @@ class ConditionalTests(unittest.TestCase):
         from py_compiler.syntax.recognition import Syntax
         return compile_source('conditions.sev', source, Syntax())
 
-    def native(self, source):
+    def c(self, source):
         import json
         import tempfile
         from pathlib import Path
-        from py_compiler.testing import test_package
+        from py_compiler.packaging.testing import test_package
         with tempfile.TemporaryDirectory(prefix='sev-conditions-') as directory:
             root = Path(directory)
             (root / 'src').mkdir()
@@ -95,7 +101,7 @@ class ConditionalTests(unittest.TestCase):
             result = test_package(root)
             self.assertTrue(result['success'], result)
 
-    def test_native_boolean_truth_tables_and_precedence(self):
+    def test_c_boolean_truth_tables_and_precedence(self):
         from itertools import product
         cases = (
             ('a and b and c', lambda a, b, c: a and b and c),
@@ -115,10 +121,10 @@ class ConditionalTests(unittest.TestCase):
             for values in product((False, True), repeat=3):
                 arguments = ', '.join(str(value).lower() for value in values)
                 assertions.append(f'    assert(condition_{index}({arguments}) == {str(expected(*values)).lower()})')
-        self.native('\n'.join(declarations) + '\ntest "all boolean combinations":\n' + '\n'.join(assertions) + '\n')
+        self.c('\n'.join(declarations) + '\ntest "all boolean combinations":\n' + '\n'.join(assertions) + '\n')
 
-    def test_native_comparisons_negation_and_multiline_conditions(self):
-        self.native('''def classify(x: int, y: int, enabled: bool) -> int:
+    def test_c_comparisons_negation_and_multiline_conditions(self):
+        self.c('''def classify(x: int, y: int, enabled: bool) -> int:
     if (
         not x == y
         and enabled
@@ -139,8 +145,8 @@ test "comparison negation binds before boolean combinations":
     assert(classify(0, 0, false) == 2)
 ''')
 
-    def test_native_short_circuit_order_and_branch_selection(self):
-        self.native('''trace = 0
+    def test_c_short_circuit_order_and_branch_selection(self):
+        self.c('''trace = 0
 def probe(label: int, answer: bool) -> bool:
     module.trace = module.trace * 10 + label
     return answer
@@ -203,7 +209,7 @@ test "comparison chains evaluate middle expressions once and short circuit":
 ''')
 
     def test_invalid_conditions_and_orphan_branches_are_rejected(self):
-        for condition in ('"text"', 'true and "text"', 'false or "text"'):
+        for condition in ('42', 'true and 42', 'false or 42'):
             with self.subTest(condition=condition):
                 result = self.compile(f'def work():\n    if {condition}:\n        return\n')
                 self.assertTrue(result.diagnostics)
@@ -253,10 +259,10 @@ class ConditionalOwnershipTests(unittest.TestCase):
 
 class ExpressionEffectTests(unittest.TestCase):
     compile = ConditionalTests.compile
-    native = ConditionalTests.native
+    c = ConditionalTests.c
 
-    def test_native_short_circuit_mutation_borrow_and_consumption(self):
-        self.native('''trace = 0
+    def test_c_short_circuit_mutation_borrow_and_consumption(self):
+        self.c('''trace = 0
 consumed = 0
 class Cell:
     value: int
@@ -422,7 +428,7 @@ class TypePredicateContractTests(unittest.TestCase):
     parser rejecting `is` cannot masquerade as a successful refinement check.
     """
     compile = ConditionalTests.compile
-    native = ConditionalTests.native
+    c = ConditionalTests.c
 
     def require_predicates(self):
         result = self.compile('def work(value: int | string) -> bool:\n'
@@ -431,7 +437,7 @@ class TypePredicateContractTests(unittest.TestCase):
 
     @unittest.expectedFailure
     def test_and_rhs_receives_true_type_and_else_merges_both_false_paths(self):
-        self.native('''def classify(value: int | string) -> int:
+        self.c('''def classify(value: int | string) -> int:
     if value is int and value > 0:
         return value + 1
     else:
@@ -448,7 +454,7 @@ test:
 
     @unittest.expectedFailure
     def test_or_rhs_receives_false_type_and_not_swaps_edges(self):
-        self.native('''def accepted(value: int | string) -> bool:
+        self.c('''def accepted(value: int | string) -> bool:
     return value is not int or value > 0
 def positive(value: int | string) -> bool:
     return not value is not int and value > 0
@@ -479,7 +485,7 @@ test:
 
     @unittest.expectedFailure
     def test_terminating_edge_does_not_widen_continuing_type(self):
-        self.native('''def increment(value: int | string) -> int:
+        self.c('''def increment(value: int | string) -> int:
     if value is not int:
         return 0
     return value + 1
@@ -490,7 +496,7 @@ test:
 
     @unittest.expectedFailure
     def test_type_test_evaluates_effectful_operand_once(self):
-        self.native('''calls = 0
+        self.c('''calls = 0
 def sample() -> int | string:
     module.calls += 1
     return 3

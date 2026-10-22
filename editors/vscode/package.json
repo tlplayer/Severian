@@ -1,7 +1,7 @@
 {
   "name": "severian-language",
   "displayName": "Severian Language",
-  "description": "Syntax highlighting, editor behavior, and native coverage gutters for the Severian programming language.",
+  "description": "Syntax highlighting, editor behavior, and c coverage gutters for the Severian programming language.",
   "version": "0.4.0",
   "publisher": "severian",
   "license": "SEE LICENSE IN LICENSE.md",
@@ -50,6 +50,32 @@
     "@vscode/vsce": "3.6.2"
   },
   "contributes": {
+    "configurationDefaults": {
+      "[severian]": {
+        "editor.semanticHighlighting.enabled": true
+      },
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": [
+              "variable.other.readwrite.severian",
+              "variable.other.member.severian",
+              "variable.parameter.severian"
+            ],
+            "settings": {
+              "foreground": "#9CDCFE"
+            }
+          }
+        ]
+      },
+      "editor.semanticTokenColorCustomizations": {
+        "rules": {
+          "variable:severian": "#9CDCFE",
+          "parameter:severian": "#9CDCFE",
+          "property:severian": "#9CDCFE"
+        }
+      }
+    },
     "languages": [
       {
         "id": "severian",
@@ -215,7 +241,7 @@
         "severian.debugger": {
           "type": "string",
           "default": "gdb",
-          "description": "GDB with its native DAP interpreter for source stepping, stack frames, variables, and watches."
+          "description": "GDB with its c DAP interpreter for source stepping, stack frames, variables, and watches."
         }
       }
     },

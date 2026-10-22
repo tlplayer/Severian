@@ -20,13 +20,15 @@ extend Counter:
 
 
 def main():
-    counter := Counter(10)
+    counter = Counter(10)
 
-    assert(counter.get() == 10)
+    if counter.get() != 10:
+        throw Error("unexpected initial counter")
 
     counter = counter.reset()
 
-    assert(counter.get() == 0)
+    if counter.get() != 0:
+        throw Error("counter did not reset")
 
 
 test "extension adds new behavior":
@@ -50,3 +52,27 @@ test with compiler "extension cannot overwrite existing behavior":
             # Reject: get() already belongs to InvalidCounter.
             def get() -> int:
                 return 0
+
+
+extend Counter:
+    def increment():
+        value += 1
+
+test "extension mutation updates the existing receiver":
+    counter = Counter(10)
+    counter.increment()
+    assert(counter.get() == 11)
+
+test "reset returns an independent counter":
+    counter = Counter(42)
+    reset = counter.reset()
+    assert(reset.get() == 0)
+    assert(counter.get() == 42)
+
+test "main uses additive extensions":
+    main()
+
+test with compiler "extensions cannot add storage":
+    reject:
+        extend Counter:
+            extra: int

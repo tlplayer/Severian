@@ -1,27 +1,82 @@
-def byte_at(byte_list: list[u8], index: int) -> u8 :
+from io import capture_stdout
+
+def byte_at(byte_list: tensor[u8], index: int) -> u8 :
     unsafe:
         p: pointer[u8] = &byte_list[0]
         # Take the first byte's address, which is also stored in p.
-        print("Pointer:", p, "->", "address:", &byte_list[0], "value:", p[0])
+        first_address = &byte_list[0]
+        print(f"Pointer: {p} -> address: {first_address} value: {p[0]}")
         # Raw access is always indexed; Severian has no unary `*pointer` form.
         return p[index]
 
 test "Base case":
     
-    byte_value ?= byte_at([65, 66, 67], 1)
+    values = tensor[u8,(3,)](tuple[u8,3](65,66,67))
+    byte_value = byte_at(values,1)
     assert(byte_value == 66)
 
 test with integ "pointer addresses print without dereferencing":
-    byte_list: list[u8] = [65, 66, 67]
+    byte_list = tensor[u8,(3,)](tuple[u8,3](65,66,67))
     unsafe:
         p: pointer[u8] = &byte_list[0]
         address = string(p)
         assert(address[:2] == "0x")
         assert(address != "0x0")
         assert(address == string(&byte_list[0]))
-        print(p, &byte_list[0], p[0])
-        assert(stdout == address + " " + address + " 65\n")
+        same_pointer = &byte_list[0]
+        print(p, same_pointer, p[0])
+        assert(capture_stdout() == address + " " + address + " 65\n")
 
 def main():
-    result = byte_at([65, 66, 67], 1)
+    values = tensor[u8,(3,)](tuple[u8,3](65,66,67))
+    result = byte_at(values,1)
     print(result)
+
+
+test "indexed pointers retain the remaining extent":
+    values = tensor[u8,(3,)](tuple[u8,3](65,66,67))
+    unsafe:
+        second = &values[1]
+        assert(second[0] == u8(66))
+        assert(second[1] == u8(67))
+        assert(string(second) != string(&values[0]))
+
+test "indexed pointer bounds exclude preceding elements":
+    unsafe:
+        throws "memory index outside allocation":
+            values = tensor[u8,(3,)](tuple[u8,3](65,66,67))
+            second = &values[1]
+            item = second[2]
+
+test "capturing stdout preserves subsequent writes":
+    print("first")
+    before = capture_stdout()
+    print("second")
+    assert(before == "first\n")
+    assert(capture_stdout() == "first\nsecond\n")
+
+test "address rejects an out-of-bounds starting element":
+    unsafe:
+        throws "address index outside allocation":
+            values = tensor[u8,(3,)]()
+            invalid = &values[3]
+
+test "indexed addresses retain cast alignment requirements":
+    unsafe:
+        throws "pointer cast target alignment mismatch":
+            values = tensor[u8,(5,)]()
+            offset = &values[1]
+            invalid = pointer[u32](offset)
+
+test "null pointer formatting does not dereference":
+    unsafe:
+        zero = pointer(0)
+        assert(string(zero) == "0x0")
+
+test with compiler "indexed pointer cannot survive its owner":
+    values = tensor[u8,(3,)]()
+    unsafe:
+        address = &values[1]
+        reject:
+            drop(values)
+            value = address[0]

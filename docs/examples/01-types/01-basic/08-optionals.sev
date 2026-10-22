@@ -1,3 +1,4 @@
+
 def find_name(found: bool) -> string | None:
     if found:
         return "Severian"
@@ -9,13 +10,13 @@ def main():
     optional_name = find_name(false)    
     #Other times, there is a 99.99% probability of being present (os.ls() for example)
     #so there's no question just take the value or throw an error
-    known_name: string = find_name(true)
+    known_name: string = find_name(true) else throw Error("expected a name")
 
-    #find_name(false).default("default name") works here too
+    # The fallback is evaluated only when the optional is absent.
     handled_name: string = find_name(false) else "default name"
 
 
-    if not optional_name:
+    if not optional_name.has_value:
         print("No name found")
     else:
         throw Error("name is not to be found")
@@ -26,4 +27,80 @@ test with integ:
     main()
     assert("No name found" in stdout)
     assert("Severian" in stdout)
-    throws(find_name(false) else throw Error("name is not to be found"))
+
+
+
+test "missing optional throws the requested error":
+    throws "name is not to be found":
+        value = find_name(false) else throw Error("name is not to be found")
+
+test "fallback selects present and absent strings":
+    present = find_name(true) else "fallback"
+    missing = find_name(false) else "fallback"
+    assert(present == "Severian")
+    assert(missing == "fallback")
+
+class Calls:
+    count: int
+    def fallback() -> string:
+        count += 1
+        return "fallback"
+
+test "fallback effects happen only on the absent branch":
+    calls = Calls(0)
+    present = find_name(true) else calls.fallback()
+    assert(calls.count == 0)
+    missing = find_name(false) else calls.fallback()
+    assert(calls.count == 1)
+    assert(present == "Severian" and missing == "fallback")
+
+test "fallback result owns its string after dropping the optional":
+    source = find_name(true)
+    selected = source else "fallback"
+    drop(source)
+    assert(selected == "Severian")
+
+test "fallback result copies a borrowed default":
+    source = find_name(false)
+    default_name = "fallback"
+    selected = source else default_name
+    drop(default_name)
+    assert(selected == "fallback")
+
+test with compiler "fallback must have the present type":
+    reject:
+        result = find_name(false) else 42
+
+test "zero false and empty strings remain present values":
+    number: int | None = 0
+    flag: bool | None = false
+    text: string | None = ""
+    assert((number else 99) == 0)
+    assert((flag else true) == false)
+    assert((text else "missing") == "")
+
+
+test with compiler "optional pointer fallback cannot escape local storage":
+    reject:
+        def escaped() -> pointer[int]:
+            unsafe:
+                owner = tensor[int](1)
+                address = &owner[0]
+                optional: pointer[int] | None = address
+                selected = optional else address
+                return selected
+
+
+test "pointer fallback borrows either source without freeing it":
+    unsafe:
+        left = tensor[int](tuple[int,1](7))
+        right = tensor[int](tuple[int,1](9))
+        left_pointer = &left[0]
+        right_pointer = &right[0]
+        present: pointer[int] | None = left_pointer
+        missing: pointer[int] | None = None
+        selected = present else right_pointer
+        defaulted = missing else right_pointer
+        assert(selected[0] == 7)
+        assert(defaulted[0] == 9)
+        assert(left[0] == 7 and right[0] == 9)

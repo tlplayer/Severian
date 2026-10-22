@@ -16,7 +16,7 @@ trait Recording:
     def record_calls(context: ProfileContext) -> None with context
 
 
-class NativeRecording: Recording
+class CRecording: Recording
     def record_calls(context: ProfileContext) -> None with context:
         with context:
             context.token = process.record_with(context.function, context.source_id, context.span_start, context.span_end)

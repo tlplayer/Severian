@@ -16,7 +16,7 @@ def collect_grammars(syntax):
 
 
 def assignment_spellings(syntax):
-    return {'=', ':='} | {grammar.spelling for grammar in grammars(syntax)
+    return {'=', ':=', '?='} | {grammar.spelling for grammar in grammars(syntax)
                          if grammar.role == 'O.assignment'}
 
 

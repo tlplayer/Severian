@@ -51,11 +51,14 @@ class ArrayAddress:
 
     def render_operation(self, operation):
         source, result = operation.operands[0], operation.result
-        address, integer = f'%address_{result.identity}', f'%address_bits_{result.identity}'
-        width = f'i{self.owner.bits}'
-        return [f'{address} = memref.extract_aligned_pointer_as_index {name(source)} : {source.type.mlir} -> index',
-                f'{integer} = arith.index_cast {address} : index to {width}',
-                f'{name(result)} = llvm.inttoptr {integer} : {width} to !llvm.ptr']
+        from py_compiler.syntax.generic.storage import descriptor_type
+        descriptor = descriptor_type(self.owner.bits)
+        prefix, width = name(result) + '_raw', f'i{self.owner.bits}'
+        return [f'{prefix}_descriptor = builtin.unrealized_conversion_cast {name(source)} : {source.type.mlir} to {descriptor}',
+                f'{prefix}_aligned = llvm.extractvalue {prefix}_descriptor[1] : {descriptor}',
+                f'{prefix}_offset = llvm.extractvalue {prefix}_descriptor[2] : {descriptor}',
+                f'{name(result)} = llvm.getelementptr {prefix}_aligned[{prefix}_offset] : (!llvm.ptr, {width}) -> !llvm.ptr, {source.type.element.mlir}']
+
 
 
 @dataclass(frozen=True)
@@ -124,12 +127,12 @@ class TypedPointerTests(unittest.TestCase):
         self.assertTrue(result.diagnostics)
         self.assertIn('cannot deallocate a view', str(result.diagnostics))
 
-    def test_pointer_lowering_verifies_natively(self):
+    def test_pointer_lowering_verifies_using_c(self):
         import shutil
-        from py_compiler.mlir.src.lib import verify_native, verifier_path
+        from py_compiler.mlir.src.lib import verify_c, verifier_path
         if not shutil.which(verifier_path()):
             self.skipTest('install mlir-opt to verify pointer lowering')
-        verify_native(self.ir('def work() -> int:\n    unsafe:\n        a = allocate[int]()\n        p: pointer[int] = a\n        return p[0]\n'))
+        verify_c(self.ir('def work() -> int:\n    unsafe:\n        a = allocate[int]()\n        p: pointer[int] = a\n        return p[0]\n'))
 
 
 @dataclass(frozen=True)
@@ -140,3 +143,85 @@ class BoundedAddress:
     def render_operation(self, operation):
         source = operation.operands[0]
         return [f'{name(operation.result)} = memref.cast {name(source)} : {source.type.mlir} to {operation.result.type.mlir}']
+
+
+@dataclass(frozen=True)
+class PointerReinterpret:
+    source_size: int
+    target_size: int
+    alignment: int
+    bits: int
+
+    def atom(self, operation):
+        return Atom(self, (operation.operands[0].type,), operation.result.type,
+                    ('view',), ('panic',), self)
+
+    def render_operation(self, operation):
+        from py_compiler.syntax.generic.storage import descriptor_type
+        source, result = operation.operands[0], operation.result
+        descriptor = descriptor_type(self.bits)
+        width = f'i{self.bits}'
+        prefix = name(result) + '_cast'
+        fields = ('allocated', 'aligned', 'offset', 'count', 'stride')
+        positions = ('0', '1', '2', '3, 0', '4, 0')
+        lines = [f'{prefix}_old = builtin.unrealized_conversion_cast {name(source)} : {source.type.mlir} to {descriptor}']
+        for field, position in zip(fields, positions):
+            lines.append(f'{prefix}_{field} = llvm.extractvalue {prefix}_old[{position}] : {descriptor}')
+        constants = {'zero': 0, 'one': 1, 'source_size': self.source_size, 'target_size': self.target_size,
+                     'alignment': self.alignment, 'limit': ((1 << (self.bits - 1)) - 1) // self.source_size}
+        for field, value in constants.items():
+            lines.append(f'{prefix}_{field} = arith.constant {value} : {width}')
+        lines += [f'{prefix}_contiguous = arith.cmpi eq, {prefix}_stride, {prefix}_one : {width}',
+                  f'cf.assert {prefix}_contiguous, "pointer cast requires contiguous storage"']
+        for field in ('count', 'offset'):
+            lines += [f'{prefix}_{field}_fits = arith.cmpi ule, {prefix}_{field}, {prefix}_limit : {width}',
+                      f'cf.assert {prefix}_{field}_fits, "pointer cast byte extent overflow"']
+        lines += [f'{prefix}_bytes = arith.muli {prefix}_count, {prefix}_source_size : {width}',
+                  f'{prefix}_remainder = arith.remui {prefix}_bytes, {prefix}_target_size : {width}',
+                  f'{prefix}_whole = arith.cmpi eq, {prefix}_remainder, {prefix}_zero : {width}',
+                  f'cf.assert {prefix}_whole, "pointer cast requires whole target elements"',
+                  f'{prefix}_size = arith.divui {prefix}_bytes, {prefix}_target_size : {width}',
+                  f'{prefix}_byte_offset = arith.muli {prefix}_offset, {prefix}_source_size : {width}',
+                  f'{prefix}_address = llvm.getelementptr {prefix}_aligned[{prefix}_byte_offset] : (!llvm.ptr, {width}) -> !llvm.ptr, i8',
+                  f'{prefix}_address_bits = llvm.ptrtoint {prefix}_address : !llvm.ptr to {width}',
+                  f'{prefix}_alignment_bits = arith.remui {prefix}_address_bits, {prefix}_alignment : {width}',
+                  f'{prefix}_aligned_ok = arith.cmpi eq, {prefix}_alignment_bits, {prefix}_zero : {width}',
+                  f'cf.assert {prefix}_aligned_ok, "pointer cast target alignment mismatch"',
+                  f'{prefix}_new0 = llvm.mlir.undef : {descriptor}']
+        for index, (value, position) in enumerate(zip(('allocated', 'address', 'zero', 'size', 'one'), positions)):
+            lines.append(f'{prefix}_new{index+1} = llvm.insertvalue {prefix}_{value}, {prefix}_new{index}[{position}] : {descriptor}')
+        lines.append(f'{name(result)} = builtin.unrealized_conversion_cast {prefix}_new5 : {descriptor} to {result.type.mlir}')
+        return lines
+
+
+@dataclass(frozen=True)
+class ElementAddress:
+    bits: int
+
+    def atom(self, operation):
+        return Atom(self, tuple(value.type for value in operation.operands), operation.result.type,
+                    ('view', 'copy'), ('panic',), self)
+
+    def render_operation(self, operation):
+        from py_compiler.syntax.generic.storage import descriptor_type
+        source, position = operation.operands
+        descriptor, width = descriptor_type(self.bits), f'i{self.bits}'
+        prefix = name(operation.result) + '_element'
+        lines = [f'{prefix}_old = builtin.unrealized_conversion_cast {name(source)} : {source.type.mlir} to {descriptor}',
+                 f'{prefix}_index = arith.index_cast {name(position)} : index to {width}']
+        for field, path in (('allocated','0'),('aligned','1'),('offset','2'),('count','3, 0'),('stride','4, 0')):
+            lines.append(f'{prefix}_{field} = llvm.extractvalue {prefix}_old[{path}] : {descriptor}')
+        lines += [f'{prefix}_zero = arith.constant 0 : {width}',
+                  f'{prefix}_one = arith.constant 1 : {width}',
+                  f'{prefix}_valid = arith.cmpi ult, {prefix}_index, {prefix}_count : {width}',
+                  f'cf.assert {prefix}_valid, "address index outside allocation"',
+                  f'{prefix}_contiguous = arith.cmpi eq, {prefix}_stride, {prefix}_one : {width}',
+                  f'cf.assert {prefix}_contiguous, "indexed pointer requires contiguous storage"',
+                  f'{prefix}_position = arith.addi {prefix}_offset, {prefix}_index : {width}',
+                  f'{prefix}_address = llvm.getelementptr {prefix}_aligned[{prefix}_position] : (!llvm.ptr, {width}) -> !llvm.ptr, {source.type.element.mlir}',
+                  f'{prefix}_size = arith.subi {prefix}_count, {prefix}_index : {width}',
+                  f'{prefix}_new0 = llvm.mlir.undef : {descriptor}']
+        for index, (value, path) in enumerate((('allocated','0'),('address','1'),('zero','2'),('size','3, 0'),('one','4, 0'))):
+            lines.append(f'{prefix}_new{index+1} = llvm.insertvalue {prefix}_{value}, {prefix}_new{index}[{path}] : {descriptor}')
+        lines.append(f'{name(operation.result)} = builtin.unrealized_conversion_cast {prefix}_new5 : {descriptor} to {operation.result.type.mlir}')
+        return lines

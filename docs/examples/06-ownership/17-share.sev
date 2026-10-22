@@ -1,13 +1,15 @@
 def shared_value() -> int:
-    value = allocate[int]()
+    value = tensor[int](1)
     value[0] = 42
-    reference: share array[int] = share value
+    reference: share tensor[int] = share value
     drop value
     return reference[0]
 
 
 def atomic_shared_value() -> int:
-    value: share atomic array[int] = allocate[int]()
+    owner = tensor[int](1)
+    value = share atomic owner
+    drop owner
     value_reference = share atomic value
     drop value
     return value_reference[0]
@@ -21,6 +23,30 @@ test:
 test with compiler:
     reject:
         def invalid():
-            value = allocate[int]()
+            value = tensor[int](1)
             reference = share atomic value
             reference[0] = 1
+
+test "last shared owner keeps the payload alive":
+    owner = tensor[int](1)
+    owner[0] = 73
+    first = share owner
+    second = share first
+    drop owner
+    drop first
+    assert(second[0] == 73)
+
+test "atomic shared owner retains an initialized payload":
+    owner = tensor[int](1)
+    owner[0] = 91
+    first = share atomic owner
+    second = share atomic first
+    drop owner
+    drop first
+    assert(second[0] == 91)
+
+test with compiler "non-atomic shared payloads are also read-only":
+    owner = tensor[int](1)
+    reference = share owner
+    reject:
+        reference[0] = 9

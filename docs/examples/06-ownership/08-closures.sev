@@ -7,7 +7,7 @@ def borrowed_identity(value: borrow string) -> borrow string:
 
 
 def duplicate(value: borrow string) -> string:
-    return clone value
+    return copy value
 
 test:
     offset := 3

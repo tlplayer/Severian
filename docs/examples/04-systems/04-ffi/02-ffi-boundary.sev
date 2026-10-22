@@ -2,7 +2,7 @@ import c from xxi
 
 
 @c(symbol = "strlen")
-def c_strlen(text: borrowed[string]) -> usize
+def c_strlen(text: view string) -> usize
 
 
 def string_length(text: string) -> usize:
@@ -10,4 +10,12 @@ def string_length(text: string) -> usize:
         return c_strlen(text)
 
 def main():
-    print(string_length("severian"))
+    print(int(string_length("severian")))
+
+test "C string conversion terminates slices without changing the source":
+    assert(string_length("severian") == 8)
+    assert(string_length("") == 0)
+
+test with compiler:
+    reject:
+        c_strlen("unsafe boundary")
