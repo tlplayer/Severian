@@ -1,6 +1,0 @@
-trait Iterator[T]:
-    def next() -> borrow T | None
-
-
-trait Iterable[T]:
-    def iter() -> Iterator[T]

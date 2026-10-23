@@ -1,7 +1,0 @@
-import * from "iterator.sev"
-
-
-trait Collection[T]: Iterable[T] + C
-
-    def empty() -> bool:
-        return len() == 0

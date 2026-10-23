@@ -1,7 +1,0 @@
-import Hash from hashed
-import HashKey from traits
-
-import Hash as HashTable from hashed
-
-def create[K: HashKey, V](capacity: usize = 0) -> HashTable[K, V]:
-    return HashTable[K, V](capacity)

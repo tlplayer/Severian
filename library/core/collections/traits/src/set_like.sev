@@ -1,7 +1,0 @@
-import * from "collection.sev"
-
-
-trait SetLike[T]: Collection[T]
-    def contains(item: borrow T) -> bool
-    def add(item: T) -> bool
-    def remove(item: borrow T) -> bool

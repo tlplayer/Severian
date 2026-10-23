@@ -440,7 +440,24 @@ Whether fallible conversions are allowed implicitly in assignments is a separate
 For example, converting `i64` to `f32` can produce a floating-point value while losing integer precision.
 ```
 
+### Collections
 
-## Testing
+The most common use of the implementers for the C trait is the `list` type which looks like this:
 
 
+```
+values = [1,2,3,4,5]
+# indexing can use slices, and ranges, 
+values[0..2] -> [1,2,3]
+# Indexing can pull many values
+values[0,2] -> [1,3]
+values[0..2) -> [1,2]
+values(0..2) -> [2]
+values(0) -> rejected by compiler
+
+# .. can be subbed with : for the standard python syntax.
+# values[0:2] note, [] means inclusive on a range, (..2) means exclusive on the range.  python uses [0,8) for [0:8] which isn't as mathematically consisten accurate and requires special knowledge to infer...
+
+
+
+```

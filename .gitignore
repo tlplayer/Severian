@@ -1,10 +1,10 @@
 **/package.pkg/**
-!**/package.pkg/debug/
-!**/package.pkg/debug/test/
-!**/package.pkg/debug/test/fuzz/
-!**/package.pkg/debug/test/fuzz/*/
-!**/package.pkg/debug/test/fuzz/*/cases/
-!**/package.pkg/debug/test/fuzz/*/cases/*.json
+**/package.pkg/debug/
+**/package.pkg/debug/test/
+**/package.pkg/debug/test/fuzz/
+**/package.pkg/debug/test/fuzz/*/
+**/package.pkg/debug/test/fuzz/*/cases/
+**/package.pkg/debug/test/fuzz/*/cases/*.json
 /bin/examples/
 /bench/.work/
 /bench/results.csv
