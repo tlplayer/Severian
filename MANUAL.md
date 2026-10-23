@@ -44,6 +44,11 @@ decks.push(1)
 decks.pop()
 # Doubly-Linked List (sorta a chain)
 chains = chain[int]()
+
+
+# Iteration
+
+
 ```
 
 ## Package structure and layout
