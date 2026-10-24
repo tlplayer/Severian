@@ -47,6 +47,23 @@ chains = chain[int]()
 
 
 # Iteration
+The difference between range iteration in a while/for loop is where the mutation happens. 
+In a while loop mutations happen in the block, in a for loop they happen outside the loop. 
+
+def two_sum(s: list[int], target: int):
+    while i in [0..j) with i = 0, j = s.last:
+        total = s[i] + s[j]
+
+        if total == target:
+            return (i, j)
+
+        if total < target:
+            i += 1
+        else:
+            j -= 1
+
+    return None
+
 
 
 ```
