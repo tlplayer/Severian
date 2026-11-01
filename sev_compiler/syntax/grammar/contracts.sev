@@ -1,10 +1,12 @@
 import Expression from "../function/function.sev"
-import ValueId from "../symbol/symbol.sev"
+import ValueID from "../symbol/symbol.sev"
 import B from "../generic/block.sev"
 import Error from "../primitive/error/error.sev"
 import For from "../block/for.sev"
 import Throw from "../keywords/throw.sev"
-import Diagnostic, DiagnosticType, ErrorType from "../primitive/error/diagnostic.sev"
+import Diagnostic,
+    DiagnosticType,
+    ErrorType from "../primitive/error/diagnostic.sev"
 import G from "../generic/grammar.sev"
 import Y from "../generic/symbol.sev"
 import Associativity, Fixity, ScalarOperation from "../function/syntax.sev"
@@ -42,56 +44,60 @@ import SlashEqual as SlashEqualSymbol from "../symbol/slash_equal.sev"
 import PercentEqual as PercentEqualSymbol from "../symbol/percent_equal.sev"
 import Is from "../keywords/is.sev"
 
-
 trait Positive: G
     symbol: Y = PlusSymbol()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Associativity.Right
-    operations: dict[T, ScalarOperation] = {
-        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("addi"),
+    operations: dict[T, ScalarOperation] =
+    {
+        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation(
+            "addi",
+        ),
         f32 | f64: ScalarOperation("addf"),
     }
-
 
 trait Negative: G
     symbol: Y = MinusSymbol()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Associativity.Right
-    operations: dict[T, ScalarOperation] = {
-        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("subi"),
-        f32 | f64: ScalarOperation("negf", direct=true),
+    operations: dict[T, ScalarOperation] =
+    {
+        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation(
+            "subi",
+        ),
+        f32 | f64: ScalarOperation(mnemonic = "negf", direct = true),
     }
-
 
 trait Not: G
     symbol: Y = NotKeyword()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Associativity.Right
-    operations: dict[T, ScalarOperation] = {
-        bool: ScalarOperation("xori", identity=1),
+    operations: dict[T, ScalarOperation] =
+    {
+        bool: ScalarOperation(mnemonic = "xori", identity = 1),
     }
-
 
 trait Bang: G
     symbol: Y = BangSymbol()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Associativity.Right
-    operations: dict[T, ScalarOperation] = {
-        bool: ScalarOperation("xori", identity=1),
+    operations: dict[T, ScalarOperation] =
+    {
+        bool: ScalarOperation(mnemonic = "xori", identity = 1),
     }
-
 
 trait Copy: G
     symbol: Y = CopyKeyword()
     fixity: Fixity = Fixity.Prefix
     precedence: int = 10
     associativity: Associativity = Associativity.Right
-    operations: dict[T, ScalarOperation] = {}
-
+    operations: dict[T, ScalarOperation] =
+    {
+    }
 
 trait Move: G
     symbol: Y = MoveKeyword()
@@ -99,13 +105,11 @@ trait Move: G
     precedence: int = 10
     associativity: Associativity = Associativity.Right
 
-
 trait BitwiseOr: G
     symbol: Y = PipeSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 4
     associativity: Associativity = Associativity.Left
-
 
 trait BitwiseAnd: G
     symbol: Y = AmpersandSymbol()
@@ -113,13 +117,11 @@ trait BitwiseAnd: G
     precedence: int = 6
     associativity: Associativity = Associativity.Left
 
-
 trait BitwiseXor: G
     symbol: Y = CaretSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 5
     associativity: Associativity = Associativity.Left
-
 
 trait LeftShift: G
     symbol: Y = LeftShiftSymbol()
@@ -127,56 +129,60 @@ trait LeftShift: G
     precedence: int = 7
     associativity: Associativity = Associativity.Left
 
-
 trait RightShift: G
     symbol: Y = RightShiftSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
     associativity: Associativity = Associativity.Left
 
-
 trait Add: G
     symbol: Y = PlusSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
     associativity: Associativity = Associativity.Left
-    operations: dict[T, ScalarOperation] = {
-        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("addi"),
+    operations: dict[T, ScalarOperation] =
+    {
+        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation(
+            "addi",
+        ),
         f32 | f64: ScalarOperation("addf"),
     }
-
 
 trait Subtract: G
     symbol: Y = MinusSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 7
     associativity: Associativity = Associativity.Left
-    operations: dict[T, ScalarOperation] = {
-        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("subi"),
+    operations: dict[T, ScalarOperation] =
+    {
+        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation(
+            "subi",
+        ),
         f32 | f64: ScalarOperation("subf"),
     }
-
 
 trait Multiply: G
     symbol: Y = StarSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
     associativity: Associativity = Associativity.Left
-    operations: dict[T, ScalarOperation] = {
-        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation("muli"),
+    operations: dict[T, ScalarOperation] =
+    {
+        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index: ScalarOperation(
+            "muli",
+        ),
         f32 | f64: ScalarOperation("mulf"),
     }
-
 
 trait Divide: G
     symbol: Y = SlashSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
     associativity: Associativity = Associativity.Left
-    operations: dict[T, ScalarOperation] = {
+    operations: dict[T, ScalarOperation] =
+    {
         f32 | f64: ScalarOperation("divf"),
     }
-
 
 trait FloorDivide: G
     symbol: Y = FloorDivideSymbol()
@@ -184,13 +190,11 @@ trait FloorDivide: G
     precedence: int = 8
     associativity: Associativity = Associativity.Left
 
-
 trait Remainder: G
     symbol: Y = PercentSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 8
     associativity: Associativity = Associativity.Left
-
 
 trait Power: G
     symbol: Y = PowerSymbol()
@@ -198,83 +202,115 @@ trait Power: G
     precedence: int = 9
     associativity: Associativity = Associativity.Right
 
-
 trait Equal: G
     symbol: Y = EqualitySymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: dict[T, ScalarOperation] = {
-        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index | bool: ScalarOperation("cmpi", predicate=0),
-        f32 | f64: ScalarOperation("cmpf", predicate=1),
+    operations: dict[T, ScalarOperation] =
+    {
+        (
+            i8
+                | i16
+                | i32
+                | int
+                | u8
+                | u16
+                | u32
+                | u64
+                | index
+                | bool: ScalarOperation(mnemonic = "cmpi", predicate = 0)
+        ),
+        f32 | f64: ScalarOperation(mnemonic = "cmpf", predicate = 1),
     }
-
 
 trait NotEqual: G
     symbol: Y = NotEqualSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: dict[T, ScalarOperation] = {
-        i8 | i16 | i32 | int | u8 | u16 | u32 | u64 | index | bool: ScalarOperation("cmpi", predicate=1),
-        f32 | f64: ScalarOperation("cmpf", predicate=13),
+    operations: dict[T, ScalarOperation] =
+    {
+        (
+            i8
+                | i16
+                | i32
+                | int
+                | u8
+                | u16
+                | u32
+                | u64
+                | index
+                | bool: ScalarOperation(mnemonic = "cmpi", predicate = 1)
+        ),
+        f32 | f64: ScalarOperation(mnemonic = "cmpf", predicate = 13),
     }
-
 
 trait Less: G
     symbol: Y = LessSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: dict[T, ScalarOperation] = {
-        i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=2),
-        u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=6),
-        f32 | f64: ScalarOperation("cmpf", predicate=4),
+    operations: dict[T, ScalarOperation] =
+    {
+        i8 | i16 | i32 | int | index: ScalarOperation(
+            mnemonic = "cmpi",
+            predicate = 2,
+        ),
+        u8 | u16 | u32 | u64: ScalarOperation(mnemonic = "cmpi", predicate = 6),
+        f32 | f64: ScalarOperation(mnemonic = "cmpf", predicate = 4),
     }
-
 
 trait LessEqual: G
     symbol: Y = LessEqualSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: dict[T, ScalarOperation] = {
-        i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=3),
-        u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=7),
-        f32 | f64: ScalarOperation("cmpf", predicate=5),
+    operations: dict[T, ScalarOperation] =
+    {
+        i8 | i16 | i32 | int | index: ScalarOperation(
+            mnemonic = "cmpi",
+            predicate = 3,
+        ),
+        u8 | u16 | u32 | u64: ScalarOperation(mnemonic = "cmpi", predicate = 7),
+        f32 | f64: ScalarOperation(mnemonic = "cmpf", predicate = 5),
     }
-
 
 trait Greater: G
     symbol: Y = GreaterSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: dict[T, ScalarOperation] = {
-        i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=4),
-        u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=8),
-        f32 | f64: ScalarOperation("cmpf", predicate=2),
+    operations: dict[T, ScalarOperation] =
+    {
+        i8 | i16 | i32 | int | index: ScalarOperation(
+            mnemonic = "cmpi",
+            predicate = 4,
+        ),
+        u8 | u16 | u32 | u64: ScalarOperation(mnemonic = "cmpi", predicate = 8),
+        f32 | f64: ScalarOperation(mnemonic = "cmpf", predicate = 2),
     }
-
 
 trait GreaterEqual: G
     symbol: Y = GreaterEqualSymbol()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-    operations: dict[T, ScalarOperation] = {
-        i8 | i16 | i32 | int | index: ScalarOperation("cmpi", predicate=5),
-        u8 | u16 | u32 | u64: ScalarOperation("cmpi", predicate=9),
-        f32 | f64: ScalarOperation("cmpf", predicate=3),
+    operations: dict[T, ScalarOperation] =
+    {
+        i8 | i16 | i32 | int | index: ScalarOperation(
+            mnemonic = "cmpi",
+            predicate = 5,
+        ),
+        u8 | u16 | u32 | u64: ScalarOperation(mnemonic = "cmpi", predicate = 9),
+        f32 | f64: ScalarOperation(mnemonic = "cmpf", predicate = 3),
     }
-
 
 trait Contains: G
     symbol: Y = InKeyword()
     fixity: Fixity = Fixity.Infix
     precedence: int = 3
     associativity: Associativity = Associativity.None
-
 
 trait LogicalAnd: G
     symbol: Y = AndKeyword()
@@ -287,7 +323,6 @@ trait LogicalAnd: G
     def semantic(left: bool, right: bool) -> bool:
         return right if left else false
 
-
 trait LogicalOr: G
     symbol: Y = OrKeyword()
     fixity: Fixity = Fixity.Infix
@@ -298,7 +333,6 @@ trait LogicalOr: G
 
     def semantic(left: bool, right: bool) -> bool:
         return true if left else right
-
 
 trait If: G
     symbol: Y = IfKeyword()
@@ -320,14 +354,12 @@ trait If: G
         cfg.fallthrough(exit)
         cfg.at(exit)
 
-
 trait Break: G
     control_flow: ControlFlow = Branch
 
     def semantic():
         exit = cfg.loop_exit()
         cfg.goto(exit)
-
 
 trait Continue: G
     control_flow: ControlFlow = Branch
@@ -336,19 +368,21 @@ trait Continue: G
         header = cfg.loop_header()
         cfg.goto(header)
 
-
 trait Return: G
     control_flow: ControlFlow = Return
 
     def semantic(value: Expression | absent):
         result = lower(value)
-        cfg.return(result)
-
+        cfg.return result
 
 trait Conditional: G
     control_flow: ControlFlow = Branch
 
-    def semantic(condition: Expression, then_value: Expression, else_value: Expression) -> ValueId:
+    def semantic(
+        condition: Expression,
+        then_value: Expression,
+        else_value: Expression,
+    ) -> ValueID:
         value = lower(condition)
         taken = cfg.block()
         otherwise = cfg.block()
@@ -364,7 +398,6 @@ trait Conditional: G
         cfg.at(exit)
         return result
 
-
 trait Assign: G
     control_flow: ControlFlow = Mutation
 
@@ -373,20 +406,22 @@ trait Assign: G
         right = lower(value)
         store(target, right)
 
-
 trait AddAssign: G
     symbol: Y = PlusEqualSymbol()
     form: GrammarForm = GrammarForm.Assignment
     operation: string = "+"
     control_flow: ControlFlow = Mutation
 
-    def semantic(destination: Expression, value: Expression, update: Expression):
+    def semantic(
+        destination: Expression,
+        value: Expression,
+        update: Expression,
+    ):
         target = place(destination)
         previous = load(target)
         right = lower(value)
         updated = apply(update, previous, right)
         store(target, updated)
-
 
 trait SubtractAssign: G
     symbol: Y = MinusEqualSymbol()
@@ -394,13 +429,16 @@ trait SubtractAssign: G
     operation: string = "-"
     control_flow: ControlFlow = Mutation
 
-    def semantic(destination: Expression, value: Expression, update: Expression):
+    def semantic(
+        destination: Expression,
+        value: Expression,
+        update: Expression,
+    ):
         target = place(destination)
         previous = load(target)
         right = lower(value)
         updated = apply(update, previous, right)
         store(target, updated)
-
 
 trait MultiplyAssign: G
     symbol: Y = StarEqualSymbol()
@@ -408,13 +446,16 @@ trait MultiplyAssign: G
     operation: string = "*"
     control_flow: ControlFlow = Mutation
 
-    def semantic(destination: Expression, value: Expression, update: Expression):
+    def semantic(
+        destination: Expression,
+        value: Expression,
+        update: Expression,
+    ):
         target = place(destination)
         previous = load(target)
         right = lower(value)
         updated = apply(update, previous, right)
         store(target, updated)
-
 
 trait DivideAssign: G
     symbol: Y = SlashEqualSymbol()
@@ -422,13 +463,16 @@ trait DivideAssign: G
     operation: string = "/"
     control_flow: ControlFlow = Mutation
 
-    def semantic(destination: Expression, value: Expression, update: Expression):
+    def semantic(
+        destination: Expression,
+        value: Expression,
+        update: Expression,
+    ):
         target = place(destination)
         previous = load(target)
         right = lower(value)
         updated = apply(update, previous, right)
         store(target, updated)
-
 
 trait RemainderAssign: G
     symbol: Y = PercentEqualSymbol()
@@ -436,16 +480,16 @@ trait RemainderAssign: G
     operation: string = "%"
     control_flow: ControlFlow = Mutation
 
-    def semantic(destination: Expression, value: Expression, update: Expression):
+    def semantic(
+        destination: Expression,
+        value: Expression,
+        update: Expression,
+    ):
         target = place(destination)
         previous = load(target)
         right = lower(value)
         updated = apply(update, previous, right)
         store(target, updated)
-
-
-    
-
 
 trait Outcome: G
     control_flow: ControlFlow = Error
@@ -457,11 +501,10 @@ trait Outcome: G
         failed = cfg.block()
         cfg.branch(valid, taken, failed)
         cfg.at(failed)
-        cfg.throw(result)
+        cfg.throw result
         cfg.at(taken)
         payload = outcome.payload(result)
         return payload
-
 
 trait Throws: G
     control_flow: ControlFlow = Error
@@ -475,15 +518,12 @@ trait Throws: G
         cfg.fallthrough(caught)
         cfg.at(caught)
 
-
 trait List: G
     construction: string = "list_create"
-
 
 trait Index: G
     access: string = "element_at"
     storage: string = "element_set"
-
 
 trait Iteration: G
     start: string = "iteration_start"

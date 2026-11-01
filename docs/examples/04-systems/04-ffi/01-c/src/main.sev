@@ -1,15 +1,12 @@
 import c from xxi
 
-
 @c(symbol = "example_add")
 def add(left: i32, right: i32) -> i32
-
 
 def main():
     unsafe:
         result := add(20, 22)
         print(result)
-
 
 test:
     unsafe:

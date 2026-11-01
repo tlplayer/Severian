@@ -1,12 +1,16 @@
 enum Color:
+
     # Simple key in the enum value defaults to absent meaning it is not supplied
     Blue
-    # Specify the values that can exist to populate the enum 
+
+    # Specify the values that can exist to populate the enum
     Green {3}
+
     # Multiple values for the same enum need a default value representation
-    Red {1,2} = 2
+    Red {1, 2} = 2
+
     # Mixed type values
-    Purple {"purple"} 
+    Purple {"purple"}
 
 def name(color: Color) -> string | int:
     match color:
@@ -22,15 +26,13 @@ def name(color: Color) -> string | int:
         case Purple:
             return Purple.value
 
-
-
 test "Getting enum keys and values":
-    assert(name(Red) == "Red")
-    assert(name(Green) == 3)
-    assert(name(Purple) == "purple")
-    assert(name(Blue) == "Blue")
-    assert(Blue.value is absent)
-
+    assert:
+        name(Red) == "Red"
+        name(Green) == 3
+        name(Purple) == "purple"
+        name(Blue) == "Blue"
+        Blue.value is absent
 
 test "variant default is selected from its allowed value set":
     assert(Red.value == 2)

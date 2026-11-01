@@ -1,19 +1,21 @@
-import MlirTypeBinding from "types.sev"
+import MLIRTypeBinding from "types.sev"
 
-class MlirOperationBinding:
+class MLIROperationBinding:
     dialect: string
     name: string
-    operands: list[MlirTypeBinding]
-    results: list[MlirTypeBinding]
+    operands: list[MLIRTypeBinding]
+    results: list[MLIRTypeBinding]
 
-trait MlirOperationProvider:
-    mlir_operation: MlirOperationBinding
+trait MLIROperationProvider:
+    mlir_operation: MLIROperationBinding
 
 trait OperationMapping:
-    def resolve(provider: MlirOperationProvider) -> MlirOperationBinding | Error
+    def resolve(provider: MLIROperationProvider) -> MLIROperationBinding | Error
 
 class DeclaredOperationMapping: OperationMapping
-    def resolve(provider: MlirOperationProvider) -> MlirOperationBinding | Error:
+    def resolve(
+        provider: MLIROperationProvider,
+    ) -> MLIROperationBinding | Error:
         binding = provider.mlir_operation
         if binding.dialect == "" or binding.name == "":
             throw Error("MLIR operation requires a dialect and operation name")
@@ -23,8 +25,13 @@ class DeclaredOperationMapping: OperationMapping
             type.render()
         return binding
 
-class ExampleAddition: MlirOperationProvider
-    mlir_operation: MlirOperationBinding = MlirOperationBinding("arith", "addi", [MlirTypeBinding("i32"), MlirTypeBinding("i32")], [MlirTypeBinding("i32")])
+class ExampleAddition: MLIROperationProvider
+    mlir_operation: MLIROperationBinding = MLIROperationBinding(
+        dialect = "arith",
+        name = "addi",
+        operands = [MLIRTypeBinding("i32"), MLIRTypeBinding("i32")],
+        results = [MLIRTypeBinding("i32")],
+    )
 
 test "operation mapping retains declared operand and result types":
     binding = DeclaredOperationMapping().resolve(ExampleAddition())

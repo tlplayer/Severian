@@ -1,13 +1,11 @@
 import source
-import BlockId, DefinitionID, RegionId, ValueId from "../symbol/symbol.sev"
+import BlockID, DefinitionID, RegionID, ValueID from "../symbol/symbol.sev"
 import Expression from "../function/function.sev"
-
 
 enum ConstraintStage:
     Static
     Specialization
     Runtime
-
 
 enum AttachmentRole:
     Dispatch
@@ -17,16 +15,13 @@ enum AttachmentRole:
     Context
     Setup
 
-
 enum ProofResult:
     Proven
     Refuted
     Unknown
 
-
-class ConstraintId:
+class ConstraintID:
     index: u32
-
 
 class WithAttachment:
     role: AttachmentRole
@@ -34,35 +29,30 @@ class WithAttachment:
     stage: ConstraintStage = ConstraintStage.Runtime
     interface: DefinitionID | None = None
 
-
 class ConstraintRequirement:
-    id: ConstraintId
+    id: ConstraintID
     condition: Expression
-    prerequisites: list[ConstraintId] = []
+    prerequisites: list[ConstraintID] = []
     stage: ConstraintStage = ConstraintStage.Runtime
     result: ProofResult = ProofResult.Unknown
     reorderable: bool = false
     cost: int = 1
     value_versions: list[int] = []
 
-
 class ConstraintGraph:
     requirements: list[ConstraintRequirement] = []
 
-
 class DispatchCandidate:
     definition: DefinitionID
-    requirements: list[ConstraintId]
-
+    requirements: list[ConstraintID]
 
 class DispatchFamily:
     key: string
     candidates: list[DispatchCandidate]
-
 
 class ConstraintObligation:
     owner: DefinitionID
     role: AttachmentRole
     condition: Expression
     result: ProofResult = ProofResult.Unknown
-    region: RegionId | None = None
+    region: RegionID | None = None

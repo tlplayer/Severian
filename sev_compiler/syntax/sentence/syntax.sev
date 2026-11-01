@@ -1,23 +1,15 @@
-"""
+'''
 A grammar in severian is a grouping of symbols
-
 For example
-
 for x in list[int](1,2,3):
-    print(x)
-
+print(x)
 has the following symbols: for, x, in, list, :, B
-
 traditional methods resolve by looking at fitting into assembly like:
-    %0 , load
-
+%0 , load
 If we create a new keyword which says these groupings behave like so we'd get:
-
 grammar [for:Y,x:Iterator,in:Y,C:Iterable]():...
-
 That way we can have different handlings while maintaining the same interface
-"""
-
+'''
 import B, Statement, Y, load from "grammar.sev"
 
 grammar for[
@@ -27,5 +19,5 @@ grammar for[
     C: Iterable,
     Y("with"),
     setup: F,
-    B
+    B,
 ] -> Iteration

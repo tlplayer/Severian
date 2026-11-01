@@ -1,13 +1,16 @@
-import B, Block, OperatorSyntax, Y, load, span from "../block/block.sev"
+import B, Block, OperatorSyntax, Y, load, Span from "../block/block.sev"
+Span as span
 import "../source.sev" as _dependency_source
 import source
-import AttrValue, BindingId, Symbol, TypeId from "../symbol/symbol.sev"
+import AttrValue, BindingID, Symbol, TypeID from "../symbol/symbol.sev"
 import TypeAnnotation from "../type/annotation.sev"
 import Expression, Operation from "../function/function.sev"
 import "../function/lowering.sev" as _dependency_lowering
 
-# Sentence composition sits above local operator parsing. The parser supplies
-# classified terms; the semantic layer supplies constraint dispatch.
+'''
+Sentence composition sits above local operator parsing. The parser supplies
+classified terms; the semantic layer supplies constraint dispatch.
+'''
 enum TermRole:
     Symbol
     Type
@@ -64,11 +67,16 @@ class SentenceMatch:
     end: int
     source: u32 | None = None
 
-# Type/shape filtering precedes every value predicate, as required by SIP-0000.
-# A nested grammar is one classified term with children in the parser's arena.
+'''
+Type/shape filtering precedes every value predicate, as required by SIP-0000.
+A nested grammar is one classified term with children in the parser's arena.
+'''
 def accepts_shape(grammar: Grammar, terms: list[Term]) -> bool:
-    # Repeated captures require the window matcher; fixed-arity matching must
-    # not silently reinterpret them as single captures during migration.
+
+    '''
+    Repeated captures require the window matcher; fixed-arity matching must
+    not silently reinterpret them as single captures during migration.
+    '''
     if len(grammar.repetitions) != 0:
         return false
     if len(grammar.fields) != len(terms):
@@ -84,7 +92,11 @@ def accepts_shape(grammar: Grammar, terms: list[Term]) -> bool:
                     return false
     return true
 
-def match_grammar(definitions: list[SentenceDefinition], terms: list[Term], satisfies: (Term, string) -> bool) -> SentenceMatch | Error:
+def match_grammar(
+    definitions: list[SentenceDefinition],
+    terms: list[Term],
+    satisfies:(Term, string) -> bool,
+) -> SentenceMatch | Error:
     candidates: list[SentenceDefinition] = []
     for definition in definitions:
         if accepts_shape(definition.grammar, terms):
@@ -109,29 +121,59 @@ def match_grammar(definitions: list[SentenceDefinition], terms: list[Term], sati
                             throw Error("duplicate grammar capture: " + name)
                     captures.append(Capture(name, terms[index]))
         if accepted:
-            matches.append(SentenceMatch(definition, captures, terms[0].start if len(terms) > 0 else 0, terms[-1].end if len(terms) > 0 else 0, terms[0].source if len(terms) > 0 else None))
+            matches.append(
+                SentenceMatch(
+                    definition = definition,
+                    captures = captures,
+                    start = terms[0].start if len(terms) > 0 else 0,
+                    end = terms[-1].end if len(terms) > 0 else 0,
+                    source = terms[0].source if len(terms) > 0 else None,
+                ),
+            )
     if len(matches) == 0:
         throw Error("no grammar matches the supplied terms and constraints")
     if len(matches) != 1:
         names: list[string] = []
         for candidate in matches:
-            names.append(candidate.definition.package + "." + candidate.definition.name)
+            names.append(
+                """\
+{candidate.definition.package}.{candidate.definition.name}\
+""",
+            )
         throw Error("ambiguous grammar dispatch: " + names.join(", "))
     return matches[0]
 
 def resolve_grammar(selected: SentenceMatch) -> SemanticObject:
-    return SemanticObject(selected.definition.semantic_interface, selected.captures, selected.start, selected.end, selected.source)
+    return SemanticObject(
+        interface_id = selected.definition.semantic_interface,
+        captures = selected.captures,
+        start = selected.start,
+        end = selected.end,
+        source = selected.source,
+    )
 
 # Package-provided declarations converge on the same semantic interface.
 def iteration_grammars() -> list[SentenceDefinition]:
-    basic: list[SentenceField] = [SentenceField.Literal("for"), SentenceField.Capture("item", TermRole.Pattern, []), SentenceField.Literal("in"), SentenceField.Capture("source", TermRole.Container, ["Iterable"])]
+    basic: list[SentenceField] = [
+        SentenceField.Literal("for"),
+        SentenceField.Capture("item", TermRole.Pattern, []),
+        SentenceField.Literal("in"),
+        SentenceField.Capture("source", TermRole.Container, ["Iterable"]),
+    ]
     extended = basic[:]
     extended.append(SentenceField.Literal("with"))
     extended.append(SentenceField.Capture("setup", TermRole.Expression, []))
     extended.append(SentenceField.Capture("body", TermRole.Block, []))
     basic.append(SentenceField.Capture("body", TermRole.Block, []))
-    return [SentenceDefinition("severian", "ForBasic", Grammar(basic), "Iteration"), SentenceDefinition("severian", "ForWith", Grammar(extended), "Iteration")]
-
+    return [
+        SentenceDefinition("severian", "ForBasic", Grammar(basic), "Iteration"),
+        SentenceDefinition(
+            "severian",
+            "ForWith",
+            Grammar(extended),
+            "Iteration",
+        ),
+    ]
 
 class Binding:
     name: string
@@ -140,22 +182,21 @@ class Binding:
     update: bool
     preserve_error: bool
     span: source.Span
-    id: BindingId = BindingId(0)
-    type_id: TypeId = TypeId(0)
+    id: BindingID = BindingID(0)
+    type_id: TypeID = TypeID(0)
     mutable: bool = false
     scoped: bool = false
-
 
 class MatchArm:
     body: Block
     binding_name: string | None = None
     annotation: TypeAnnotation | None = None
     span: source.Span | None = None
-    binding: BindingId | None = None
-    type_id: TypeId | None = None
+    binding: BindingID | None = None
+    type_id: TypeID | None = None
+
     # None denotes a wildcard for value matches; type arms use annotation.
     pattern: Expression | None = None
-
 
 # Parsed grammar operations retain their existing variant/constructor names.
 enum Statement:
@@ -163,20 +204,40 @@ enum Statement:
     Unsafe(body: Block, span: source.Span)
     CompilerCheck(reject: bool, body: Block, span: source.Span)
     Drop(value: Expression, span: source.Span)
-    GrammarApply(syntax: OperatorSyntax, operands: list[Expression], bodies: list[Block], span: source.Span, exits: bool)
+    GrammarApply(
+        syntax: OperatorSyntax,
+        operands: list[Expression],
+        bodies: list[Block],
+        span: source.Span,
+        exits: bool,
+    )
     BindingStatement(binding: Binding)
     ExpressionStatement(expression: Expression)
     Throw(value: Expression, span: source.Span)
     Return(value: Expression | None, span: source.Span)
-    Assert(condition: Expression, message: Expression | None, span: source.Span, condition_span: source.Span)
-    If(condition: Expression, then_block: Block, else_block: Block, span: source.Span)
-    FieldSet(target: Expression, value: Expression, span: source.Span, update: OperatorSyntax | None)
+    Assert(
+        condition: Expression,
+        message: Expression | None,
+        span: source.Span,
+        condition_span: source.Span,
+    )
+    If(
+        condition: Expression,
+        then_block: Block,
+        else_block: Block,
+        span: source.Span,
+    )
+    FieldSet(
+        target: Expression,
+        value: Expression,
+        span: source.Span,
+        update: OperatorSyntax | None,
+    )
     While(condition: Expression, body: Block, span: source.Span)
     Break(span: source.Span)
     Continue(span: source.Span)
     ForEach(name: string, iterable: Expression, body: Block, span: source.Span)
     Match(subject: Expression, arms: list[MatchArm], span: source.Span)
-
 
 # Compatibility name for existing parser and compiler consumers.
 Statement as SentenceOperation

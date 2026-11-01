@@ -1,14 +1,14 @@
 import c from xxi
 
-@c(symbol="getenv")
+@c(symbol = "getenv")
 def c_getenv(name: pointer) -> pointer
-@c(symbol="setenv")
+@c(symbol = "setenv")
 def c_setenv(name: pointer, value: pointer, overwrite: i32) -> i32
-@c(symbol="unsetenv")
+@c(symbol = "unsetenv")
 def c_unsetenv(name: pointer) -> i32
-@c(symbol="strlen")
+@c(symbol = "strlen")
 def c_strlen(value: pointer) -> usize
-@c(symbol="memcpy")
+@c(symbol = "memcpy")
 def c_memcpy(destination: pointer, source: pointer, count: usize) -> pointer
 
 @mlir("memref.extract_aligned_pointer_as_index")
@@ -24,24 +24,36 @@ def pointer_integer(value: pointer) -> int
 def read_environment(name: string) -> string | None:
     encoded = name.utf(true)
     unsafe:
-        address = c_getenv(address_pointer(address_integer(buffer_address(encoded))))
+        address = c_getenv(
+            address_pointer(address_integer(buffer_address(encoded))),
+        )
         if pointer_integer(address) == 0:
             return None
         count = c_strlen(address)
         bytes = tensor[u8](int(count))
-        copied = c_memcpy(address_pointer(address_integer(buffer_address(bytes))), address, count)
+        copied = c_memcpy(
+            address_pointer(address_integer(buffer_address(bytes))),
+            address,
+            count,
+        )
         return string(bytes)
 
 def write_environment(name: string, value: string | None):
     encoded_name = name.utf(true)
     unsafe:
-        name_address = address_pointer(address_integer(buffer_address(encoded_name)))
+        name_address = address_pointer(
+            address_integer(buffer_address(encoded_name)),
+        )
         if value is None:
             if c_unsetenv(name_address) != i32(0):
                 throw Error("environment removal failed")
         else:
             encoded_value = value.value.utf(true)
-            if c_setenv(name_address, address_pointer(address_integer(buffer_address(encoded_value))), i32(1)) != i32(0):
+            if c_setenv(
+                name_address,
+                address_pointer(address_integer(buffer_address(encoded_value))),
+                i32(1),
+            ) != i32(0):
                 throw Error("environment override failed")
 
 class TestEnvironment:
@@ -59,8 +71,18 @@ class TestEnvironment:
         write_environment("HTTP_PROXY", old_http_proxy)
         write_environment("HTTPS_PROXY", old_https_proxy)
 
-def environment(home: string, debug: string, http_proxy: string | None, https_proxy: string | None) -> TestEnvironment:
-    scope = TestEnvironment(read_environment("HOME"), read_environment("DEBUG"), read_environment("HTTP_PROXY"), read_environment("HTTPS_PROXY"))
+def environment(
+    home: string,
+    debug: string,
+    http_proxy: string | None,
+    https_proxy: string | None,
+) -> TestEnvironment:
+    scope = TestEnvironment(
+        old_home = read_environment("HOME"),
+        old_debug = read_environment("DEBUG"),
+        old_http_proxy = read_environment("HTTP_PROXY"),
+        old_https_proxy = read_environment("HTTPS_PROXY"),
+    )
     write_environment("HOME", home)
     write_environment("DEBUG", debug)
     write_environment("HTTP_PROXY", http_proxy)
@@ -75,11 +97,25 @@ def same_environment(left: string | None, right: string | None) -> bool:
     return left.value == right.value
 
 def observe_overrides() -> bool:
-    scope = environment("/tmp/severian-test-home", "1", None, None)
-    return scope.get("HOME") == "/tmp/severian-test-home" and scope.get("DEBUG") == "1" and scope.get("HTTP_PROXY") is None and scope.get("HTTPS_PROXY") is None
+    scope = environment(
+        home = "/tmp/severian-test-home",
+        debug = "1",
+        http_proxy = None,
+        https_proxy = None,
+    )
+    return scope
+        .get("HOME") == "/tmp/severian-test-home" and scope
+        .get("DEBUG") == "1" and scope
+        .get("HTTP_PROXY") is None and scope
+        .get("HTTPS_PROXY") is None
 
 def failed_scope() -> int | Error:
-    scope = environment("/tmp/severian-failed-home", "failure", None, None)
+    scope = environment(
+        home = "/tmp/severian-failed-home",
+        debug = "failure",
+        http_proxy = None,
+        https_proxy = None,
+    )
     throw Error("scope failed")
 
 test "environment overrides are local to one scope":
@@ -87,15 +123,21 @@ test "environment overrides are local to one scope":
     debug = read_environment("DEBUG")
     http_proxy = read_environment("HTTP_PROXY")
     https_proxy = read_environment("HTTPS_PROXY")
-    assert(observe_overrides())
-    assert(same_environment(home, read_environment("HOME")))
-    assert(same_environment(debug, read_environment("DEBUG")))
-    assert(same_environment(http_proxy, read_environment("HTTP_PROXY")))
-    assert(same_environment(https_proxy, read_environment("HTTPS_PROXY")))
+    assert:
+        observe_overrides()
+        same_environment(home, read_environment("HOME"))
+        same_environment(debug, read_environment("DEBUG"))
+        same_environment(http_proxy, read_environment("HTTP_PROXY"))
+        same_environment(https_proxy, read_environment("HTTPS_PROXY"))
 
 test "absent and empty environment variables remain distinct":
     previous = read_environment("HTTP_PROXY")
-    scope = environment("/tmp/severian-test-home", "1", "", None)
+    scope = environment(
+        home = "/tmp/severian-test-home",
+        debug = "1",
+        http_proxy = "",
+        https_proxy = None,
+    )
     assert(scope.get("HTTP_PROXY") == "")
     assert(scope.get("HTTPS_PROXY") is None)
     drop scope

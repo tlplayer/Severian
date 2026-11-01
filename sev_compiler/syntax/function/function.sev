@@ -1,79 +1,135 @@
-import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider from "../type/mlir.sev"
+import MLIRTypeBinding,
+    MLIRTypeParameter,
+    MLIRTypeProvider from "../type/mlir.sev"
 import AssertionOrigin, CoveragePoint from "../source.sev"
 import source
 import B, Block from "../block/block.sev"
-import Constructor, Conversion, ConversionKind, Size, TypeRef from "../generic/type.sev"
+import Constructor,
+    Conversion,
+    ConversionKind,
+    Size,
+    TypeRef from "../generic/type.sev"
 import Lexeme, LexemeTerm, TokenTerm from "../generic/token.sev"
-import SourceFile, SourceMap, Span, load, span, utf8_offset, virtual_source from "../source.sev"
-import array_mlir, byte_view_mlir, index_mlir, memref_mlir, ranked_memref_storage, scalar_mlir, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir from "../primitive/mlir.sev"
+import SourceFile,
+    SourceMap,
+    Span,
+    load,
+    Span,
+    utf8_offset,
+    virtual_source from "../source.sev"
+Span as span
+import array_mlir,
+    byte_view_mlir,
+    index_mlir,
+    memref_mlir,
+    ranked_memref_storage,
+    scalar_mlir,
+    struct_mlir,
+    tensor_mlir,
+    unranked_memref_mlir,
+    unranked_tensor_mlir from "../primitive/mlir.sev"
 import LiteralValue as Constant from "../grammar/resolution.sev"
 import "../block/control_flow.sev" as control_flow
 import "../../../library/core/utils/src/hash.sev" as hashing
-import AbiId, ArtifactId, BindingId, CompilerId, DeclarationId, DefinitionID, FfiId, FunctionId, GenericParamId, HirId, InterfaceId, OpId, ProviderId, Substitution, SymbolId, TypeBinding, TypeId, ValueId, VariantId, semantic_key from "../symbol/symbol.sev"
-import TypeAnnotation, TypeAnnotationKind, named_type, simple_type_name from "../type/annotation.sev"
+import ABIID,
+    ArtifactID,
+    BindingID,
+    CompilerID,
+    DeclarationID,
+    DefinitionID,
+    FFIID,
+    FunctionID,
+    GenericParamID,
+    HIRID,
+    InterfaceID,
+    OpID,
+    ProviderID,
+    Substitution,
+    SymbolID,
+    TypeBinding,
+    TypeID,
+    ValueID,
+    VariantID,
+    semantic_key from "../symbol/symbol.sev"
+import TypeAnnotation,
+    TypeAnnotationKind,
+    named_type,
+    simple_type_name from "../type/annotation.sev"
 import LoweredFloatFormat, LoweredType from "../lowered.sev"
-import Associativity, BinaryOperator, Decorator, DecoratorValue, GenericConstraint, OperatorDeclaration, OperatorSyntax, TestMode, operator_syntax from "syntax.sev"
+import Associativity,
+    BinaryOperator,
+    Decorator,
+    DecoratorValue,
+    GenericConstraint,
+    OperatorDeclaration,
+    OperatorSyntax,
+    TestMode,
+    OperatorSyntax from "syntax.sev"
+OperatorSyntax as operator_syntax
 import Grammar, MatchArm from "../grammar/grammar.sev"
-import AttachmentRole, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, DispatchCandidate, DispatchFamily, ProofResult, WithAttachment from "../constraint/model.sev"
-import LiteralSyntax, LiteralConstruction, PrimitiveAlias, PrimitiveCategory, PrimitiveRepresentation from "../primitive/contract.sev"
+import AttachmentRole,
+    ConstraintGraph,
+    ConstraintID,
+    ConstraintObligation,
+    ConstraintRequirement,
+    ConstraintStage,
+    DispatchCandidate,
+    DispatchFamily,
+    ProofResult,
+    WithAttachment from "../constraint/model.sev"
+import LiteralSyntax,
+    LiteralConstruction,
+    PrimitiveAlias,
+    PrimitiveCategory,
+    PrimitiveRepresentation from "../primitive/contract.sev"
 import LiteralValue, LiteralValueOf from "../grammar/resolution.sev"
 
 # Callable identity, parameters, bodies, and expression use share one model.
-
 class CompilerCapability:
     name: string
 
-
 enum CompileRoute:
     Standard
-    Compiler(compiler: CompilerId)
-
+    Compiler(compiler: CompilerID)
 
 class BoundaryModifier:
     name: string
-
 
 class FieldConstraint:
     condition: Expression
     failure: Expression | None = None
 
-
 class MockFunction:
     original: string
     replacement: string
-
 
 class FunctionParameter:
     name: string
     annotation: TypeAnnotation
     default: Expression | absent
     span: source.Span
-    binding: BindingId = BindingId(0)
-    type_id: TypeId = TypeId(0)
+    binding: BindingID = BindingID(0)
+    type_id: TypeID = TypeID(0)
     modifiers: list[BoundaryModifier] = []
     variadic: bool = false
     keyword_only: bool = false
     pack: string = ""
     field_constraints: list[FieldConstraint] = []
 
-
 class ExternalCall:
-    interface: InterfaceId
-    symbol: SymbolId
-    provider: ProviderId | None
-    ffi: FfiId
-    abi: AbiId
-
+    interface: InterfaceID
+    symbol: SymbolID
+    provider: ProviderID | None
+    ffi: FFIID
+    abi: ABIID
 
 enum CallType:
     Severian
     External(call: ExternalCall)
 
-
 enum FunctionLinkage:
     Internal
     External(symbol: string)
-
 
 class FunctionDeclaration:
     decorators: list[Decorator] = []
@@ -84,23 +140,27 @@ class FunctionDeclaration:
     result: TypeAnnotation | None = None
     body: Block | None = None
     span: source.Span | None = None
-    id: FunctionId = FunctionId(0)
-    definition: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
-    generic_parameters: list[GenericParamId] = []
-    parameter_types: list[TypeId] = []
-    result_type: TypeId = TypeId(0)
+    id: FunctionID = FunctionID(0)
+    definition: DefinitionID = DefinitionID(0, 0, DeclarationID(0))
+    generic_parameters: list[GenericParamID] = []
+    parameter_types: list[TypeID] = []
+    result_type: TypeID = TypeID(0)
     compile_route: CompileRoute = Standard
     call_type: CallType = Severian
-    values: list[ValueId] = []
+    values: list[ValueID] = []
     lowered_result: LoweredType = Unit
     linkage: FunctionLinkage = Internal
-    binary_requirements: map[GenericParamId, list[BinaryOperator]] = {}
-    capability_requirements: map[GenericParamId, list[CompilerCapability]] = {}
+    binary_requirements: map[GenericParamID, list[BinaryOperator]] =
+    {
+    }
+    capability_requirements: map[GenericParamID, list[CompilerCapability]] =
+    {
+    }
     constrained: bool = false
     constraints_supported: bool = true
     lookup: string | None = None
     operator_syntax: OperatorSyntax | None = None
-    owner_type: TypeId = TypeId(0)
+    owner_type: TypeID = TypeID(0)
     extension: bool = false
     template: DefinitionID | None = None
     type_arguments: list[TypeBinding] = []
@@ -115,19 +175,22 @@ class FunctionDeclaration:
     semantic_key: string = ""
     dispatch_candidates: list[string] = []
     dispatch_predicates: list[Expression] = []
-    # Artifact location only; declaration identity remains definition/semantic_key.
+
+    '''
+    Artifact location only; declaration identity remains
+    definition/semantic_key.
+    '''
     lazy_body: string = ""
     grammar: Grammar | None = None
 
-
 def resolved_function(
-    generic_parameters: list[GenericParamId],
+    generic_parameters: list[GenericParamID],
     constrained: bool,
     constraints_supported: bool,
-    binary_requirements: map[GenericParamId, list[BinaryOperator]],
-    capability_requirements: map[GenericParamId, list[CompilerCapability]],
-    parameter_types: list[TypeId],
-    result_type: TypeId,
+    binary_requirements: map[GenericParamID, list[BinaryOperator]],
+    capability_requirements: map[GenericParamID, list[CompilerCapability]],
+    parameter_types: list[TypeID],
+    result_type: TypeID,
 ) -> FunctionDeclaration:
     function = FunctionDeclaration()
     function.generic_parameters = generic_parameters
@@ -139,23 +202,21 @@ def resolved_function(
     function.result_type = result_type
     return function
 
-
 class CallableAlternative:
     name: string
     fields: list[FunctionParameter]
     span: source.Span
     transitions: list[string] = []
 
-
 class RecordDeclaration:
     name: string
     fields: list[FunctionParameter]
     methods: list[FunctionDeclaration]
     span: source.Span
-    type_id: TypeId = TypeId(0)
+    type_id: TypeID = TypeID(0)
     lookup: string = ""
     traits: list[TypeAnnotation] = []
-    definition: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
+    definition: DefinitionID = DefinitionID(0, 0, DeclarationID(0))
     operators: list[OperatorDeclaration] = []
     type_parameters: list[string] = []
     constraints: list[GenericConstraint] = []
@@ -164,45 +225,41 @@ class RecordDeclaration:
     type_defaults: list[TypeAnnotation] = []
     alternatives: list[CallableAlternative] = []
     representation: string = ""
-    declaration_grammar: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
-    storage_element: TypeId = TypeId(0)
+    declaration_grammar: DefinitionID = DefinitionID(0, 0, DeclarationID(0))
+    storage_element: TypeID = TypeID(0)
     source_name: string = ""
     extension_target: TypeAnnotation | None = None
     decorators: list[Decorator] = []
     grammars: list[FunctionDeclaration] = []
-    mlir: MlirTypeBinding | None = None
-    mlir_parameters: list[MlirTypeParameter] = []
-    mlir_arguments: list[tuple[string, TypeId]] = []
+    mlir: MLIRTypeBinding | None = None
+    mlir_parameters: list[MLIRTypeParameter] = []
+    mlir_arguments: list[tuple[string, TypeID]] = []
     mlir_shape: list[int] = []
-    mlir_element: TypeId = TypeId(0)
+    mlir_element: TypeID = TypeID(0)
 
-
-def union_variants(record: RecordDeclaration) -> list[TypeId]:
-    variants: list[TypeId] = []
+def union_variants(record: RecordDeclaration) -> list[TypeID]:
+    variants: list[TypeID] = []
     if record.name.starts_with("$union$"):
         for field in record.fields[1:]:
             variants.append(field.type_id)
     return variants
 
-
-def outcome_variants(record: RecordDeclaration) -> list[TypeId]:
-    variants: list[TypeId] = []
+def outcome_variants(record: RecordDeclaration) -> list[TypeID]:
+    variants: list[TypeID] = []
     if record.name.starts_with("$outcome$"):
         for field in record.fields[1:]:
             variants.append(field.type_id)
     return variants
 
-
 class Expression:
     kind: ExpressionKind
     span: source.Span
-    id: HirId = HirId(0)
-    type_id: TypeId = TypeId(0)
+    id: HIRID = HIRID(0)
+    type_id: TypeID = TypeID(0)
     grammar: DefinitionID | None = None
     loan_root: int = -1
     loan_mode: string = ""
     literal: LiteralConstruction | None = None
-
 
 class CallArgument:
     name: string | absent
@@ -210,21 +267,27 @@ class CallArgument:
     span: source.Span
     spread: bool = false
 
-
 enum ResolvedCallee:
     Direct(function: DefinitionID, substitution: Substitution)
     FunctionValue(expression: Expression)
-    Method(implementation: DefinitionID, receiver: Expression, substitution: Substitution)
-    Constructor(type_definition: DefinitionID, variant: VariantId | None)
-    Intrinsic(operation: OpId)
-
+    Method(
+        implementation: DefinitionID,
+        receiver: Expression,
+        substitution: Substitution,
+    )
+    Constructor(type_definition: DefinitionID, variant: VariantID | None)
+    Intrinsic(operation: OpID)
 
 enum ExpressionKind:
-    MockValue(calls: list[Expression], results: list[Expression], fallback: Expression)
+    MockValue(
+        calls: list[Expression],
+        results: list[Expression],
+        fallback: Expression,
+    )
     Lambda(parameters: list[string], body: Expression)
     Ownership(mode: string, value: Expression)
     AddressOf(value: Expression)
-    TypeLayout(subject: TypeId, alignment: bool)
+    TypeLayout(subject: TypeID, alignment: bool)
     SourceSymbol(spelling: string, definition: DefinitionID)
     CompilerTerm(name: string, arguments: list[TypeAnnotation])
     TypeApplication(target: Expression, arguments: list[TypeAnnotation])
@@ -241,40 +304,60 @@ enum ExpressionKind:
     ErrorExpectation(value: Expression | None, comparison: Expression | None)
     MapLiteral(keys: list[Expression], values: list[Expression])
     Subscript(object: Expression, index: Expression)
-    Slice(object: Expression, start: Expression | None, stop: Expression | None, step: Expression | None)
-    ListValue(elements: list[Expression], construction: Expression, storage: Expression)
-    IndexReference(object: Expression, index: Expression, access: Expression, storage: Expression | None)
+    Slice(
+        object: Expression,
+        start: Expression | None,
+        stop: Expression | None,
+        step: Expression | None,
+    )
+    ListValue(
+        elements: list[Expression],
+        construction: Expression,
+        storage: Expression,
+    )
+    IndexReference(
+        object: Expression,
+        index: Expression,
+        access: Expression,
+        storage: Expression | None,
+    )
     OutcomeValue(value: Expression, variant: int)
     OutcomeTest(value: Expression, variant: int)
     OutcomeUnwrap(value: Expression)
     UpdateOperand(index: int)
-    BindingReference(binding: BindingId)
+    BindingReference(binding: BindingID)
     FunctionReference(definition: DefinitionID)
     ResolvedCall(callee: ResolvedCallee, arguments: list[CallArgument])
     Convert(operand: Expression, conversion: ExpressionConversion)
     Unary(operator: OperatorSyntax, operand: Expression)
     Binary(operator: OperatorSyntax, left: Expression, right: Expression)
     ComparisonChain(operands: list[Expression], operators: list[OperatorSyntax])
-    Conditional(condition: Expression, then_value: Expression, else_value: Expression)
+    Conditional(
+        condition: Expression,
+        then_value: Expression,
+        else_value: Expression,
+    )
     Stringify(value: Expression)
     TypeName(value: Expression, name: string)
     RecordValue(fields: list[CallArgument])
     FieldReference(object: Expression, index: int)
     RequiredMember(object: Expression, requirement: DefinitionID, name: string)
 
-
-def resolve_expression(expression: Expression, id: HirId, type_id: TypeId, kind: ExpressionKind) -> Expression:
+def resolve_expression(
+    expression: Expression,
+    id: HIRID,
+    type_id: TypeID,
+    kind: ExpressionKind,
+) -> Expression:
     expression.id = id
     expression.type_id = type_id
     expression.kind = kind
     return expression
 
-
 class ExpressionConversion:
-    from_type: TypeId
-    to_type: TypeId
+    from_type: TypeID
+    to_type: TypeID
     kind: ExpressionConversionKind
-
 
 enum ExpressionConversionKind:
     NumericWidening
@@ -285,29 +368,55 @@ enum ExpressionConversionKind:
 enum Operation:
     DebugOwnership(name: string, mode: string, span: source.Span)
     DebugLocation(span: source.Span)
-    DebugValue(name: string, value: ValueId, span: source.Span, argument: int, ownership: string, address: bool, declared_type: TypeId)
-    TypeLayout(subject: TypeId, alignment: bool, result: ValueId)
+    DebugValue(
+        name: string,
+        value: ValueID,
+        span: source.Span,
+        argument: int,
+        ownership: string,
+        address: bool,
+        declared_type: TypeID,
+    )
+    TypeLayout(subject: TypeID, alignment: bool, result: ValueID)
     Coverage(point: CoveragePoint)
+
     # Accepts a tagged aggregate or its decomposed integer tag.
-    IsVariant(value: ValueId, variant: int, result: ValueId)
-    Constant(value: LiteralValue, result: ValueId)
-    Unary(operator: OperatorSyntax, operand: ValueId, result: ValueId)
-    Binary(operator: OperatorSyntax, left: ValueId, right: ValueId, result: ValueId)
-    Call(function: FunctionId, arguments: list[ValueId], result: ValueId)
-    CallFields(function: FunctionId, arguments: list[ValueId], outputs: list[ValueId])
-    Assert(condition: ValueId, message: ValueId | None, origin: AssertionOrigin)
-    Allocate(type_id: TypeId, result: ValueId)
-    Alias(value: ValueId, result: ValueId)
-    Load(address: ValueId, result: ValueId)
-    Store(address: ValueId, value: ValueId)
-    FieldAddress(object: ValueId, owner: TypeId, index: int, result: ValueId)
-    CompiledRegionCall(artifact_id: ArtifactId, inputs: list[ValueId], outputs: list[ValueId])
+    IsVariant(value: ValueID, variant: int, result: ValueID)
+    Constant(value: LiteralValue, result: ValueID)
+    Unary(operator: OperatorSyntax, operand: ValueID, result: ValueID)
+    Binary(
+        operator: OperatorSyntax,
+        left: ValueID,
+        right: ValueID,
+        result: ValueID,
+    )
+    Call(function: FunctionID, arguments: list[ValueID], result: ValueID)
+    CallFields(
+        function: FunctionID,
+        arguments: list[ValueID],
+        outputs: list[ValueID],
+    )
+    Assert(condition: ValueID, message: ValueID | None, origin: AssertionOrigin)
+    Allocate(type_id: TypeID, result: ValueID)
+    Alias(value: ValueID, result: ValueID)
+    Load(address: ValueID, result: ValueID)
+    Store(address: ValueID, value: ValueID)
+    FieldAddress(object: ValueID, owner: TypeID, index: int, result: ValueID)
+    CompiledRegionCall(
+        artifact_id: ArtifactID,
+        inputs: list[ValueID],
+        outputs: list[ValueID],
+    )
 
-
-# Functions use @mlir for operation identity; type declarations use it for a
-# type spelling. Both preserve the same parsed decorator/grammar data.
-def declared_mlir_binding(decorators: list[Decorator], owner: string) -> MlirTypeBinding | None:
-    selected: MlirTypeBinding | None := None
+'''
+Functions use @mlir for operation identity; type declarations use it for a
+type spelling. Both preserve the same parsed decorator/grammar data.
+'''
+def declared_mlir_binding(
+    decorators: list[Decorator],
+    owner: string,
+) -> MLIRTypeBinding | None:
+    selected: MLIRTypeBinding | None := None
     for decorator in decorators:
         if decorator.name != "mlir":
             continue
@@ -319,23 +428,28 @@ def declared_mlir_binding(decorators: list[Decorator], owner: string) -> MlirTyp
             case String:
                 if value == "":
                     throw Error("MLIR type annotation requires a spelling")
-                selected = MlirTypeBinding(value)
+                selected = MLIRTypeBinding(value)
             case Name | Integer | Boolean:
                 throw Error("MLIR type annotation requires a string")
     return selected
 
-
-def record_mlir_binding(record: RecordDeclaration) -> MlirTypeBinding | None:
+def record_mlir_binding(record: RecordDeclaration) -> MLIRTypeBinding | None:
     selected ?= declared_mlir_binding(record.decorators, record.name)
     if selected != None:
         return selected
     cached ?= record.mlir
     if cached != None:
         return cached
-    return MlirTypeBinding("!llvm.struct<({elements})>", "struct", dimensions=0)
+    return MLIRTypeBinding(
+        spelling = "!llvm.struct<({elements})>",
+        category = "struct",
+        dimensions = 0,
+    )
 
-
-def annotation_key(annotation: TypeAnnotation, parameters: list[string] = []) -> string:
+def annotation_key(
+    annotation: TypeAnnotation,
+    parameters: list[string] = [],
+) -> string:
     generic_parameters = parameters
     match annotation.kind:
         case Named:
@@ -352,6 +466,7 @@ def annotation_key(annotation: TypeAnnotation, parameters: list[string] = []) ->
             parts = ["union"]
             for member in members:
                 parts.append(annotation_key(member, parameters))
+
             # The source order carries tagged-union ABI meaning.
             return semantic_key(parts)
         case Function:
@@ -365,8 +480,15 @@ def annotation_key(annotation: TypeAnnotation, parameters: list[string] = []) ->
         case DimensionRuntime:
             return semantic_key(["runtime-dimension", string(index)])
         case ShapeSpread:
-            return semantic_key(["shape-spread", annotation_key(named_type(parameter, [], annotation.span), generic_parameters)])
-
+            return semantic_key(
+                [
+                    "shape-spread",
+                    annotation_key(
+                        named_type(parameter, [], annotation.span),
+                        generic_parameters,
+                    ),
+                ],
+            )
 
 def callable_key(function: FunctionDeclaration, owner: string) -> string:
     name := function.name
@@ -376,20 +498,24 @@ def callable_key(function: FunctionDeclaration, owner: string) -> string:
             name = name[len(namespace):]
     parts = [owner, "callable", name, string(len(function.type_parameters))]
     for parameter in function.parameters:
-        parts.append(annotation_key(parameter.annotation, function.type_parameters))
+        parts.append(
+            annotation_key(parameter.annotation, function.type_parameters),
+        )
         parts.append("pack" if parameter.variadic else "single")
         parts.append(parameter.name if parameter.keyword_only else "")
         for modifier in parameter.modifiers:
             parts.append(modifier.name)
     return semantic_key(parts)
 
-
 test "annotation keys retain function and dimension structure":
     location = Span(0, 0, 1)
     first = named_type("T", [], location)
     second = named_type("U", [], location)
     left = TypeAnnotation(TypeAnnotationKind.Function([first], first), location)
-    right = TypeAnnotation(TypeAnnotationKind.Function([second], second), location)
+    right = TypeAnnotation(
+        TypeAnnotationKind.Function([second], second),
+        location,
+    )
     assert(annotation_key(left, ["T"]) == annotation_key(right, ["U"]))
     constant = TypeAnnotation(TypeAnnotationKind.DimensionConstant(3), location)
     runtime = TypeAnnotation(TypeAnnotationKind.DimensionRuntime(3), location)

@@ -1,44 +1,215 @@
-import ArtifactId, AttrValue, AttributeId, CompilerId, FunctionId, OpId, ProviderId, StableId, TypeId, ValueId from "../symbol/symbol.sev"
+import ArtifactID,
+    AttrValue,
+    AttributeID,
+    CompilerID,
+    FunctionID,
+    OpID,
+    ProviderID,
+    StableID,
+    TypeID,
+    ValueID from "../symbol/symbol.sev"
 import source
 import LiteralValue, LiteralValueOf from "../grammar/resolution.sev"
-import Add, Associativity, BinaryOperator, BitwiseAnd, BitwiseOr, BitwiseXor, CompilerExpectation, CompilerTestCase, Contains, Decorator, DecoratorArgument, DecoratorValue, Divide, Equal, Fixity, FloorDivide, GenericConstraint, Greater, GreaterEqual, ImportDeclaration, ImportSubject, LeftShift, Less, LessEqual, LogicalAnd, LogicalOr, Move, Multiply, Negative, Not, NotEqual, Operator, OperatorDeclaration, OperatorDomain, OperatorParameter, OperatorSignature, OperatorSyntax, Positive, Power, PropertyDeclaration, Remainder, RightShift, ScalarOperation, Subtract, TestCaseRow, TestDeclaration, TestExpectation, TestMode, TestModeArguments, TestStream, TraitDeclaration, TypeConstraint, TypeDeclaration, TypePattern, UnaryOperator, Y, operator_syntax, test_mode_name from "syntax.sev"
+import Add,
+    Associativity,
+    BinaryOperator,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    CompilerExpectation,
+    CompilerTestCase,
+    Contains,
+    Decorator,
+    DecoratorArgument,
+    DecoratorValue,
+    Divide,
+    Equal,
+    Fixity,
+    FloorDivide,
+    GenericConstraint,
+    Greater,
+    GreaterEqual,
+    ImportDeclaration,
+    ImportSubject,
+    LeftShift,
+    Less,
+    LessEqual,
+    LogicalAnd,
+    LogicalOr,
+    Move,
+    Multiply,
+    Negative,
+    Not,
+    NotEqual,
+    Operator,
+    OperatorDeclaration,
+    OperatorDomain,
+    OperatorParameter,
+    OperatorSignature,
+    OperatorSyntax,
+    Positive,
+    Power,
+    PropertyDeclaration,
+    Remainder,
+    RightShift,
+    ScalarOperation,
+    Subtract,
+    TestCaseRow,
+    TestDeclaration,
+    TestExpectation,
+    TestMode,
+    TestModeArguments,
+    TestStream,
+    TraitDeclaration,
+    TypeConstraint,
+    TypeDeclaration,
+    TypePattern,
+    UnaryOperator,
+    Y,
+    OperatorSyntax,
+    test_mode_name from "syntax.sev"
 import AssertionLocation from "../source.sev"
 import LiteralValue as Constant from "../grammar/resolution.sev"
 import "../grammar/grammar.sev" as _dependency_grammar
-import AttachmentRole, Block, BoundaryModifier, CallArgument, CallType, CallableAlternative, CompileRoute, CompilerCapability, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, Constructor, Conversion, ConversionKind, DispatchCandidate, DispatchFamily, Expression, ExpressionConversion, ExpressionConversionKind, ExpressionKind, ExternalCall, FieldConstraint, FunctionDeclaration, FunctionLinkage, FunctionParameter, Lexeme, LexemeTerm, LiteralSyntax, LiteralConstruction, LoweredFloatFormat, LoweredType, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, MockFunction, Operation, PrimitiveAlias, PrimitiveCategory, PrimitiveRepresentation, ProofResult, RecordDeclaration, ResolvedCallee, Size, SourceFile, SourceMap, Span, TokenTerm, TypeAnnotation, TypeAnnotationKind, TypeRef, WithAttachment, annotation_key, array_mlir, byte_view_mlir, callable_key, control_flow, declared_mlir_binding, index_mlir, load, memref_mlir, named_type, outcome_variants, ranked_memref_storage, record_mlir_binding, resolve_expression, resolved_function, scalar_mlir, simple_type_name, span, struct_mlir, tensor_mlir, union_variants, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source from "function.sev"
-import Constraint, InferenceContext, Signature, TraitRef, TyInterner, TypeKind, UnifyError, insert_type, same_constructor, same_parameters, type_children from "../type/system.sev"
+import AttachmentRole,
+    Block,
+    BoundaryModifier,
+    CallArgument,
+    CallType,
+    CallableAlternative,
+    CompileRoute,
+    CompilerCapability,
+    ConstraintGraph,
+    ConstraintID,
+    ConstraintObligation,
+    ConstraintRequirement,
+    ConstraintStage,
+    Constructor,
+    Conversion,
+    ConversionKind,
+    DispatchCandidate,
+    DispatchFamily,
+    Expression,
+    ExpressionConversion,
+    ExpressionConversionKind,
+    ExpressionKind,
+    ExternalCall,
+    FieldConstraint,
+    FunctionDeclaration,
+    FunctionLinkage,
+    FunctionParameter,
+    Lexeme,
+    LexemeTerm,
+    LiteralSyntax,
+    LiteralConstruction,
+    LoweredFloatFormat,
+    LoweredType,
+    MLIRTypeBinding,
+    MLIRTypeParameter,
+    MLIRTypeProvider,
+    MockFunction,
+    Operation,
+    PrimitiveAlias,
+    PrimitiveCategory,
+    PrimitiveRepresentation,
+    ProofResult,
+    RecordDeclaration,
+    ResolvedCallee,
+    Size,
+    SourceFile,
+    SourceMap,
+    Span,
+    TokenTerm,
+    TypeAnnotation,
+    TypeAnnotationKind,
+    TypeRef,
+    WithAttachment,
+    annotation_key,
+    array_mlir,
+    byte_view_mlir,
+    callable_key,
+    control_flow,
+    declared_mlir_binding,
+    index_mlir,
+    load,
+    memref_mlir,
+    named_type,
+    outcome_variants,
+    ranked_memref_storage,
+    record_mlir_binding,
+    resolve_expression,
+    resolved_function,
+    scalar_mlir,
+    simple_type_name,
+    Span,
+    struct_mlir,
+    tensor_mlir,
+    union_variants,
+    unranked_memref_mlir,
+    unranked_tensor_mlir,
+    utf8_offset,
+    virtual_source from "function.sev"
+import Constraint,
+    InferenceContext,
+    Signature,
+    TraitRef,
+    TyInterner,
+    TypeKind,
+    UnifyError,
+    insert_type,
+    same_constructor,
+    same_parameters,
+    type_children from "../type/system.sev"
 import "../../../library/core/utils/src/hash.sev" as hashing
 
-
 # Operations, registry contracts, and callable lowering metadata.
-
 enum LoweredOperation:
     LoweredCoverage(key: string)
-    ConstantValue(value: Constant, result: ValueId)
-    LoweredUnary(operator: UnaryOperation, operand: ValueId, result: ValueId)
-    LoweredBinary(operator: BinaryOperation, left: ValueId, right: ValueId, result: ValueId)
-    LoweredCall(function: FunctionId, arguments: list[ValueId], result: ValueId)
-    RuntimeCall(symbol: string, arguments: list[ValueId], result: ValueId | None)
-    LoweredReturn(value: ValueId | None)
-    LoweredAssert(condition: ValueId, message: ValueId | None, location: AssertionLocation | None)
-    LoweredIf(condition: ValueId, then_block: Block, else_block: Block)
-    ArtifactCall(artifact_id: ArtifactId, inputs: list[ValueId], outputs: list[ValueId])
+    ConstantValue(value: Constant, result: ValueID)
+    LoweredUnary(operator: UnaryOperation, operand: ValueID, result: ValueID)
+    LoweredBinary(
+        operator: BinaryOperation,
+        left: ValueID,
+        right: ValueID,
+        result: ValueID,
+    )
+    LoweredCall(function: FunctionID, arguments: list[ValueID], result: ValueID)
+    RuntimeCall(
+        symbol: string,
+        arguments: list[ValueID],
+        result: ValueID | None,
+    )
+    LoweredReturn(value: ValueID | None)
+    LoweredAssert(
+        condition: ValueID,
+        message: ValueID | None,
+        location: AssertionLocation | None,
+    )
+    LoweredIf(condition: ValueID, then_block: Block, else_block: Block)
+    ArtifactCall(
+        artifact_id: ArtifactID,
+        inputs: list[ValueID],
+        outputs: list[ValueID],
+    )
 
-
-# Source annotations describe the implementation of an F. The scalar compiler
-# recognizes these two boundary forms, never library helper/function names.
+'''
+Source annotations describe the implementation of an F. The scalar compiler
+recognizes these two boundary forms, never library helper/function names.
+'''
 def scalar_boundary(function: FunctionDeclaration, name: string) -> string:
     for decorator in function.decorators:
         if decorator.name == name:
             for argument in decorator.arguments:
-                if argument.name == "" or (name == "c" and argument.name == "symbol"):
+                if argument.name == ""
+                    or (name == "c" and argument.name == "symbol"):
                     match argument.value:
                         case String:
                             return value
                         case Name | Integer | Boolean:
-                            throw Error("scalar boundary requires a string literal")
+                            throw Error(
+                                "scalar boundary requires a string literal",
+                            )
     return ""
-
 
 def scalar_operand_segments(function: FunctionDeclaration) -> list[int]:
     for decorator in function.decorators:
@@ -50,27 +221,37 @@ def scalar_operand_segments(function: FunctionDeclaration) -> list[int]:
                             segments: list[int] = []
                             for part in value.split(","):
                                 if part == "":
-                                    throw Error("invalid MLIR operand segment size")
+                                    throw Error(
+                                        "invalid MLIR operand segment size",
+                                    )
                                 for character in part.characters():
                                     if character < "0" or character > "9":
-                                        throw Error("invalid MLIR operand segment size")
+                                        throw Error(
+                                            "invalid MLIR operand segment size",
+                                        )
                                 size = int(part)
                                 if size < 0 or size > 2147483647:
-                                    throw Error("invalid MLIR operand segment size")
+                                    throw Error(
+                                        "invalid MLIR operand segment size",
+                                    )
                                 segments.append(size)
                             return segments
                         case Name | Integer | Boolean:
-                            throw Error("MLIR operand segments require a string literal")
+                            throw Error(
+                                "MLIR operand segments require a string litera"
+                                "l",
+                            )
     return []
 
-
-# Lowering dependencies belong to the declaration that introduces an operation. The
-# driver collects these from reachable F; the backend never inspects IR text.
+'''
+Lowering dependencies belong to the declaration that introduces an operation.
+The
+driver collects these from reachable F; the backend never inspects IR text.
+'''
 class LoweringRequirements:
     passes: list[string] = []
     libraries: list[string] = []
     quality: bool = false
-
 
 def scalar_requirement_names(text: string) -> list[string]:
     result: list[string] = []
@@ -79,7 +260,12 @@ def scalar_requirement_names(text: string) -> list[string]:
         if name == "":
             throw Error("empty lowering requirement")
         for character in name.characters():
-            if not ((character >= "a" and character <= "z") or (character >= "A" and character <= "Z") or (character >= "0" and character <= "9") or character in ["_", "-", "."]):
+            if not (
+                (character >= "a" and character <= "z")
+                or (character >= "A" and character <= "Z")
+                or (character >= "0" and character <= "9")
+                or character in ["_", "-", "."]
+            ):
                 throw Error("invalid lowering requirement: " + name)
         if name.starts_with("-"):
             throw Error("invalid lowering requirement: " + name)
@@ -87,8 +273,10 @@ def scalar_requirement_names(text: string) -> list[string]:
             result.append(name)
     return result
 
-
-def scalar_requirements(function: borrow FunctionDeclaration, requirements: LoweringRequirements):
+def scalar_requirements(
+    function: borrow FunctionDeclaration,
+    requirements: LoweringRequirements,
+):
     for decorator in borrow function.decorators:
         if decorator.name not in ["mlir", "c"]:
             continue
@@ -103,7 +291,10 @@ def scalar_requirements(function: borrow FunctionDeclaration, requirements: Lowe
                     for name in scalar_requirement_names(value):
                         if key == "lowering":
                             if decorator.name != "mlir":
-                                throw Error("C boundaries cannot request MLIR lowering passes")
+                                throw Error(
+                                    "C boundaries cannot request MLIR lowering"
+                                    " passes",
+                                )
                             if name not in requirements.passes:
                                 requirements.passes.append(name)
                         elif name not in requirements.libraries:
@@ -111,22 +302,17 @@ def scalar_requirements(function: borrow FunctionDeclaration, requirements: Lowe
                 case Name | Integer | Boolean:
                     throw Error("lowering requirements require string literals")
 
-
-class DialectId: StableId
+class DialectID: StableID
     value: u128
 
-
-class OperationId: StableId
+class OperationID: StableID
     value: u128
 
-
-class BackendId: StableId
+class BackendID: StableID
     value: u128
 
-
-class RuntimeId: StableId
+class RuntimeID: StableID
     value: u128
-
 
 class EffectSet:
     bits: u16
@@ -137,116 +323,108 @@ class EffectSet:
     def union(other: EffectSet) -> EffectSet:
         return EffectSet(bits | other.bits)
 
-
 enum LoweringCapability:
     Standard
-    Compiler(compiler: CompilerId)
-    Backend(backend: BackendId)
-    Runtime(runtime: RuntimeId)
-    Provider(provider: ProviderId)
-
+    Compiler(compiler: CompilerID)
+    Backend(backend: BackendID)
+    Runtime(runtime: RuntimeID)
+    Provider(provider: ProviderID)
 
 class RegisteredOperation:
-    id: OpId
-    operands: list[TypeId]
-    results: list[TypeId]
-    attributes: map[AttributeId, AttrValue]
-
+    id: OpID
+    operands: list[TypeID]
+    results: list[TypeID]
+    attributes: map[AttributeID, AttrValue]
 
 class IrContext:
     types: TyInterner
     operations: OperationRegistry
 
-
 class OperationDiagnostic:
-    operation: OpId
+    operation: OpID
     message: string
 
-
 class CanonicalRewrite:
-    replacement: OpId
-    attributes: map[AttributeId, AttrValue]
-
+    replacement: OpID
+    attributes: map[AttributeID, AttrValue]
 
 trait OperationInterface:
-    def infer_types(operands: list[TypeId], attributes: map[AttributeId, AttrValue]) -> list[TypeId] | OperationDiagnostic
-    def verify(operation: RegisteredOperation, context: IrContext) -> absent | OperationDiagnostic
+    def infer_types(
+        operands: list[TypeID],
+        attributes: map[AttributeID, AttrValue],
+    ) -> list[TypeID] | OperationDiagnostic
+    def verify(
+        operation: RegisteredOperation,
+        context: IrContext,
+    ) -> absent | OperationDiagnostic
     def effects(operation: RegisteredOperation) -> EffectSet
     def canonicalize(operation: RegisteredOperation) -> CanonicalRewrite | None
     def lowering_capabilities() -> list[LoweringCapability]
 
-
 class OperationRegistry:
-    interfaces: map[OpId, OperationInterface]
+    interfaces: map[OpID, OperationInterface]
 
     def OperationRegistry():
         interfaces = {}
 
-    def register(id: OpId, interface: OperationInterface) -> absent | OperationDiagnostic:
+    def register(
+        id: OpID,
+        interface: OperationInterface,
+    ) -> absent | OperationDiagnostic:
         if interfaces.contains(id):
-            return error(OperationDiagnostic(id, "operation interface is already registered"))
+            return error(
+                OperationDiagnostic(
+                    id,
+                    "operation interface is already registered",
+                ),
+            )
         interfaces[id] = interface
         return absent
 
-    def interface(id: OpId) -> OperationInterface | None:
+    def interface(id: OpID) -> OperationInterface | None:
         return interfaces.get(id)
 
+def dialect_id(name: string) -> DialectID:
+    return DialectID(hashing.hash(name))
 
-def dialect_id(name: string) -> DialectId:
-    return DialectId(hashing.hash(name))
+def operation_id(name: string) -> OperationID:
+    return OperationID(hashing.hash(name))
 
+def attribute_id(name: string) -> AttributeID:
+    return AttributeID(hashing.hash(name))
 
-def operation_id(name: string) -> OperationId:
-    return OperationId(hashing.hash(name))
+def backend_id(name: string) -> BackendID:
+    return BackendID(hashing.hash(name))
 
+def runtime_id(name: string) -> RuntimeID:
+    return RuntimeID(hashing.hash(name))
 
-def attribute_id(name: string) -> AttributeId:
-    return AttributeId(hashing.hash(name))
+def provider_id(name: string) -> ProviderID:
+    return ProviderID(hashing.hash(name))
 
-
-def backend_id(name: string) -> BackendId:
-    return BackendId(hashing.hash(name))
-
-
-def runtime_id(name: string) -> RuntimeId:
-    return RuntimeId(hashing.hash(name))
-
-
-def provider_id(name: string) -> ProviderId:
-    return ProviderId(hashing.hash(name))
-
-
-def named_operation(dialect: string, operation: string) -> OpId:
-    return OpId(dialect_id(dialect).value, operation_id(operation).value)
-
+def named_operation(dialect: string, operation: string) -> OpID:
+    return OpID(dialect_id(dialect).value, operation_id(operation).value)
 
 def no_effects() -> EffectSet:
     return EffectSet(0)
 
-
 def read_effect() -> EffectSet:
     return EffectSet(1)
-
 
 def write_effect() -> EffectSet:
     return EffectSet(2)
 
-
 def allocate_effect() -> EffectSet:
     return EffectSet(4)
-
 
 def free_effect() -> EffectSet:
     return EffectSet(8)
 
-
 def throw_effect() -> EffectSet:
     return EffectSet(16)
 
-
 def io_effect() -> EffectSet:
     return EffectSet(32)
-
 
 test "operation names have stable independent identities":
     first = named_operation("arith", "add")
@@ -257,28 +435,27 @@ test "operation names have stable independent identities":
     assert(first != different_operation)
     assert(first != different_dialect)
 
-
 test "effect sets compose without losing bits":
-    effects = read_effect().union(write_effect()).union(io_effect())
+    effects = read_effect()
+        .union(write_effect())
+        .union(io_effect())
     assert(effects.contains(read_effect()))
     assert(effects.contains(write_effect()))
     assert(effects.contains(io_effect()))
     assert(not effects.contains(throw_effect()))
 
-
-
-# Lowering retains the same open operation identity. These wrappers describe
-# arity only; adding an operation does not add a new lowered variant.
+'''
+Lowering retains the same open operation identity. These wrappers describe
+arity only; adding an operation does not add a new lowered variant.
+'''
 class UnaryOperation:
-    id: OpId
-
+    id: OpID
 
 class BinaryOperation:
-    id: OpId
-
+    id: OpID
 
 # Keep compilation-unit identity across the compiler/backend boundary.
-class MlirObject:
+class MLIRObject:
     key: string
     text: string
     entry: bool = false

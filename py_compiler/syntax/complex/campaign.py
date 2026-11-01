@@ -25,14 +25,33 @@ void __sev_profile_difference(void) {
 '''
 
 
+@dataclass(frozen=True)
+class FloatInputBits:
+    """Decode the transported IEEE value in MLIR, then narrow its precision."""
+    def atom(self, operation):
+        from py_compiler.syntax.generic.atom import Atom
+        return Atom(self, (operation.operands[0].type,), operation.result.type, ('copy',), (), self)
+
+    def render_operation(self, operation):
+        from py_compiler.mlir.src.cfg import name
+        source, result = operation.operands[0], operation.result
+        if result.type.mlir == 'f64':
+            return [f'{name(result)} = arith.bitcast {name(source)} : i64 to f64']
+        temporary = f'%campaign_float_{result.identity}'
+        return [f'{temporary} = arith.bitcast {name(source)} : i64 to f64',
+                f'{name(result)} = arith.truncf {temporary} : f64 to {result.type.mlir}']
+
+
 class Marker(BlockProvider):
-    def __init__(self, metric, name=None):
-        self.metric, self.name = metric, name
+    def __init__(self, metric, name=None, annotation=None):
+        self.metric, self.name, self.annotation = metric, name, annotation
 
     def lower(self,node,cfg,env,nodes,index):
         if self.name:
             from py_compiler.mir.ownership.flow import Binding
             value=cfg.emit('campaign-input',cfg.context.type('int'),(),ProfileOperation('input'),node.span)
+            if self.annotation is not None:
+                value=cfg.emit('campaign-float',cfg.context.type(self.annotation),(value,),FloatInputBits(),node.span)
             binding=Binding(node.identity,self.name,value.type,True,'own',node.span)
             env[self.name]=binding
             cfg.local_names.add(self.name)
@@ -106,26 +125,39 @@ def expand(node,context):
     if fixed and replay_cases is None: raise ValueError('replay requires cases or fixture')
     from py_compiler.packaging.campaigns import domain,constrain
     domains={name:domain(annotation) for name,annotation in entry.parameters}
+    constraints=[]
     for candidate in entries:
         names=dict(zip((name for name,_ in candidate.parameters),domains))
         def spelling(term):
             if term.kind=='name': return names.get(term.token.text,term.token.text)
             if term.kind=='literal': return term.token.text
+            if term.kind=='list': return '['+','.join(spelling(x) for x in term.operands)+']'
+            if term.kind=='member' and term.token.text in ('first', 'last'):
+                return term.token.text+'('+spelling(term.operands[0])+')'
+            if term.kind=='index': return spelling(term.operands[0])+'['+spelling(term.operands[1])+']'
+            if term.kind=='comprehension':
+                item,target,source,predicate=term.operands
+                return '['+spelling(item)+' for '+target.token.text+' in '+spelling(source)+(' if '+spelling(predicate) if predicate else '')+']'
             if term.kind=='call': return spelling(term.operands[0])+'('+','.join(spelling(x) for x in term.operands[1:])+')'
             if term.kind=='chain': return ' '.join(spelling(x) if hasattr(x,'operands') else x.text for x in term.operands)
-            if term.kind=='binary': return '('+spelling(term.operands[0])+' '+term.token.text+' '+spelling(term.operands[1])+')'
-            if term.kind=='unary': return term.token.text+spelling(term.operands[0])
+            if term.kind=='binary':
+                left,right=term.operands
+                if term.token.text=='in' and (right.kind=='interval' or right.kind=='binary' and right.token.text=='..'):
+                    closed=right.interval or (True,True)
+                    return '('+spelling(right.operands[0])+(' <= ' if closed[0] else ' < ')+spelling(left)+(' <= ' if closed[1] else ' < ')+spelling(right.operands[1])+')'
+                return '('+spelling(left)+' '+term.token.text+' '+spelling(right)+')'
+            if term.kind=='unary': return term.token.text+' '+spelling(term.operands[0])
             raise ValueError('unsupported campaign constraint expression '+term.kind)
         for guard in candidate.guards:
-            constrain(domains,spelling(guard))
+            constraints.append(constrain(domains,spelling(guard)))
     from py_compiler.frontend.source.source import SourceFile
     from py_compiler.frontend.lexer.lexer import lex
     from py_compiler.frontend.parser.blocks import parse_blocks
     lines=[]; markers={}; counter=0
-    def marker(metric,name=None,indent=''):
+    def marker(metric,name=None,indent='',annotation=None):
         nonlocal counter
         key='__campaign_marker_'+str(counter);counter+=1
-        markers[key]=Marker(metric,name);lines.append(indent+key)
+        markers[key]=Marker(metric,name,annotation);lines.append(indent+key)
     def parameter(name,bounds,indent=''):
         if 'element' in bounds:
             length=name+'_length'; item=name+'_item'
@@ -136,6 +168,8 @@ def expand(node,context):
             parameter(item,bounds['element'],indent+'    ')
             lines.append(indent+'    '+name+'.append('+item+')')
             lines.append(indent+'    '+name+'_index += 1')
+        elif 'float-bits' in bounds:
+            marker('input',name,indent,bounds['type'])
         else:
             raw=name+'_raw';marker('input',raw,indent)
             lines.append(indent+name+': '+bounds['type']+' = '+('bool('+raw+')' if bounds['type']=='bool' else raw))
@@ -166,6 +200,7 @@ def expand(node,context):
     start=original.text.rfind('\n',0,node.span.start)+1
     end=original.text.find('\n',node.span.end)
     spec={'mode':mode,'function':targets[0],'times':times,'domains':domains,'parameters':list(domains),
+          'constraints':constraints,
           'result':entry.result,'complexity':entry.complexity,'label':node.header.label,
           'indent':original.text[start:node.span.start]+'    ',
           'persistence':{'source-sha256':sha256(original.text.encode()).hexdigest(),
@@ -185,6 +220,31 @@ def expand(node,context):
 import unittest
 
 class CallableCampaignTests(unittest.TestCase):
+    def test_float_campaign_decodes_ieee_bits_in_mlir(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.mlir.src.lib import lower, render
+        for annotation in ('float', 'f32', 'f16'):
+            source = f'def identity(value: {annotation}) -> {annotation}:\n    return value\ntest:\n    replay(identity, cases=[[1.25]])\n'
+            result = compile_source('float-campaign.sev', source, Syntax(include_tests=True))
+            self.assertFalse(result.diagnostics, str(result.diagnostics))
+            output = render(lower(result.program))
+            self.assertIn('arith.bitcast', output)
+            self.assertIn('i64 to f64', output)
+            if annotation != 'float': self.assertIn('f64 to '+annotation, output)
+
+    def test_joint_guards_survive_lowering_and_replay_checks(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = 'def gap(low: int, high: int) -> int with 0 <= low < high <= 4:\n    return high-low\n'
+        result = compile_source('joint-campaign.sev', source + 'test with fuzz:\n    fuzz(gap, times=3)\n', Syntax(include_tests=True))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        spec = next(body.test['campaign'] for body in result.program.bodies if body.test)
+        from py_compiler.packaging.campaigns import inputs
+        self.assertTrue(all(values['low'] < values['high'] for values, _ in inputs(spec)))
+        rejected = compile_source('joint-replay.sev', source + 'test:\n    replay(gap, cases=[[3,2]])\n', Syntax(include_tests=True))
+        self.assertIn('joint parameter constraints', str(rejected.diagnostics))
+
     def test_callable_lowering_records_domains_and_c_harness(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax

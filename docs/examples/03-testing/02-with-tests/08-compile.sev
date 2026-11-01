@@ -2,6 +2,7 @@ def foo(x: int) -> int:
     return x + 1
 
 test with compiler "checks accepted and rejected semantic fragments":
+
     # This fragment reaches semantic analysis and must be rejected.
     reject:
         def foo(x: int) -> int:

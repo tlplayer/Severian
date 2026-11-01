@@ -3,10 +3,14 @@ import TokenForm from "../generic/token.sev"
 import SourceFile from "../source.sev"
 import recognize_keyword from "../keywords/keyword.sev"
 
-
 def recognize_defer(source: SourceFile, start: u32) -> u32 | None:
     return recognize_keyword(source, start, "defer")
 
-
 class DeferSyntax: Y
-    token_forms: list[TokenForm] = [TokenForm("DEFER", "defer", recognize=recognize_defer)]
+    token_forms: list[TokenForm] = [
+        TokenForm(
+            kind = "DEFER",
+            spelling = "defer",
+            recognize = recognize_defer,
+        ),
+    ]

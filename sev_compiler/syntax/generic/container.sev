@@ -1,5 +1,7 @@
-# All collections share element counts, storage consumption, and alignment.
-# Capacity is separate from len/size and may exceed the initialized count.
+'''
+All collections share element counts, storage consumption, and alignment.
+Capacity is separate from len/size and may exceed the initialized count.
+'''
 trait Container:
     def len(self: view Self) -> int
 
@@ -8,7 +10,6 @@ trait Container:
 
     def bytes(self: view Self) -> byte
     def alignment(self: view Self) -> byte
-
 
 Container as C
 

@@ -1,9 +1,9 @@
 from collections import list, set
 
-def find_goal(grid: list[list[int]]) -> tuple[int,2] | None:
+def find_goal(grid: list[list[int]]) -> tuple[int, 2] | None:
     queue = [(0, 0)]
-    visited = set[tuple[int,2]]()
-    result: tuple[int,2] | None = None
+    visited = set[tuple[int, 2]]()
+    result: tuple[int, 2] | None = None
 
     while queue with
     {
@@ -27,13 +27,11 @@ def find_goal(grid: list[list[int]]) -> tuple[int,2] | None:
 
     return result
 
-
 test "search finds a goal after visiting boundary cells":
     grid = [[0, 0, 0], [0, 0, 1], [0, 0, 0]]
     result = find_goal(grid)
     assert(result.has_value)
     assert(result.value == (1, 2))
-
 
 test "empty and exhausted grids have no goal":
     empty = list[list[int]]()
@@ -41,13 +39,11 @@ test "empty and exhausted grids have no goal":
     grid = [[0, 0], [0, 0]]
     assert(find_goal(grid) == None)
 
-
 test "goal at the starting cell breaks immediately":
     grid = [[1]]
     result = find_goal(grid)
     assert(result.has_value)
     assert(result.value == (0, 0))
-
 
 test "ragged rows are bounded independently":
     grid = [[0, 0], [0], [0, 1, 0]]
@@ -55,31 +51,26 @@ test "ragged rows are bounded independently":
     assert(result.has_value)
     assert(result.value == (2, 1))
 
-
 test "an empty first row does not allow an invalid access":
     grid = list[list[int]]()
     row = list[int]()
     grid.append(row)
     assert(find_goal(grid) == None)
 
-
 test "tuple unpacking snapshots before swapping":
     left, right = (3, 7)
     left, right = (right, left)
     assert(left == 7 and right == 3)
 
-
 test "tuple unpacking owns copied members":
-    source = tuple[string,int]("kept", 42)
+    source = tuple[string, int]("kept", 42)
     word, number := source
-    drop(source)
+    drop source
     assert(word == "kept" and number == 42)
-
 
 test with compiler "tuple unpacking rejects an arity mismatch":
     reject:
         left, right := (1, 2, 3)
-
 
 test with compiler "tuple unpacking rejects duplicate names":
     reject:

@@ -9,9 +9,10 @@ test:
     borrowed := view values[1]
     copied := copy values[2]
 
-    assert(moved == "a")
-    assert(borrowed == "b")
-    assert(copied == "c")
+    assert:
+        moved == "a"
+        borrowed == "b"
+        copied == "c"
 
 test with compiler:
     values := ["a", "b", "c"]

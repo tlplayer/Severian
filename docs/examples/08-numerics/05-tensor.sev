@@ -1,17 +1,17 @@
 import tensor_math
-from collections import equal
+from collections import Equal
 
 test "construct tensor from fixed tuple storage":
-    initial = tuple[f64,4](1.0,2.0,3.0,4.0)
-    value = tensor[f64,(2,2)](initial)
+    initial = tuple[f64, 4](1.0, 2.0, 3.0, 4.0)
+    value = tensor[f64, (2, 2)](initial)
     shape = value.shape
     assert(shape[0] == 2 and shape[1] == 2)
     flat = value.values
-    assert(equal(flat, initial))
+    assert(Equal(flat, initial))
 
 test "elementwise tensor operations":
-    left = tensor[f64,(2,)](tuple[f64,2](1.0,2.0))
-    right = tensor[f64,(2,)](tuple[f64,2](3.0,4.0))
+    left = tensor[f64, (2,)](tuple[f64, 2](1.0, 2.0))
+    right = tensor[f64, (2,)](tuple[f64, 2](3.0, 4.0))
     added = left + right
     multiplied = left * right
     assert(added[0] == 4.0 and added[1] == 6.0)

@@ -5,14 +5,18 @@ def handle(command: string):
     print("command:", command)
 
 def main():
-    messages = channel[string,16] #buffer size 16
-    commands = channel[string] # unbounded channel
+
+    # buffer size 16
+    messages = channel[string, 16]
+
+    # unbounded channel
+    commands = channel[string]
 
     message_producer = async messages.send("hello")
     command_producer = async commands.send("refresh")
     received = 0
 
-    select with limit=2:
+    select with limit = 2:
         case command from commands:
             handle(command)
             received += 1
@@ -26,7 +30,6 @@ def main():
 
     await message_producer
     await command_producer
-
 
 test with integ "select handles both channels":
     main()

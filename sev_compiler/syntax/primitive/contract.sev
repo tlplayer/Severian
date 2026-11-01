@@ -1,8 +1,77 @@
 import LiteralValue from "../grammar/resolution.sev"
-import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, array_mlir, byte_view_mlir, index_mlir, memref_mlir, ranked_memref_storage, scalar_mlir, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir from "mlir.sev"
-import AbiId, ArtifactId, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, DeclarationId, DefinitionID, FfiId, FunctionId, GenericParamId, HirId, IndexedId, InferVarId, InterfaceId, LocalId, ModuleId, NamedId, OpId, PackageId, PrimitiveId, ProviderId, RegionId, ScopeId, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TypeBinding, TypeConstructorBinding, TypeId, ValueId, VariantId, definition_from_key, named_definition, same_definition, semantic_digest, semantic_key from "../symbol/symbol.sev"
-import Constructor, Conversion, ConversionKind, Size, TypeRef from "../generic/type.sev"
-import AssertionLocation, AssertionOrigin, CoverageKind, CoveragePoint, QualityRegion, SourceFile, SourceMap, Span, load, span, utf8_offset, virtual_source from "../source.sev"
+import MLIRTypeBinding,
+    MLIRTypeParameter,
+    MLIRTypeProvider,
+    array_mlir,
+    byte_view_mlir,
+    index_mlir,
+    memref_mlir,
+    ranked_memref_storage,
+    scalar_mlir,
+    struct_mlir,
+    tensor_mlir,
+    unranked_memref_mlir,
+    unranked_tensor_mlir from "mlir.sev"
+import ABIID,
+    ArtifactID,
+    AttrValue,
+    AttributeID,
+    BindingID,
+    BlockID,
+    CompiledRegionID,
+    CompilerID,
+    DeclarationID,
+    DefinitionID,
+    FFIID,
+    FunctionID,
+    GenericParamID,
+    HIRID,
+    IndexedID,
+    InferVarID,
+    InterfaceID,
+    LocalID,
+    ModuleID,
+    NamedID,
+    OpID,
+    PackageID,
+    PrimitiveID,
+    ProviderID,
+    RegionID,
+    ScopeID,
+    StableID,
+    Substitution,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    SymbolName,
+    TypeBinding,
+    TypeConstructorBinding,
+    TypeID,
+    ValueID,
+    VariantID,
+    definition_from_key,
+    named_definition,
+    same_definition,
+    semantic_digest,
+    semantic_key from "../symbol/symbol.sev"
+import Constructor,
+    Conversion,
+    ConversionKind,
+    Size,
+    TypeRef from "../generic/type.sev"
+import AssertionLocation,
+    AssertionOrigin,
+    CoverageKind,
+    CoveragePoint,
+    QualityRegion,
+    SourceFile,
+    SourceMap,
+    Span,
+    load,
+    Span,
+    utf8_offset,
+    virtual_source from "../source.sev"
+Span as span
 
 import Lexeme, LexemeTerm, TokenTerm from "../generic/token.sev"
 
@@ -22,7 +91,12 @@ enum PrimitiveRepresentation:
     IntegerBits(bits: u16, signed: bool)
     IeeeFloatBits(bits: u16)
     BrainFloatBits(bits: u16)
-    FloatBits(bits: u16, exponent_bits: u16, fraction_bits: u16, supports_infinity: bool)
+    FloatBits(
+        bits: u16,
+        exponent_bits: u16,
+        fraction_bits: u16,
+        supports_infinity: bool,
+    )
     PointerBits(bits: u16)
     RecordAggregate
     TaggedAggregate
@@ -31,19 +105,21 @@ import L, Literal, LiteralSyntax from "../generic/literal.sev"
 import Y from "../generic/symbol.sev"
 import Type from "../generic/type.sev"
 
-# Identity and literal behavior are required parts of the primitive contract.
-# TypeId is a compilation handle; identity is the declaration's stable identity.
-trait Primitive: Type + Y + L + MlirTypeProvider
-    identity: PrimitiveId
-    id: TypeId
+'''
+Identity and literal behavior are required parts of the primitive contract.
+TypeId is a compilation handle; identity is the declaration's stable identity.
+'''
+trait Primitive: Type + Y + L + MLIRTypeProvider
+    identity: PrimitiveID
+    id: TypeID
     category: PrimitiveCategory
     representation: PrimitiveRepresentation
 
 trait PrimitiveAlias[T]: Primitive
 
 class LiteralConstruction:
-    primitive: PrimitiveId
-    type_id: TypeId
+    primitive: PrimitiveID
+    type_id: TypeID
     family: string
     syntax: LiteralSyntax
     value: LiteralValue

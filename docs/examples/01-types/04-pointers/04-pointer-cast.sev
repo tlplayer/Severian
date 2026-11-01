@@ -1,15 +1,19 @@
-# Typed pointer constructors explicitly reinterpret bounded scalar storage.
-# Raw dereference uses [0]; the old [pointer[T]](value) spelling is obsolete.
+'''
+Typed pointer constructors explicitly reinterpret bounded scalar storage.
+Raw dereference uses [0]; the old [pointer[T]](value) spelling is obsolete.
+'''
 test "pointer cast exposes each stored byte":
     value: u32 = 0x04030201
     unsafe:
         integer_pointer: pointer[u32] = &value
         byte_pointer = pointer[u8](integer_pointer)
+
         # This example targets the package's little-endian x86-64 host.
-        assert(byte_pointer[0] == u8(1))
-        assert(byte_pointer[1] == u8(2))
-        assert(byte_pointer[2] == u8(3))
-        assert(byte_pointer[3] == u8(4))
+        assert:
+            byte_pointer[0] == u8(1)
+            byte_pointer[1] == u8(2)
+            byte_pointer[2] == u8(3)
+            byte_pointer[3] == u8(4)
         restored = pointer[u32](byte_pointer)
         assert(restored[0] == value)
 
@@ -24,7 +28,7 @@ test "cast bounds use the target element size":
 test "cast rejects partial target elements":
     unsafe:
         throws "pointer cast requires whole target elements":
-            values = tensor[u8,(3,)]()
+            values = tensor[u8, (3,)]()
             bytes: pointer[u8] = values
             words = pointer[u32](bytes)
 

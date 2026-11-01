@@ -1,8 +1,7 @@
 from collections import C, map, dict, list, Numeric, enumerate, sum
 
-
 # C supplies typed key/value pairs; the loop ignores keys and sums values.
-def sum_values[K,V:Numeric,Container:C[K,V]](container: Container) -> V:
+def sum_values[K, V: Numeric, Container: C[K, V]](container: Container) -> V:
     total: V = 0
     for _, value in enumerate(container):
         total += value
@@ -16,30 +15,42 @@ test:
     counts = {"first": 34, "second": 8}
     assert(sum_values(counts) == 42)
 
-
 test "the same utility accepts every numeric container":
-    counts: dict[string,int] = {"first": 34, "second": 8}
-    numbers: list[int] = [34,8]
-    packed = tensor[int](tuple[int,2](34,8))
-    assert(sum_values(counts) == 42)
-    assert(sum_values(numbers) == 42)
-    assert(sum_values(packed) == 42)
-    assert(sum(counts) == 42)
+    counts: dict[string, int] =
+    {
+        "first": 34,
+        "second": 8,
+    }
+    numbers: list[int] = [34, 8]
+    packed = tensor[int](tuple[int, 2](34, 8))
+    assert:
+        sum_values(counts) == 42
+        sum_values(numbers) == 42
+        sum_values(packed) == 42
+        sum(counts) == 42
 
 test "enumeration keeps dictionary keys and values typed as strings":
-    names: dict[string,string] = {"first": "Alice", "second": "Bob"}
-    pairs: list[tuple[string,string]] = enumerate(names)
-    drop(names)
+    names: dict[string, string] =
+    {
+        "first": "Alice",
+        "second": "Bob",
+    }
+    pairs: list[tuple[string, string]] = enumerate(names)
+    drop names
     assert(pairs.get(0)[0] == "first")
     assert(pairs.get(1)[1] == "Bob")
 
 test "numeric sum keeps floating point results":
-    parts: map[string,f64] = {"first": 1.25, "second": 2.5}
+    parts: map[string, f64] =
+    {
+        "first": 1.25,
+        "second": 2.5,
+    }
     result: f64 = sum_values(parts)
     assert(result == 3.75)
 
 test "empty generic sums retain their numeric result type":
-    integers = dict[string,int]()
+    integers = dict[string, int]()
     fractions = list[f64]()
     integer_total: int = sum_values(integers)
     fractional_total: f64 = sum_values(fractions)

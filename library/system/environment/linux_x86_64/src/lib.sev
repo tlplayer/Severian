@@ -1,0 +1,155 @@
+import string
+from collections import dict, list
+
+class EnvironmentError: Error
+    message: string
+
+def __validate_name(name: view string) -> absent | EnvironmentError:
+    if len(name) == 0:
+        throw EnvironmentError("environment name cannot be empty")
+    for byte in name:
+        if byte == u8(0) or byte == u8(61):
+            throw EnvironmentError("environment name contains NUL or equals")
+
+def __validate_value(value: view string) -> absent | EnvironmentError:
+    for byte in value:
+        if byte == u8(0):
+            throw EnvironmentError("environment value contains NUL")
+
+# Mutations affect this owned dictionary. They never call setenv/unsetenv.
+class Snapshot:
+    entries: dict[string,string]
+
+    def Snapshot():
+        entries = dict[string,string]()
+
+    def get(name: view string) -> string | None | EnvironmentError:
+        __validate_name(name)
+        return entries.find(name)
+
+    def set(name: view string, value: view string) -> absent | EnvironmentError:
+        __validate_name(name)
+        __validate_value(value)
+        entries.set(name, value)
+
+    def remove(name: view string) -> bool | EnvironmentError:
+        __validate_name(name)
+        removed = entries.remove(name)
+        return removed is not None
+
+    def len() -> int:
+        return entries.len()
+
+    def assignments() -> list[string] | EnvironmentError:
+        result = list[string]()
+        for name in entries.keys():
+            value = entries.get(name)
+            __validate_name(name)
+            __validate_value(value)
+            result.append(name + "=" + value)
+        return result
+
+@mlir("llvm.inline_asm", asm_string="movq environ@GOTPCREL(%rip), $0; movq ($0), $0", constraints="=r,~{memory}", has_side_effects=true, target="x86_64-linux")
+def __environment() -> int
+
+@mlir("llvm.inline_asm", asm_string="movq ($1), $0", constraints="=r,r,~{memory}", has_side_effects=true, target="x86_64-linux")
+def __read_address(address: int) -> int
+
+@mlir("llvm.inline_asm", asm_string="movzbq ($1), $0", constraints="=r,r,~{memory}", has_side_effects=true, target="x86_64-linux")
+def __read_byte(address: int) -> int
+
+# Read libc's current environ, including changes made since process startup.
+# The caller must serialize external global-environment mutation with capture.
+def snapshot() -> Snapshot | EnvironmentError:
+    result = Snapshot()
+    table = __environment()
+    if table == 0:
+        return result
+    index = 0
+    total = 0
+    while index < 65536:
+        address = __read_address(table + index * 8)
+        if address == 0:
+            return result
+        bytes = tensor[u8](0)
+        offset = 0
+        delimiter = -1
+        while true:
+            if total >= 16777216:
+                throw EnvironmentError("environment exceeds 16 MiB")
+            byte = __read_byte(address + offset)
+            total += 1
+            if byte == 0:
+                break
+            if byte == 61 and delimiter < 0:
+                delimiter = offset
+            bytes.append(u8(byte))
+            offset += 1
+        # Native environ may contain malformed entries without an equals sign.
+        if delimiter > 0:
+            name = string(bytes[:delimiter))
+            value = string(bytes[delimiter + 1:])
+            result.set(name, value)
+        index += 1
+    throw EnvironmentError("environment exceeds 65536 entries")
+
+def get(name: view string) -> string | None | EnvironmentError:
+    __validate_name(name)
+    values = snapshot()
+    return values.get(name)
+
+test "snapshot distinguishes absent empty and replaced values":
+    values = Snapshot()
+    assert(values.get("MODE") is None)
+    values.set("MODE", "")
+    assert(values.get("MODE") == "")
+    values.set("MODE", "development=local")
+    assert(values.get("MODE") == "development=local")
+    assert(values.len() == 1)
+    assert(values.remove("MODE"))
+    assert(not values.remove("MODE"))
+    assert(values.get("MODE") is None)
+
+test "snapshot copies and returned strings own their storage":
+    original = Snapshot()
+    original.set("MODE", "before")
+    copied = copy original
+    captured = original.get("MODE")
+    original.set("MODE", "after")
+    drop original
+    assert(copied.get("MODE") == "before")
+    assert(captured == "before")
+
+test "snapshot validates names and values before mutation":
+    values = Snapshot()
+    empty ?= values.set("", "bad")
+    equals ?= values.set("A=B", "bad")
+    name_nul ?= values.set("A\0B", "bad")
+    value_nul ?= values.set("OK", "a\0b")
+    lookup ?= values.get("")
+    removal ?= values.remove("A=B")
+    assert(empty is EnvironmentError and equals is EnvironmentError)
+    assert(name_nul is EnvironmentError and value_nul is EnvironmentError)
+    assert(lookup is EnvironmentError and removal is EnvironmentError)
+    assert(values.len() == 0)
+
+test "snapshot serializes empty and equals-containing values independently":
+    values = Snapshot()
+    values.set("EMPTY", "")
+    values.set("MODE", "a=b")
+    encoded = values.assignments()
+    drop values
+    assert(encoded.len() == 2)
+    assert(encoded[0] == "EMPTY=" and encoded[1] == "MODE=a=b")
+
+test "host capture returns an independent environment":
+    values = snapshot()
+    key = "SEVERIAN_SNAPSHOT_LOCAL_TEST_2026"
+    original = get(key)
+    values.set(key, "snapshot only")
+    assert(values.get(key) == "snapshot only")
+    current = get(key)
+    if original is None:
+        assert(current is None)
+    else:
+        assert(current == original.value)

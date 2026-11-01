@@ -1,5 +1,5 @@
 import Y from "../generic/symbol.sev"
-import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import B, BlockContext, BlockSentence, SourceBlockID from "../generic/block.sev"
 import source
 import try from "try.sev"
 import Symbol from "../symbol/symbol.sev"
@@ -9,23 +9,37 @@ class catch: Y + B
     context: BlockContext = BlockContext()
     span: source.Span | None = None
     grammars: list[BlockSentence] = []
-    subblocks: list[SourceBlockId] = []
+    subblocks: list[SourceBlockID] = []
     parent: B
     previous: try | catch
     body: B
     binding: Symbol | None = None
     expected: TypeAnnotation | None = None
 
-    grammar catch["catch", binding: Symbol, ":", expected: TypeAnnotation, ":"]() -> B with self.previous.parent == self.parent:
+    grammar catch[
+        "catch",
+        binding: Symbol,
+        ":",
+        expected: TypeAnnotation,
+        ":",
+    ]() -> B with
+        self.previous.parent == self.parent:
         self.binding = binding
         self.expected = expected
         return self
 
-    grammar type_first_catch["catch", expected: TypeAnnotation, binding: Symbol, ":"]() -> B with self.previous.parent == self.parent:
+    grammar type_first_catch[
+        "catch",
+        expected: TypeAnnotation,
+        binding: Symbol,
+        ":",
+    ]() -> B with
+        self.previous.parent == self.parent:
         self.binding = binding
         self.expected = expected
         return self
 
-    grammar untyped_catch["catch", binding: Symbol, ":"]() -> B with self.previous.parent == self.parent:
+    grammar untyped_catch["catch", binding: Symbol, ":"]() -> B with
+        self.previous.parent == self.parent:
         self.binding = binding
         return self

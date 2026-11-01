@@ -1,12 +1,11 @@
 import Y from "../generic/symbol.sev"
-import TypeId, RegionId, GenericParamId from "../symbol/symbol.sev"
+import TypeID, RegionID, GenericParamID from "../symbol/symbol.sev"
 import TypeKind, Signature from "system.sev"
 
-
 class ReferenceType: Y
-    target: TypeId | None = None
+    target: TypeID | None = None
     mutable: bool = false
-    lifetime: RegionId | None = None
+    lifetime: RegionID | None = None
 
     def structural_kind() -> TypeKind | Error:
         target ?= self.target

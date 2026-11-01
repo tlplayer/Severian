@@ -2,11 +2,9 @@ class Server:
     host: string
     port: int
 
-
 def server(host: string, port: int) -> Server:
     result := Server(host, port)
     return result
-
 
 test:
     server := server("localhost", 8080)

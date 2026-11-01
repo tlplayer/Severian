@@ -187,8 +187,9 @@ class Checker:
         if binding.type.family == 'pointer' and binding.identity in self.values and binding.identity != identity:
             return self.values[binding.identity]
         if identity in self.storage:
-            return self.storage[identity].read(self, span)
-        value = self.values[identity]
+            value = self.storage[identity].read(self, span)
+        else:
+            value = self.values[identity]
         if binding.type.family in ('record', 'array', 'tensor', 'tuple', 'shared', 'string', 'union', 'dynamic', 'iterator') and binding.identity in self.values and binding.type != value.type:
             # A nested record view borrows the containing binding's lifetime,
             # but retains the address and type of its own field.
@@ -267,6 +268,9 @@ class Checker:
 
     def expression_value(self, node, env, expected=None):
         token = node.token
+        if node.kind == 'runtime':
+            from py_compiler.syntax.dynamic.dynamic import runtime_value
+            return runtime_value(self.expr(node.operands[0], env, expected), self)
         if getattr(self, 'profiling', False):
             from py_compiler.syntax.complex.profile import read
             metric = read(node, self, env)
@@ -276,6 +280,9 @@ class Checker:
         match = expression_grammar(node, self, env)
         if match is not None:
             return lower_result(match, self)
+        if node.kind in ('interval', 'index_domain', 'filled'):
+            from py_compiler.syntax.symbol.range import lower_special
+            return lower_special(node, self, env, expected)
         if node.kind == 'tuple':
             value = self.context.type('tuple').construct_expression(None, node.operands, self, env, node.token.span, expected)
             if expected is not None and expected.family == 'union':
@@ -353,6 +360,15 @@ class Checker:
             return coerce(self.expr(node, env), expected, self, token.span)
         if node.kind == "index":
             subject, argument = node.operands
+            if argument.kind == 'template_arguments':
+                from py_compiler.syntax.generic.place import expression_type
+                receiver_type = expression_type(subject, self, env)
+                if getattr(getattr(receiver_type, 'declaration', None), 'template_name', '').rsplit('.', 1)[-1] == 'list':
+                    from py_compiler.syntax.grammar.expression import Expression
+                    indexed = subject
+                    for position in argument.operands:
+                        indexed = Expression('index', node.token, (indexed, position))
+                    return self.expr(indexed, env, expected)
             definition = self.context.types.get(subject.token.text) if subject.kind == 'name' else None
             if callable(getattr(definition, 'construct_expression', None)):
                 return definition.construct_expression(argument, (), self, env, token.span, expected)
@@ -378,10 +394,22 @@ class Checker:
                                closed=argument.interval or (True, True))
             place = receiver.type.element_place(receiver, node.operands[1], self, env, token.span)
             value = place.read(self, token.span)
+            from py_compiler.syntax.generic.storage import FieldPlace, is_unbound_temporary, owns_storage, copy_storage, release_temporary
+            temporary_receiver = is_unbound_temporary(receiver, self)
+            if temporary_receiver:
+                if owns_storage(value.type) and value.identity not in self.owned_results:
+                    if isinstance(place, FieldPlace):
+                        if getattr(receiver.type.declaration, 'destructor', False):
+                            raise ValueError('cannot extract an owned field from a temporary with a destructor; bind the owner first')
+                        value = place.take(self, token.span, value)
+                    else:
+                        value = copy_storage(value, self, token.span)
+                        self.owned_results.add(value.identity)
+                release_temporary(receiver, self, token.span)
             if receiver.type.family == 'array' and value.type.binding_ownership != 'copy':
                 self.value_sources[value.identity] = set(self.value_sources.get(receiver.identity, ()))
                 self.value_dependencies[value.identity] = set(self.value_dependencies.get(receiver.identity, ()))
-            if receiver.identity in self.call_result_owners and value.type.binding_ownership != 'copy':
+            if not temporary_receiver and receiver.identity in self.call_result_owners and value.type.binding_ownership != 'copy':
                 self.call_result_owners[value.identity] = self.call_result_owners[receiver.identity]
                 self.call_result_modes[value.identity] = self.call_result_modes.get(receiver.identity, 'view')
                 if receiver.identity in self.call_result_sources:
@@ -607,9 +635,15 @@ class Checker:
         if self.body.result_type is None:
             self.body.result_type = self.syntax.types["absent"]
         if self.current.terminator is None:
-            if self.body.result_type.mlir:
+            result_type = self.body.result_type
+            if result_type.family == 'union' and self.context.type('absent') in result_type.variants:
+                from py_compiler.syntax.function.calls import coerce
+                result = coerce(None, result_type, self, self.body.source_span)
+                self.current.terminator = Terminator("finish", value=result)
+            elif result_type.mlir:
                 raise ValueError("not every path returns the declared result")
-            self.current.terminator = Terminator("finish")
+            else:
+                self.current.terminator = Terminator("finish")
         if self.body.result_type.family == 'record' and self.body.result_ownership == 'own':
             provider = self.context.provider_by_name[self.body.result_type.name]
             self.body.result_layout = provider.layout(self.body.result_type.declaration, self.context)
@@ -662,3 +696,79 @@ def use() -> int:
         self.assertEqual(len(owners), 1)
         self.assertTrue(any(op.kind == 'deallocate'
                             for block in body.blocks for op in block.operations))
+
+
+class BorrowedProjectionTests(unittest.TestCase):
+    def test_returned_field_borrow_keeps_its_type_when_owner_is_a_field(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = '''class Item:
+    value: int
+    def increment():
+        value += 1
+class Box:
+    item: Item
+    def selected(self: borrow Self) -> borrow Item:
+        return borrow item
+class Root:
+    box: Box
+    def update():
+        selected = box.selected()
+        selected.increment()
+def work() -> int:
+    root = Root(Box(Item(41)))
+    root.update()
+    return root.box.item.value
+'''
+        result = compile_source('borrowed-field.sev', source, Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'Root.update')
+        calls = [operation for block in body.blocks for operation in block.operations
+                 if operation.kind == 'call']
+        self.assertTrue(any(operation.operands and operation.operands[0].type.name == 'Item'
+                            for operation in calls))
+
+
+class AbsentResultCompletionTests(unittest.TestCase):
+    def test_fallthrough_boxes_absent_success_after_cleanup(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('absent-fallthrough.sev', '''class Failure: Error
+    message: string
+def complete(fail: bool) -> absent | Failure:
+    temporary = "owned"
+    if fail:
+        throw Failure("failed")
+''', Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'complete')
+        returns = [block.terminator.value for block in body.blocks if block.terminator.kind == 'finish']
+        self.assertTrue(all(value is not None and value.type == body.result_type for value in returns))
+        self.assertTrue(any(operation.kind == 'deallocate' for block in body.blocks for operation in block.operations))
+
+
+class TemporaryIndexTests(unittest.TestCase):
+    def test_index_releases_temporary_after_loading_scalar(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('temporary-index.sev', '''def text() -> string:
+    return "hello"
+def first() -> u8:
+    return text()[0]
+''', Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'first')
+        self.assertEqual(sum(operation.kind == 'deallocate' for block in body.blocks for operation in block.operations), 1)
+
+    def test_owned_tuple_element_survives_temporary_receiver_cleanup(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('temporary-tuple-index.sev', '''def first() -> string:
+    return ("hello", "world")[0]
+''', Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'first')
+        returned = next(block.terminator.value for block in body.blocks if block.terminator.kind == 'finish')
+        releases = [operation for block in body.blocks for operation in block.operations if operation.kind == 'deallocate']
+        self.assertTrue(releases)
+        self.assertTrue(all(operation.operands[0] != returned for operation in releases))

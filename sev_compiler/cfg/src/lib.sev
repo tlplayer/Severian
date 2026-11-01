@@ -28,8 +28,8 @@ class FlowBlock[V]:
     exit: Exit[V] | None = None
 
 class FlowBuilder[V, B]: ControlFlow[V, B]
-    condition_value: (bool) -> V
-    lower_body: (B) -> absent
+    condition_value: bool -> V
+    lower_body: B -> absent
     blocks: list[FlowBlock[V]] = []
     current: int = -1
 
@@ -61,7 +61,11 @@ class FlowBuilder[V, B]: ControlFlow[V, B]
         self.require_open()
         self.require_block(taken)
         self.require_block(otherwise)
-        self.blocks[self.current].exit = Exit[V].Conditional(value, Edge[V](taken), Edge[V](otherwise))
+        self.blocks[self.current].exit = Exit[V].Conditional(
+            value,
+            Edge[V](taken),
+            Edge[V](otherwise),
+        )
 
     def at(block: int):
         self.require_block(block)

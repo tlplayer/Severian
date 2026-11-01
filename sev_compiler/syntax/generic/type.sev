@@ -1,19 +1,15 @@
-
 enum ConversionKind:
     Identity
     Promote
     Checked
     Lossy
 
-
 class TypeRef:
     name: string
-
 
 class Constructor:
     source: TypeRef
     kind: ConversionKind
-
 
 trait Conversion:
     constructors: list[Constructor]
@@ -28,6 +24,5 @@ trait Type: Conversion
     name: string
     size: Size
     alignment: Size
-
 
 Type as T

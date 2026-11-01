@@ -24,6 +24,35 @@ class TestHeader:
         return 3
 
 
+def canonical_label_tokens(tokens):
+    """G owns acceptance of the lint's parenthesized adjacent string pieces."""
+    from py_compiler.syntax.symbol.forms import decode_quoted
+    from py_compiler.frontend.lint.layout import quoted
+    from py_compiler.frontend.lexer.lexer import Lexeme
+    result = []
+    for token in tokens:
+        if token.kind == 'FSTRING':
+            from py_compiler.frontend.lint.layout import literal_text
+            token = token.with_text(quoted(literal_text(token)), kind='STRING')
+        if token.kind == 'STRING' and result and result[-1].kind == 'STRING':
+            previous = result.pop()
+            source = previous.lexeme.source
+            span = source.span(previous.span.start, token.span.end)
+            combined = replace(previous, lexeme=Lexeme(source.text[span.start:span.end], span, source))
+            result.append(combined.with_text(quoted(decode_quoted(previous.text) + decode_quoted(token.text))))
+        else:
+            result.append(token)
+        if len(result) >= 3 and result[-1].text == ')' and result[-2].kind == 'STRING' and result[-3].text == '(':
+            preceding = result[-4].text if len(result) > 3 else ''
+            if not preceding or preceding in ('(', '[', '{', ',', '=', ':=', ':', 'with', 'cases'):
+                opening, value, closing = result[-3:]
+                source = value.lexeme.source
+                span = source.span(opening.span.start, closing.span.end)
+                value = replace(value, lexeme=Lexeme(source.text[span.start:span.end], span, source), replacement=value.text)
+                result[-3:] = [value]
+    return tuple(result)
+
+
 def groups(tokens):
     depth, start, result = 0, 0, []
     for index, token in enumerate(tokens):
@@ -57,6 +86,8 @@ def runner_options(tokens):
             while end < len(tokens) and tokens[end].text != ')':
                 end += 1
             argument = tokens[position + 1:end]
+            if argument and argument[-1].text == ',':
+                argument = argument[:-1]
             if end == len(tokens) or len(argument) != 1:
                 raise ValueError(key + ' requires one literal argument')
             spelling = argument[0].text
@@ -138,7 +169,7 @@ class Test(DeclarationProvider):
     development_scope = True
 
     def parse_header(self, items):
-        header = super().parse_header(items)
+        header = canonical_label_tokens(super().parse_header(items))
         if not header:
             return TestHeader()
         cases = case_header(header)
@@ -174,6 +205,7 @@ class Test(DeclarationProvider):
         if any(t.text == 'with' for t in header):
             position = next(i for i, t in enumerate(header) if t.text == 'with')
             clauses, header = tuple(header[position + 1:]), header[:position]
+        header = canonical_label_tokens(header)
         if len(header) > 1 or (header and header[0].kind != 'STRING'):
             raise ValueError('expected test [with capability] ["label"]:')
         return TestHeader(mode, ast.literal_eval(header[0].text) if header else '', clauses, options=options)

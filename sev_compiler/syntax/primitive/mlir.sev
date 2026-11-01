@@ -1,41 +1,105 @@
-import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider from "../type/mlir.sev"
+import MLIRTypeBinding,
+    MLIRTypeParameter,
+    MLIRTypeProvider from "../type/mlir.sev"
 
-# Built-in constructors are declaration data. New dialect types provide their
-# own binding, without extending lowering or the MLIR text printer.
-def scalar_mlir(spelling: string, scalar: string, bits: u16 = 0, signed: bool = false) -> MlirTypeBinding:
-    return MlirTypeBinding(spelling, "scalar", scalar, bits, signed, dimensions=0, elements=0)
+'''
+Built-in constructors are declaration data. New dialect types provide their
+own binding, without extending lowering or the MLIR text printer.
+'''
+def scalar_mlir(
+    spelling: string,
+    scalar: string,
+    bits: u16 = 0,
+    signed: bool = false,
+) -> MLIRTypeBinding:
+    return MLIRTypeBinding(
+        spelling = spelling,
+        category = "scalar",
+        scalar = scalar,
+        bits = bits,
+        signed = signed,
+        dimensions = 0,
+        elements = 0,
+    )
 
-def tensor_mlir() -> MlirTypeBinding:
-    return MlirTypeBinding("tensor<{shape}{element}>", "tensor", elements=0)
+def tensor_mlir() -> MLIRTypeBinding:
+    return MLIRTypeBinding(
+        spelling = "tensor<{shape}{element}>",
+        category = "tensor",
+        elements = 0,
+    )
 
-def unranked_tensor_mlir() -> MlirTypeBinding:
-    return MlirTypeBinding("tensor<*x{element}>", "unranked_tensor", dimensions=0, elements=0, ranked=false)
+def unranked_tensor_mlir() -> MLIRTypeBinding:
+    return MLIRTypeBinding(
+        spelling = "tensor<*x{element}>",
+        category = "unranked_tensor",
+        dimensions = 0,
+        elements = 0,
+        ranked = false,
+    )
 
-def memref_mlir() -> MlirTypeBinding:
-    return MlirTypeBinding("memref<{shape}{element}>", "memref", elements=0, storage=ranked_memref_storage())
+def memref_mlir() -> MLIRTypeBinding:
+    return MLIRTypeBinding(
+        spelling = "memref<{shape}{element}>",
+        category = "memref",
+        elements = 0,
+        storage = ranked_memref_storage(),
+    )
 
-def unranked_memref_mlir() -> MlirTypeBinding:
-    return MlirTypeBinding("memref<*x{element}>", "unranked_memref", dimensions=0, elements=0, ranked=false, storage=MlirTypeBinding("!llvm.struct<(i64, !llvm.ptr)>", "struct"))
+def unranked_memref_mlir() -> MLIRTypeBinding:
+    return MLIRTypeBinding(
+        spelling = "memref<*x{element}>",
+        category = "unranked_memref",
+        dimensions = 0,
+        elements = 0,
+        ranked = false,
+        storage = MLIRTypeBinding("!llvm.struct<(i64, !llvm.ptr)>", "struct"),
+    )
 
-def struct_mlir() -> MlirTypeBinding:
-    return MlirTypeBinding("!llvm.struct<({elements})>", "struct", dimensions=0)
+def struct_mlir() -> MLIRTypeBinding:
+    return MLIRTypeBinding(
+        spelling = "!llvm.struct<({elements})>",
+        category = "struct",
+        dimensions = 0,
+    )
 
-def array_mlir() -> MlirTypeBinding:
-    return MlirTypeBinding("!llvm.array<{dimension0} x {element0}>", "array", dimensions=1, elements=1)
+def array_mlir() -> MLIRTypeBinding:
+    return MLIRTypeBinding(
+        spelling = "!llvm.array<{dimension0} x {element0}>",
+        category = "array",
+        dimensions = 1,
+        elements = 1,
+    )
 
-
-# Hosted primitive declarations own the current index/storage ABI. Alternate
-# targets may supply bindings with a different index width.
-def index_mlir(bits: u16 = 64) -> MlirTypeBinding:
+'''
+Hosted primitive declarations own the current index/storage ABI. Alternate
+targets may supply bindings with a different index width.
+'''
+def index_mlir(bits: u16 = 64) -> MLIRTypeBinding:
     binding = scalar_mlir("index", "index")
-    binding.storage = scalar_mlir("i" + string(bits), "integer", bits, true)
+    binding.storage = scalar_mlir(
+        spelling = "i" + string(bits),
+        scalar = "integer",
+        bits = bits,
+        signed = true,
+    )
     return binding
 
-
-def ranked_memref_storage(bits: u16 = 64) -> MlirTypeBinding:
+def ranked_memref_storage(bits: u16 = 64) -> MLIRTypeBinding:
     index = "i" + string(bits)
-    return MlirTypeBinding("!llvm.struct<(!llvm.ptr, !llvm.ptr, " + index + ", !llvm.array<{rank} x " + index + ">, !llvm.array<{rank} x " + index + ">)>", "struct")
+    return MLIRTypeBinding(
+        """\
+!llvm.struct<(!llvm.ptr, !llvm.ptr, {index}, !llvm.array<{{rank}} x {index}>, !\
+llvm.array<{{rank}} x {index}>)>\
+""",
+        "struct",
+    )
 
-
-def byte_view_mlir() -> MlirTypeBinding:
-    return MlirTypeBinding("memref<?xi8>", "memref", dimensions=1, elements=0, storage=ranked_memref_storage())
+def byte_view_mlir() -> MLIRTypeBinding:
+    return MLIRTypeBinding(
+        spelling = "memref<?xi8>",
+        category = "memref",
+        dimensions = 1,
+        elements = 0,
+        storage = ranked_memref_storage(),
+    )

@@ -1,13 +1,9 @@
 '''
 Fuzz tests search arbitrary inputs and preserve failing inputs for replay.
-
 The runner should report a seed, minimized input, and reproduction command.
 '''
-
-
 class ParseError: Error
     message: string
-
 
 def parse_integer(value: string) -> int | ParseError:
     if value == "":
@@ -17,6 +13,7 @@ def parse_integer(value: string) -> int | ParseError:
         position = 1
     if position == len(value):
         throw ParseError("missing digits")
+
     # Bound the accepted decimal domain before the checked integer conversion.
     if len(value) - position > 18:
         throw ParseError("integer outside the supported decimal domain")
@@ -26,10 +23,12 @@ def parse_integer(value: string) -> int | ParseError:
         position += 1
     return int(value)
 
-
 test with fuzz "parse and format agree":
-    # Typed bindings provide the representative seed until the fuzz runner
-    # replaces them with generated values.
+
+    '''
+    Typed bindings provide the representative seed until the fuzz runner
+    replaces them with generated values.
+    '''
     input: string = "42"
     result ?= parse_integer(input)
 
@@ -41,22 +40,18 @@ test with fuzz "parse and format agree":
     when result is ParseError:
         assert(result.message != "")
 
-
 def text_does_not_crash(data: string) -> bool:
     result ?= parse_integer(data)
     return result is int or result is ParseError
-
 
 test with fuzz "text parsing remains memory safe":
     data: string = "severian"
     assert(text_does_not_crash(data))
 
-
 class User:
-    age: int { 0 <= age and age <= 130 }
-
+    age: int {0 <= age and age <= 130}
 
 test with fuzz "generated ages satisfy the user invariant":
-    age: int { 0 <= age and age <= 130 } = 36
+    age: int {0 <= age and age <= 130} = 36
     user = User(age)
     assert(user.age == age)

@@ -97,8 +97,12 @@ class Class(RecordProvider):
         constructors = cfg.context.functions.get(declaration.name + "." + constructor_name, [])
         if constructors:
             entry, operands = select(constructors, arguments, cfg, env)
+            if getattr(cfg.context, 'lint', None) is not None:
+                cfg.context.lint.arguments(arguments, entry.parameters)
             invoke(entry, operands, cfg, span, value)
             return value
+        if getattr(cfg.context, 'lint', None) is not None:
+            cfg.context.lint.arguments(arguments, declaration.fields)
         if len(arguments) > len(declaration.fields):
             raise ValueError("too many constructor arguments")
         if any(argument.kind == 'named_argument' for argument in arguments):
@@ -128,9 +132,9 @@ class Class(RecordProvider):
                     continue
                 field = cfg.expr(arguments[index], env, type_)
             elif default is not None:
+                # String constants produce fresh owned storage on every
+                # evaluation. Transfer that allocation directly into the field.
                 field = literal_value(default, type_, cfg, span)
-                if type_.family == "string":
-                    field = copy_storage(field, cfg, span)
             elif type_.family == 'union' and any(t.name in ('absent','None') for t in type_.variants):
                 from py_compiler.syntax.block.union import UnionNone
                 # An omitted field is absent when the contract distinguishes
@@ -263,6 +267,22 @@ import unittest
 
 
 class ClassTests(unittest.TestCase):
+    def test_string_defaults_transfer_their_fresh_allocation(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('default-string.sev', '''class Settings:
+    name: string = "default"
+def create() -> Settings:
+    return Settings()
+''', Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'create')
+        operations = [operation for block in body.blocks for operation in block.operations]
+        constant = next(operation.result for operation in operations
+                        if operation.kind == 'constant' and operation.result.type.family == 'string')
+        self.assertTrue(any(operation.kind == 'write' and constant in operation.operands for operation in operations))
+        self.assertFalse(any(operation.kind == 'memory-copy' and constant in operation.operands for operation in operations))
+
     def compile(self, source):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax

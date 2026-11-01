@@ -36,6 +36,9 @@ class Return:
             cfg.callable_entry.parameter_ownership[binding.name] = 'move'
             cfg.value_sources[cfg.values[binding.identity].identity] = set()
         value = cfg.expr(term, env, cfg.body.result_type) if term is not None else None
+        if term is None and cfg.body.result_type is not None and cfg.body.result_type.family == 'union':
+            from py_compiler.syntax.function.calls import coerce
+            value = coerce(None, cfg.body.result_type, cfg, node.span)
         contract = getattr(cfg, 'result_contract', None)
         if contract is not None:
             borrowed = (value is not None and value.type.binding_ownership != 'copy'
@@ -103,8 +106,8 @@ class Return:
             if binding and binding.ownership not in ('view', 'borrow'):
                 cfg.flow.move(binding)
         if value and value.type.family != 'pointer' and callable(getattr(value.type, 'release', None)):
-            term = expression(node.tokens[1:])
-            binding = cfg.lookup(term, env) if term.kind in ('name', 'reference') else None
+            term = expression(node.tokens[1:]) if len(node.tokens) > 1 else None
+            binding = cfg.lookup(term, env) if term is not None and term.kind in ('name', 'reference') else None
             if value.identity in cfg.owned_results and (binding is None or binding.type != value.type):
                 pass
             elif binding:
@@ -113,7 +116,7 @@ class Return:
                         raise ValueError('returning a memory view requires a result lifetime contract')
                 else:
                     cfg.flow.move(binding)
-            elif term.kind != 'call':
+            elif term is None or term.kind != 'call':
                 raise ValueError('memory return requires ownership')
             elif term.operands[0].kind == 'index' and term.operands[0].operands[0].token.text == 'pointer' and not cfg.value_sources.get(value.identity):
                 raise ValueError('returning a pointer view requires a result lifetime contract')
@@ -178,3 +181,23 @@ def invalid(value: view Item) -> Item:
 ''')
         self.assertTrue(result.diagnostics)
         self.assertIn('move', str(result.diagnostics))
+
+    def test_absent_success_is_boxed_in_typed_error_return(self):
+        result = self.valid('''class Failure: Error
+    message: string
+def complete(fail: bool) -> absent | Failure:
+    if fail:
+        throw Failure("failed")
+    return
+test:
+    complete(false)
+    throws(complete(true) -> Failure)
+''')
+        body = next(body for body in result.program.bodies if body.declaration == 'complete')
+        returns = [block.terminator.value for block in body.blocks if block.terminator.kind == 'finish']
+        self.assertTrue(returns)
+        self.assertTrue(all(value.type == body.result_type for value in returns))
+
+    def test_empty_return_does_not_fabricate_a_none_value(self):
+        result = self.compile('def invalid() -> int | None:\n    return\n')
+        self.assertTrue(result.diagnostics)

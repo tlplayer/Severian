@@ -1,19 +1,19 @@
-import B, SourceBlockId from "../generic/block.sev"
+import B, SourceBlockID from "../generic/block.sev"
 import TypeDeclaration from "../function/syntax.sev"
 import Expression from "../function/function.sev"
 import Span from "../source.sev"
 import Diagnostic from "../primitive/error/diagnostic.sev"
 import ParserDiagnostic from "../../frontend/parser/diagnostic.sev"
 
-
-# A heterogeneous collection retains each payload's concrete type through its
-# implementation. Adding a grammar result does not extend a compiler union.
+'''
+A heterogeneous collection retains each payload's concrete type through its
+implementation. Adding a grammar result does not extend a compiler union.
+'''
 trait LiteralValue:
     def read[T](span: Span) -> T | Diagnostic
     def block() -> B | None
     def type_declaration() -> TypeDeclaration | None
     def expression() -> Expression | None
-
 
 class LiteralValueOf[T]: LiteralValue
     value: T
@@ -21,7 +21,11 @@ class LiteralValueOf[T]: LiteralValue
     def read[R](span: Span) -> R | Diagnostic:
         if self.value is R:
             return self.value
-        return ParserDiagnostic("grammar result does not implement the capture contract", span, "parser.capture")
+        return ParserDiagnostic(
+            "grammar result does not implement the capture contract",
+            span,
+            "parser.capture",
+        )
 
     def block() -> B | None:
         if self.value is B:
@@ -38,32 +42,38 @@ class LiteralValueOf[T]: LiteralValue
             return self.value
         return None
 
-
 def literal_value[T](value: T) -> LiteralValue | Diagnostic:
     if value is Diagnostic:
         return value
     return LiteralValueOf[T](value)
-
 
 class ResolvedGrammarNode:
     value: LiteralValue
     span: Span
     declaration: string
     children: list[ResolvedGrammarNode] = []
-    owner: SourceBlockId | None = None
+    owner: SourceBlockID | None = None
     owner_unit: int | None = None
 
+test
+"""\
 
-test "grammar results retain scalar and container types without literal variants":
+grammar results retain scalar and container types without literal variants
+""":
     span = Span(0, 0, 1)
     integer: LiteralValue = LiteralValueOf[int](0)
     decimal: LiteralValue = LiteralValueOf[float](0.0)
-    assert(integer.read[int](span) == 0)
-    assert(decimal.read[float](span) == 0.0)
-    assert(integer.read[string](span) is Diagnostic)
+    assert:
+        integer.read[int](span) == 0
+        decimal.read[float](span) == 0.0
+        integer.read[string](span) is Diagnostic
     items: LiteralValue = LiteralValueOf[list[int]]([0, 1, 2, 3])
-    mapping: LiteralValue = LiteralValueOf[map[string, int]]({"key": 7})
+    mapping: LiteralValue = LiteralValueOf[map[string, int]](
+    {
+        "key": 7,
+    })
     pair: LiteralValue = LiteralValueOf[(int, int, int)]((1, 2, 3))
-    assert(items.read[list[int]](span) == [0, 1, 2, 3])
-    assert(mapping.read[map[string, int]](span) == {"key": 7})
-    assert(pair.read[(int, int, int)](span) == (1, 2, 3))
+    assert:
+        items.read[list[int]](span) == [0, 1, 2, 3]
+        mapping.read[map[string, int]](span) == {"key": 7}
+        pair.read[(int, int, int)](span) == (1, 2, 3)

@@ -2,26 +2,25 @@ import SourceFile from "../source.sev"
 import Diagnostic from "../primitive/error/diagnostic.sev"
 import Lexeme, LexemeTerm, Span, Symbol, span from "lexeme.sev"
 
-
 trait TokenTerm:
     kind: string
     lexeme: Lexeme
     span: Span
 
-
 class TokenForm:
     kind: string
     spelling: string | None = None
-    accepts: ((Lexeme) -> bool) | None = None
-    recognize: ((SourceFile, u32) -> u32 | None | Diagnostic) | None = None
+    accepts:(Lexeme -> bool) | None = None
+    recognize:((source_file, u32) -> u32 | None | diagnostic) | None = None
     boundary: bool = false
-
 
 class Token: TokenTerm
     kind: string
     lexeme: Lexeme
     span: Span
+
     # Applicable declarations remain candidates until grammar resolution.
     declarations: list[string] = []
+
     # All classifications of the longest match; kind remains the first form.
     kinds: list[string] = []

@@ -1,14 +1,13 @@
-# Y - Symbol
-# Y identifies syntax. It resolves to O, which owns executable semantics.
-
+'''
+Y - Symbol
+Y identifies syntax. It resolves to O, which owns executable semantics.
+'''
 enum OperationKind:
     Add
     Multiply
 
-
 trait SymbolTerm:
     def same_symbol(other: Self) -> bool
-
 
 class ResolvedSymbol: SymbolTerm
     id: u64
@@ -16,11 +15,9 @@ class ResolvedSymbol: SymbolTerm
     def same_symbol(other: Self) -> bool:
         return id == other.id
 
-
 class OperationBinding[Y]:
     symbol: Y
     operation: OperationKind
-
 
 def resolve_operation[Y: SymbolTerm](
     first: OperationBinding[Y],
@@ -34,7 +31,6 @@ def resolve_operation[Y: SymbolTerm](
         return second.operation
     throw Error("unknown operation symbol")
 
-
 def apply_operation(operation: OperationKind, left: i64, right: i64) -> i64:
     match operation:
         case Add:
@@ -43,13 +39,15 @@ def apply_operation(operation: OperationKind, left: i64, right: i64) -> i64:
         case Multiply:
             return left * right
 
-
 test:
     plus := ResolvedSymbol(1)
     multiply := ResolvedSymbol(2)
 
     add_binding := OperationBinding[ResolvedSymbol](plus, OperationKind.Add)
-    multiply_binding := OperationBinding[ResolvedSymbol](multiply, OperationKind.Multiply)
+    multiply_binding := OperationBinding[ResolvedSymbol](
+        multiply,
+        OperationKind.Multiply,
+    )
 
     add := resolve_operation(add_binding, multiply_binding, plus)
     product := resolve_operation(add_binding, multiply_binding, multiply)
@@ -57,14 +55,16 @@ test:
     assert(apply_operation(add, 19, 23) == 42)
     assert(apply_operation(product, 6, 7) == 42)
 
-
 test "unknown symbol fails instead of selecting the second operation":
     throws "unknown operation symbol":
         plus = ResolvedSymbol(1)
         multiply = ResolvedSymbol(2)
         unknown = ResolvedSymbol(3)
         first = OperationBinding[ResolvedSymbol](plus, OperationKind.Add)
-        second = OperationBinding[ResolvedSymbol](multiply, OperationKind.Multiply)
+        second = OperationBinding[ResolvedSymbol](
+            multiply,
+            OperationKind.Multiply,
+        )
         result = resolve_operation(first, second, unknown)
 
 class Probe:
@@ -88,7 +88,7 @@ def fallback(operation: OperationKind) -> int:
     match operation:
         case Add:
             return 1
-        case _:
+        case OperationKind.Multiply:
             return 9
 
 test "wildcard matches the remaining variants":

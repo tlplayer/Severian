@@ -67,6 +67,10 @@ def parse_expression(tokens, syntax):
             left = owner.parse_prefix(token, parse, tokens, cursor)
         elif token.text == '...':
             left = Expression('spread', token, (parse(6),))
+        elif token.text == '..':
+            left = Expression('index_domain', token, (parse(6),))
+        elif token.text == 'dynamic' and cursor[0] < len(tokens) and tokens[cursor[0]].text in syntax.types:
+            left = Expression('runtime', token, (parse(6),))
         elif token.text == "&":
             left = Expression("address", token, (parse(6),))
         elif token.text in ("not", "!", "+", "-", "~"):
@@ -82,10 +86,12 @@ def parse_expression(tokens, syntax):
                     comma = True
                 else:
                     break
-            if cursor[0] == len(tokens) or tokens[cursor[0]].text != ")":
+            interval = len(elements) == 1 and elements[0].kind == 'binary' and elements[0].token.text == '..' and not comma
+            if cursor[0] == len(tokens) or tokens[cursor[0]].text not in ((')', ']') if interval else (')',)):
                 raise ValueError("expected closing parenthesis")
+            closing = tokens[cursor[0]].text
             cursor[0] += 1
-            left = elements[0] if len(elements) == 1 and not comma else Expression('tuple', token, tuple(elements))
+            left = Expression('interval', elements[0].token, elements[0].operands, interval=(False, closing == ']')) if interval else elements[0] if len(elements) == 1 and not comma else Expression('tuple', token, tuple(elements))
         elif token.text == '[':
             elements = []
             comprehension = None
@@ -110,10 +116,12 @@ def parse_expression(tokens, syntax):
                     cursor[0] += 1
                 else:
                     break
-            if cursor[0] == len(tokens) or tokens[cursor[0]].text != ']':
+            interval = len(elements) == 1 and elements[0].kind == 'binary' and elements[0].token.text == '..' and comprehension is None
+            if cursor[0] == len(tokens) or tokens[cursor[0]].text not in ((')', ']') if interval else (']',)):
                 raise ValueError('expected closing list bracket')
+            closing = tokens[cursor[0]].text
             cursor[0] += 1
-            left = Expression('comprehension', token, comprehension) if comprehension else Expression('list', token, tuple(elements))
+            left = Expression('interval', elements[0].token, elements[0].operands, interval=(True, closing == ']')) if interval else Expression('comprehension', token, comprehension) if comprehension else Expression('list', token, tuple(elements))
         elif token.text == '{':
             entries = []
             collection_kind = None
@@ -139,7 +147,26 @@ def parse_expression(tokens, syntax):
             left = Expression(collection_kind or 'map', token, tuple(entries))
         elif token.kind == "FSTRING":
             left = Expression("interpolation", token)
+            import ast
+            try:
+                from py_compiler.syntax.symbol.forms import interpolation_parser_text
+                parsed = ast.parse(interpolation_parser_text(token.text), mode='eval').body
+            except SyntaxError:
+                parsed = None  # Interpolation lowering owns the diagnostic.
+            if isinstance(parsed, ast.JoinedStr) and all(isinstance(part, ast.Constant) and isinstance(part.value, str) for part in parsed.values):
+                from py_compiler.frontend.lint.layout import quoted
+                token = token.with_text(quoted(''.join(part.value for part in parsed.values)), kind='STRING')
+                left = Expression('literal', token)
         elif token.kind in ("NUMBER", "CHAR", "STRING") or token.text in ("true", "false", "None", "absent"):
+            if token.kind == 'STRING':
+                from py_compiler.syntax.symbol.forms import decode_quoted
+                from py_compiler.frontend.lint.layout import quoted
+                pieces = [token]
+                while cursor[0] < len(tokens) and tokens[cursor[0]].kind == 'STRING':
+                    pieces.append(tokens[cursor[0]])
+                    cursor[0] += 1
+                if len(pieces) > 1:
+                    token = token.with_text(quoted(''.join(decode_quoted(piece.text) for piece in pieces)))
             left = Expression("literal", token)
         elif token.text in ("module", "local", "self") and cursor[0] + 1 < len(tokens) and tokens[cursor[0]].text == "." and tokens[cursor[0] + 1].kind == "IDENTIFIER":
             left = Expression("reference", token, (tokens[cursor[0] + 1],))
@@ -149,7 +176,15 @@ def parse_expression(tokens, syntax):
             left = Expression("name", token)
         else:
             raise ValueError(f"unsupported expression keyword {token.text!r}")
-        while cursor[0] < len(tokens) and tokens[cursor[0]].text in ("(", ".", "["):
+        while cursor[0] < len(tokens) and tokens[cursor[0]].text in ("(", ".", "[", "{"):
+            if tokens[cursor[0]].text == '{':
+                cursor[0] += 1
+                initializer = parse()
+                if cursor[0] == len(tokens) or tokens[cursor[0]].text != '}':
+                    raise ValueError('fill initializer requires a closing brace')
+                cursor[0] += 1
+                left = Expression('filled', token, (left, initializer))
+                continue
             interval_call = False
             if tokens[cursor[0]].text == '(':
                 depth = 0
@@ -185,6 +220,8 @@ def parse_expression(tokens, syntax):
                 arguments = [argument()]
                 while cursor[0] < len(tokens) and tokens[cursor[0]].text == ',':
                     cursor[0] += 1
+                    if cursor[0] < len(tokens) and tokens[cursor[0]].text in (']', ')'):
+                        break
                     arguments.append(argument())
                 index = arguments[0] if len(arguments) == 1 else Expression('template_arguments', bracket, tuple(arguments))
                 if cursor[0] == len(tokens) or tokens[cursor[0]].text not in ("]", ")"):

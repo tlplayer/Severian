@@ -1,8 +1,9 @@
-from util import range
+from util import Range
 from io import capture_stdout
 
 def main():
-    #Only print odds
+
+    # Only print odds
     while count < 5 with count = 0:
         if count == 3:
             break
@@ -12,7 +13,7 @@ def main():
         print(count)
         count += 1
 
-    for value in range(0, 4):
+    for value in Range(0, 4):
         if value % 2 == 0 and value > 1:
             break
         else:
@@ -20,12 +21,12 @@ def main():
 
 test with integ "control flow output":
     main()
-    assert("0" not in stdout)
-    assert("1" in stdout)
-    assert("2" not in stdout)
-    assert("3" not in stdout)
-    assert("odd" not in stdout)
-
+    assert:
+        "0" not in stdout
+        "1" in stdout
+        "2" not in stdout
+        "3" not in stdout
+        "odd" not in stdout
 
 test "continue skips the body tail and break stops iteration":
     main()
@@ -34,7 +35,7 @@ test "continue skips the body tail and break stops iteration":
 test "continue and break preserve the carried loop state":
     visits = 0
     total = 0
-    for value in range(0, 8):
+    for value in Range(0, 8):
         visits += 1
         if value == 5:
             break
@@ -46,6 +47,6 @@ test "continue and break preserve the carried loop state":
 
 test with compiler "unreachable statements after continue are diagnosed":
     reject:
-        for value in range(0, 4):
+        for value in Range(0, 4):
             continue
             print("unreachable")

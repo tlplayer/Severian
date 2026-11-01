@@ -6,12 +6,12 @@ test:
     assert(await task == 42)
 
 def main():
+
     # Tasks owned by self cannot outlive main.
     first = async work(10) with local
     second = async work(21) with local
 
     print(await first + await second)
-
 
 test with compiler "await consumes a task handle":
     task = async work(21)

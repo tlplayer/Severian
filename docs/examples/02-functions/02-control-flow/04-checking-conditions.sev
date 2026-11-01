@@ -1,4 +1,4 @@
-#divisor will throw an error on entry before value is set to 0.  
+# divisor will throw an error on entry before value is set to 0.
 def divide(value: f64, divisor: f64) -> f64 | Error with
 {
     divisor != 0.0 -> Error("Passed argument to divide cannot be zero!"),
@@ -7,5 +7,5 @@ def divide(value: f64, divisor: f64) -> f64 | Error with
 
 test:
     assert(divide(10, 2.0) == 5.0)
-    divide(1,0) else error:
+    divide(1, 0) else error:
         assert(error is Error)

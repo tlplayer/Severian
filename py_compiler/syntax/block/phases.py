@@ -134,10 +134,13 @@ class ContractPhaseTests(unittest.TestCase):
         self.assertEqual(rendered.count('llvm.unreachable'), 6)
 
     def test_callbacks_can_take_the_current_value(self):
-        program = self.compile('def failed(value: int):\n    assert(value < 0)\n'
-                               'def work(x: int) -> int with {fix x >= 0 -> failed(x),}:\n'
-                               '    x = -1\n    x = 1\n    return x\n')
-        body = next(body for body in program.bodies if body.declaration == 'work')
+        # The callback uses assert, so its declaration belongs to test scope.
+        program = self.compile('test "phase callback":\n'
+                               '    def failed(value: int):\n        assert(value < 0)\n'
+                               '    def work(x: int) -> int with {fix x >= 0 -> failed(x),}:\n'
+                               '        x = -1\n        x = 1\n        return x\n'
+                               '    result = work(1)\n')
+        body = next(body for body in program.bodies if body.declaration.endswith('work'))
         calls = [op for block in body.blocks for op in block.operations if op.kind == 'call']
         self.assertEqual(len(calls), 4)
         constants = {op.result.identity: op.payload.value for block in body.blocks

@@ -1,1 +1,3 @@
-import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider from "../../mlir/src/types.sev"
+import MLIRTypeBinding,
+    MLIRTypeParameter,
+    MLIRTypeProvider from "../../mlir/src/types.sev"

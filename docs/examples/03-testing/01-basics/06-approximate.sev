@@ -2,36 +2,19 @@ from math import approximate
 
 '''
 approximate() compares numeric values using explicit tolerances.
-
 It is a predicate consumed by assert() or assert(), not a separate
 assertion family.
 '''
-
-
 def divide(a: f64, b: f64) -> f64:
     return a / b
-
 
 test:
     result := divide(1.0, 3.0)
 
-    assert(
-        approximate(
-            result,
-            0.333333333,
-            atol=1e-8,
-        )
-    )
-
+    assert(approximate(actual = result, expected = 0.333333333, atol = 1e-8))
 
 test:
     actual := 1000.001
     expected := 1000.0
 
-    assert(
-        approximate(
-            actual,
-            expected,
-            rtol=1e-5,
-        )
-    )
+    assert(approximate(actual = actual, expected = expected, rtol = 1e-5))

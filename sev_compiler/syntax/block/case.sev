@@ -1,5 +1,5 @@
 import Y from "../generic/symbol.sev"
-import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import B, BlockContext, BlockSentence, SourceBlockID from "../generic/block.sev"
 import source
 import match from "match.sev"
 import Expression from "../function/function.sev"
@@ -11,7 +11,7 @@ class case: Y + B
     context: BlockContext = BlockContext()
     span: source.Span | None = None
     grammars: list[BlockSentence] = []
-    subblocks: list[SourceBlockId] = []
+    subblocks: list[SourceBlockID] = []
     parent: match
     previous: case | None = None
     body: B
@@ -19,11 +19,21 @@ class case: Y + B
     binding: Symbol | None = None
     annotation: TypeAnnotation | None = None
 
-    grammar case["case", pattern: Expression, ":"]() -> B with self.previous == None or self.previous.parent == self.parent:
+    grammar case["case", pattern: Expression, ":"]() -> B with
+        self.previous == None
+        or self.previous.parent == self.parent:
         self.pattern = pattern
         return self
 
-    grammar typed_case["case", binding: Symbol, ":", annotation: TypeAnnotation, ":"]() -> B with self.previous == None or self.previous.parent == self.parent:
+    grammar typed_case[
+        "case",
+        binding: Symbol,
+        ":",
+        annotation: TypeAnnotation,
+        ":",
+    ]() -> B with
+        self.previous == None
+        or self.previous.parent == self.parent:
         self.binding = binding
         self.annotation = annotation
         return self

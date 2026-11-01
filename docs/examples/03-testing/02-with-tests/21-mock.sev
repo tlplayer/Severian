@@ -1,55 +1,44 @@
 '''
-Mocks replace behavior only inside the active test. One `mock(...)` call groups
+Mocks replace behavior only inside the active test. One `mock(...)` call
+groups
 one or more call-to-result cases and an optional fallback.
 '''
-
-
 def fetch_price(product: int) -> int:
     return 0
-
 
 def total(product: int, quantity: int) -> int:
     price = fetch_price(product)
     return price * quantity
-
 
 test "one-line mock maps one call to one result":
     mock(fetch_price(10) -> 25)
 
     assert(fetch_price(10) == 25)
 
-
 test "multiline mock groups cases and failures":
     mock(
         fetch_price(10) -> 25,
         fetch_price(20) -> 50,
-        else throw Error("unknown product")
+        else throw Error("unknown product"),
     )
 
     assert(fetch_price(10) == 25)
     assert(fetch_price(20) == 50)
     throws(fetch_price(30) -> Error)
 
-
 test "mock fallback handles unmatched calls":
-    mock(
-        fetch_price(10) -> 25,
-        else 0
-    )
+    mock(fetch_price(10) -> 25, else 0)
 
     assert(fetch_price(10) == 25)
     assert(fetch_price(99) == 0)
-
 
 test "mock reaches calls made by another function":
     mock(fetch_price(10) -> 25)
     assert(total(10, 4) == 100)
 
-
 test "a later test uses the original callable":
     assert(fetch_price(10) == 0)
     assert(total(10, 4) == 0)
-
 
 test "unmatched calls fail unless a fallback is declared":
     mock(fetch_price(10) -> 25)

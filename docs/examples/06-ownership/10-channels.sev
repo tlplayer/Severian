@@ -9,8 +9,6 @@ test:
 
     assert(received == "hello")
 
-
-
 test with compiler "send move consumes the original binding":
     messages = channel[string](1)
     message = "hello"

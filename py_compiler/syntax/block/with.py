@@ -14,7 +14,7 @@ class Placement:
     mode: str
 
 
-def clause_groups(tokens, *, tuple_bindings=False):
+def clause_groups(tokens, *, tuple_bindings=False, inline_groups=False):
     """One inline clause, or a braced list with comma-terminated clauses."""
     if not tokens:
         raise ValueError('with requires a clause')
@@ -32,7 +32,7 @@ def clause_groups(tokens, *, tuple_bindings=False):
                 if end is not None and tail[end].text in ('=', ':='):
                     current.append(token)
                     continue
-            if not braced:
+            if not braced and not inline_groups:
                 raise ValueError('multiple with clauses require braces')
             if not current:
                 raise ValueError('empty with clause')

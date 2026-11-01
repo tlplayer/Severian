@@ -1,31 +1,144 @@
-import AbiId, ArtifactId, AssertionLocation, AssertionOrigin, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, Constructor, Conversion, ConversionKind, CoverageKind, CoveragePoint, DeclarationId, DefinitionID, FfiId, FunctionId, GenericParamId, HirId, IndexedId, InferVarId, InterfaceId, Lexeme, LexemeTerm, LiteralSyntax, LiteralConstruction, LocalId, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, ModuleId, NamedId, OpId, PackageId, Primitive, PrimitiveAlias, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, ProviderId, QualityRegion, RegionId, ScopeId, Size, SourceFile, SourceMap, Span, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TokenTerm, Type, TypeBinding, TypeConstructorBinding, TypeId, TypeRef, ValueId, VariantId, definition_from_key, load, named_definition, same_definition, semantic_digest, semantic_key, span, utf8_offset, virtual_source from "../contract.sev"
+import ABIID,
+    ArtifactID,
+    AssertionLocation,
+    AssertionOrigin,
+    AttrValue,
+    AttributeID,
+    BindingID,
+    BlockID,
+    CompiledRegionID,
+    CompilerID,
+    Constructor,
+    Conversion,
+    ConversionKind,
+    CoverageKind,
+    CoveragePoint,
+    DeclarationID,
+    DefinitionID,
+    FFIID,
+    FunctionID,
+    GenericParamID,
+    HIRID,
+    IndexedID,
+    InferVarID,
+    InterfaceID,
+    Lexeme,
+    LexemeTerm,
+    LiteralSyntax,
+    LiteralConstruction,
+    LocalID,
+    MLIRTypeBinding,
+    MLIRTypeParameter,
+    MLIRTypeProvider,
+    ModuleID,
+    NamedID,
+    OpID,
+    PackageID,
+    Primitive,
+    PrimitiveAlias,
+    PrimitiveCategory,
+    PrimitiveID,
+    PrimitiveRepresentation,
+    ProviderID,
+    QualityRegion,
+    RegionID,
+    ScopeID,
+    Size,
+    SourceFile,
+    SourceMap,
+    Span,
+    StableID,
+    Substitution,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    SymbolName,
+    TokenTerm,
+    Type,
+    TypeBinding,
+    TypeConstructorBinding,
+    TypeID,
+    TypeRef,
+    ValueID,
+    VariantID,
+    definition_from_key,
+    load,
+    named_definition,
+    same_definition,
+    semantic_digest,
+    semantic_key,
+    Span,
+    utf8_offset,
+    virtual_source from "../contract.sev"
 import AbsentPrimitive, absent_type_id from "../../symbol/absent.sev"
-import BF16Primitive, F128Primitive, F16Primitive, F32Primitive, F64Primitive, F8E4M3FnPrimitive, F8E5M2Primitive, bf16_type_id, f128_type_id, f16_type_id, f32_type_id, f64_type_id, f8e4m3fn_type_id, f8e5m2_type_id from "../float/declarations.sev"
+import Bf16Primitive,
+    F128Primitive,
+    F16Primitive,
+    F32Primitive,
+    F64Primitive,
+    F8E4M3FnPrimitive,
+    F8E5M2Primitive,
+    bf16_type_id,
+    f128_type_id,
+    f16_type_id,
+    f32_type_id,
+    f64_type_id,
+    f8e4m3fn_type_id,
+    f8e5m2_type_id from "../float/declarations.sev"
 import BoolPrimitive, bool_type_id from "../bool/declarations.sev"
 import CharPrimitive, char_type_id from "../char/declarations.sev"
-import I128Primitive, I16Primitive, I32Primitive, I64Primitive, I8Primitive, IndexPrimitive, U128Primitive, U16Primitive, U32Primitive, U64Primitive, U8Primitive, i128_type_id, i16_type_id, i32_type_id, i64_type_id, i8_type_id, index_type_id, u128_type_id, u16_type_id, u32_type_id, u64_type_id, u8_type_id from "../int/declarations.sev"
+import I128Primitive,
+    I16Primitive,
+    I32Primitive,
+    I64Primitive,
+    I8Primitive,
+    IndexPrimitive,
+    U128Primitive,
+    U16Primitive,
+    U32Primitive,
+    U64Primitive,
+    U8Primitive,
+    i128_type_id,
+    i16_type_id,
+    i32_type_id,
+    i64_type_id,
+    i8_type_id,
+    index_type_id,
+    u128_type_id,
+    u16_type_id,
+    u32_type_id,
+    u64_type_id,
+    u8_type_id from "../int/declarations.sev"
 import NoneValuePrimitive, none_type_id from "../../symbol/none.sev"
 import PointerPrimitive, pointer_type_id from "declarations.sev"
 import StringPrimitive, string_type_id from "../string/declarations.sev"
-import array_mlir, byte_view_mlir, index_mlir, memref_mlir, ranked_memref_storage, scalar_mlir, struct_mlir, tensor_mlir, unranked_memref_mlir, unranked_tensor_mlir from "../mlir.sev"
-import "../../../../library/core/memory/src/raw_intrinsics.sev" as _dependency_raw_intrinsics
+import array_mlir,
+    byte_view_mlir,
+    index_mlir,
+    memref_mlir,
+    ranked_memref_storage,
+    scalar_mlir,
+    struct_mlir,
+    tensor_mlir,
+    unranked_memref_mlir,
+    unranked_tensor_mlir from "../mlir.sev"
+import "../../../../library/core/memory/src/raw_intrinsics.sev"
+    as _dependency_raw_intrinsics
 
 trait Pointer[T]: Primitive
     operator store(self, value: T)
-    operator [](self) -> T
+    operator[](self) -> T
     operator +(self, bytes: int) -> self
 
     operator address(self) -> u64
 
-
 class pointer[T]: Pointer
-    identity: PrimitiveId = PointerPrimitive().identity
-    mlir: MlirTypeBinding = PointerPrimitive().mlir
-    id: TypeId = PointerPrimitive().id
+    identity: PrimitiveID = PointerPrimitive().identity
+    mlir: MLIRTypeBinding = PointerPrimitive().mlir
+    id: TypeID = PointerPrimitive().id
     token_kind: string = PointerPrimitive().token_kind
     literal_family: string = PointerPrimitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = PointerPrimitive().literal_syntaxes
+
     # The address uses the same c pointer contract as memory and @c.
     __address: pointer
-
-    

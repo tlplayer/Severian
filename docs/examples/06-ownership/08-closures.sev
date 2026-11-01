@@ -1,10 +1,8 @@
 def identity(value: string) -> string:
     return value
 
-
 def borrowed_identity(value: borrow string) -> borrow string:
     return value
-
 
 def duplicate(value: borrow string) -> string:
     return copy value

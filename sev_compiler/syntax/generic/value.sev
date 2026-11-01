@@ -1,11 +1,9 @@
 import LoweredType from "../lowered.sev"
-import TypeId, ValueId from "../symbol/symbol.sev"
-
+import TypeID, ValueID from "../symbol/symbol.sev"
 
 class Value:
-    id: ValueId
-    type_id: TypeId = TypeId(0)
+    id: ValueID
+    type_id: TypeID = TypeID(0)
     lowered_type: LoweredType = Unit
-
 
 Value as V

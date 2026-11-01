@@ -27,7 +27,7 @@ import FunctionType from "type/function.sev"
 import ReferenceType from "type/reference.sev"
 import GenericType from "type/generic.sev"
 import IteratorType from "primitive/iterator/iterator.sev"
-import byte from "primitive/byte/byte.sev"
+import Byte from "primitive/byte/byte.sev"
 import "block/global.sev" as _block_global
 import "block/main.sev" as _block_main
 import "block/function.sev" as _block_function
@@ -45,7 +45,8 @@ import "block/for.sev" as _block_for
 import "block/while.sev" as _block_while
 import "grammar/contracts.sev" as _grammar_contracts
 import "keywords/throw.sev" as _keywords_throw
-import "../../library/core/string/src/string.sev" as _library_core_string_src_string
+import "../../library/core/string/src/string.sev"
+    as _library_core_string_src_string
 import "primitive/char/char.sev" as _primitive_char_char
 import "function/syntax.sev" as _function_syntax
 import "primitive/bool/bool.sev" as _primitive_bool_bool
@@ -58,12 +59,16 @@ import "symbol/none.sev" as _symbol_none
 import "symbol/absent.sev" as _symbol_absent
 import "symbol/symbol.sev" as _symbol_symbol
 
-
 def syntax_prelude() -> list[SyntaxDeclaration]:
-    # Stopgap master list. Preserve this order when visiting candidates within
-    # each source window; recursively recognize the declaration's captures.
-    # The global declaration applies once to the complete source window.
-    # Spellings, boundaries, constraints and construction stay in each provider.
+
+    '''
+    Stopgap master list. Preserve this order when visiting candidates within
+    each source window; recursively recognize the declaration's captures.
+    The global declaration applies once to the complete source window.
+    Spellings, boundaries, constraints and construction stay in each provider.
+    Quoted forms retain their contents as captures of their own grammar.
+    Primitive declarations own both type names and literal contracts.
+    '''
     return [
         SyntaxDeclaration("block/global.sev", "global"),
         SyntaxDeclaration("block/main.sev", "main"),
@@ -80,7 +85,6 @@ def syntax_prelude() -> list[SyntaxDeclaration]:
         SyntaxDeclaration("block/case.sev", "case"),
         SyntaxDeclaration("block/for.sev", "For"),
         SyntaxDeclaration("block/while.sev", "While"),
-
         SyntaxDeclaration("grammar/contracts.sev", "Return"),
         SyntaxDeclaration("keywords/throw.sev", "Throw"),
         SyntaxDeclaration("grammar/contracts.sev", "Break"),
@@ -95,11 +99,8 @@ def syntax_prelude() -> list[SyntaxDeclaration]:
         SyntaxDeclaration("grammar/contracts.sev", "List"),
         SyntaxDeclaration("grammar/contracts.sev", "Slice"),
         SyntaxDeclaration("grammar/contracts.sev", "Index"),
-
-        # Quoted forms retain their contents as captures of their own grammar.
         SyntaxDeclaration("../../library/core/string/src/string.sev", "string"),
         SyntaxDeclaration("primitive/char/char.sev", "char"),
-
         SyntaxDeclaration("function/syntax.sev", "Power"),
         SyntaxDeclaration("function/syntax.sev", "FloorDivide"),
         SyntaxDeclaration("function/syntax.sev", "LeftShift"),
@@ -125,16 +126,20 @@ def syntax_prelude() -> list[SyntaxDeclaration]:
         SyntaxDeclaration("function/syntax.sev", "Contains"),
         SyntaxDeclaration("function/syntax.sev", "LogicalAnd"),
         SyntaxDeclaration("function/syntax.sev", "LogicalOr"),
-
-        # Primitive declarations own both type names and literal contracts.
         SyntaxDeclaration("primitive/bool/bool.sev", "bool"),
         SyntaxDeclaration("primitive/float/float.sev", "float"),
         SyntaxDeclaration("primitive/float/declarations.sev", "F32Primitive"),
         SyntaxDeclaration("primitive/float/declarations.sev", "F16Primitive"),
         SyntaxDeclaration("primitive/float/declarations.sev", "F128Primitive"),
         SyntaxDeclaration("primitive/float/declarations.sev", "BF16Primitive"),
-        SyntaxDeclaration("primitive/float/declarations.sev", "F8E4M3FnPrimitive"),
-        SyntaxDeclaration("primitive/float/declarations.sev", "F8E5M2Primitive"),
+        SyntaxDeclaration(
+            "primitive/float/declarations.sev",
+            "F8E4M3FnPrimitive",
+        ),
+        SyntaxDeclaration(
+            "primitive/float/declarations.sev",
+            "F8E5M2Primitive",
+        ),
         SyntaxDeclaration("primitive/int/int.sev", "int"),
         SyntaxDeclaration("primitive/int/declarations.sev", "I8Primitive"),
         SyntaxDeclaration("primitive/int/declarations.sev", "I16Primitive"),
@@ -146,7 +151,10 @@ def syntax_prelude() -> list[SyntaxDeclaration]:
         SyntaxDeclaration("primitive/int/declarations.sev", "U64Primitive"),
         SyntaxDeclaration("primitive/int/declarations.sev", "U128Primitive"),
         SyntaxDeclaration("primitive/int/declarations.sev", "IndexPrimitive"),
-        SyntaxDeclaration("primitive/pointer/declarations.sev", "PointerPrimitive"),
+        SyntaxDeclaration(
+            "primitive/pointer/declarations.sev",
+            "PointerPrimitive",
+        ),
         SyntaxDeclaration("symbol/none.sev", "NoneValuePrimitive"),
         SyntaxDeclaration("symbol/absent.sev", "AbsentPrimitive"),
         SyntaxDeclaration("symbol/symbol.sev", "Symbol"),
@@ -180,25 +188,51 @@ def syntax_prelude() -> list[SyntaxDeclaration]:
         SyntaxDeclaration("primitive/byte/byte.sev", "byte"),
     ]
 
-
 def prelude_token_owners() -> list[Y]:
-    return [YieldSyntax(), DeferSyntax(), StaticSyntax(), AtomicSyntax(), PrefixSyntax(), FixSyntax(), SuffixSyntax(), LambdaSyntax(), AsyncSyntax(), AwaitSyntax(), SelectSyntax(), OperatorBlock(), ExtendBlock(), TestBlock(), WithBlock(), UnsafeBlock(), AcceptBlock(), RejectBlock(), DynamicType(), AnyType(), NumericType(), byte()]
-
+    return [
+        YieldSyntax(),
+        DeferSyntax(),
+        StaticSyntax(),
+        AtomicSyntax(),
+        PrefixSyntax(),
+        FixSyntax(),
+        SuffixSyntax(),
+        LambdaSyntax(),
+        AsyncSyntax(),
+        AwaitSyntax(),
+        SelectSyntax(),
+        OperatorBlock(),
+        ExtendBlock(),
+        TestBlock(),
+        WithBlock(),
+        UnsafeBlock(),
+        AcceptBlock(),
+        RejectBlock(),
+        DynamicType(),
+        AnyType(),
+        NumericType(),
+        Byte(),
+    ]
 
 import virtual_source from "source.sev"
-
 
 test "syntax prelude retains one locator per defining object":
     seen: list[string] = []
     declarations = syntax_prelude()
     assert(declarations[0].path == "block/global.sev")
     for declaration in declarations:
-        identity = declaration.path + ":" + declaration.name
+        identity = """{declaration.path}:{declaration.name}"""
         assert(identity not in seen)
         seen.append(identity)
-    for required in ["primitive/byte/byte.sev:byte", "block/match.sev:match", "block/unsafe.sev:UnsafeBlock", "function/async.sev:AsyncSyntax", "type/reference.sev:ReferenceType", "primitive/iterator/iterator.sev:IteratorType"]:
+    for required in [
+        "primitive/byte/byte.sev:byte",
+        "block/match.sev:match",
+        "block/unsafe.sev:UnsafeBlock",
+        "function/async.sev:AsyncSyntax",
+        "type/reference.sev:ReferenceType",
+        "primitive/iterator/iterator.sev:IteratorType",
+    ]:
         assert(required in seen)
-
 
 test "prelude keyword owners preserve identifier boundaries":
     for owner in prelude_token_owners():
@@ -206,5 +240,15 @@ test "prelude keyword owners preserve identifier boundaries":
             spelling ?= form.spelling
             recognize ?= form.recognize
             if spelling != None and recognize != None:
-                assert(recognize(virtual_source("keyword.sev", spelling + ":"), 0) == len(spelling))
-                assert(recognize(virtual_source("identifier.sev", spelling + "_value"), 0) == None)
+                assert(
+                    recognize(
+                        virtual_source("keyword.sev", spelling + ":"),
+                        0,
+                    ) == len(spelling),
+                )
+                assert(
+                    recognize(
+                        virtual_source("identifier.sev", spelling + "_value"),
+                        0,
+                    ) == None,
+                )

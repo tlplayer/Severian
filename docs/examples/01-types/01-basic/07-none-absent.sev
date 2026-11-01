@@ -1,7 +1,7 @@
 class Update:
     name: string | None | absent
 
-test "not name specified it is not provided": 
+test "not name specified it is not provided":
     update = Update()
     assert(update.name is absent)
 
@@ -30,6 +30,7 @@ test "omitted explicit None and supplied text stay distinct":
     missing = Update()
     empty = Update(None)
     named = Update("Severian")
-    assert(missing.name is absent)
-    assert(empty.name is None)
-    assert(named.name == "Severian")
+    assert:
+        missing.name is absent
+        empty.name is None
+        named.name == "Severian"

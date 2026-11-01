@@ -1,0 +1,9 @@
+{
+  "package": {"name": "robot-gem", "version": "0.1.0"},
+  "sources": ["01-robot-gem.sev"],
+  "dependencies": {
+    "collections": {"package": "core.collections", "path": "../../../library/core/collections/collection"},
+    "io": {"package": "system.io", "path": "../../../library/system/io/linux_x86_64"}
+  },
+  "bin": [{"name": "robot-gem", "path": "01-robot-gem.sev"}]
+}

@@ -19,9 +19,8 @@ def main():
     task = async count_all([1, -2, 3]) with self
     print(await task)
 
-
 test "task captures retain independent list storage":
     values = [1, -2, 3]
     task = async count_all(values)
-    drop(values)
+    drop values
     assert(await task == 2)

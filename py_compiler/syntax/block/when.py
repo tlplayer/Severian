@@ -6,7 +6,15 @@ class When(import_module('py_compiler.syntax.block.if').Conditional):
     spelling = 'when'
     required_scope = 'test'
 
+    def parse_header(self, items):
+        return () if len(items) == 2 and items[-1].text == ':' else super().parse_header(items)
+
     def lower(self, node, cfg, env, nodes, index):
+        if not node.header:
+            if not node.children or any(getattr(child.provider, 'spelling', None) not in ('when', 'elif', 'else') for child in node.children):
+                raise ValueError('when block requires when operations')
+            cfg.scope(node.children, env)
+            return 1
         scenarios = getattr(cfg, 'test_scenarios', ())
         cfg.test_scenarios = (*scenarios, ' '.join(token.text for token in node.header))
         try:

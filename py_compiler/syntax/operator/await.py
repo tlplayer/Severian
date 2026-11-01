@@ -26,7 +26,15 @@ class Await(PrefixOperator):
         value.type.join(value, cfg, node.token.span)
         result = None
         if value.type.result.mlir:
-            result = copy_storage(value.type.read(value, cfg, node.token.span, 2, value.type.result), cfg, node.token.span)
+            # The task has one consumer. Transfer its payload before freeing
+            # the frame; copying a resource handle then dropping the original
+            # would invalidate the returned resource.
+            result = value.type.read(value, cfg, node.token.span, 2, value.type.result)
+            if value.type.result_ownership != 'own':
+                # A returned view may point into an input snapshot in the
+                # frame. Materialize it before releasing those snapshots.
+                result = copy_storage(result, cfg, node.token.span)
             cfg.owned_results.add(result.identity)
-        value.type.release(value, cfg, node.token.span)
+        value.type.release(value, cfg, node.token.span, release_result=False)
+        cfg.owned_results.discard(value.identity)
         return unwrap_result(result, cfg, node.token.span) if result is not None else None

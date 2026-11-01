@@ -1,6 +1,5 @@
 from collections import list
 
-
 class Stack[T]:
     values: list[T]
 
@@ -15,7 +14,6 @@ class Stack[T]:
             return None
 
         return values.pop()
-
 
 def main():
     ints := Stack[int]()
@@ -38,13 +36,14 @@ test "stack returns values in LIFO order and then absence":
     second = stack.pop()
     first = stack.pop()
     missing = stack.pop()
-    assert(second.has_value and second.value == 20)
-    assert(first.has_value and first.value == 10)
-    assert(not missing.has_value)
+    assert:
+        second.has_value and second.value == 20
+        first.has_value and first.value == 10
+        not missing.has_value
 
 test "popped string owns its value after the stack is dropped":
     stack = Stack[string]()
     stack.push("owned")
     result = stack.pop()
-    drop(stack)
+    drop stack
     assert(result.has_value and result.value == "owned")

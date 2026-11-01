@@ -1,6 +1,6 @@
 # channel[T,N] elements
 def main():
-    messages = channel[string,10]
+    messages = channel[string, 10]
 
     first = async messages.send("hello") with self
     second = async messages.send("hello") with self
@@ -9,7 +9,6 @@ def main():
     message = messages.receive()
 
     print(message)
-
 
 test with integ "both queued messages are received":
     main()

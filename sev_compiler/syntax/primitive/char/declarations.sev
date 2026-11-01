@@ -1,26 +1,38 @@
 import scalar_mlir from "../mlir.sev"
-import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../contract.sev"
-
+import Constructor,
+    DeclarationID,
+    LiteralSyntax,
+    MLIRTypeBinding,
+    Primitive,
+    PrimitiveCategory,
+    PrimitiveID,
+    PrimitiveRepresentation,
+    Size,
+    TypeID from "../contract.sev"
 
 class CharPrimitive: Primitive
-    mlir: MlirTypeBinding = scalar_mlir("i32", "integer", 32, false)
-    identity: PrimitiveId = PrimitiveId(DeclarationId(132))
-    id: TypeId = TypeId(132)
+    mlir: MLIRTypeBinding = scalar_mlir(
+        spelling = "i32",
+        scalar = "integer",
+        bits = 32,
+        signed = false,
+    )
+    identity: PrimitiveID = PrimitiveID(DeclarationID(132))
+    id: TypeID = TypeID(132)
     name: string = "char"
     size: Size = Size.Fixed(4)
     alignment: Size = Size.Fixed(4)
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Char
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, false)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(32, false)
     token_kind: string = "Character"
     literal_family: string = ""
     literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Character")]
     default_literal: bool = true
 
-
-def char_type_id() -> TypeId:
+def char_type_id() -> TypeID:
     return CharPrimitive().id
-
 
 test "CharPrimitive owns its lexical category":
     assert(CharPrimitive().token_kind == "Character")

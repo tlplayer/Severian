@@ -1,25 +1,35 @@
 import LiteralValue, LiteralValueOf from "../grammar/resolution.sev"
-import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../primitive/contract.sev"
-
+import Constructor,
+    DeclarationID,
+    LiteralSyntax,
+    MLIRTypeBinding,
+    Primitive,
+    PrimitiveCategory,
+    PrimitiveID,
+    PrimitiveRepresentation,
+    Size,
+    TypeID from "../primitive/contract.sev"
 
 class AbsentPrimitive: Primitive
     grammar literal["absent"]() -> absent:
         return absent
 
-    mlir: MlirTypeBinding = MlirTypeBinding("", value=false)
-    identity: PrimitiveId = PrimitiveId(DeclarationId(7))
-    id: TypeId = TypeId(7)
+    mlir: MLIRTypeBinding = MLIRTypeBinding(spelling = "", value = false)
+    identity: PrimitiveID = PrimitiveID(DeclarationID(7))
+    id: TypeID = TypeID(7)
     name: string = "absent"
     size: Size = Size.Fixed(0)
     alignment: Size = Size.Fixed(1)
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Absence
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.RecordAggregate
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.RecordAggregate
     token_kind: string = "Identifier"
     literal_family: string = ""
-    literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Identifier", "absent", LiteralValueOf[absent](absent))]
+    literal_syntaxes: list[LiteralSyntax] = [
+        LiteralSyntax("Identifier", "absent", LiteralValueOf[absent](absent)),
+    ]
     default_literal: bool = true
 
-
-def absent_type_id() -> TypeId:
+def absent_type_id() -> TypeID:
     return AbsentPrimitive().id

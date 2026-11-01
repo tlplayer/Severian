@@ -1,21 +1,19 @@
 import cli
 from collections import list
 
-
 def interface() -> cli.Command:
-    return cli.command(
-        "arguments",
-        "Print each application argument",
-        arguments=[
-            cli.argument(
-                "values",
-                "Values to print",
-                required=false,
-                multiple=true,
+    return cli.Command(
+        name = "arguments",
+        about = "Print each application argument",
+        arguments = [
+            cli.Argument(
+                name = "values",
+                help = "Values to print",
+                required = false,
+                multiple = true,
             ),
         ],
     )
-
 
 def main():
     application = interface()

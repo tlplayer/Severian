@@ -2,27 +2,30 @@ from collections import map
 
 # map[K, V]: ordered key/value lookup.
 def main():
-    scores := map[int,int]()
+    scores := map[int, int]()
     scores.set(30, 300)
     scores.set(10, 100)
     scores.set(20, 200)
-    scores.set(20, 250)  # Replace the value for an existing key.
 
-    if not (scores.len() == 3):
+    # Replace the value for an existing key.
+    scores.set(20, 250)
+
+    if not scores.len() == 3:
         throw Error("map invariant failed")
     value = scores.find(20)
     if not (value.has_value and value.value == 250):
         throw Error("map invariant failed")
     missing = scores.find(99)
-    if not (not missing.has_value):
+    if not not missing.has_value:
         throw Error("map invariant failed")
 
     for key in scores.keys():
-        print(key)  # 10, 20, 30 on successive lines, in key order.
 
+        # 10, 20, 30 on successive lines, in key order.
+        print(key)
 
 test "map replacement retains one value per key":
-    values := map[int,int]()
+    values := map[int, int]()
     values.set(20, 200)
     values.set(20, 250)
     assert(values.len() == 1)
@@ -32,7 +35,7 @@ test "map replacement retains one value per key":
     assert(not missing.has_value)
 
 test "map iterates keys in ascending order":
-    values := map[int,int]()
+    values := map[int, int]()
     values.set(30, 300)
     values.set(10, 100)
     values.set(20, 200)
@@ -52,16 +55,17 @@ test "map supports string keys and union values":
     assert(status.has_value and status.value == "ready")
 
 test "default traversal keeps sorted keys paired with their values":
-    values = map[int,int]()
+    values = map[int, int]()
     values.set(30, 300)
     values.set(10, 100)
     values.set(20, 200)
     keys = values.keys()
     payloads = values.values()
     pairs = values.items()
-    assert(keys[0] == 10 and keys[2] == 30)
-    assert(payloads[0] == 100 and payloads[2] == 300)
-    assert(pairs[0][0] == 10 and pairs[0][1] == 100)
+    assert:
+        keys[0] == 10 and keys[2] == 30
+        payloads[0] == 100 and payloads[2] == 300
+        pairs[0][0] == 10 and pairs[0][1] == 100
     expected = 10
     for key, value in values:
         assert(key == expected and value == key * 10)

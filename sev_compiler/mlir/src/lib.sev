@@ -1,2 +1,9 @@
-import MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, TypeMapping, DeclaredTypeMapping from "types.sev"
-import MlirOperationBinding, MlirOperationProvider, OperationMapping, DeclaredOperationMapping from "operations.sev"
+import MLIRTypeBinding,
+    MLIRTypeParameter,
+    MLIRTypeProvider,
+    TypeMapping,
+    DeclaredTypeMapping from "types.sev"
+import MLIROperationBinding,
+    MLIROperationProvider,
+    OperationMapping,
+    DeclaredOperationMapping from "operations.sev"

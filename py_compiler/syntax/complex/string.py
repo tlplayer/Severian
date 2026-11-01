@@ -75,6 +75,10 @@ class String(Collection):
         result = cfg.emit('memory-copy', self, (value,), MemoryOperation('copy'), span)
         cfg.owned_results.add(result.identity)
         cfg.value_dependencies[result.identity] = set()
+        # Constructors copy their bytes. An unbound input (another conversion,
+        # a literal, or an allocating slice) no longer needs its allocation.
+        from py_compiler.syntax.generic.storage import release_temporary
+        release_temporary(value, cfg, span)
         return result
 
     def copy_value(self, value, cfg, span):
@@ -284,3 +288,31 @@ class StringConversion:
 
     def lower(self, cfg, expected=None):
         return self.value
+
+
+class TemporaryStringConversionTests(unittest.TestCase):
+    def test_nested_conversions_release_both_unbound_inputs(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('temporary-string.sev',
+            'def text() -> string:\n    return string(string("hello"))\n', Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'text')
+        releases = [op for block in body.blocks for op in block.operations if op.kind == 'deallocate']
+        self.assertEqual(len(releases), 2)
+        returned = next(block.terminator.value for block in body.blocks
+                        if block.terminator and block.terminator.kind == 'finish')
+        self.assertTrue(all(op.operands[0] != returned for op in releases))
+
+    def test_converting_a_binding_preserves_its_storage_until_scope_exit(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = 'def text() -> string:\n    original = "hello"\n    converted = string(original)\n    size = len(original)\n    return converted\n'
+        result = compile_source('bound-string.sev', source, Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'text')
+        operations = [op for block in body.blocks for op in block.operations]
+        releases = [index for index, op in enumerate(operations) if op.kind == 'deallocate']
+        reads = [index for index, op in enumerate(operations) if op.kind == 'length']
+        self.assertEqual(len(releases), 1)
+        self.assertGreater(releases[0], reads[0])

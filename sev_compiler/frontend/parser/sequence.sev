@@ -9,34 +9,34 @@ import ParserDiagnostic from "diagnostic.sev"
 import "../../syntax/recognition.sev" as syntax
 import SyntaxDeclaration from "../../syntax/recognition.sev"
 
-
 class GrammarContext:
     parent: B | None = None
     body: B = Block()
     previous: B | None = None
-    fields: map[string, LiteralValue] = {}
+    fields: map[string, LiteralValue] =
+    {
+    }
     span: Span
-    # Explicit receivers allow grammars owned by traits other than B. Block
-    # grammars may use the enclosing block when no explicit receiver is set.
-    receiver: LiteralValue | None = None
 
+    '''
+    Explicit receivers allow grammars owned by traits other than B. Block
+    grammars may use the enclosing block when no explicit receiver is set.
+    '''
+    receiver: LiteralValue | None = None
 
 class CapturedGrammar:
     name: string
     matches: list[GrammarMatch] = []
 
-
 class SequenceState:
     cursor: int
     captures: list[CapturedGrammar]
-
 
 def capture_one[T](captures: list[CapturedGrammar], index: int) -> T:
     values = capture_many[T](captures, index)
     if len(values) != 1:
         throw Error("capture requires exactly one value")
     return values[0]
-
 
 def capture_many[T](captures: list[CapturedGrammar], index: int) -> list[T]:
     values: list[T] = []
@@ -55,15 +55,27 @@ def capture_many[T](captures: list[CapturedGrammar], index: int) -> list[T]:
         values.append(extracted)
     return values
 
-
-# Every recursive call is keyed by declaration and source position. This rejects
-# left recursion without preventing a consuming recursive grammar.
-def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, context: GrammarContext, active: list[string] = []) -> list[GrammarMatch] | Diagnostic:
+'''
+Every recursive call is keyed by declaration and source position. This rejects
+left recursion without preventing a consuming recursive grammar.
+'''
+def match_sequence(
+    input: list[TokenTerm],
+    grammar: syntax.RegisteredGrammar,
+    context: GrammarContext,
+    active: list[string] = [],
+) -> list[GrammarMatch] | Diagnostic:
     if len(input) == 0:
         return []
-    if not (grammar.syntax is syntax.SyntaxDeclaration):
-        return ParserDiagnostic("sequence grammar requires a declaration identity", input[0].span, "parser.grammar")
-    key = grammar.syntax.path + ":" + grammar.syntax.name + ":" + string(input[0].span.start)
+    if not grammar.syntax is syntax.SyntaxDeclaration:
+        return ParserDiagnostic(
+            "sequence grammar requires a declaration identity",
+            input[0].span,
+            "parser.grammar",
+        )
+    key = """\
+{grammar.syntax.path}:{grammar.syntax.name}:{string(input[0].span.start,)}\
+"""
     if key in active:
         return []
     stack = active[:]
@@ -75,8 +87,11 @@ def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, co
         match field:
             case Literal:
                 for state in states:
-                    if state.cursor < len(input) and input[state.cursor].lexeme.text == spelling:
-                        following.append(SequenceState(state.cursor + 1, state.captures))
+                    if state.cursor < len(input)
+                        and input[state.cursor].lexeme.text == spelling:
+                        following.append(
+                            SequenceState(state.cursor + 1, state.captures),
+                        )
             case Capture:
                 repeated = capture_index in grammar.repetitions
                 for state in states:
@@ -84,25 +99,42 @@ def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, co
                     initial_captures.append(CapturedGrammar(name))
                     frontier := [SequenceState(state.cursor, initial_captures)]
                     if repeated:
-                        following.extend(frontier)
+                        following.extend frontier
                     while len(frontier) > 0:
                         next_frontier: list[SequenceState] = []
                         for partial in frontier:
                             if partial.cursor >= len(input):
                                 continue
-                            candidates = match_contract(input[partial.cursor:], grammar.capture_types[capture_index], context, stack)
+                            candidates = match_contract(
+                                input = input[partial.cursor:],
+                                required = grammar.capture_types[capture_index],
+                                context = context,
+                                active = stack,
+                            )
                             if candidates is Diagnostic:
                                 return candidates
                             for candidate in candidates:
-                                if candidate.consumed <= 0 or candidate.consumed > len(input) - partial.cursor:
-                                    return ParserDiagnostic("capture did not make bounded progress", input[partial.cursor].span, "parser.capture")
+                                if candidate.consumed <= 0
+                                    or candidate.consumed > len(
+                                        input,
+                                    ) - partial.cursor:
+                                    return ParserDiagnostic(
+                                        "capture did not make bounded progress",
+                                        input[partial.cursor].span,
+                                        "parser.capture",
+                                    )
                                 captures = partial.captures[:]
                                 matched = captures[-1].matches[:]
                                 matched.append(candidate)
                                 captures[-1] = CapturedGrammar(name, matched)
-                                next_frontier.append(SequenceState(partial.cursor + candidate.consumed, captures))
-                        following.extend(next_frontier)
-                        frontier = next_frontier if repeated else []
+                                next_frontier.append(
+                                    SequenceState(
+                                        partial.cursor + candidate.consumed,
+                                        captures,
+                                    ),
+                                )
+                        following.extend next_frontier
+                        frontier = next_frontier if repeated else[]
                 capture_index += 1
         states = following
         if len(states) == 0:
@@ -110,28 +142,84 @@ def match_sequence(input: list[TokenTerm], grammar: syntax.RegisteredGrammar, co
     matches: list[GrammarMatch] = []
     for state in states:
         if state.cursor > 0:
-            matches.append(sequence_candidate(grammar, state, context, input, grammar.syntax))
+            matches.append(
+                sequence_candidate(
+                    grammar,
+                    state,
+                    context,
+                    input,
+                    grammar.syntax,
+                ),
+            )
     return matches
 
+def sequence_candidate(
+    grammar: syntax.RegisteredGrammar,
+    state: SequenceState,
+    context: GrammarContext,
+    input: list[TokenTerm],
+    declaration: syntax.SyntaxDeclaration,
+) -> GrammarMatch:
+    span = Span(
+        input[0].span.source_id,
+        input[0].span.start,
+        input[state.cursor - 1].span.end,
+    )
 
-def sequence_candidate(grammar: syntax.RegisteredGrammar, state: SequenceState, context: GrammarContext, input: list[TokenTerm], declaration: syntax.SyntaxDeclaration) -> GrammarMatch:
-    span = Span(input[0].span.source_id, input[0].span.start, input[state.cursor - 1].span.end)
-    # Each candidate owns its source window; probing another interpretation
-    # must not replace the span retained by this candidate's constructor.
-    context = GrammarContext(context.parent, context.body, context.previous, context.fields, span, context.receiver)
-    return GrammarMatch(state.cursor, lambda: construct_sequence(grammar, state.captures, context, span), check=lambda: check_sequence(grammar, state.captures, context), captures=state.captures, identity=declaration.path + ":" + declaration.name + ":" + string(span.start) + ":" + string(span.end))
+    '''
+    Each candidate owns its source window; probing another interpretation
+    must not replace the span retained by this candidate's constructor.
+    '''
+    context = GrammarContext(
+        parent = context.parent,
+        body = context.body,
+        previous = context.previous,
+        fields = context.fields,
+        span = span,
+        receiver = context.receiver,
+    )
+    return GrammarMatch(
+        consumed = state.cursor,
+        construct = lambda: construct_sequence(
+            grammar,
+            state.captures,
+            context,
+            span,
+        ),
+        check = lambda: check_sequence(grammar, state.captures, context),
+        captures = state.captures,
+        identity = """\
+{declaration.path}:{declaration.name}:{string(span.start,)}:{span.end}\
+""",
+    )
 
-
-def construct_sequence(grammar: syntax.RegisteredGrammar, captures: list[CapturedGrammar], context: GrammarContext, span: Span) -> GrammarResolution | Diagnostic:
-    if not (grammar.syntax is syntax.SyntaxDeclaration):
-        return ParserDiagnostic("sequence grammar requires a declaration identity", span, "parser.grammar")
+def construct_sequence(
+    grammar: syntax.RegisteredGrammar,
+    captures: list[CapturedGrammar],
+    context: GrammarContext,
+    span: Span,
+) -> GrammarResolution | Diagnostic:
+    if not grammar.syntax is syntax.SyntaxDeclaration:
+        return ParserDiagnostic(
+            "sequence grammar requires a declaration identity",
+            span,
+            "parser.grammar",
+        )
     admissible = check_sequence(grammar, captures, context)
     if admissible is Diagnostic:
         return admissible
     if admissible != ProofResult.Proven:
-        return ParserDiagnostic("selected grammar constraints are not established", span, "parser.constraint")
+        return ParserDiagnostic(
+            "selected grammar constraints are not established",
+            span,
+            "parser.constraint",
+        )
     if grammar.construct == None:
-        return ParserDiagnostic("grammar has no construction callable", span, "parser.construct")
+        return ParserDiagnostic(
+            "grammar has no construction callable",
+            span,
+            "parser.construct",
+        )
     value = grammar.construct(captures, context)
     if value is Diagnostic:
         return value
@@ -142,13 +230,25 @@ def construct_sequence(grammar: syntax.RegisteredGrammar, captures: list[Capture
             if resolved is Diagnostic:
                 return resolved
             children.extend(resolved.nodes)
-    return GrammarResolution(nodes=[ResolvedGrammarNode(value, span, grammar.syntax.name, children)])
-
+    return GrammarResolution(
+        nodes = [
+            ResolvedGrammarNode(
+                value = value,
+                span = span,
+                declaration = grammar.syntax.name,
+                children = children,
+            ),
+        ],
+    )
 
 import ResolvedGrammarNode from "../../syntax/grammar/resolution.sev"
 
-
-def match_contract(input: list[TokenTerm], required: type | None, context: GrammarContext, active: list[string] = []) -> list[GrammarMatch] | Diagnostic:
+def match_contract(
+    input: list[TokenTerm],
+    required: type | None,
+    context: GrammarContext,
+    active: list[string] = [],
+) -> list[GrammarMatch] | Diagnostic:
     matches: list[GrammarMatch] = []
     for label, grammar in syntax.registry(required):
         if grammar.match_context != None:
@@ -161,7 +261,7 @@ def match_contract(input: list[TokenTerm], required: type | None, context: Gramm
             candidates = match_sequence(input, grammar, context, active)
             if candidates is Diagnostic:
                 return candidates
-            matches.extend(candidates)
+            matches.extend candidates
         elif grammar.match_tokens != None:
             selected = grammar.match_tokens(input)
             if selected is Diagnostic:
@@ -170,8 +270,10 @@ def match_contract(input: list[TokenTerm], required: type | None, context: Gramm
                 matches.append(selected)
     return matches
 
-
-def match_declared_grammar(input: list[TokenTerm], label: string) -> GrammarMatch | None | Diagnostic:
+def match_declared_grammar(
+    input: list[TokenTerm],
+    label: string,
+) -> GrammarMatch | None | Diagnostic:
     for declaration, grammar in syntax.registry():
         if declaration is SyntaxDeclaration:
             if declaration.name == label:
@@ -183,22 +285,25 @@ def match_declared_grammar(input: list[TokenTerm], label: string) -> GrammarMatc
                 return select_grammar(matches, input[0].span)
     return None
 
-
 def context_value[T](value: B | None) -> T:
     if value is T:
         return value
-    throw Error("grammar context does not implement the receiver field contract")
-
+    throw Error(
+        "grammar context does not implement the receiver field contract",
+    )
 
 def context_receiver_state[T](context: GrammarContext) -> ProofResult:
     if context.receiver != None:
         location = context.span
         value = context.receiver.read[T](location)
-        return ProofResult.Refuted if value is Diagnostic else ProofResult.Proven
+        return
+            ProofResult.Refuted
+            if value
+            is Diagnostic
+            else ProofResult.Proven
     if context.parent == None:
         return ProofResult.Unknown
     return ProofResult.Proven if context.parent is T else ProofResult.Refuted
-
 
 def context_receiver[T](context: GrammarContext) -> T:
     if context.receiver != None:
@@ -209,21 +314,18 @@ def context_receiver[T](context: GrammarContext) -> T:
         return value
     return context_value[T](context.parent)
 
-
 import LiteralValueOf from "../../syntax/grammar/resolution.sev"
-
 
 test "grammar receiver checks retain missing and incompatible context":
     assert(context_receiver_state[B](GrammarContext()) == ProofResult.Unknown)
     block = Block()
-    context = GrammarContext(parent=block)
+    context = GrammarContext(parent = block)
     assert(context_receiver_state[B](context) == ProofResult.Proven)
     assert(context_receiver[B](context).indentation_unit == "    ")
     context.receiver = LiteralValueOf[string]("explicit")
     assert(context_receiver_state[B](context) == ProofResult.Refuted)
     assert(context_receiver_state[string](context) == ProofResult.Proven)
     assert(context_receiver[string](context) == "explicit")
-
 
 def captures_ready(captures: list[CapturedGrammar]) -> bool:
     for capture in captures:
@@ -232,31 +334,43 @@ def captures_ready(captures: list[CapturedGrammar]) -> bool:
                 return false
     return true
 
-
-def check_sequence(grammar: syntax.RegisteredGrammar, captures: list[CapturedGrammar], context: GrammarContext) -> ProofResult | Diagnostic:
+def check_sequence(
+    grammar: syntax.RegisteredGrammar,
+    captures: list[CapturedGrammar],
+    context: GrammarContext,
+) -> ProofResult | Diagnostic:
     if grammar.accepts == None:
         return ProofResult.Proven
     return grammar.accepts(captures, context)
 
-
 def same_interpretation(left: GrammarMatch, right: GrammarMatch) -> bool:
-    if left.identity != right.identity or left.consumed != right.consumed or len(left.captures) != len(right.captures):
+    if left.identity != right.identity
+        or left.consumed != right.consumed
+        or len(left.captures) != len(right.captures):
         return false
     for index in range(len(left.captures)):
         first = left.captures[index]
         second = right.captures[index]
-        if first.name != second.name or len(first.matches) != len(second.matches):
+        if first.name != second.name
+            or len(first.matches) != len(second.matches):
             return false
         for child in range(len(first.matches)):
-            if not same_interpretation(first.matches[child], second.matches[child]):
+            if not same_interpretation(
+                first.matches[child],
+                second.matches[child],
+            ):
                 return false
     return true
 
-
-# Captures can be evaluated before their parent only when every live parent
-# agrees on that capture's interpretation. Competing child constructors never
-# run just to see which enclosing predicate they might satisfy.
-def select_grammar(candidates: list[GrammarMatch], span: Span) -> GrammarMatch | Diagnostic:
+'''
+Captures can be evaluated before their parent only when every live parent
+agrees on that capture's interpretation. Competing child constructors never
+run just to see which enclosing predicate they might satisfy.
+'''
+def select_grammar(
+    candidates: list[GrammarMatch],
+    span: Span,
+) -> GrammarMatch | Diagnostic:
     live := candidates[:]
     while true:
         survivors: list[GrammarMatch] = []
@@ -273,7 +387,11 @@ def select_grammar(candidates: list[GrammarMatch], span: Span) -> GrammarMatch |
                     survivors.append(candidate)
         live = survivors
         if len(live) == 0:
-            return ParserDiagnostic("no grammar satisfies the supplied captures and constraints", span, "parser.select")
+            return ParserDiagnostic(
+                "no grammar satisfies the supplied captures and constraints",
+                span,
+                "parser.select",
+            )
         progress := false
         for capture in live[0].captures:
             for child in capture.matches:
@@ -305,15 +423,28 @@ def select_grammar(candidates: list[GrammarMatch], span: Span) -> GrammarMatch |
         if progress:
             continue
         if len(live) != 1:
-            return ParserDiagnostic("multiple grammar interpretations remain admissible", span, "parser.select")
+            return ParserDiagnostic(
+                "multiple grammar interpretations remain admissible",
+                span,
+                "parser.select",
+            )
         proof = live[0].admissible()
         if proof is Diagnostic:
             return proof
         if proof != ProofResult.Proven:
-            return ParserDiagnostic("grammar constraints require unresolved capture or context facts", span, "parser.constraint")
+            return ParserDiagnostic(
+                "grammar constraints require unresolved capture or context fac"
+                "ts",
+                span,
+                "parser.constraint",
+            )
         live[0].selected = true
         return live[0]
-    return ParserDiagnostic("Could not find a grammar match", span, "parser.select")
+    return ParserDiagnostic(
+        "Could not find a grammar match",
+        span,
+        "parser.select",
+    )
 
 def context_field[T](context: GrammarContext, name: string) -> T:
     if name == "span":
@@ -328,10 +459,13 @@ def context_field[T](context: GrammarContext, name: string) -> T:
     if name == "previous":
         return context_value[T](context.previous)
     if name in context.fields:
+
         # The caller retains the original diagnostic on a failed typed read.
-        location = context.span 
+        location = context.span
         value = context.fields[name].read[T](location)
         if value is Diagnostic:
             throw value
         return value
-    throw Error("grammar receiver field is not available in this context: " + name)
+    throw Error(
+        "grammar receiver field is not available in this context: " + name,
+    )

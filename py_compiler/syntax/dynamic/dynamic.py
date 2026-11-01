@@ -4,6 +4,17 @@ from hashlib import sha256
 from py_compiler.syntax.generic.atom import Atom
 
 
+def runtime_value(value, cfg):
+    """A typed runtime value crosses an SSA edge; it is not a literal fact."""
+    from py_compiler.hir.thir.src.model import Edge, Terminator
+    if value.type.family not in ('integer', 'float', 'bool', 'char', 'byte'):
+        raise ValueError('dynamic typed values currently require a scalar type')
+    following = cfg.block((value.type,))
+    cfg.current.terminator = Terminator('jump', (Edge(following.identity, (value,)),))
+    cfg.current = following
+    return following.parameters[0]
+
+
 @dataclass(frozen=True)
 class DynamicType:
     name: str = 'dynamic'
@@ -157,6 +168,17 @@ import unittest
 
 
 class DynamicTests(unittest.TestCase):
+    def test_typed_runtime_values_are_not_compile_time_integer_facts(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.mlir.src.lib import lower, render
+        source = 'def work() -> int:\n    first: dynamic int = 42\n    second = dynamic int(7)\n    return first + second\n'
+        result = compile_source('runtime.sev', source, Syntax(), lint=True)
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        self.assertIn('cf.br', render(lower(result.program)))
+        body = next(body for body in result.program.bodies if body.declaration == 'work')
+        self.assertGreaterEqual(sum(bool(block.parameters) for block in body.blocks), 2)
+
     def test_boxing_and_forwarding_retain_the_descriptor(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax

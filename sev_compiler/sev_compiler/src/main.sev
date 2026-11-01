@@ -1,16 +1,19 @@
 import package
 import process
 
-@c(symbol="exit")
+@c(symbol = "exit")
 def exit_status(status: i32)
-
 
 def main():
     status := 0
     try:
         status = package.command_line(process.arguments())
     catch failure: Error:
-        process.write_error("error: " + failure.message + "\n")
+        process.write_error(
+            """\
+error: {failure.message}
+""",
+        )
         status = 1
     if status != 0:
         exit_status(i32(status))

@@ -68,5 +68,8 @@ class Registry:
 
 
 class Grammar:
+    def lint_rules(self):
+        return ()
+
     def accept(self, match):
         return True

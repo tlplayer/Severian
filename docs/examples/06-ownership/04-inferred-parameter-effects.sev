@@ -3,14 +3,11 @@ from collections import list
 def length(values: list[int]) -> int:
     return values.len()
 
-
 def clear(values: list[int]):
     values.clear()
 
-
 def store(values: list[int]) -> list[int]:
     return values
-
 
 test:
     values := [1, 2, 3]
@@ -26,7 +23,6 @@ test:
     stored := store(values)
     assert(stored.len() == 0)
 
-
 test with compiler:
     values := [1, 2, 3]
     observed := borrow values
@@ -34,7 +30,6 @@ test with compiler:
     reject:
         clear(values)
         assert(observed.len() == 3)
-
 
 test with compiler:
     reject:

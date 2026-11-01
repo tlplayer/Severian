@@ -1,7 +1,7 @@
 import "../../cfg/src/lib.sev" as cfg
-import ValueId, DefinitionID from "../symbol/symbol.sev"
+import ValueID, DefinitionID from "../symbol/symbol.sev"
 import source
 
-cfg.Edge[ValueId] as CfgEdge
-cfg.Exit[ValueId] as CfgExit
-cfg.Terminator[ValueId, DefinitionID, source.Span] as CfgTerminator
+cfg.Edge[ValueID] as CfgEdge
+cfg.Exit[ValueID] as CfgExit
+cfg.Terminator[ValueID, DefinitionID, source.Span] as CfgTerminator

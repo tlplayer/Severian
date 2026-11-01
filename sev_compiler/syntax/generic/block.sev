@@ -1,16 +1,19 @@
 import source
-import DefinitionID, ScopeId, ValueId from "../symbol/symbol.sev"
+import DefinitionID, ScopeID, ValueID from "../symbol/symbol.sev"
 import Capture from "../grammar/grammar.sev"
-import Expression, FunctionParameter, FunctionDeclaration, RecordDeclaration from "../function/function.sev"
+import Expression,
+    FunctionParameter,
+    FunctionDeclaration,
+    RecordDeclaration from "../function/function.sev"
 import TypeAnnotation from "../type/annotation.sev"
 import Lexeme from "lexeme.sev"
 import Diagnostic from "../primitive/error/diagnostic.sev"
 import ParserDiagnostic from "../../frontend/parser/diagnostic.sev"
 
-class SourceBlockId:
+class SourceBlockID:
     index: u32
 
-class SentenceId:
+class SentenceID:
     index: u32
 
 enum BlockTermRole:
@@ -18,26 +21,23 @@ enum BlockTermRole:
     Symbol
     Opaque
 
-
 class BlockTerm:
     spelling: string
     span: source.Span
     role: BlockTermRole
 
-
 class BlockSentence:
-    id: SentenceId
+    id: SentenceID
     span: source.Span
     terms: list[BlockTerm]
 
-
 # Populated by resolution, not guessed from a block's spelling or CFG index.
 class BlockContext:
-    identity: SourceBlockId | None = None
+    identity: SourceBlockID | None = None
     provider: DefinitionID | None = None
     constructor: DefinitionID | None = None
-    scope: ScopeId | None = None
-    parent: SourceBlockId | None = None
+    scope: ScopeID | None = None
+    parent: SourceBlockID | None = None
     captures: list[Capture] = []
     values: list[BlockCaptureValue] = []
     fields: list[BlockFieldValue] = []
@@ -45,9 +45,14 @@ class BlockContext:
     requires_provider: bool = false
 
     def require_resolved():
-        if self.identity == None or self.provider == None or self.constructor == None or self.scope == None:
-            throw Error("block resolution requires identity, provider, constructor and scope")
-
+        if self.identity == None
+            or self.provider == None
+            or self.constructor == None
+            or self.scope == None:
+            throw Error(
+                "block resolution requires identity, provider, constructor and"
+                " scope",
+            )
 
 class BlockCaptureValue:
     name: string
@@ -59,59 +64,71 @@ class BlockCaptureValue:
     symbols: list[string] = []
     variadic: bool = false
 
-
 class BlockProviderCandidate:
     owner: RecordDeclaration
     constructor: FunctionDeclaration
     captures: list[BlockCaptureValue]
 
-
 class BlockFieldValue:
     name: string
     value: BlockCaptureValue
 
-
 import "../../cfg/src/lib.sev" as cfg
 
-cfg.ControlFlow[ValueId, B] as BlockLowering
+cfg.ControlFlow[ValueID, B] as BlockLowering
 
-
-# B is the source structure shared by discovery and resolved block bodies.
-# Sentence spans remain available before any expression or literal is resolved.
+'''
+B is the source structure shared by discovery and resolved block bodies.
+Sentence spans remain available before any expression or literal is resolved.
+'''
 trait B:
     partition_with_parent: bool = false
     declaration_name: string = ""
     context: BlockContext
     span: source.Span | None
     grammars: list[BlockSentence]
-    subblocks: list[SourceBlockId]
+    subblocks: list[SourceBlockID]
     indentation_unit: string = "    "
 
     # Indentation is a string spelling with block-owned structural meaning.
-    grammar indentation[spelling: Lexeme]() -> string with spelling.text == self.indentation_unit:
+    grammar indentation[spelling: Lexeme]() -> string with
+        spelling.text == self.indentation_unit:
         return spelling.text
 
     def indentation_level(prefix: Lexeme) -> int | Diagnostic:
         width = len(self.indentation_unit)
         if width == 0 or len(prefix.text) % width != 0:
-            return ParserDiagnostic("indentation must contain complete block indentation units", prefix.span, "syntax.block.indentation")
+            return ParserDiagnostic(
+                "indentation must contain complete block indentation units",
+                prefix.span,
+                "syntax.block.indentation",
+            )
         offset := 0
         while offset < len(prefix.text):
             if prefix.text[offset:offset + width] != self.indentation_unit:
-                return ParserDiagnostic("indentation does not match the block indentation spelling", prefix.span, "syntax.block.indentation")
+                return ParserDiagnostic(
+                    "indentation does not match the block indentation spelling",
+                    prefix.span,
+                    "syntax.block.indentation",
+                )
             offset += width
         return int(len(prefix.text) // width)
 
-    # Called for the first substantive body line, after the owning block has
-    # identified its header. Blank lines and quoted contents are not prefixes.
+    '''
+    Called for the first substantive body line, after the owning block has
+    identified its header. Blank lines and quoted contents are not prefixes.
+    '''
     def body_indentation(parent_level: int, prefix: Lexeme) -> int | Diagnostic:
         level = self.indentation_level(prefix)
         if level is Diagnostic:
             return level
         if parent_level < 0 or level != parent_level + 1:
-            return ParserDiagnostic("block body must begin one indentation level below its header", prefix.span, "syntax.block.indentation")
+            return ParserDiagnostic(
+                "block body must begin one indentation level below its header",
+                prefix.span,
+                "syntax.block.indentation",
+            )
         return level
-
 
 trait ExecutableBlock: B
     partition_with_parent: bool = true
@@ -121,20 +138,20 @@ class IndentedBlock: B
     context: BlockContext = BlockContext()
     span: source.Span | None = None
     grammars: list[BlockSentence] = []
-    subblocks: list[SourceBlockId] = []
+    subblocks: list[SourceBlockID] = []
 
     def prefix(text: string) -> Lexeme:
         return Lexeme(text, source.Span(0, 0, u32(len(text))))
 
 test "blocks own four space indentation and relative body depth":
     block = IndentedBlock()
-    assert(block.indentation_level(prefix("")) == 0)
-    assert(block.indentation_level(prefix("    ")) == 1)
-    assert(block.indentation_level(prefix("        ")) == 2)
-    assert(block.body_indentation(0, prefix("    ")) == 1)
-    assert(block.body_indentation(1, prefix("        ")) == 2)
-    assert(block.body_indentation(0, prefix("        ")) is Diagnostic)
-    assert(block.indentation_level(prefix("  ")) is Diagnostic)
-    assert(block.indentation_level(prefix("      ")) is Diagnostic)
-    assert(block.indentation_level(prefix("\t")) is Diagnostic)
-    assert(block.indentation_level(prefix("   x")) is Diagnostic)
+    assert(block.indentation_level(prefix "") == 0)
+    assert(block.indentation_level(prefix "    ") == 1)
+    assert(block.indentation_level(prefix "        ") == 2)
+    assert(block.body_indentation(0, prefix "    ") == 1)
+    assert(block.body_indentation(1, prefix "        ") == 2)
+    assert(block.body_indentation(0, prefix "        ") is Diagnostic)
+    assert(block.indentation_level(prefix "  ") is Diagnostic)
+    assert(block.indentation_level(prefix "      ") is Diagnostic)
+    assert(block.indentation_level(prefix "\t") is Diagnostic)
+    assert(block.indentation_level(prefix "   x") is Diagnostic)

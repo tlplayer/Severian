@@ -5,87 +5,84 @@ class Point:
 def runtime_string(value: string) -> string:
     return value
 
-def runtime_int(value: int) -> int:
-    return value
-
 test "dynamic fields and atomic grouped updates":
-    point = Point(3,4)
+    point = Point(3, 4)
     axis = runtime_string("x")
     assert(point.get(axis) == 3)
-    point.set(axis,10)
+    point.set(axis, 10)
     assert(point.x == 10)
-    point.set({"x":20,"y":30})
+    point.set({"x": 20, "y": 30})
     assert(point.x == 20 and point.y == 30)
     x_axis = runtime_string("x")
     y_axis = runtime_string("y")
-    point.set({x_axis:40,y_axis:50})
+    point.set({x_axis: 40, y_axis: 50})
     assert(point.x == 40 and point.y == 50)
 
 test "unknown runtime field names raise without modifying the object":
-    point = Point(3,4)
+    point = Point(3, 4)
     axis = runtime_string("z")
     throws "FieldError":
         point.get(axis)
     throws "FieldError":
-        point.set(axis,10)
+        point.set(axis, 10)
     assert(point.x == 3 and point.y == 4)
 
 test "failed single and grouped validation leave every field unchanged":
-    point = Point(3,4)
-    value = runtime_int(200)
+    point = Point(3, 4)
+    value = dynamic int(200)
     throws "ConstraintError":
-        point.set("x",value)
+        point.set("x", value)
     assert(point.x == 3 and point.y == 4)
     throws "ConstraintError":
-        point.set({"x":20,"y":value})
+        point.set({"x": 20, "y": value})
     assert(point.x == 3 and point.y == 4)
 
 test with compiler "static names and concrete field types are checked":
     reject:
-        point = Point(3,4)
+        point = Point(3, 4)
         point.get("z")
     reject:
-        point = Point(3,4)
-        point.set("z",10)
+        point = Point(3, 4)
+        point.set("z", 10)
     reject:
-        point = Point(3,4)
-        point.set("x","ten")
+        point = Point(3, 4)
+        point.set("x", "ten")
     reject:
-        point = Point(3,4)
-        point.set({"x":10,"z":20})
+        point = Point(3, 4)
+        point.set({"x": 10, "z": 20})
 
 class Interval:
     low: int {low <= high}
     high: int {high >= low}
 
 test "grouped constraints observe the complete proposed state":
-    interval = Interval(1,4)
-    interval.set({"low":10,"high":20})
+    interval = Interval(1, 4)
+    interval.set({"low": 10, "high": 20})
     assert(interval.low == 10 and interval.high == 20)
     throws "ConstraintError":
-        interval.set({"low":30,"high":15})
+        interval.set({"low": 30, "high": 15})
     assert(interval.low == 10 and interval.high == 20)
 
 test "runtime group names validate the complete proposed state":
-    interval = Interval(1,4)
+    interval = Interval(1, 4)
     lower = runtime_string("low")
     upper = runtime_string("high")
-    interval.set({lower:10,upper:20})
+    interval.set({lower: 10, upper: 20})
     assert(interval.low == 10 and interval.high == 20)
     throws "ConstraintError":
-        interval.set({lower:30,upper:15})
+        interval.set({lower: 30, upper: 15})
     assert(interval.low == 10 and interval.high == 20)
 
 test "temporary runtime names are evaluated once and retained through dispatch":
-    point = Point(3,4)
+    point = Point(3, 4)
     assert(point.get(runtime_string("y")) == 4)
-    point.set(runtime_string("y"),20)
+    point.set(runtime_string("y"), 20)
     assert(point.y == 20)
 
 test "unknown runtime group member prevents every update":
-    point = Point(3,4)
+    point = Point(3, 4)
     known = runtime_string("x")
     unknown = runtime_string("z")
     throws "FieldError":
-        point.set({known:20,unknown:30})
+        point.set({known: 20, unknown: 30})
     assert(point.x == 3 and point.y == 4)

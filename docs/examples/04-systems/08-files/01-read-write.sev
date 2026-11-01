@@ -1,7 +1,6 @@
 import file
 import os
 
-
 test with integ "text file round trip":
     path = "/tmp/severian-file.txt"
 

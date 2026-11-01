@@ -1,14 +1,16 @@
 print("You can print in module scope before main starts.")
 
-
 value = "one"
 module_func(value)
 value = "two"
 module_func(value)
 
-
 def module_func(value: string):
-    print(f"Call functions in module or allocate values like python call:{value}")
+    print(
+        """\
+Call functions in module or allocate values like python call:{value}\
+""",
+    )
 
 def main():
     print("Or inside main")
@@ -16,8 +18,11 @@ def main():
 test with integ:
     main()
     print("or in tests")
-    assert("You can print in module scope before main starts." in stdout)
-    assert("Call functions in module or allocate values like python call:one" in stdout)
-    assert("Call functions in module or allocate values like python call:two" in stdout)
-    assert("Or inside main" in stdout)
-    assert("or in tests" in stdout)
+    assert:
+        """
+        You can print in module scope before main starts.
+        Call functions in module or allocate values like python call:one
+        Call functions in module or allocate values like python call:two
+        Or inside main 
+        or in tests
+        """ in stdout

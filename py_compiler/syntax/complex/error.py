@@ -54,13 +54,8 @@ def throw_expression(term, cfg, env, span):
 
 
 def release_temporary(value, cfg, span):
-    if value.identity not in cfg.owned_results:
-        return
-    live = [b for scope in cfg.active_scopes for b in scope.values() if b.identity not in cfg.flow.moved]
-    if any(cfg.values.get(b.identity) is value for b in live):
-        return
-    from py_compiler.syntax.generic.storage import release_storage
-    release_storage(value, cfg, span)
+    from py_compiler.syntax.generic.storage import release_temporary as release_storage_temporary
+    release_storage_temporary(value, cfg, span)
 
 def forward_error(value, cfg, span):
     from py_compiler.syntax.function.calls import coerce
@@ -98,6 +93,7 @@ def unwrap_result(value, cfg, span):
     errors = error_members(value.type)
     if not errors or getattr(cfg, 'preserve_error_result', False):
         return value
+    owns_result = value.identity in cfg.owned_results
     initial_values, initial_flow = dict(cfg.values), cfg.flow.fork()
     if value.type.family != 'union':
         forward_error(value, cfg, span)
@@ -112,17 +108,21 @@ def unwrap_result(value, cfg, span):
         cfg.current.terminator = Terminator('conditional', (Edge(failed.identity), Edge(following.identity)), matches)
         cfg.current = failed
         payload = cfg.emit('union-member', error, (value,), UnionMember(index), span)
-        payload = copy_storage(payload, cfg, span)
-        release_temporary(value, cfg, span)
+        if owns_result:
+            # The union is an inline tagged value. Transfer its active payload;
+            # destroying the union here would close an owned resource too soon.
+            cfg.owned_results.add(payload.identity)
+        else:
+            payload = copy_storage(payload, cfg, span)
         forward_error(payload, cfg, span)
         cfg.current, cfg.values, cfg.flow = following, dict(initial_values), initial_flow.fork()
     successes = [t for t in value.type.variants if not is_error(t)]
     if len(successes) > 1:
         from py_compiler.syntax.block.union import Union, UnionWiden
         target = Union().resolve(successes, cfg.context)
-        copied = copy_storage(value, cfg, span)
+        copied = value if owns_result else copy_storage(value, cfg, span)
         result = cfg.emit('union-narrow', target, (copied,), UnionWiden(narrow=True), span)
-        release_temporary(value, cfg, span)
+        cfg.owned_results.discard(value.identity)
         cfg.owned_results.add(result.identity)
         return result
     if not successes:
@@ -132,9 +132,9 @@ def unwrap_result(value, cfg, span):
             release_storage(value, cfg, span)
         return None
     result = cfg.emit('union-member', successes[0], (value,), UnionMember(value.type.variants.index(successes[0])), span)
-    result = copy_storage(result, cfg, span)
-    if value.identity in cfg.owned_results:
-        release_storage(value, cfg, span)
+    if not owns_result:
+        result = copy_storage(result, cfg, span)
+    cfg.owned_results.discard(value.identity)
     cfg.owned_results.add(result.identity)
     return result
 
@@ -314,7 +314,9 @@ class Try(BlockProvider):
                 local[name] = binding
                 cfg.body.bindings.append(binding)
                 cfg.values[binding.identity] = payload
-                cfg.scope(catch.children, local)
+                cfg.flow.moved.discard(binding.identity)
+                cfg.record_lifetime('declare', binding.identity, binding.name)
+                cfg.scope(catch.children, local, local_names={name})
                 if cfg.current.terminator is None:
                     exits.append((cfg.current, dict(cfg.values), cfg.flow.fork()))
             finally:
@@ -387,3 +389,55 @@ class Recover(BlockProvider):
         catch = replace(node, identity=node.identity + ':catch', provider=Catch(), header=binding)
         Try().lower(body, cfg, env, [body, catch], 0)
         return 1
+
+
+class OwnedResultLifetimeTests(unittest.TestCase):
+    def compile(self, source):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('owned-result-lifetime.sev', source, Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        return result
+
+    def test_unwrapping_success_transfers_the_resource_before_drop(self):
+        result = self.compile('''class Failure: Error
+    code: int
+class Resource:
+    handle: int
+    def drop():
+        return
+
+def create() -> Resource | Failure:
+    return Resource(42)
+def use() -> int:
+    resource = create()
+    value = resource.handle
+    drop(resource)
+    return value
+''')
+        body = next(body for body in result.program.bodies if body.declaration == 'use')
+        releases = [op for block in body.blocks for op in block.operations
+                    if op.kind == 'call' and 'Resource.drop' in getattr(op.payload, 'symbol', '')]
+        self.assertEqual(len(releases), 1)
+
+    def test_catch_in_a_loop_reinitializes_and_cleans_its_error_owner(self):
+        result = self.compile('''class Failure: Error
+    message: string
+    code: int
+def fail() -> int | Failure:
+    throw Failure("again", 7)
+def consume() -> int:
+    total = 0
+    while total < 3:
+        try:
+            total += fail()
+        catch error: Failure:
+            if error.code == 7 and error.code != 0:
+                total += 1
+    return total
+''')
+        body = next(body for body in result.program.bodies if body.declaration == 'consume')
+        declarations = [op for block in body.blocks for op in block.operations
+                        if op.kind == 'lifetime' and getattr(op.payload, 'kind', '') == 'declare'
+                        and getattr(op.payload, 'slot', '') == 'error']
+        self.assertTrue(declarations)

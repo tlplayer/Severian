@@ -1,11 +1,10 @@
 import Y from "../generic/symbol.sev"
-import TypeId, RegionId, GenericParamId from "../symbol/symbol.sev"
+import TypeID, RegionID, GenericParamID from "../symbol/symbol.sev"
 import TypeKind, Signature from "system.sev"
 
-
 class FunctionType: Y
-    parameters: list[TypeId] = []
-    result: TypeId | None = None
+    parameters: list[TypeID] = []
+    result: TypeID | None = None
 
     def structural_kind() -> TypeKind | Error:
         result ?= self.result

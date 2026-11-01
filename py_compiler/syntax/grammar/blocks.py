@@ -26,21 +26,21 @@ def recognize_blocks(source, tokens, syntax=None):
     root.provider = import_module("py_compiler.syntax.block.global").Global()
     root.scope = root.provider.bind_scope(root)
     lines, current, errors, delimiters = [], [], [], []
-    for token in tokens:
+    for token_index, token in enumerate(tokens):
         if token.kind in ("NEWLINE", "EOF"):
-            test_header = [item for item in current if item.kind != 'INDENT']
-            multiline_test = test_header and test_header[0].text == 'test' and test_header[-1].text != ':'
-            if (delimiters or (current and current[-1].text == "with") or multiline_test) and token.kind != "EOF":
+            from py_compiler.syntax.grammar.continuation import continues_statement, next_term
+            continuation = continues_statement(source, current, next_term(tokens, token_index))
+            if (delimiters or continuation) and token.kind != "EOF":
                 continue
             if current and any(t.kind != "INDENT" for t in current):
                 lines.append(current)
             current = []
         else:
-            if token.kind == "INDENT" and (delimiters or (current and current[-1].text == "with")):
+            if token.kind == "INDENT" and current:
                 continue
             if token.text in ("(", "[", "{"):
                 delimiters.append([token.text, False])
-            elif token.text == ':' and delimiters:
+            elif token.text in (':', '..') and delimiters:
                 delimiters[-1][1] = True
             elif token.text in (')', ']', '}'):
                 expected = {')': '(', ']': '[', '}': '{'}[token.text]

@@ -657,6 +657,17 @@ def declare_alias(node, context):
     position = next(i for i,t in enumerate(node.tokens) if t.text == 'as')
     left = ''.join(t.text for t in node.tokens[:position])
     right = ''.join(t.text for t in node.tokens[position+1:])
+    if right.isidentifier() and all(part.isidentifier() for part in left.split('.')):
+        qualified = '.'.join((*context.scope, right))
+        if qualified in context.types or qualified in context.record_templates or qualified in context.by_name:
+            raise ValueError('duplicate type alias ' + right)
+        target = context.type(left)
+        context.types[qualified] = target
+        if not hasattr(context, 'type_aliases'):
+            context.type_aliases = {}
+        if not context.scope and not node.scope.development:
+            context.type_aliases[right] = target.name
+        return
     if left.endswith('()') and right.endswith('()'):
         target, name = left[:-2], right[:-2]
         if not name.isidentifier() or not all(part.isidentifier() for part in target.split('.')):
@@ -686,6 +697,18 @@ def declare_alias(node, context):
 
 
 class CallableAliasTests(unittest.TestCase):
+    def test_plain_type_alias_keeps_nominal_identity_and_round_trips(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = 'class DefinitionID:\n    value: int\nDefinitionID as DefinitionId\ndef read(value: DefinitionId) -> int:\n    return value.value\n'
+        result = compile_source('identity.sev', source, Syntax(), lint=True)
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        self.assertIn({'kind': 'type', 'name': 'DefinitionId', 'target': 'DefinitionID'}, result.aliases)
+        primitive = compile_source('types.sev', 'i64 as LegacyNumber\n', Syntax())
+        self.assertFalse(primitive.diagnostics, str(primitive.diagnostics))
+        package = {'package': {'name': 'types', 'version': '1.0.0'}, 'objects': [], 'exports': [], 'types': [], 'templates': [], 'aliases': primitive.aliases}
+        imported = compile_source('consumer.sev', 'from types import LegacyNumber\ndef work(value: LegacyNumber) -> int:\n    return value\n', Syntax(), c_packages={'types': package})
+        self.assertFalse(imported.diagnostics, str(imported.diagnostics))
     def test_alias_preserves_overloads_and_supports_forward_targets(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax

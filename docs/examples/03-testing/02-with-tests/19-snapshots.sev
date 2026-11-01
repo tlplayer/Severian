@@ -2,22 +2,17 @@
 Snapshots are harness-managed files, not language semantics. The test records
 a named value; `sev test --update-snapshots` deliberately accepts changes.
 '''
-
-
 def parse_source(source: string) -> string:
-    return "Module(" + source + ")"
-
+    return """Module({source})"""
 
 def check_source(source: string) -> string:
     return "overflow: " + source
-
 
 test "parser AST matches its snapshot":
     source = "value = 1 + 2"
     tree = parse_source(source)
 
     snapshot("parser/simple-add.ast", tree)
-
 
 test "diagnostic rendering matches its snapshot":
     diagnostic = check_source("value: u8 = 300")

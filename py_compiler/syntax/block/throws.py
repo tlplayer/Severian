@@ -22,6 +22,11 @@ class Throws(BlockProvider):
         return syntax, ()
 
     def lower(self, node, cfg, env, nodes, index):
+        if not node.header:
+            if not node.children or any(getattr(child.provider, 'spelling', None) != 'throws' for child in node.children):
+                raise ValueError('throws block requires throws operations')
+            cfg.scope(node.children, env)
+            return 1
         if node.header and node.header[0].text == '(':
             return self.capture(node, cfg, env)
 

@@ -1,26 +1,42 @@
 import Y from "../generic/symbol.sev"
-import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import B, BlockContext, BlockSentence, SourceBlockID from "../generic/block.sev"
 import source
-import global from "global.sev"
+import Global from "global.sev"
 import FunctionParameter from "../function/function.sev"
 import TypeAnnotation from "../type/annotation.sev"
 
-class main: Y + B
+class Main: Y + B
     declaration_name: string = "main"
     context: BlockContext = BlockContext()
     span: source.Span | None = None
     grammars: list[BlockSentence] = []
-    subblocks: list[SourceBlockId] = []
-    parent: global
+    subblocks: list[SourceBlockID] = []
+    parent: Global
     body: B
     parameters: list[FunctionParameter] = []
     result: TypeAnnotation | None = None
 
-    grammar main["def", "main", "(", parameters...: FunctionParameter, ")", ":"]() -> B:
+    grammar Main[
+        "def",
+        "main",
+        "(",
+        parameters...: FunctionParameter,
+        ")",
+        ":",
+    ]() -> B:
         self.parameters = parameters
         return self
 
-    grammar typed_main["def", "main", "(", parameters...: FunctionParameter, ")", "->", result: TypeAnnotation, ":"]() -> B:
+    grammar typed_main[
+        "def",
+        "main",
+        "(",
+        parameters...: FunctionParameter,
+        ")",
+        "->",
+        result: TypeAnnotation,
+        ":",
+    ]() -> B:
         self.parameters = parameters
         self.result = result
         return self

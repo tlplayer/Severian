@@ -5,7 +5,6 @@ def shared_value() -> int:
     drop value
     return reference[0]
 
-
 def atomic_shared_value() -> int:
     owner = tensor[int](1)
     value = share atomic owner
@@ -14,11 +13,9 @@ def atomic_shared_value() -> int:
     drop value
     return value_reference[0]
 
-
 test:
     assert(shared_value() == 42)
     assert(atomic_shared_value() == 0)
-
 
 test with compiler:
     reject:

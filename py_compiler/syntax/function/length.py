@@ -8,12 +8,12 @@ class Length:
     stride: int = 1
 
     def predicate_argument(self, argument, parameters, context):
-        if argument.kind != 'name' or not isinstance(parameters, dict):
+        if not isinstance(parameters, dict):
             return False
-        annotation = parameters.get(argument.token.text)
-        if not annotation:
+        from py_compiler.syntax.function.contracts import predicate_value_type
+        type_ = predicate_value_type(argument, parameters, context)
+        if type_ is None:
             return False
-        type_ = context.type(annotation)
         entries = context.functions.get(type_.name + '.len', ())
         if entries:
             from py_compiler.syntax.grammar.expression import expression
@@ -37,14 +37,18 @@ class Length:
         if entries:
             from py_compiler.syntax.function.calls import select, invoke
             entry, operands = select(entries, (), cfg, env)
-            return invoke(entry, operands, cfg, span, value)
-        if callable(getattr(value.type, 'length', None)):
-            return value.type.length(value, cfg, span)
-        if value.type.family not in ('array', 'pointer') or not value.type.mlir.startswith('memref<'):
-            raise ValueError(f'{value.type.name} does not provide len; a sized container is required')
-        from py_compiler.syntax.complex.array import record_storage
-        stride = record_storage(value.type, cfg.context)[0] if getattr(value.type, 'aggregate', False) else 1
-        return cfg.emit('length', cfg.context.type('int'), (value,), Length(stride), span)
+            result = invoke(entry, operands, cfg, span, value)
+        elif callable(getattr(value.type, 'length', None)):
+            result = value.type.length(value, cfg, span)
+        else:
+            if value.type.family not in ('array', 'pointer') or not value.type.mlir.startswith('memref<'):
+                raise ValueError(f'{value.type.name} does not provide len; a sized container is required')
+            from py_compiler.syntax.complex.array import record_storage
+            stride = record_storage(value.type, cfg.context)[0] if getattr(value.type, 'aggregate', False) else 1
+            result = cfg.emit('length', cfg.context.type('int'), (value,), Length(stride), span)
+        from py_compiler.syntax.generic.storage import release_temporary
+        release_temporary(value, cfg, span)
+        return result
 
     def atom(self, operation):
         return Atom(self, (operation.operands[0].type,), operation.result.type, ('view',), ('read',), self)
@@ -64,3 +68,64 @@ class Length:
         else:
             lines.append(f'{name(result)} = arith.index_cast {length} : index to {result.type.mlir}')
         return lines
+
+
+import unittest
+
+
+class TemporaryLengthTests(unittest.TestCase):
+    def test_iterator_length_keeps_frozen_owned_capture_alive(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('captured-length.sev', '''class Word:
+    text: string
+    def len() -> int:
+        return len(text)
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+        index = 0
+        while index < len(self):
+            yield index
+            index += 1
+def word() -> Word:
+    return Word("hello")
+def count() -> int:
+    total = 0
+    for item in [word()]:
+        for index in item:
+            total += index
+    return total
+''', Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        for body in result.program.bodies:
+            body.verify()
+
+    def test_length_releases_an_unbound_string_result_once(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('temporary-length.sev', '''def text() -> string:
+    return "hello"
+def count() -> int:
+    return len(text())
+''', Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'count')
+        operations = [operation for block in body.blocks for operation in block.operations]
+        self.assertEqual(sum(op.kind == 'call' for op in operations), 1)
+        self.assertEqual(sum(op.kind == 'deallocate' for op in operations), 1)
+        self.assertLess(next(i for i, op in enumerate(operations) if op.kind == 'length'),
+                        next(i for i, op in enumerate(operations) if op.kind == 'deallocate'))
+
+    def test_length_preserves_a_live_binding(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('bound-length.sev', '''def count() -> int:
+    text = "hello"
+    first = len(text)
+    return first + len(text)
+''', Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'count')
+        operations = [operation for block in body.blocks for operation in block.operations]
+        self.assertEqual(sum(op.kind == 'deallocate' for op in operations), 1)
+        self.assertGreater(next(i for i, op in enumerate(operations) if op.kind == 'deallocate'),
+                           max(i for i, op in enumerate(operations) if op.kind == 'length'))

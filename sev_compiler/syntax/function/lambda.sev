@@ -9,12 +9,22 @@ import Span from "../source.sev"
 def recognize_lambda(source: SourceFile, start: u32) -> u32 | None:
     return recognize_keyword(source, start, "lambda")
 
-
 class LambdaSyntax: Y
-    token_forms: list[TokenForm] = [TokenForm("LAMBDA", "lambda", recognize=recognize_lambda)]
+    token_forms: list[TokenForm] = [
+        TokenForm(
+            kind = "LAMBDA",
+            spelling = "lambda",
+            recognize = recognize_lambda,
+        ),
+    ]
     span: Span | None = None
 
-    grammar expression["lambda", parameters...: Symbol, ":", body: Expression]() -> Expression:
+    grammar expression[
+        "lambda",
+        parameters...: Symbol,
+        ":",
+        body: Expression,
+    ]() -> Expression:
         names: list[string] = []
         for parameter in parameters:
             names.append(parameter.name.value)

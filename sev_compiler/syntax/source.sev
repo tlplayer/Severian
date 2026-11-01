@@ -1,8 +1,55 @@
 import source
-import AbiId, ArtifactId, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, DeclarationId, DefinitionID, FfiId, FunctionId, GenericParamId, HirId, IndexedId, InferVarId, InterfaceId, LocalId, ModuleId, NamedId, OpId, PackageId, PrimitiveId, ProviderId, RegionId, ScopeId, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TypeBinding, TypeConstructorBinding, TypeId, ValueId, VariantId, definition_from_key, named_definition, same_definition, semantic_digest, semantic_key from "symbol/symbol.sev"
-import EOF, SourceFile, SourceMap, Span, load, span, utf8_offset, virtual_source from "../frontend/source/source.sev"
-
-
+import ABIID,
+    ArtifactID,
+    AttrValue,
+    AttributeID,
+    BindingID,
+    BlockID,
+    CompiledRegionID,
+    CompilerID,
+    DeclarationID,
+    DefinitionID,
+    FFIID,
+    FunctionID,
+    GenericParamID,
+    HIRID,
+    IndexedID,
+    InferVarID,
+    InterfaceID,
+    LocalID,
+    ModuleID,
+    NamedID,
+    OpID,
+    PackageID,
+    PrimitiveID,
+    ProviderID,
+    RegionID,
+    ScopeID,
+    StableID,
+    Substitution,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    SymbolName,
+    TypeBinding,
+    TypeConstructorBinding,
+    TypeID,
+    ValueID,
+    VariantID,
+    definition_from_key,
+    named_definition,
+    same_definition,
+    semantic_digest,
+    semantic_key from "symbol/symbol.sev"
+import Eof,
+    SourceFile,
+    SourceMap,
+    Span,
+    load,
+    Span,
+    utf8_offset,
+    virtual_source from "../frontend/source/source.sev"
+Span as span
 
 class AssertionOrigin:
     statement_start: u32
@@ -10,11 +57,9 @@ class AssertionOrigin:
     condition_end: u32
     location: AssertionLocation | None
 
-
 enum CoverageKind:
     Line
     Branch
-
 
 class CoveragePoint:
     span_start: u32
@@ -23,14 +68,13 @@ class CoveragePoint:
     key: string | None
     file: string | None
     line: u32 | None
-    condition: ValueId | None = None
+    condition: ValueID | None = None
 
 class AssertionLocation:
     file: string
     line: u32
     column: u32
     expression: string
-
 
 class QualityRegion:
     id: int

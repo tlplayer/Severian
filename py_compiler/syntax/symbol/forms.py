@@ -4,6 +4,11 @@ import re
 NUMBER = re.compile(r"(?:\.[0-9](?:_?[0-9])*(?:[eE][+-]?[0-9](?:_?[0-9])*)?|0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*|0[bB][01](?:_?[01])*|0[oO][0-7](?:_?[0-7])*|[0-9](?:_?[0-9])*(?:\.(?!\.)(?:[0-9](?:_?[0-9])*)?)?(?:[eE][+-]?[0-9](?:_?[0-9])*)?)(?:B)?")
 
 
+def interpolation_parser_text(text):
+    """Adapt Severian's implicit formatted blocks for the expression reader."""
+    return 'f' + text if text.startswith('"""') else text
+
+
 def quoted_end(text, start):
     quote = text[start]
     delimiter = quote * 3 if text.startswith(quote * 3, start) else quote

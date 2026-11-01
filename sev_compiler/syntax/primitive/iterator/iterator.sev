@@ -1,10 +1,8 @@
 import Y from "../../generic/symbol.sev"
-import TypeId from "../../symbol/symbol.sev"
-
+import TypeID from "../../symbol/symbol.sev"
 
 class IteratorType: Y
-    element: TypeId | None = None
-
+    element: TypeID | None = None
 
 trait Iterable[T]:
-    def next(item:T) -> T
+    def next(item: T) -> T

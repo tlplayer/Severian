@@ -3,29 +3,29 @@ import decode_four, decode_three, decode_two, valid, width from "encoding.sev"
 @mlir("arith.extui")
 def codepoint(value: char) -> int
 
-
 @mlir("arith.trunci")
 def __scalar(value: int) -> char
-
 
 def from_codepoint(value: int) -> char:
     assert(valid(value))
     return __scalar(value)
 
-
 test "character literals preserve Unicode scalars and escapes":
-    assert(codepoint('a') == 97)
-    assert(codepoint('λ') == 955)
-    assert(codepoint('中') == 20013)
-    assert(codepoint('😀') == 128512)
-    assert(codepoint('\n') == 10)
+    assert:
+        codepoint('a') == 97
+        codepoint('λ') == 955
+        codepoint('中') == 20013
+        codepoint('😀') == 128512
+        codepoint('\n') == 10
 
 def literal_value(spelling: string, delimiter: string) -> string | None:
     width = len(delimiter)
     length = len(spelling)
     if width == 0 or length < width * 2:
         return None
-    if not spelling.starts_with(delimiter) or not spelling.ends_with(delimiter):
+    if not spelling
+        .starts_with(delimiter) or not spelling
+        .ends_with(delimiter):
         return None
     end = length - width
     offset := width
@@ -55,7 +55,7 @@ def literal_value(spelling: string, delimiter: string) -> string | None:
         elif escaped == '\\' or escaped == '\'' or escaped == '"':
             value += string(escaped)
         elif escaped == 'x' or escaped == 'u' or escaped == 'U':
-            count := 2 if escaped == 'x' else (4 if escaped == 'u' else 8)
+            count := 2 if escaped == 'x' else(4 if escaped == 'u' else 8)
             start := offset + 1
             braced = escaped == 'u' and start < end and spelling[start] == '{'
             if braced:
@@ -70,7 +70,7 @@ def literal_value(spelling: string, delimiter: string) -> string | None:
                 return None
             scalar: u32 := 0
             for digit in spelling[start:start + count]:
-            number: u32 := 0
+                number: u32 := 0
                 if digit >= '0' and digit <= '9':
                     number = u32(digit) - u32('0')
                 elif digit >= 'a' and digit <= 'f':
@@ -92,13 +92,13 @@ def literal_value(spelling: string, delimiter: string) -> string | None:
         offset += 1
     return value
 
-
 test "literal decoding shares Unicode and escape validation":
-    assert(literal_value("'λ'", "'") == "λ")
-    assert(literal_value("'\\u{1f600}'", "'") == "😀")
-    assert(literal_value("'\\n'", "'") == "\n")
-    assert(literal_value("'\\uD800'", "'") == None)
-    assert(literal_value("'\\U00110000'", "'") == None)
-    assert(literal_value("'\\u{}'", "'") == None)
-    assert(literal_value("'\\q'", "'") == None)
-    assert(literal_value("'x", "'") == None)
+    assert:
+        literal_value("'λ'", "'") == "λ"
+        literal_value("'\\u{1f600}'", "'") == "😀"
+        literal_value("'\\n'", "'") == "\n"
+        literal_value("'\\uD800'", "'") == None
+        literal_value("'\\U00110000'", "'") == None
+        literal_value("'\\u{}'", "'") == None
+        literal_value("'\\q'", "'") == None
+        literal_value("'x", "'") == None

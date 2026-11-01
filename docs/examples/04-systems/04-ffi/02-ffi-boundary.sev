@@ -1,9 +1,7 @@
 import c from xxi
 
-
 @c(symbol = "strlen")
 def c_strlen(text: view string) -> usize
-
 
 def string_length(text: string) -> usize:
     unsafe:

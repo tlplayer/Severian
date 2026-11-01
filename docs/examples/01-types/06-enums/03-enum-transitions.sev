@@ -1,4 +1,3 @@
-
 enum Status:
     Connecting -> Received | Failed
     Received
@@ -9,14 +8,13 @@ test with compiler "Received cannot go to Connecting":
     reject:
         state = Connecting
 
-
 test "declared transitions reach either terminal state":
     received = Connecting
-    received = Received
+    received = Status.Received
     assert(received == Status.Received)
     failed = Status.Connecting
     failed = Status.Failed
-    assert(failed == Failed)
+    assert(failed == Status.Failed)
 
 test with compiler "mutable terminal states cannot transition backwards":
     state = Received

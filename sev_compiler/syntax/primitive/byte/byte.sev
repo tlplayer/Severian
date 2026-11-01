@@ -1,50 +1,77 @@
 '''
 Storage quantities count bytes: 1B is one byte; 0B is zero storage.
 This is a dimensioned size, independent of integer values and element counts.
-This is convenient to avoid pointer[0] which could mean 0 byte offset, or 0 type offset
+This is convenient to avoid pointer[0] which could mean 0 byte offset, or 0 type
+offset
 - allocate(1024B) requests exactly 1,024 bytes.
 - p[1024B] accesses memory at base + 1024 bytes, regardless of the pointee type.
 - p[10] accesses memory at base + 10 × sizeof(T) for pointer[T].
 For pointer[u32], p[4B] and p[1] therefore address the same location.
-The compiler fix must preserve that distinction by resolving the existing byte primitive
- and its unit conversions. Treating byte as an alias for u8 or plain int would lose the semantics you intended.
+The compiler fix must preserve that distinction by resolving the existing byte
+primitive
+ and its unit conversions. Treating byte as an alias for u8 or plain int would
+ lose the semantics you intended.
 '''
-import Constructor, DeclarationId, LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, Size, TypeId from "../contract.sev"
+import Constructor,
+    DeclarationID,
+    LiteralSyntax,
+    MLIRTypeBinding,
+    Primitive,
+    PrimitiveCategory,
+    PrimitiveID,
+    PrimitiveRepresentation,
+    Size,
+    TypeID from "../contract.sev"
 import scalar_mlir from "../mlir.sev"
 import Lexeme from "../../generic/lexeme.sev"
 import TokenForm from "../../generic/token.sev"
 import SourceFile from "../../source.sev"
 
-
 def recognize_byte(source: SourceFile, start: u32) -> u32 | None:
     end := start
     length = u32(len(source.characters))
-    while end < length and ((source.characters[end] >= '0' and source.characters[end] <= '9') or source.characters[end] == '_'):
+    while end < length
+        and (
+            (source.characters[end] >= '0' and source.characters[end] <= '9')
+            or source.characters[end] == '_'
+        ):
         end += 1
     if end == start or end >= length or source.characters[end] != 'B':
         return None
     end += 1
-    if end < length and (source.characters[end].is_alphanumeric() or source.characters[end] == '_'):
+    if end < length
+        and (
+            source.characters[end].is_alphanumeric()
+            or source.characters[end] == '_'
+        ):
         return None
-    if not byte.literal_valid(source.text[start:end]):
+    if not Byte.literal_valid(source.text[start:end]):
         return None
     return end
 
+class Byte: Primitive
 
-class byte: Primitive
     # Integer number of bytes.
     amount: int = 0
-    identity: PrimitiveId = PrimitiveId(DeclarationId(9))
-    id: TypeId = TypeId(9)
+    identity: PrimitiveID = PrimitiveID(DeclarationID(9))
+    id: TypeID = TypeID(9)
     name: string = "byte"
     size: Size = Size.Fixed(8)
     alignment: Size = Size.Fixed(8)
     constructors: list[Constructor] = []
     category: PrimitiveCategory = PrimitiveCategory.Bytes
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
-    mlir: MlirTypeBinding = scalar_mlir("i64", "integer", 64, true)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(64, true)
+    mlir: MLIRTypeBinding = scalar_mlir(
+        spelling = "i64",
+        scalar = "integer",
+        bits = 64,
+        signed = true,
+    )
     token_kind: string = "Byte"
-    token_forms: list[TokenForm] = [TokenForm("Byte", recognize=recognize_byte)]
+    token_forms: list[TokenForm] = [
+        TokenForm(kind = "Byte", recognize = recognize_byte),
+    ]
     literal_family: string = "byte"
     literal_syntaxes: list[LiteralSyntax] = [LiteralSyntax("Byte")]
     default_literal: bool = true
@@ -64,39 +91,34 @@ class byte: Primitive
                 return false
         return previous_digit
 
-    grammar literal[spelling: Lexeme]() -> byte with byte.literal_valid(spelling.text):
+    grammar literal[spelling: Lexeme]() -> Byte with
+        Byte.literal_valid(spelling.text):
         digits := ""
         for current in spelling.text[:-1]:
             if current != '_':
                 digits += string(current)
-        return byte(amount=digits.parse_integer[int](base=10))
+        return Byte(amount = digits.parse_integer[int](base = 10))
 
     operator <=>(self) -> string:
         return string(self.amount) + "B"
 
-
-    operator ==[G:Equal](other: Self) -> bool:
+    operator == [G:Equal](other: Self) -> bool:
         return self.amount == other.amount
 
-
-    operator <[G:Less](other: Self) -> bool:
+    operator < [G:Less](other: Self) -> bool:
         return self.amount < other.amount
 
+    operator + [G:Add](other: Self) -> Self:
+        return Byte(self.amount + other.amount)
 
-    operator +[G:Add](other: Self) -> Self:
-        return byte(self.amount + other.amount)
-
-
-    operator /[G:Divide](other: Self) -> int:
+    operator / [G:Divide](other: Self) -> int:
         return self.amount / other.amount
 
-
-def byte_type_id() -> TypeId:
-    return TypeId(9)
-
+def byte_type_id() -> TypeID:
+    return TypeID(9)
 
 test "byte spelling is a storage quantity, not an integer prefix":
-    assert(byte.literal_valid("1B"))
-    assert(byte.literal_valid("1_024B"))
+    assert(Byte.literal_valid("1B"))
+    assert(Byte.literal_valid("1_024B"))
     for invalid in ["B", "_1B", "1_B", "1__0B", "1.5B", "1", "1Bytes"]:
-        assert(not byte.literal_valid(invalid))
+        assert(not Byte.literal_valid(invalid))

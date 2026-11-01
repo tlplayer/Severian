@@ -1,9 +1,10 @@
 import collections
 
-
-# An ordinary generic class selects another generic class as its storage.
-# Slot is a one-value provider used to illustrate the contract.
-trait SingleValue[T]: collections.C[int,T]
+'''
+An ordinary generic class selects another generic class as its storage.
+Slot is a one-value provider used to illustrate the contract.
+'''
+trait SingleValue[T]: collections.C[int, T]
 
 class Slot[T]: SingleValue[T]
     value: T
@@ -22,9 +23,9 @@ class Slot[T]: SingleValue[T]
     def values(self: view Self) -> collections.list[T]:
         return [value]
 
-    def items(self: view Self) -> collections.list[tuple[int,T]]:
-        result = collections.list[tuple[int,T]]()
-        result.append(tuple[int,T](0,value))
+    def items(self: view Self) -> collections.list[tuple[int, T]]:
+        result = collections.list[tuple[int, T]]()
+        result.append(tuple[int, T](0, value))
         return result
 
     grammar indexed[self, "[", index: int, "]"]() -> T:
@@ -33,7 +34,7 @@ class Slot[T]: SingleValue[T]
     grammar iterate["iterator", "(", self, ")"]() -> iterator[T]:
         yield self.get(0)
 
-class Collection[T, C:collections.C[int,T]]:
+class Collection[T, C: collections.C[int, T]]:
     storage: C[T]
     def Collection(value: T):
         storage = C[T](value)
@@ -54,21 +55,20 @@ test "named container bindings preserve input and output types":
     assert(number.get() == 42)
     assert(text.get() == "owned")
 
-
 test "provider results own their string after the collection is dropped":
     collection = Collection[T:string, C:Slot]("retained")
     result = collection.get()
-    drop(collection)
+    drop collection
     assert(result == "retained")
 
 test "a one-slot provider uses the common container utilities":
     slot = Slot[int](42)
     assert(collections.sum(slot) == 42)
-    pairs: collections.list[(int,int)] = collections.enumerate(slot)
+    pairs: collections.list[(int, int)] = collections.enumerate(slot)
     assert(pairs.get(0)[0] == 0 and pairs.get(0)[1] == 42)
 
 test with compiler "providers must satisfy the complete container contract":
     reject "missing":
-        class Incomplete[T]: collections.C[int,T]
+        class Incomplete[T]: collections.C[int, T]
             value: T
-        collection = Collection[T:int,C:Incomplete](42)
+        collection = Collection[T:int, C:Incomplete](42)

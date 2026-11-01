@@ -10,12 +10,10 @@ class Resource:
     def drop():
         print("close:", name)
 
-
 def use_resource():
     resource := Resource("database")
 
     print(resource.name)
-
 
 def main():
     use_resource()
@@ -31,11 +29,15 @@ test with compiler "dropped resource cannot be read":
 
 test "scope cleanup calls drop before releasing fields":
     main()
-    assert(capture_stdout() == "open: database\ndatabase\nclose: database\nfinished\n")
+    assert(
+        (capture_stdout() ==
+            "open: database\ndatabase\nclose: database\nfinished\n"
+            ),
+    )
 
 test "explicit drop runs once":
     resource = Resource("temporary")
-    drop(resource)
+    drop resource
     assert(capture_stdout() == "open: temporary\nclose: temporary\n")
 
 class Marker:

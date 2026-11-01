@@ -2,19 +2,18 @@
 test "data units":
     empty: byte = 0B
     width: byte = 1B
-    assert(empty == 0b)
-    assert(width == 8b)
-    assert(1B == 8b)
-
-    assert(1KB == 1000B)
-    assert(1MB == 1000KB)
-    assert(1GB == 1000MB)
-    assert(1TB == 1000GB)
-
-    assert(1KiB == 1024B)
-    assert(1MiB == 1024KiB)
-    assert(1GiB == 1024MiB)
-    assert(1TiB == 1024GiB)
+    assert:
+        empty == 0b
+        width == 8b
+        1B == 8b
+        1KB == 1000B
+        1MB == 1000KB
+        1GB == 1000MB
+        1TB == 1000GB
+        1KiB == 1024B
+        1MiB == 1024KiB
+        1GiB == 1024MiB
+        1TiB == 1024GiB
 
 test "hex literals":
     assert(0xFF == 255)
@@ -22,16 +21,17 @@ test "hex literals":
 
     mask := 0xFF00_FF00
     register := 0x0000_0001
-    # Typed memory reads can assign into the initialized register:
-    # register = memory.read[u32](address, endian=little)
-    # register = memory.read[u32](address, endian=big)
 
-
-
+'''
+Typed memory reads can assign into the initialized register:
+register = memory.read[u32](address, endian=little)
+register = memory.read[u32](address, endian=big)
+'''
 test "percent literals":
-    assert(80pct == 0.8)
-    assert(100pct == 1.0)
-    assert(1pct == 0.01)
+    assert:
+        80pct == 0.8
+        100pct == 1.0
+        1pct == 0.01
 
     utilization := 92pct
 
@@ -39,14 +39,13 @@ test "percent literals":
 
 # Time
 test "time units":
-    assert(1000ns == 1us)
-    assert(1000us == 1ms)
-    assert(1000ms == 1s)
-
-    assert(60s == 1min)
-    assert(60min == 1hr)
-    assert(24hr == 1day)
-
+    assert:
+        1000ns == 1us
+        1000us == 1ms
+        1000ms == 1s
+        60s == 1min
+        60min == 1hr
+        24hr == 1day
 
 # Units can be converted naturally.
 test "unit conversion":
@@ -54,7 +53,6 @@ test "unit conversion":
 
     assert(duration / 1ms == 2000)
     assert(4096B / 1KiB == 4)
-
 
 # Units compose.
 test "derived units":
@@ -65,59 +63,57 @@ test "derived units":
 
     assert(throughput == 50MB / 1s)
 
-
 # Frequency is inverse time.
 test "frequency":
-    assert(1Hz == 1 / 1s)
-    assert(1kHz == 1000Hz)
-    assert(1MHz == 1000kHz)
-    assert(1GHz == 1000MHz)
-
+    assert:
+        1Hz == 1 / 1s
+        1kHz == 1000Hz
+        1MHz == 1000kHz
+        1GHz == 1000MHz
 
 # Unit values work naturally in contracts.
 def process(data: string):
-    #Number of elements
+
+    # Number of elements
     print(size(data))
 
-
-# Profile SLA syntax under consideration:
-# {
-#     defer time < 10ms -> Error("operation took too long"),
-# }
+'''
+Profile SLA syntax under consideration:
+{
+    defer time < 10ms -> Error("operation took too long"),
+}
+'''
 test "sized input":
     process("a")
 
 # Temperature suffixes are dimensioned literals supplied by the prelude.
-
 test "temperature":
     gpu_idle := 42C
     gpu_load := 78C
 
-    assert(gpu_idle < gpu_load)
-    assert(gpu_load < 90C)
+    assert:
+        gpu_idle < gpu_load
+        gpu_load < 90C
+        32F == 0C
+        273.15K == 0C
 
-    assert(32F == 0C)
-    assert(273.15K == 0C)
+'''
+Custom units can be created:
 
+trait Unit[Dimension]:
+    symbol: string
+    scale: f64
+    offset: f64 = 0.0
 
-# Custom units can be created:
-#
-# trait Unit[Dimension]:
-#     symbol: string
-#     scale: f64
-#     offset: f64 = 0.0
-#
-# class Volt: Unit
-#     symbol: string = "V"
-#     scale: f64
-#     offset: f64
-# Electrical suffixes are dimensioned literals supplied by the prelude.
-
-#core_voltage := 950mV
-#power := 220W
-
-
-# Different dimensions cannot be compared.
+class Volt: Unit
+    symbol: string = "V"
+    scale: f64
+    offset: f64
+Electrical suffixes are dimensioned literals supplied by the prelude.
+core_voltage := 950mV
+power := 220W
+Different dimensions cannot be compared.
+'''
 test with compiler:
     reject:
         assert(10ms < 20MB)
@@ -128,18 +124,20 @@ test with compiler:
 from collections import list, sum
 
 test "signed temperatures apply offsets before comparing normalized values":
-    assert(-40F == -40C)
-    assert(-273.15C == 0K)
-    assert(212F == 100C)
+    assert:
+        -40F == -40C
+        -273.15C == 0K
+        212F == 100C
 
 def measured_duration() -> duration:
     return 2s
 
 test "units compose through nested expressions and function results":
-    assert(1 / (2s + 3s) == 0.2Hz)
-    assert(1 / measured_duration() == 0.5Hz)
-    assert(3 * measured_duration() == 6s)
-    assert(0B < 1KB < 2MB)
+    assert:
+        1 / (2s + 3s) == 0.2Hz
+        1 / measured_duration() == 0.5Hz
+        3 * measured_duration() == 6s
+        0B < 1KB < 2MB
 
 test "runtime negation and compound assignments preserve dimensions":
     elapsed = 2s
@@ -152,15 +150,19 @@ test "runtime negation and compound assignments preserve dimensions":
     assert(elapsed == 2s)
 
 test "C sums retain duration and ratio types":
-    durations: list[duration] = [2s,3s]
+    durations: list[duration] = [2s, 3s]
     total: duration = sum(durations)
     assert(total == 5s)
     empty = list[duration]()
     assert(sum(empty) == 0s)
-    fractions: list[ratio] = [25pct,50pct]
+    fractions: list[ratio] = [25pct, 50pct]
     assert(sum(fractions) == 75pct)
 
-test with compiler "dimension checks survive calls updates and comparison chains":
+test with compiler
+"""\
+
+dimension checks survive calls updates and comparison chains
+""":
     reject "incompatible unit dimensions":
         value = measured_duration() + 4B
     reject "cannot change the destination type or dimensions":

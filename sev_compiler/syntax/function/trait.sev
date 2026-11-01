@@ -1,8 +1,4 @@
-
-
 # Callable behavior contracts shared by primitive implementations.
-
-
 trait BitAnd:
     operator &(right: Self) -> Self
 
@@ -15,20 +11,19 @@ trait BitXor:
 # This contract combines the three operator traits without a runtime body.
 trait Bitwise: BitAnd + BitOr + BitXor
 
-
 trait Equatable:
     operator ==(right: Self) -> bool
     operator !=(right: Self) -> bool
-
 
 trait Logical:
     operator and(right: Self) -> Self
     operator or(right: Self) -> Self
     operator not() -> Self
 
-
-# A total order compatible with equality. Partially ordered values (such as
-# unrestricted IEEE floats containing NaN) need an explicit total-order wrapper.
+'''
+A total order compatible with equality. Partially ordered values (such as
+unrestricted IEEE floats containing NaN) need an explicit total-order wrapper.
+'''
 trait Ordered:
     Equatable
 
@@ -36,7 +31,6 @@ trait Ordered:
     operator <=(right: Self) -> bool
     operator >(right: Self) -> bool
     operator >=(right: Self) -> bool
-
 
 trait Truth:
     operator if(self) -> bool

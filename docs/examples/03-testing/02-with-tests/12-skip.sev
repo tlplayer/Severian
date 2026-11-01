@@ -2,11 +2,8 @@
 Skipping is explicit runner metadata. A skipped test always carries a reason,
 so the test catalog explains why its body did not execute.
 '''
-
-
 test with skip("requires an AMD GPU") "runs on the ROCm backend":
     assert(gpu.backend == "rocm")
-
 
 test with skip("requires Unix domain sockets") "uses a Unix domain socket":
     socket = unix.listen("/tmp/severian-example.sock")

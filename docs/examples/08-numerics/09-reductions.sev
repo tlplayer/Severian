@@ -1,9 +1,9 @@
 from tensor_math import sum
 
 test "sum reduces tensor elements to a scalar":
-    value = tensor[f64,(2,2)](tuple[f64,4](1.0,2.0,3.0,4.0))
+    value = tensor[f64, (2, 2)](tuple[f64, 4](1.0, 2.0, 3.0, 4.0))
     assert(sum(value) == 10.0)
 
 test "empty reduction has the additive identity":
-    value = tensor[f64,(0,2)]()
+    value = tensor[f64, (0, 2)]()
     assert(sum(value) == 0.0)

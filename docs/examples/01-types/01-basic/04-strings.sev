@@ -6,7 +6,7 @@ def main():
     print(name.upper())
     print(name.contains("ver"))
     print(f"Hello, {name}!")
-    print(name.slice(0,5))
+    print(name.slice(0, 5))
 
 test with integ:
     main()

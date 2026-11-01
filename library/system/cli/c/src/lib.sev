@@ -7,6 +7,11 @@ class Argument:
     help: string
     required: bool
     multiple: bool
+    named: bool = false
+    is_flag: bool = false
+    short: string = ""
+    default_text: string = ""
+    has_default: bool = false
 
 class Command:
     name: string
@@ -22,35 +27,164 @@ class CliError: Error
 def argument(name: string, help: string = "", required: bool = true, multiple: bool = false) -> Argument:
     return Argument(name, help, required, multiple)
 
+def option(name: string, help: string = "", short: string = "", default: string | None = None,
+           required: bool = false, multiple: bool = false) -> Argument:
+    return Argument(name, help, required, multiple, true, false, short, default else "", default.has_value)
+
+def flag(name: string, help: string = "", short: string = "") -> Argument:
+    return Argument(name, help, false, false, true, true, short)
+
 def command(name: string, about: string, arguments: copy list[Argument]) -> Command:
     return Command(name, about, arguments)
 
-def parse(specification: Command, input: list[string]) -> Matches | CliError:
-    entries = dict[string,list[string]]()
-    position = 0
+def valid_name(name: string) -> bool:
+    if len(name) == 0:
+        return false
+    for byte in name:
+        code = int(byte)
+        if not ((code >= 65 and code <= 90) or (code >= 97 and code <= 122) or
+                (code >= 48 and code <= 57) or code == 45 or code == 95):
+            return false
+    return name[0] != u8(45)
+
+def validate(specification: Command) -> dict[string,int] | CliError:
+    names = dict[string,int]()
+    aliases = dict[string,int]()
+    optional_seen = false
+    multiple_seen = false
     index = 0
     while index < specification.arguments.len():
         item = specification.arguments[index]
-        name = copy item.name
-        if name == "" or name in entries:
-            throw CliError("argument names must be nonempty and unique")
-        if item.multiple and index + 1 != specification.arguments.len():
-            throw CliError("only the last positional argument may accept multiple values")
+        if not valid_name(item.name) or item.name in names:
+            throw CliError("argument names must be valid and unique")
+        names[item.name] = index
+        if item.named:
+            aliases["--" + item.name] = index
+            if item.short != "":
+                if len(item.short) != 1 or not valid_name(item.short) or item.short == "_" or item.short in aliases:
+                    throw CliError("short options must be unique single letters or digits")
+                aliases[item.short] = index
+                aliases["-" + item.short] = index
+            if item.is_flag and (item.required or item.multiple or item.has_default):
+                throw CliError("flags cannot require values, defaults, or repetition")
+        else:
+            if item.short != "" or item.is_flag or item.has_default:
+                throw CliError("positional arguments cannot have option metadata")
+            if multiple_seen:
+                throw CliError("only the last positional argument may accept multiple values")
+            if item.required and optional_seen:
+                throw CliError("required positional arguments must precede optional arguments")
+            optional_seen = optional_seen or not item.required
+            multiple_seen = item.multiple
+        index += 1
+    return aliases
+
+def capture(entries: borrow dict[string,list[string]], item: Argument, value: string) -> absent | CliError:
+    captured = entries[item.name]
+    if not item.multiple and captured.len() > 0:
+        throw CliError("option supplied more than once: --" + item.name)
+    captured.append(value)
+    entries[item.name] = captured
+    return
+
+# Pure parsing: no argv access, shell expansion, output, or process exit.
+# Options may occur between positionals. -- ends option recognition.
+def parse(specification: Command, input: list[string]) -> Matches | CliError:
+    aliases = validate(specification)
+    entries = dict[string,list[string]]()
+    for item in specification.arguments:
+        entries[item.name] = list[string]()
+    positional = list[string]()
+    options = true
+    position = 0
+    while position < input.len():
+        token = input[position]
+        if options and token == "--":
+            options = false
+        elif options and len(token) > 1 and token[0] == u8(45):
+            split = 0
+            while split < len(token) and token[split] != u8(61):
+                split += 1
+            key = token[:split)
+            if key not in aliases:
+                throw CliError("unknown option: " + key)
+            item = specification.arguments[aliases[key]]
+            if item.is_flag:
+                if split != len(token):
+                    throw CliError("flag does not accept a value: " + key)
+                capture(entries, item, "true")
+            elif split < len(token):
+                capture(entries, item, token[split + 1:])
+            else:
+                position += 1
+                if position == input.len():
+                    throw CliError("missing value for option: " + key)
+                next = input[position]
+                split = 0
+                while split < len(next) and next[split] != u8(61):
+                    split += 1
+                next_key = next[:split)
+                if next == "--" or next_key in aliases:
+                    throw CliError("missing value for option: " + key)
+                capture(entries, item, next)
+        else:
+            positional.append(token)
+        position += 1
+    position = 0
+    for item in specification.arguments:
+        if item.named:
+            captured = entries[item.name]
+            if captured.len() == 0 and item.has_default:
+                captured.append(item.default_text)
+            if item.required and captured.len() == 0:
+                throw CliError("missing required option: --" + item.name)
+            entries[item.name] = captured
+            continue
         captured = list[string]()
-        if position < input.len():
-            captured.append(input[position])
+        if position < positional.len():
+            captured.append(positional[position])
             position += 1
             if item.multiple:
-                while position < input.len():
-                    captured.append(input[position])
+                while position < positional.len():
+                    captured.append(positional[position])
                     position += 1
         if item.required and captured.len() == 0:
             throw CliError("missing required argument: " + item.name)
-        entries[name] = captured
-        index += 1
-    if position < input.len():
+        entries[item.name] = captured
+    if position < positional.len():
         throw CliError("too many positional arguments")
     return Matches(entries)
+
+def present(matches: Matches, name: string) -> bool:
+    return name in matches.entries and matches.entries[name].len() > 0
+
+def render_help(specification: Command) -> string | CliError:
+    validate(specification)
+    result = "usage: " + specification.name
+    for item in specification.arguments:
+        text = copy item.name
+        if item.named:
+            text = "--" + text
+            if not item.is_flag:
+                text = text + " VALUE"
+        if item.multiple:
+            text = text + "..."
+        if not item.required:
+            text = "[" + text + "]"
+        result = result + " " + text
+    result = result + "\n" + specification.about + "\n"
+    for item in specification.arguments:
+        result = result + "  "
+        if item.named:
+            result = result + "--"
+        result = result + item.name
+        if item.short != "":
+            result = result + ", -" + item.short
+        result = result + "  " + item.help
+        if item.has_default:
+            result = result + " (default: " + item.default_text + ")"
+        result = result + "\n"
+    return result
 
 def parse_process(specification: Command) -> Matches | CliError:
     input = process.arguments()
@@ -81,3 +215,52 @@ test "required and excess positional values are errors":
     specification = command("example", "", [argument("value")])
     throws(parse(specification, []) -> CliError)
     throws(parse(specification, ["a", "b"]) -> CliError)
+
+test "named options aliases flags and positionals compose":
+    specification = command("chat", "", [argument("file"), option("port", short="p", default="7777"), flag("verbose", short="v")])
+    parsed = parse(specification, ["-v", "notes.txt", "--port=9000"])
+    assert(values(parsed, "port")[0] == "9000")
+    assert(values(parsed, "file")[0] == "notes.txt" and present(parsed, "verbose"))
+    alternate = parse(specification, ["-p", "8000", "notes.txt"])
+    assert(values(alternate, "port")[0] == "8000" and not present(alternate, "verbose"))
+    defaults = parse(specification, ["notes.txt"])
+    assert(values(defaults, "port")[0] == "7777")
+
+test "end of options preserves literals and explicit empty values":
+    specification = command("tool", "", [argument("files", required=false, multiple=true), option("name", default="fallback")])
+    parsed = parse(specification, ["--name=", "--", "--name=literal", "$HOME", ""])
+    assert(values(parsed, "name")[0] == "")
+    files = values(parsed, "files")
+    assert(files.len() == 3 and files[0] == "--name=literal" and files[1] == "$HOME" and files[2] == "")
+
+test "repeatable options preserve order and required options are checked":
+    specification = command("tool", "", [option("include", short="I", multiple=true, required=true)])
+    parsed = parse(specification, ["-I", "one", "--include=two"])
+    paths = values(parsed, "include")
+    assert(paths.len() == 2 and paths[0] == "one" and paths[1] == "two")
+    throws(parse(specification, []) -> CliError)
+
+test "invalid option uses fail without consuming a following option":
+    specification = command("tool", "", [option("port", short="p"), flag("verbose", short="v")])
+    throws(parse(specification, ["--unknown"]) -> CliError)
+    throws(parse(specification, ["--port"]) -> CliError)
+    throws(parse(specification, ["--port", "-v"]) -> CliError)
+    throws(parse(specification, ["--port", "--"]) -> CliError)
+    throws(parse(specification, ["--port=1", "-p", "2"]) -> CliError)
+    throws(parse(specification, ["--verbose=true"]) -> CliError)
+    throws(parse(specification, ["-v", "-v"]) -> CliError)
+
+test "invalid specifications fail even with no input":
+    throws(parse(command("tool", "", [option("one", short="x"), flag("two", short="x")]), []) -> CliError)
+    throws(parse(command("tool", "", [argument("same", required=false), option("same")]), []) -> CliError)
+    throws(parse(command("tool", "", [argument("first", required=false), argument("second")]), []) -> CliError)
+    throws(parse(command("tool", "", [option("bad=name")]), []) -> CliError)
+    throws(parse(command("tool", "", [option("name", short="_")]), []) -> CliError)
+
+test "help is returned as text with aliases and defaults":
+    specification = command("chat", "A chat lab", [option("port", help="Listen port", short="p", default="7777"), flag("help", short="h")])
+    text = render_help(specification)
+    assert(text.contains("usage: chat") and text.contains("--port, -p"))
+    assert(text.contains("Listen port") and text.contains("default: 7777"))
+    parsed = parse(specification, ["--help"])
+    assert(present(parsed, "help"))

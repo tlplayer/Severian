@@ -6,9 +6,8 @@ import source
 import lexer
 import parser
 
-@c(symbol="exit")
+@c(symbol = "exit")
 def exit_status(status: i32)
-
 
 def repository() -> string | Error:
     configured = environment.get("SEVERIAN_SYSROOT", "")
@@ -16,66 +15,191 @@ def repository() -> string | Error:
         return package.canonical(configured)
     location := process.current_directory()
     while location != "/" and location != "":
-        if package.exists(package.manifest_file(location + "/sev_compiler")) and package.exists(location + "/docs/examples"):
+        if package
+            .exists(
+                package.manifest_file(location + "/sev_compiler"),
+            ) and package
+            .exists(location + "/docs/examples"):
             return package.canonical(location)
         location = path.dirname(location)
     throw Error("set SEVERIAN_SYSROOT to the Severian repository")
 
-
 def source_has_tests(input: source.SourceFile) -> bool | Error:
-    stream = lexer.lexer(input)
+    stream = lexer.Lexer(input)
     if stream is list[lexer.Diagnostic]:
         for diagnostic in stream:
             throw Error(diagnostic.note)
         throw Error("lexing failed without a diagnostic")
     for line in parser.token_lines(stream):
-        if line.prefix.text == "" and len(line.tokens) > 0 and line.tokens[0].lexeme.text == "test":
+        if line.prefix.text == ""
+            and len(line.tokens) > 0
+            and line.tokens[0].lexeme.text == "test":
             return true
     return false
-
 
 def has_tests(location: string) -> bool | Error:
     return source_has_tests(source.load(location))
 
-
 def plan(root: string, rebuild: bool = true) -> list[package.Step] | Error:
     project = package.open(root + "/sev_compiler")
     config = project.manifest.entries
-    section_names = package.text_setting(config, "package.metadata.pipeline", "sections")
-    seconds = int(package.text_setting(config, "package.metadata.pipeline", "timeout-seconds", "30"))
-    memory = int(package.text_setting(config, "package.metadata.pipeline", "memory-bytes", "3000000000"))
-    compiler_seconds = int(package.text_setting(config, "package.metadata.pipeline", "compiler-timeout-seconds", "180"))
-    compiler_memory = int(package.text_setting(config, "package.metadata.pipeline", "compiler-memory-bytes", "3000000000"))
-    compiler_profile = package.text_setting(config, "package.metadata.pipeline", "compiler-profile", "release")
+    section_names = package.text_setting(
+        config,
+        "package.metadata.pipeline",
+        "sections",
+    )
+    seconds = int(
+        package.text_setting(
+            config,
+            "package.metadata.pipeline",
+            "timeout-seconds",
+            "30",
+        ),
+    )
+    memory = int(
+        package.text_setting(
+            config,
+            "package.metadata.pipeline",
+            "memory-bytes",
+            "3000000000",
+        ),
+    )
+    compiler_seconds = int(
+        package.text_setting(
+            config,
+            "package.metadata.pipeline",
+            "compiler-timeout-seconds",
+            "180",
+        ),
+    )
+    compiler_memory = int(
+        package.text_setting(
+            config,
+            "package.metadata.pipeline",
+            "compiler-memory-bytes",
+            "3000000000",
+        ),
+    )
+    compiler_profile = package.text_setting(
+        config,
+        "package.metadata.pipeline",
+        "compiler-profile",
+        "release",
+    )
     if section_names == "":
-        throw Error("compiler pipeline requires example sections in package metadata")
+        throw Error(
+            "compiler pipeline requires example sections in package metadata",
+        )
     compiler = root + "/sev_compiler/package.pkg/host/dev/bin/sev_compiler"
     seed = environment.get("SEVERIAN_SEED", root + "/bin/sev_rust")
-    output = package.temporary(root + "/sev_compiler/package.pkg/pipeline/artifacts", "run-")
+    output = package.temporary(
+        root + "/sev_compiler/package.pkg/pipeline/artifacts",
+        "run-",
+    )
     steps: list[package.Step] = []
     dependencies: list[string] = []
     if rebuild:
-        steps.append(package.Step("compiler", [seed, "build", root + "/sev_compiler", "--bin", "sev_compiler", "--build-profile", compiler_profile, "-o", compiler], root, stage="compiler", timeout=compiler_seconds, memory_bytes=compiler_memory))
+        steps.append(
+            package.Step(
+                name = "compiler",
+                arguments = [
+                    seed,
+                    "build",
+                    root + "/sev_compiler",
+                    "--bin",
+                    "sev_compiler",
+                    "--build-profile",
+                    compiler_profile,
+                    "-o",
+                    compiler,
+                ],
+                directory = root,
+                stage = "compiler",
+                timeout = compiler_seconds,
+                memory_bytes = compiler_memory,
+            ),
+        )
         dependencies.append("compiler")
     for section in section_names.split(","):
-        for location in package.files(root + "/docs/examples/" + section.strip()):
+        for location in package.files(
+            """\
+{root}/docs/examples/{section.strip()}\
+""",
+        ):
             if not location.ends_with(".sev"):
                 continue
             relative = location[int(len(root + "/docs/examples/")):]
             build_name = relative + ":build"
-            executable = output + "/" + relative.replace("/", "_")
-            steps.append(package.Step(build_name, [compiler, "build", location, "--sysroot", root, "-o", executable], root, dependencies, relative, "build", timeout=seconds, memory_bytes=memory))
+            executable = """{output}/{relative.replace("/", "_")}"""
+            steps.append(
+                package.Step(
+                    name = build_name,
+                    arguments = [
+                        compiler,
+                        "build",
+                        location,
+                        "--sysroot",
+                        root,
+                        "-o",
+                        executable,
+                    ],
+                    directory = root,
+                    dependencies = dependencies,
+                    group = relative,
+                    stage = "build",
+                    timeout = seconds,
+                    memory_bytes = memory,
+                ),
+            )
             stdout_fixture = location[:-4] + ".stdout"
             stderr_fixture = location[:-4] + ".stderr"
-            steps.append(package.Step(relative + ":run", [executable], root, [build_name], relative, "run", timeout=seconds, memory_bytes=memory, stdout_fixture=stdout_fixture if package.exists(stdout_fixture) else "", stderr_fixture=stderr_fixture if package.exists(stderr_fixture) else ""))
-            steps.append(package.Step(relative + ":test", [compiler, "test", location, "--sysroot", root, "-o", executable + ".tests"], root, dependencies, relative, "test", timeout=seconds, memory_bytes=memory, enabled=has_tests(location)))
+            steps.append(
+                package.Step(
+                    name = relative + ":run",
+                    arguments = [executable],
+                    directory = root,
+                    dependencies = [build_name],
+                    group = relative,
+                    stage = "run",
+                    timeout = seconds,
+                    memory_bytes = memory,
+                    stdout_fixture = stdout_fixture if package.exists(
+                        stdout_fixture,
+                    ) else "",
+                    stderr_fixture = stderr_fixture if package.exists(
+                        stderr_fixture,
+                    ) else "",
+                ),
+            )
+            steps.append(
+                package.Step(
+                    name = relative + ":test",
+                    arguments = [
+                        compiler,
+                        "test",
+                        location,
+                        "--sysroot",
+                        root,
+                        "-o",
+                        executable + ".tests",
+                    ],
+                    directory = root,
+                    dependencies = dependencies,
+                    group = relative,
+                    stage = "test",
+                    timeout = seconds,
+                    memory_bytes = memory,
+                    enabled = has_tests(location),
+                ),
+            )
     return steps
-
 
 def run(rebuild: bool = true) -> package.Report | Error:
     root = repository()
-    return package.pipeline(plan(root, rebuild), root + "/sev_compiler/package.pkg/pipeline/reports")
-
+    return package.pipeline(
+        plan(root, rebuild),
+        root + "/sev_compiler/package.pkg/pipeline/reports",
+    )
 
 def main():
     arguments = process.arguments()
@@ -83,13 +207,37 @@ def main():
     if len(arguments) == 2 and arguments[1] == "--no-build":
         rebuild = false
     elif len(arguments) > 1:
-        throw Error("usage: sev run sev_compiler --bin compiler-pipeline [-- --no-build]")
+        throw Error(
+            "usage: sev run sev_compiler --bin compiler-pipeline [-- --no-buil"
+            "d]",
+        )
     report = run(rebuild)
     if report.failed > 0 or report.blocked > 0:
         exit_status(1)
 
-
 test "pipeline discovers top level tests from classified token lines":
-    assert(source_has_tests(source.virtual_source("top.sev", "test \"example\":\n    assert(true)\n")))
-    assert(not source_has_tests(source.virtual_source("nested.sev", "class Example:\n    test \"nested\":\n        assert(true)\n")))
-    assert(not source_has_tests(source.virtual_source("quoted.sev", "message = \"test example:\"\n# test ignored:\n")))
+    assert(
+        source_has_tests(
+            source.virtual_source(
+                "top.sev",
+                "test \"example\":\n    assert(true)\n",
+            ),
+        ),
+    )
+    assert(
+        not source_has_tests(
+            source.virtual_source(
+                "nested.sev",
+                "class Example:\n    test \"nested\":\n        assert(true)"
+                "\n",
+            ),
+        ),
+    )
+    assert(
+        not source_has_tests(
+            source.virtual_source(
+                "quoted.sev",
+                "message = \"test example:\"\n# test ignored:\n",
+            ),
+        ),
+    )

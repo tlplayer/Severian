@@ -6,7 +6,6 @@ def main():
 
     print(value)
 
-
 test "integer to float conversion can be explicit":
     count: i32 = 4
     ratio: f64 = 0.5

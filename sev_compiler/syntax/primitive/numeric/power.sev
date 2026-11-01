@@ -1,12 +1,10 @@
-@c(symbol="pow")
+@c(symbol = "pow")
 def __power(left: float, right: float) -> float
 
-
-operator **[G:Power](left: float, right: float) -> float:
+operator**[G:power](left: float, right: float) -> float:
     return __power(left, right)
 
-
--> integer_power[T: int]():
+-> integer_power[T:int]():
     def power(base: T, exponent: T) -> T:
         assert(exponent >= 0)
         result: T := 1
@@ -20,7 +18,7 @@ operator **[G:Power](left: float, right: float) -> float:
                 factor = factor * factor
         return result
 
-    operator **[G:Power](left: T, right: T) -> T:
+    operator**[G:power](left: T, right: T) -> T:
         return power(left, right)
 
 integer_power[int]()

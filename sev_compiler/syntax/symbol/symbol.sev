@@ -3,188 +3,150 @@ import Y from "../generic/symbol.sev"
 class SymbolName:
     value: string
 
-
 enum SymbolKind:
     Function
     Data
     ThreadLocal
 
-trait IndexedId:
+trait IndexedID:
     index: u32
 
-
-trait StableId:
+trait StableID:
     value: u128
 
-
-trait NamedId:
+trait NamedID:
     value: string
 
-
-class HirId: IndexedId
+class HIRID: IndexedID
     index: u32
 
-
-class BindingId: IndexedId
+class BindingID: IndexedID
     index: u32
 
-
-class VariantId: IndexedId
+class VariantID: IndexedID
     index: u32
 
-
-class ValueId: IndexedId
+class ValueID: IndexedID
     index: u32
 
-
-class TypeId: IndexedId
+class TypeID: IndexedID
     index: u32
 
-
-class GenericParamId: IndexedId
+class GenericParamID: IndexedID
     index: u32
 
-
-class InferVarId: IndexedId
+class InferVarID: IndexedID
     index: u32
 
-
-class RegionId: IndexedId
+class RegionID: IndexedID
     index: u32
 
-
-class DeclarationId: StableId
+class DeclarationID: StableID
     value: u128
 
+class PrimitiveID:
+    declaration: DeclarationID
 
-class PrimitiveId:
-    declaration: DeclarationId
-
-
-class CompilerId: StableId
+class CompilerID: StableID
     value: u128
 
-
-class DefinitionId:
+class DefinitionID:
     package: u128
     module: u128
-    declaration: DeclarationId
-
-
-# Existing consumers share this identity while migrating its spelling.
-DefinitionId as DefinitionID
-
+    declaration: DeclarationID
 
 class TypeBinding:
-    parameter: GenericParamId
-    type_id: TypeId
-
+    parameter: GenericParamID
+    type_id: TypeID
 
 class TypeConstructorBinding:
-    parameter: GenericParamId
+    parameter: GenericParamID
     definition: DefinitionID
-
 
 class Substitution:
     arguments: list[TypeBinding] = []
 
-    def get(parameter: GenericParamId) -> TypeId | None:
+    def get(parameter: GenericParamID) -> TypeID | None:
         for binding in arguments:
             if binding.parameter.index == parameter.index:
                 return binding.type_id
         return None
 
-    def bind(parameter: GenericParamId, type: TypeId):
+    def bind(parameter: GenericParamID, type: TypeID):
         for binding in arguments:
             if binding.parameter.index == parameter.index:
                 if binding.type_id.index != type.index:
                     throw Error("conflicting generic type binding")
                 return
         position := 0
-        while position < len(arguments) and arguments[position].parameter.index < parameter.index:
+        while position < len(arguments)
+            and arguments[position].parameter.index < parameter.index:
             position += 1
         arguments.insert(position, TypeBinding(parameter, type))
 
-
-class OpId:
+class OpID:
     dialect: u128
     operation: u128
 
-
-class AttributeId: StableId
+class AttributeID: StableID
     value: u128
-
 
 enum AttrValue:
     Integer(value: i128)
     Boolean(value: bool)
     String(value: string)
-    Type(value: TypeId)
-    Types(value: list[TypeId])
+    Type(value: TypeID)
+    Types(value: list[TypeID])
 
-
-class BlockId: IndexedId
+class BlockID: IndexedID
     index: u32
 
-
-class LocalId: IndexedId
+class LocalID: IndexedID
     index: u32
 
+class ScopeID:
+    module: ModuleID
 
-class ScopeId:
-    module: ModuleId
-
-
-class PackageId: IndexedId
+class PackageID: IndexedID
     index: u32
 
-
-class CompiledRegionId: IndexedId
+class CompiledRegionID: IndexedID
     index: u32
 
-
-class ArtifactId: IndexedId
+class ArtifactID: IndexedID
     index: u32
 
-
-class FunctionId: StableId
+class FunctionID: StableID
     value: u128
 
-
-class ModuleId: StableId
+class ModuleID: StableID
     value: u128
 
-
-class ProviderId: StableId
+class ProviderID: StableID
     value: u128
 
-
-class InterfaceId: NamedId
+class InterfaceID: NamedID
     value: string
 
-
-class FfiId: NamedId
+class FFIID: NamedID
     value: string
 
-
-class AbiId: NamedId
+class ABIID: NamedID
     value: string
 
-
-class SymbolId: NamedId
+class SymbolID: NamedID
     value: string
-
 
 class Symbol: Y
     name: SymbolName
     kind: SymbolKind
-    id: SymbolId | None = None
+    id: SymbolID | None = None
 
-
-
-# Versioned, deterministic digest. Both accumulators stay below 2**61 before
-# multiplication, so the calculation cannot overflow its u128 intermediates.
-# Full semantic keys remain alongside IDs for collision diagnostics.
+'''
+Versioned, deterministic digest. Both accumulators stay below 2**61 before
+multiplication, so the calculation cannot overflow its u128 intermediates.
+Full semantic keys remain alongside IDs for collision diagnostics.
+'''
 def semantic_digest(key: string) -> u128:
     first: u128 := 1469598103934665603
     second: u128 := 1099511628211
@@ -194,22 +156,28 @@ def semantic_digest(key: string) -> u128:
         second = (second * 263 + u128(byte) + 1) % modulus
     return first * 2305843009213693952 + second
 
-
 def definition_from_key(key: string) -> DefinitionID:
-    return DefinitionID(2, semantic_digest("definition-owner-2:" + key), DeclarationId(semantic_digest(key)))
-
+    return DefinitionID(
+        2,
+        semantic_digest("definition-owner-2:" + key),
+        DeclarationID(semantic_digest(key)),
+    )
 
 def same_definition(left: DefinitionID, right: DefinitionID) -> bool:
-    return left.package == right.package and left.module == right.module and left.declaration.value == right.declaration.value
-
+    return
+        left.package
+        == right.package
+        and left.module
+        == right.module
+        and left.declaration.value
+        == right.declaration.value
 
 def named_definition(owner: string, kind: string, name: string) -> DefinitionID:
     return definition_from_key(semantic_key([owner, kind, name]))
-
 
 # Keys are explicit strings, not runtime hash() values or source coordinates.
 def semantic_key(parts: list[string]) -> string:
     encoded: list[string] = []
     for part in parts:
-        encoded.append(string(len(part)) + ":" + part)
+        encoded.append("""{len(part)}:{part}""")
     return "semantic-2:" + encoded.join("")

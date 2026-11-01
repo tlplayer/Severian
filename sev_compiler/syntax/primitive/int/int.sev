@@ -1,10 +1,24 @@
-import I128Primitive, I16Primitive, I32Primitive, I64Primitive, I8Primitive, U128Primitive, U16Primitive, U32Primitive, U64Primitive, U8Primitive from "declarations.sev"
-import LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../contract.sev"
+import I128Primitive,
+    I16Primitive,
+    I32Primitive,
+    I64Primitive,
+    I8Primitive,
+    U128Primitive,
+    U16Primitive,
+    U32Primitive,
+    U64Primitive,
+    U8Primitive from "declarations.sev"
+import LiteralSyntax,
+    MLIRTypeBinding,
+    Primitive,
+    PrimitiveCategory,
+    PrimitiveID,
+    PrimitiveRepresentation,
+    TypeID from "../contract.sev"
 import Error from "../primitive.sev"
 import Lexeme from "../../generic/lexeme.sev"
 
 import Bitwise, Equatable, Ordered, Truth from "../../function/trait.sev"
-
 
 '''
 # `int`
@@ -28,10 +42,12 @@ union int:
 ```
 
 The union is a type family for declarations, conversions, generic constraints,
-documentation, and generated tests. A concrete integer value still has a concrete
+documentation, and generated tests. A concrete integer value still has a
+concrete
 storage type such as `i32` or `u64`.
 
-Unsuffixed integer literals belong to the `int` family. The compiler resolves the
+Unsuffixed integer literals belong to the `int` family. The compiler resolves
+the
 concrete representation from the expected type and literal range instead of
 materializing a runtime `int` wrapper.
 
@@ -52,11 +68,10 @@ Integers participate in the `Truth` contract:
 nonzero -> true
 ```
 
-Truth testing is not a narrowing conversion. `if value:` asks the integer for its
+Truth testing is not a narrowing conversion. `if value:` asks the integer for
+its
 truth value without changing the integer's type.
 '''
-
-
 trait IntegerArithmetic:
     operator +(right: Self) -> Self
     operator -(right: Self) -> Self
@@ -64,28 +79,25 @@ trait IntegerArithmetic:
     operator /(right: Self) -> Self
     operator //(right: Self) -> Self
     operator %(right: Self) -> Self
-    operator **(right: f32) -> Self
+    operator**(right: f32) -> Self
 
-    operator +=(right: Self)
-    operator -=(right: Self)
-    operator *=(right: Self)
-    operator /=(right: Self)
-    operator //=(right: Self)
-    operator %=(right: Self)
-
+    operator += right: Self
+    operator -= right: Self
+    operator *= right: Self
+    operator /= right: Self
+    operator //= right: Self
+    operator %= right: Self
 
 trait IntegerShift:
-    operator <<[LeftShift: Y, int: int](right: int) -> Self
-    operator >>[RightShift: Y, int: int](right: int) -> Self
-    operator <<=[LeftShift: Y, int: int](right: int)
-    operator >>=[RightShift: Y, int: int](right: int)
-
+    operator <<[LeftShift:Y, int:int](right: int) -> Self
+    operator >>[RightShift:Y, int:int](right: int) -> Self
+    operator <<=[LeftShift:Y, int:int](right: int)
+    operator >>=[RightShift:Y, int:int](right: int)
 
 trait IntegerBitwiseAssign:
-    operator &=(right: Self)
-    operator |=(right: Self)
-    operator ^=(right: Self)
-
+    operator &= right: Self
+    operator |= right: Self
+    operator ^= right: Self
 
 trait Integer:
     Primitive
@@ -104,279 +116,277 @@ trait Integer:
     ConstParam
     Structural
 
-    bits: u16
+    bits: U16
     signed: bool
     min: Self
     max: Self
 
-
 trait SignedInteger: Integer
 trait UnsignedInteger: Integer
-
 
 '''
 # Integer family
 
-The family itself is closed. Libraries may define numeric classes that convert to
-or from an integer, but they do not become members of `int` merely by implementing
+The family itself is closed. Libraries may define numeric classes that convert
+to
+or from an integer, but they do not become members of `int` merely by
+implementing
 `Integer`.
 '''
-union signed_int:
-    i8
-    i16
-    i32
-    i64
-    i128
-    isize
+union SignedInt:
+    I8
+    I16
+    I32
+    I64
+    I128
+    Isize
 
-
-union unsigned_int:
-    u8
-    u16
-    u32
-    u64
-    u128
-    usize
-
+union UnsignedInt:
+    U8
+    U16
+    U32
+    U64
+    U128
+    Usize
 
 union int:
-    signed_int
-    unsigned_int
-
+    SignedInt
+    UnsignedInt
 
 '''
 # Primitive declarations
 
 Only representation metadata differs between the concrete types. Behavior is
-specified once by the `Integer` contracts and generated conversion relations below.
+specified once by the `Integer` contracts and generated conversion relations
+below.
 '''
-class i8: SignedInteger
-    identity: PrimitiveId = I8Primitive().identity
-    mlir: MlirTypeBinding = I8Primitive().mlir
-    id: TypeId = I8Primitive().id
+class I8: SignedInteger
+    identity: PrimitiveID = I8Primitive().identity
+    mlir: MLIRTypeBinding = I8Primitive().mlir
+    id: TypeID = I8Primitive().id
     token_kind: string = I8Primitive().token_kind
     literal_family: string = I8Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = I8Primitive().literal_syntaxes
     name: string = "i8"
     size: byte = 1B
     alignment: byte = 1B
-    bits: u16 = 8
+    bits: U16 = 8
     signed: bool = true
-    min: i8 = -128
-    max: i8 = 127
+    min: I8 = -128
+    max: I8 = 127
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, true)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(8, true)
     default_literal: bool = I8Primitive().default_literal
 
-
-class i16: SignedInteger
-    identity: PrimitiveId = I16Primitive().identity
-    mlir: MlirTypeBinding = I16Primitive().mlir
-    id: TypeId = I16Primitive().id
+class I16: SignedInteger
+    identity: PrimitiveID = I16Primitive().identity
+    mlir: MLIRTypeBinding = I16Primitive().mlir
+    id: TypeID = I16Primitive().id
     token_kind: string = I16Primitive().token_kind
     literal_family: string = I16Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = I16Primitive().literal_syntaxes
     name: string = "i16"
     size: byte = 2B
     alignment: byte = 2B
-    bits: u16 = 16
+    bits: U16 = 16
     signed: bool = true
-    min: i16 = -32768
-    max: i16 = 32767
+    min: I16 = -32768
+    max: I16 = 32767
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, true)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(16, true)
     default_literal: bool = I16Primitive().default_literal
 
-
-class i32: SignedInteger
-    identity: PrimitiveId = I32Primitive().identity
-    mlir: MlirTypeBinding = I32Primitive().mlir
-    id: TypeId = I32Primitive().id
+class I32: SignedInteger
+    identity: PrimitiveID = I32Primitive().identity
+    mlir: MLIRTypeBinding = I32Primitive().mlir
+    id: TypeID = I32Primitive().id
     token_kind: string = I32Primitive().token_kind
     literal_family: string = I32Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = I32Primitive().literal_syntaxes
     name: string = "i32"
     size: byte = 4B
     alignment: byte = 4B
-    bits: u16 = 32
+    bits: U16 = 32
     signed: bool = true
-    min: i32 = -2147483648
-    max: i32 = 2147483647
+    min: I32 = -2147483648
+    max: I32 = 2147483647
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, true)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(32, true)
     default_literal: bool = I32Primitive().default_literal
 
-
-class i64: SignedInteger
-    identity: PrimitiveId = I64Primitive().identity
-    mlir: MlirTypeBinding = I64Primitive().mlir
-    id: TypeId = I64Primitive().id
+class I64: SignedInteger
+    identity: PrimitiveID = I64Primitive().identity
+    mlir: MLIRTypeBinding = I64Primitive().mlir
+    id: TypeID = I64Primitive().id
     token_kind: string = I64Primitive().token_kind
     literal_family: string = I64Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = I64Primitive().literal_syntaxes
     name: string = "i64"
     size: byte = 8B
     alignment: byte = 8B
-    bits: u16 = 64
+    bits: U16 = 64
     signed: bool = true
-    min: i64 = -9223372036854775808
-    max: i64 = 9223372036854775807
+    min: I64 = -9223372036854775808
+    max: I64 = 9223372036854775807
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, true)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(64, true)
     default_literal: bool = I64Primitive().default_literal
 
-
-class i128: SignedInteger
-    identity: PrimitiveId = I128Primitive().identity
-    mlir: MlirTypeBinding = I128Primitive().mlir
-    id: TypeId = I128Primitive().id
+class I128: SignedInteger
+    identity: PrimitiveID = I128Primitive().identity
+    mlir: MLIRTypeBinding = I128Primitive().mlir
+    id: TypeID = I128Primitive().id
     token_kind: string = I128Primitive().token_kind
     literal_family: string = I128Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = I128Primitive().literal_syntaxes
     name: string = "i128"
     size: byte = 16B
     alignment: byte = 16B
-    bits: u16 = 128
+    bits: U16 = 128
     signed: bool = true
-    min: i128 = -(2 ** 127)
-    max: i128 = (2 ** 127) - 1
+    min: I128 = - (2**127)
+    max: I128 = (2**127) - 1
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, true)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(128, true)
     default_literal: bool = I128Primitive().default_literal
 
-
-class isize: SignedInteger
-    identity: PrimitiveId = I64Primitive().identity
-    mlir: MlirTypeBinding = I64Primitive().mlir
-    id: TypeId = I64Primitive().id
+class Isize: SignedInteger
+    identity: PrimitiveID = I64Primitive().identity
+    mlir: MLIRTypeBinding = I64Primitive().mlir
+    id: TypeID = I64Primitive().id
     token_kind: string = I64Primitive().token_kind
     literal_family: string = I64Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = I64Primitive().literal_syntaxes
     name: string = "isize"
     size: byte = target.pointer_size
     alignment: byte = target.pointer_alignment
-    bits: u16 = target.pointer_bits
+    bits: U16 = target.pointer_bits
     signed: bool = true
-    min: isize = -(2 ** (bits - 1))
-    max: isize = (2 ** (bits - 1)) - 1
+    min: Isize = - (2**(bits - 1))
+    max: Isize = (2**(bits - 1)) - 1
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(bits, true)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(bits, true)
     default_literal: bool = I64Primitive().default_literal
 
-
-class u8: UnsignedInteger
-    identity: PrimitiveId = U8Primitive().identity
-    mlir: MlirTypeBinding = U8Primitive().mlir
-    id: TypeId = U8Primitive().id
+class U8: UnsignedInteger
+    identity: PrimitiveID = U8Primitive().identity
+    mlir: MLIRTypeBinding = U8Primitive().mlir
+    id: TypeID = U8Primitive().id
     token_kind: string = U8Primitive().token_kind
     literal_family: string = U8Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = U8Primitive().literal_syntaxes
     name: string = "u8"
     size: byte = 1B
     alignment: byte = 1B
-    bits: u16 = 8
+    bits: U16 = 8
     signed: bool = false
-    min: u8 = 0
-    max: u8 = 255
+    min: U8 = 0
+    max: U8 = 255
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(8, false)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(8, false)
     default_literal: bool = U8Primitive().default_literal
 
-
-class u16: UnsignedInteger
-    identity: PrimitiveId = U16Primitive().identity
-    mlir: MlirTypeBinding = U16Primitive().mlir
-    id: TypeId = U16Primitive().id
+class U16: UnsignedInteger
+    identity: PrimitiveID = U16Primitive().identity
+    mlir: MLIRTypeBinding = U16Primitive().mlir
+    id: TypeID = U16Primitive().id
     token_kind: string = U16Primitive().token_kind
     literal_family: string = U16Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = U16Primitive().literal_syntaxes
     name: string = "u16"
     size: byte = 2B
     alignment: byte = 2B
-    bits: u16 = 16
+    bits: U16 = 16
     signed: bool = false
-    min: u16 = 0
-    max: u16 = 65535
+    min: U16 = 0
+    max: U16 = 65535
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(16, false)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(16, false)
     default_literal: bool = U16Primitive().default_literal
 
-
-class u32: UnsignedInteger
-    identity: PrimitiveId = U32Primitive().identity
-    mlir: MlirTypeBinding = U32Primitive().mlir
-    id: TypeId = U32Primitive().id
+class U32: UnsignedInteger
+    identity: PrimitiveID = U32Primitive().identity
+    mlir: MLIRTypeBinding = U32Primitive().mlir
+    id: TypeID = U32Primitive().id
     token_kind: string = U32Primitive().token_kind
     literal_family: string = U32Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = U32Primitive().literal_syntaxes
     name: string = "u32"
     size: byte = 4B
     alignment: byte = 4B
-    bits: u16 = 32
+    bits: U16 = 32
     signed: bool = false
-    min: u32 = 0
-    max: u32 = 4294967295
+    min: U32 = 0
+    max: U32 = 4294967295
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(32, false)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(32, false)
     default_literal: bool = U32Primitive().default_literal
 
-
-class u64: UnsignedInteger
-    identity: PrimitiveId = U64Primitive().identity
-    mlir: MlirTypeBinding = U64Primitive().mlir
-    id: TypeId = U64Primitive().id
+class U64: UnsignedInteger
+    identity: PrimitiveID = U64Primitive().identity
+    mlir: MLIRTypeBinding = U64Primitive().mlir
+    id: TypeID = U64Primitive().id
     token_kind: string = U64Primitive().token_kind
     literal_family: string = U64Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = U64Primitive().literal_syntaxes
     name: string = "u64"
     size: byte = 8B
     alignment: byte = 8B
-    bits: u16 = 64
+    bits: U16 = 64
     signed: bool = false
-    min: u64 = 0
-    max: u64 = 18446744073709551615
+    min: U64 = 0
+    max: U64 = 18446744073709551615
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(64, false)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(64, false)
     default_literal: bool = U64Primitive().default_literal
 
-
-class u128: UnsignedInteger
-    identity: PrimitiveId = U128Primitive().identity
-    mlir: MlirTypeBinding = U128Primitive().mlir
-    id: TypeId = U128Primitive().id
+class U128: UnsignedInteger
+    identity: PrimitiveID = U128Primitive().identity
+    mlir: MLIRTypeBinding = U128Primitive().mlir
+    id: TypeID = U128Primitive().id
     token_kind: string = U128Primitive().token_kind
     literal_family: string = U128Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = U128Primitive().literal_syntaxes
     name: string = "u128"
     size: byte = 16B
     alignment: byte = 16B
-    bits: u16 = 128
+    bits: U16 = 128
     signed: bool = false
-    min: u128 = 0
-    max: u128 = (2 ** 128) - 1
+    min: U128 = 0
+    max: U128 = (2**128) - 1
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(128, false)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(128, false)
     default_literal: bool = U128Primitive().default_literal
 
-
-class usize: UnsignedInteger
-    identity: PrimitiveId = U64Primitive().identity
-    mlir: MlirTypeBinding = U64Primitive().mlir
-    id: TypeId = U64Primitive().id
+class Usize: UnsignedInteger
+    identity: PrimitiveID = U64Primitive().identity
+    mlir: MLIRTypeBinding = U64Primitive().mlir
+    id: TypeID = U64Primitive().id
     token_kind: string = U64Primitive().token_kind
     literal_family: string = U64Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = U64Primitive().literal_syntaxes
     name: string = "usize"
     size: byte = target.pointer_size
     alignment: byte = target.pointer_alignment
-    bits: u16 = target.pointer_bits
+    bits: U16 = target.pointer_bits
     signed: bool = false
-    min: usize = 0
-    max: usize = (2 ** bits) - 1
+    min: Usize = 0
+    max: Usize = (2**bits) - 1
     category: PrimitiveCategory = PrimitiveCategory.Integer
-    representation: PrimitiveRepresentation = PrimitiveRepresentation.IntegerBits(bits, false)
+    representation: PrimitiveRepresentation =
+        PrimitiveRepresentation.IntegerBits(bits, false)
     default_literal: bool = U64Primitive().default_literal
-
 
 '''
 # Shared integer behavior
@@ -421,12 +431,15 @@ compiler intrinsics. They remain ordinary Severian/library operations unless
 they have a real MLIR operation to bind to.
 '''
 class int: Integer
-    # The family supplies behavior; each concrete integer owns its storage
-    # metadata. A family grammar must not introduce an i64 instance layout.
 
-    # Capture the complete numeric spelling, including its original span.
-    # A float or unit spelling must not be accepted as an integer prefix.
-    grammar literal[spelling: Lexeme]() -> int with int.literal_base(spelling.text) != 0:
+    '''
+    The family supplies behavior; each concrete integer owns its storage
+    metadata. A family grammar must not introduce an i64 instance layout.
+    Capture the complete numeric spelling, including its original span.
+    A float or unit spelling must not be accepted as an integer prefix.
+    '''
+    grammar literal[spelling: Lexeme]() -> int with
+        int.literal_base(spelling.text) != 0:
         base = int.literal_base(spelling.text)
         offset := 0
         digits := ""
@@ -438,11 +451,13 @@ class int: Integer
         for current in spelling.text[offset:]:
             if current != '_':
                 digits += string(current)
-        return digits.parse_integer[int](base=base)
+        return digits.parse_integer[int](base = base)
 
-    # Recognition checks syntax only; range and concrete type selection belong
-    # to construction. Zero means this complete spelling is not an integer.
-    def literal_base(spelling: string) -> u8:
+    '''
+    Recognition checks syntax only; range and concrete type selection belong
+    to construction. Zero means this complete spelling is not an integer.
+    '''
+    def literal_base(spelling: string) -> U8:
         length = len(spelling)
         if length == 0:
             return 0
@@ -452,7 +467,7 @@ class int: Integer
         if offset == length:
             return 0
 
-        base: u8 := 10
+        base: U8 := 10
         if offset + 1 < length and spelling[offset] == '0':
             prefix = spelling[offset + 1]
             if prefix == 'x' or prefix == 'X':
@@ -472,13 +487,13 @@ class int: Integer
                     return 0
                 previous_digit = false
             else:
-                digit: u8
+                digit: U8
                 if current >= '0' and current <= '9':
-                    digit = u8(current) - u8('0')
+                    digit = U8(current) - U8('0')
                 elif current >= 'a' and current <= 'f':
-                    digit = u8(current) - u8('a') + 10
+                    digit = U8(current) - U8('a') + 10
                 elif current >= 'A' and current <= 'F':
-                    digit = u8(current) - u8('A') + 10
+                    digit = U8(current) - U8('A') + 10
                 else:
                     return 0
                 if digit >= base:
@@ -500,7 +515,7 @@ class int: Integer
         return mlir(arith.subi, self, right)
 
     operator *(right: int) -> int:
-        return  mlir(arith.muli, self, right)
+        return mlir(arith.muli, self, right)
 
     operator /(right: int) -> int:
         if int.signed:
@@ -517,7 +532,7 @@ class int: Integer
             return mlir(arith.remsi, self, right)
         return mlir(arith.remui, self, right)
 
-    operator **(right: u32) -> int:
+    operator**(right: U32) -> int:
         return mlir(math.ipowi, self, right as int)
 
     operator &(right: int) -> int:
@@ -529,10 +544,10 @@ class int: Integer
     operator ^(right: int) -> int:
         return mlir(arith.xori, self, right)
 
-    operator <<[LeftShift: Y, shift_int: int](right: shift_int) -> int:
+    operator <<[LeftShift:Y, shift_int:int](right: shift_int) -> int:
         return mlir(arith.shli, self, right as int)
 
-    operator >>[RightShift: Y, shift_int: int](right: shift_int) -> int:
+    operator >>[RightShift:Y, shift_int:int](right: shift_int) -> int:
         if int.signed:
             return mlir(arith.shrsi, self, right as int)
         return mlir(arith.shrui, self, right as int)
@@ -541,7 +556,7 @@ class int: Integer
         return mlir(arith.cmpi, "eq", self, right)
 
     operator !=(right: int) -> bool:
-        return not (self == right)
+        return not self == right
 
     operator <(right: int) -> bool:
         if int.signed:
@@ -584,10 +599,10 @@ class int: Integer
     operator ^=(right: int):
         self = self ^ right
 
-    operator <<=[LeftShift: Y, shift_int: int](right: shift_int):
+    operator <<=[LeftShift:Y, shift_int:int](right: shift_int):
         self = self << right
 
-    operator >>=[RightShift: Y, shift_int: int](right: shift_int):
+    operator >>=[RightShift:Y, shift_int:int](right: shift_int):
         self = self >> right
 
     def copy(self) -> int:
@@ -596,33 +611,33 @@ class int: Integer
     def default() -> int:
         return 0
 
-    def hash(self) -> u64:
+    def hash(self) -> U64:
         return hash(self.c_endian())
 
     def print(self) -> string:
-        return string.from_integer(self, base=10)
+        return string.from_integer(self, base = 10)
 
     def abs(self) -> int:
         if int.signed:
             return mlir(math.absi, self)
         return self
 
-    def rotate_left(self, count: u32) -> int:
-        shift := count % u32(int.bits)
+    def rotate_left(self, count: U32) -> int:
+        shift := count % U32(int.bits)
         if shift == 0:
             return self
 
         left := mlir(arith.shli, self, shift as int)
-        right := mlir(arith.shrui, self, (u32(int.bits) - shift) as int)
+        right := mlir(arith.shrui, self, (U32(int.bits) - shift) as int)
         return mlir(arith.ori, left, right)
 
-    def rotate_right(self, count: u32) -> int:
-        shift := count % u32(int.bits)
+    def rotate_right(self, count: U32) -> int:
+        shift := count % U32(int.bits)
         if shift == 0:
             return self
 
         right := mlir(arith.shrui, self, shift as int)
-        left := mlir(arith.shli, self, (u32(int.bits) - shift) as int)
+        left := mlir(arith.shli, self, (U32(int.bits) - shift) as int)
         return mlir(arith.ori, left, right)
 
     def little_endian(self) -> bytes[int.bits / 8]:
@@ -630,9 +645,9 @@ class int: Integer
         for index in range(int.bits / 8):
             shifted := mlir(arith.shrui, self, int(index * 8))
             if int.bits == 8:
-                result[index] = mlir(arith.bitcast, shifted, to=u8)
+                result[index] = mlir(arith.bitcast, shifted, to = U8)
             else:
-                result[index] = mlir(arith.trunci, shifted, to=u8)
+                result[index] = mlir(arith.trunci, shifted, to = U8)
         return result
 
     def big_endian(self) -> bytes[int.bits / 8]:
@@ -641,9 +656,9 @@ class int: Integer
             shift := (int.bits / 8 - index - 1) * 8
             shifted := mlir(arith.shrui, self, int(shift))
             if int.bits == 8:
-                result[index] = mlir(arith.bitcast, shifted, to=u8)
+                result[index] = mlir(arith.bitcast, shifted, to = U8)
             else:
-                result[index] = mlir(arith.trunci, shifted, to=u8)
+                result[index] = mlir(arith.trunci, shifted, to = U8)
         return result
 
     def c_endian(self) -> bytes[int.bits / 8]:
@@ -651,8 +666,7 @@ class int: Integer
             return self.little_endian()
         return self.big_endian()
 
-
-extend [int: signed_int] int:
+extend[int:SignedInt] int:
 
     operator +(self) -> int:
         return self
@@ -673,12 +687,10 @@ extend [int: signed_int] int:
     def is_positive(self) -> bool:
         return self > 0
 
-
-extend [int: unsigned_int] int:
+extend[int:UnsignedInt] int:
 
     operator +(self) -> int:
         return self
-
 
 '''
 ## Conversion relations
@@ -709,71 +721,86 @@ A ~> B       A ~~> B
 Every concrete member of `int` receives conversion edges to every other member.
 The relation is selected from the source and target ranges:
 
-- if every source value fits in the target, the source has a `->` edge to target;
+- if every source value fits in the target, the source has a `->` edge to
+target;
 - otherwise the source has a `~>` edge to target.
 
 This gives widening conversions such as `i8 -> i16`, while narrowing or
 signedness-changing conversions such as `i64 ~> i8` and `i16 ~> u16` are marked
 as approximate.
 
-The `~>` body checks the value before lowering the cast. `as` may request the edge,
+The `~>` body checks the value before lowering the cast. `as` may request the
+edge,
 but it does not disable the check.
 '''
 extend int:
 
     operator <=>(self, T) -> T | TypeConversionError:
 
-        -> integer_conversion[T: target_int]() with target_int in int:
+        -> integer_conversion[T:target_int]() with target_int in int:
 
-            self -> target_int with self.min >= target_int.min and self.max <= target_int.max:
+            self -> target_int with
+                self.min >= target_int.min
+                and self.max <= target_int.max:
                 if int.bits < target_int.bits:
                     if int.signed:
-                        return mlir(arith.extsi, self, to=target_int)
-                    return mlir(arith.extui, self, to=target_int)
+                        return mlir(arith.extsi, self, to = target_int)
+                    return mlir(arith.extui, self, to = target_int)
                 if int.bits > target_int.bits:
-                    return mlir(arith.trunci, self, to=target_int)
-                return mlir(arith.bitcast, self, to=target_int)
+                    return mlir(arith.trunci, self, to = target_int)
+                return mlir(arith.bitcast, self, to = target_int)
 
-            self ~> target_int with self.min < target_int.min or self.max > target_int.max:
+            self ~ > target_int with
+                self.min < target_int.min
+                or self.max > target_int.max:
                 if self < target_int.min or self > target_int.max:
                     throw TypeConversionError(
-                        f"{int} value {self} is outside {target_int}[{target_int.min}, {target_int.max}]"
+                        """\
+{int} value {self} is outside {target_int}[{target_int.min}, {target_int.max}]\
+""",
                     )
                 if int.bits < target_int.bits:
                     if int.signed:
-                        return mlir(arith.extsi, self, to=target_int)
-                    return mlir(arith.extui, self, to=target_int)
+                        return mlir(arith.extsi, self, to = target_int)
+                    return mlir(arith.extui, self, to = target_int)
                 if int.bits > target_int.bits:
-                    return mlir(arith.trunci, self, to=target_int)
-                return mlir(arith.bitcast, self, to=target_int)
+                    return mlir(arith.trunci, self, to = target_int)
+                return mlir(arith.bitcast, self, to = target_int)
 
         integer_conversion[int]()
 
         '''
         ## Floating conversion family
 
-        Integer and floating-point storage do not share an exact conversion graph
-        in general. Large integers may lose precision when represented as a float;
-        floats may contain fractions, infinities, NaNs, or values outside the target
+        Integer and floating-point storage do not share an exact conversion
+        graph
+        in general. Large integers may lose precision when represented as a
+        float;
+        floats may contain fractions, infinities, NaNs, or values outside the
+        target
         integer range. Both directions are therefore `~>` relationships.
         '''
-        -> float_conversion[T: target_float]() with target_float in float:
+        -> float_conversion[T:target_float]() with target_float in float:
 
-            self ~> target_float:
+            self ~ > target_float:
                 if int.signed:
-                    return mlir(arith.sitofp, self, to=target_float)
-                return mlir(arith.uitofp, self, to=target_float)
+                    return mlir(arith.sitofp, self, to = target_float)
+                return mlir(arith.uitofp, self, to = target_float)
 
-            target_float ~> self:
+            target_float ~ > self:
                 if not target_float.is_finite():
-                    throw TypeConversionError("non-finite float cannot convert to int")
+                    throw TypeConversionError(
+                        "non-finite float cannot convert to int",
+                    )
                 if target_float < int.min or target_float > int.max:
                     throw TypeConversionError(
-                        f"{target_float} is outside {int}[{int.min}, {int.max}]"
+                        """\
+{target_float} is outside {int}[{int.min}, {int.max}]\
+""",
                     )
                 if int.signed:
-                    return mlir(arith.fptosi, target_float, to=int)
-                return mlir(arith.fptoui, target_float, to=int)
+                    return mlir(arith.fptosi, target_float, to = int)
+                return mlir(arith.fptoui, target_float, to = int)
 
         float_conversion[float]()
 
@@ -787,20 +814,20 @@ extend int:
         self -> string:
             return self.print()
 
-        string ~> self:
-            parsed ?= string.parse_integer[int](string, base=10)
+        string ~ > self:
+            parsed ?= string.parse_integer[int](string, base = 10)
             if parsed is Error:
                 throw TypeConversionError(f"cannot convert '{string}' to {int}")
             return parsed
 
         _ -> [T]:
             throw TypeConversionError(
-                f"Failed to convert {int} to {type(T)}, no compatible conversion"
+                """\
+Failed to convert {int} to {type(T)}, no compatible conversion\
+""",
             )
 
-
 int = zip(int)
-
 
 '''
 # Executable specification
@@ -809,138 +836,125 @@ These tests describe family membership, truth behavior, integer operators,
 signedness, conversion-edge generation, approximate conversions, formatting, and
 compiler rejection.
 '''
-
-
 test "int is a closed family of concrete integer primitives":
-    assert(i8 is int)
-    assert(i16 is int)
-    assert(i32 is int)
-    assert(i64 is int)
-    assert(i128 is int)
-    assert(isize is int)
-    assert(u8 is int)
-    assert(u16 is int)
-    assert(u32 is int)
-    assert(u64 is int)
-    assert(u128 is int)
-    assert(usize is int)
-
+    assert(I8 is int)
+    assert(I16 is int)
+    assert(I32 is int)
+    assert(I64 is int)
+    assert(I128 is int)
+    assert(Isize is int)
+    assert(U8 is int)
+    assert(U16 is int)
+    assert(U32 is int)
+    assert(U64 is int)
+    assert(U128 is int)
+    assert(Usize is int)
 
 test "integer truth is zero versus nonzero":
-    if i32(0):
+    if I32(0):
         throw Error("zero must be false")
 
-    assert(i32(27),Error("nonzero integer must be true"))
+    assert(I32(27), Error("nonzero integer must be true"))
 
-    assert(i32(-1) == true, Error("negative nonzero integer must be true"))
-
+    assert(I32(-1) == true, Error("negative nonzero integer must be true"))
 
 test "integer arithmetic uses the concrete type":
-    a: i32 = 20
-    b: i32 = 6
+    a: I32 = 20
+    b: I32 = 6
 
     assert(a + b == 26)
     assert(a - b == 14)
     assert(a * b == 120)
     assert(a // b == 3)
     assert(a % b == 2)
-    assert(i32(2) ** 5 == 32)
-
+    assert(I32(2)**5 == 32)
 
 test "signed integer unary operations are defined":
-    value: i32 = -7
+    value: I32 = -7
     assert(+value == -7)
     assert(-value == 7)
     assert(value.abs() == 7)
     assert(value.signum() == -1)
-    assert(i32(0).signum() == 0)
-    assert(i32(8).signum() == 1)
-
+    assert(I32(0).signum() == 0)
+    assert(I32(8).signum() == 1)
 
 test "integer bitwise and shifts are concrete":
-    value: u8 = 0b1010
-    assert((value & u8(0b1100)) == u8(0b1000))
-    assert((value | u8(0b0101)) == u8(0b1111))
-    assert((value ^ u8(0b1111)) == u8(0b0101))
-    assert((u8(1) << 3) == u8(8))
-    assert((u8(8) >> 3) == u8(1))
-
+    value: U8 = 0b1010
+    assert((value & U8(0b1100)) == U8(0b1000))
+    assert((value | U8(0b0101)) == U8(0b1111))
+    assert((value ^ U8(0b1111)) == U8(0b0101))
+    assert((U8(1) << 3) == U8(8))
+    assert((U8(8) >> 3) == U8(1))
 
 test "integer ordering respects signedness":
-    assert(i32(-1) < i32(0))
-    assert(i32(0) < i32(1))
-    assert(u32(0) < u32(1))
-    assert(i32(7) >= i32(7))
-
+    assert(I32(-1) < I32(0))
+    assert(I32(0) < I32(1))
+    assert(U32(0) < U32(1))
+    assert(I32(7) >= I32(7))
 
 test "integer metadata defines range and width":
-    assert(i8.bits == 8)
-    assert(i8.min == -128)
-    assert(i8.max == 127)
-    assert(u8.bits == 8)
-    assert(u8.min == 0)
-    assert(u8.max == 255)
+    assert(I8.bits == 8)
+    assert(I8.min == -128)
+    assert(I8.max == 127)
+    assert(U8.bits == 8)
+    assert(U8.min == 0)
+    assert(U8.max == 255)
 
-
--> assert_lossless_integer_conversion[source_int, result_int](value: source_int):
+-> assert_lossless_integer_conversion[
+    source_int,
+    result_int,
+](value: source_int):
     converted: result_int = result_int(value)
     assert(converted == value as result_int)
 
-
 test "widening integer conversions generate one directional edges":
-    assert_lossless_integer_conversion[i8, i16](100)
-    assert_lossless_integer_conversion[u8, u16](255)
-    assert_lossless_integer_conversion[i32, i64](2147483647)
-
+    assert_lossless_integer_conversion[I8, I16](100)
+    assert_lossless_integer_conversion[U8, U16](255)
+    assert_lossless_integer_conversion[I32, I64](2147483647)
 
 test "narrowing integer conversions use approximate graph edges":
-    assert((i16(127) as i8) == i8(127))
-    assert((i16(255) as u8) == u8(255))
+    assert((I16(127) as I8) == I8(127))
+    assert((I16(255) as U8) == U8(255))
 
-    throws(i16(128) as i8)
-    throws(i16(-1) as u8)
-    throws(u16(256) as u8)
-
+    throws(I16(128) as I8)
+    throws(I16(-1) as U8)
+    throws(U16(256) as U8)
 
 test "integer and float conversion may approximate":
-    assert((i32(7) as f32) == f32(7.0))
-    assert((f32(7.0) as i32) == i32(7))
-
+    assert((I32(7) as f32) == f32(7.0))
+    assert((f32(7.0) as I32) == I32(7))
 
 test "integer string formatting and parsing use conversion graph":
-    assert(string(i32(-42)) == "-42")
-    assert(i32("42") == 42)
-    assert(i32("-42") == -42)
-    throws(i32("forty-two"))
-
+    assert(string(I32(-42)) == "-42")
+    assert(I32("42") == 42)
+    assert(I32("-42") == -42)
+    throws(I32("forty-two"))
 
 test "integer endian bytes preserve representation":
-    value: u16 = 0x1234
+    value: U16 = 0x1234
     assert(value.big_endian() == bytes([0x12, 0x34]))
     assert(value.little_endian() == bytes([0x34, 0x12]))
 
-
 test with compiler "unsigned integers do not define unary negation":
     reject:
-        value := -u32(1)
-
+        value := -U32(1)
 
 test with compiler "unsupported conversion has no canonical edge":
     reject:
-        value := i32([1, 2, 3])
-
+        value := I32([1, 2, 3])
 
 test with compiler "package level no loss of data for conversion":
     import package
-    #Set package for compiler to reject data loss for conversion
-    package.config.set("lossless.conversion",true)
+
+    # Set package for compiler to reject data loss for conversion
+    package.config.set("lossless.conversion", true)
     reject:
-        big_number: i64 = 10**10
+        big_number: I64 = 10**10
         small_representation: f8e4m3fn = big_number
 
-    package.config.set("lossless.conversion",false)
+    package.config.set("lossless.conversion", false)
     accept:
-        big_number: i64 = 10**10
+        big_number: I64 = 10**10
         small_representation: f8e4m3fn = big_number
 
 test "integer comparison of similar literals/floats":
@@ -948,8 +962,7 @@ test "integer comparison of similar literals/floats":
     assert(type(x) == int)
     assert(x == 0.0)
     assert(x == float(0))
-    assert(x +1 == float(1.0))
-
+    assert(x + 1 == float(1.0))
 
 test "integer grammar accepts whole integers and rejects floating spellings":
     assert(int.literal_base("0") == 10)

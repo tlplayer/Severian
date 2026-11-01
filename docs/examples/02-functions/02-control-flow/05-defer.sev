@@ -1,7 +1,6 @@
 def fix():
     print("fix")
 
-
 def break_thing():
     print("break")
 
@@ -16,7 +15,8 @@ def foo():
     defer print("second")
     defer print("third")
 test with integ:
-    #lifo stack
+
+    # lifo stack
     foo()
     assert("third\nsecond\nfirst\n" in stdout)
 

@@ -59,7 +59,7 @@ class Assignment:
         first = items[0]
         if first.kind != "IDENTIFIER":
             raise ValueError(f"keyword {first.text!r} has no executable sentence provider")
-        position, annotation = 1, None
+        position, annotation, runtime_annotation = 1, None, False
         if len(items) > 1 and items[1].text == ":":
             if len(items) > 3 and items[2].text in cfg.syntax.scope_providers:
                 if qualified and qualified != items[2].text:
@@ -68,7 +68,9 @@ class Assignment:
                 destination = cfg.syntax.scope_providers[qualified].bindings(cfg, env)
                 items = items[:2] + items[3:]
             position = next((i for i in range(2, len(items)) if items[i].text in assignments), len(items))
-            spelling = ''.join(t.text for t in items[2:position])
+            annotation_tokens = items[2:position]
+            runtime_annotation = len(annotation_tokens) > 1 and annotation_tokens[0].text == 'dynamic'
+            spelling = ''.join(t.text for t in annotation_tokens[int(runtime_annotation):])
             annotation = None if spelling == 'infer' else cfg.context.type(spelling)
         if position >= len(items) or items[position].text not in assignments:
             raise ValueError("expected a binding or assignment")
@@ -154,6 +156,9 @@ class Assignment:
                 value = cfg.expr(core, env, None if mode == 'share' else expected)
             finally:
                 cfg.captured_error_expression = previous_capture
+        if runtime_annotation:
+            from py_compiler.syntax.dynamic.dynamic import runtime_value
+            value = runtime_value(value, cfg)
         if mode == 'share':
             from py_compiler.syntax.complex.shared import Shared
             if owner is None or owner.ownership in ('view', 'borrow'):
@@ -239,7 +244,8 @@ class Assignment:
         if existing:
             if callable(getattr(existing.type, 'check_assignment', None)):
                 existing.type.check_assignment(cfg.read_binding(existing, node.span), value, cfg)
-            release_string = existing.type.family == 'string' and existing.ownership == 'own' and existing.identity not in cfg.flow.moved and ownership == 'own'
+            release_string = (existing.type.family == 'string' and existing.ownership in ('own', 'copy')
+                              and existing.identity not in cfg.flow.moved and ownership in ('own', 'copy'))
             release_union = existing.type.family == 'union' and existing.ownership == 'own' and existing.identity not in cfg.flow.moved and ownership == 'own'
             if callable(getattr(existing.type, 'release', None)) and existing.identity not in cfg.flow.moved and not (release_string or release_union):
                 raise ValueError('memory rebinding requires moving or releasing the previous owner')
@@ -371,3 +377,33 @@ class TupleAssignmentTests(unittest.TestCase):
         for source in cases:
             with self.subTest(source=source):
                 self.assertTrue(self.compile(source).diagnostics)
+
+
+class CopiedStringAssignmentTests(unittest.TestCase):
+    def test_copied_string_rebinding_releases_previous_storage(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = '''def replace_text() -> string:
+    original = "original"
+    text = copy original
+    text = "replacement"
+    text = copy original
+    return text
+'''
+        result = compile_source('copied-string-assignment.sev', source, Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'replace_text')
+        releases = [operation for block in body.blocks for operation in block.operations
+                    if operation.kind == 'deallocate']
+        # Two replaced values, then original at scope exit. The return remains owned.
+        self.assertEqual(len(releases), 3)
+
+    def test_view_rebinding_cannot_release_its_source(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('view-string-assignment.sev', '''def invalid():
+    original = "original"
+    text = view original
+    text = "replacement"
+''', Syntax(include_tests=False))
+        self.assertTrue(result.diagnostics)

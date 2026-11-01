@@ -1,6 +1,5 @@
 import Error, ErrorType, ErrorPersistence from "error.sev"
 
-
 trait Diagnostic: Error
     type: ErrorType
     category: int {0 <= category <= 999}

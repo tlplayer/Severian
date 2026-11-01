@@ -1,5 +1,5 @@
 import Y from "../generic/symbol.sev"
-import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import B, BlockContext, BlockSentence, SourceBlockID from "../generic/block.sev"
 import source
 import Symbol from "../symbol/symbol.sev"
 import TypeAnnotation from "../type/annotation.sev"
@@ -8,20 +8,19 @@ import TokenForm from "../generic/token.sev"
 import SourceFile from "../source.sev"
 import recognize_keyword from "../keywords/keyword.sev"
 
-
 def recognize_enum(source: SourceFile, start: u32) -> u32 | None:
     return recognize_keyword(source, start, "enum")
 
-
 class EnumKeyword: Y
-    token_forms: list[TokenForm] = [TokenForm("ENUM", "enum", recognize=recognize_enum)]
-
+    token_forms: list[TokenForm] = [
+        TokenForm(kind = "ENUM", spelling = "enum", recognize = recognize_enum),
+    ]
 
 class enum: Y + B
     context: BlockContext = BlockContext()
     span: source.Span | None = None
     grammars: list[BlockSentence] = []
-    subblocks: list[SourceBlockId] = []
+    subblocks: list[SourceBlockID] = []
     parent: B
     body: B
     name: Symbol | None = None
@@ -31,7 +30,15 @@ class enum: Y + B
         self.name = name
         return self
 
-    grammar generic_enum["enum", name: Symbol, "[", parameters...: TypeAnnotation, "]", ":"]() -> B with len(parameters) > 0:
+    grammar generic_enum[
+        "enum",
+        name: Symbol,
+        "[",
+        parameters...: TypeAnnotation,
+        "]",
+        ":",
+    ]() -> B with
+        len(parameters) > 0:
         self.name = name
         self.parameters = parameters
         return self

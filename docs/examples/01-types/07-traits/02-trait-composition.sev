@@ -30,7 +30,7 @@ def render(item: Drawable):
     item.draw()
 
 def main():
-    button = Button("Save","mauve")
+    button = Button("Save", "mauve")
     render(button)
 
 test "composed trait dispatch":
@@ -78,5 +78,5 @@ test "header inheritance retains both methods":
 test "boxed owned string result outlives the source record":
     button = Button("Save", "mauve")
     result = parent_name(button)
-    drop(button)
+    drop button
     assert(result == "Save")

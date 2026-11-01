@@ -1,29 +1,42 @@
 import Y from "../generic/symbol.sev"
 import TokenForm from "../generic/token.sev"
-import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import B, BlockContext, BlockSentence, SourceBlockID from "../generic/block.sev"
 import SourceFile, Span from "../source.sev"
 import recognize_keyword from "../keywords/keyword.sev"
 import TypeAnnotation from "../type/annotation.sev"
 import Expression, FunctionParameter from "../function/function.sev"
 import Symbol from "../symbol/symbol.sev"
 
-
 def recognize_operator(source: SourceFile, start: u32) -> u32 | None:
     return recognize_keyword(source, start, "operator")
 
-
 class OperatorBlock: Y + B
-    token_forms: list[TokenForm] = [TokenForm("OPERATOR", "operator", recognize=recognize_operator)]
+    token_forms: list[TokenForm] = [
+        TokenForm(
+            kind = "OPERATOR",
+            spelling = "operator",
+            recognize = recognize_operator,
+        ),
+    ]
     context: BlockContext = BlockContext()
     span: Span | None = None
     grammars: list[BlockSentence] = []
-    subblocks: list[SourceBlockId] = []
+    subblocks: list[SourceBlockID] = []
     parent: B | None = None
     operation: Symbol | None = None
     parameters: list[FunctionParameter] = []
     result: TypeAnnotation | None = None
 
-    grammar declaration["operator", operation: Symbol, "(", parameters...: FunctionParameter, ")", "->", result: TypeAnnotation, ":"]() -> B:
+    grammar declaration[
+        "operator",
+        operation: Symbol,
+        "(",
+        parameters...: FunctionParameter,
+        ")",
+        "->",
+        result: TypeAnnotation,
+        ":",
+    ]() -> B:
         self.operation = operation
         self.parameters = parameters
         self.result = result

@@ -1,15 +1,12 @@
 test:
-    assert(bytes[i8]() == 1B)
-    assert(bytes[u8]() == 1B)
-
-    assert(bytes[i16]() == 2B)
-    assert(bytes[u16]() == 2B)
-
-    assert(bytes[i32]() == 4B)
-    assert(bytes[u32]() == 4B)
-
-    assert(bytes[i64]() == 8B)
-    assert(bytes[u64]() == 8B)
-
-    assert(bytes[f32]() == 4B)
-    assert(bytes[f64]() == 8B)
+    assert:
+        bytes[i8]() == 1B
+        bytes[u8]() == 1B
+        bytes[i16]() == 2B
+        bytes[u16]() == 2B
+        bytes[i32]() == 4B
+        bytes[u32]() == 4B
+        bytes[i64]() == 8B
+        bytes[u64]() == 8B
+        bytes[f32]() == 4B
+        bytes[f64]() == 8B

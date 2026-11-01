@@ -1,10 +1,10 @@
-import Span, span from "../source.sev"
+import Span, Span from "../source.sev"
+Span as span
 
 class TypeAnnotation:
     kind: TypeAnnotationKind
     span: Span
     binding: string = ""
-
 
 enum TypeAnnotationKind:
     Named(name: string, arguments: list[TypeAnnotation])
@@ -14,16 +14,22 @@ enum TypeAnnotationKind:
     DimensionRuntime(index: u32)
     ShapeSpread(parameter: string)
 
-
-def named_type(name: string, arguments: list[TypeAnnotation], span: Span) -> TypeAnnotation:
+def named_type(
+    name: string,
+    arguments: list[TypeAnnotation],
+    span: Span,
+) -> TypeAnnotation:
     return TypeAnnotation(Named(name, arguments), span)
-
 
 def simple_type_name(annotation: TypeAnnotation) -> string | None:
     match annotation.kind:
         case Named:
             if len(arguments) == 0:
                 return name
-        case Union | Function | DimensionConstant | DimensionRuntime | ShapeSpread:
+        case Union
+            | Function
+            | DimensionConstant
+            | DimensionRuntime
+            | ShapeSpread:
             return None
     return None

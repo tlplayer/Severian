@@ -329,14 +329,19 @@ class For(BlockProvider):
                 source = Expression('list', source.token, variants)
         if source.kind == 'list':
             return self.lower_literal(node, cfg, env, source, initializer)
+        from py_compiler.syntax.symbol.range import domain_iterator, endpoint_interval
+        domain_provider = domain_iterator(source, cfg, env) if source.kind == 'index_domain' and endpoint_interval(source) is None else None
         match = expression_grammar(source, cfg, env)
-        if match is not None and match.provider.result.family == 'iterator':
+        if domain_provider is not None:
+            provider = domain_provider
+            source = source.operands[0]
+        elif match is not None and match.provider.result.family == 'iterator':
             provider, captures = match.provider, match.captures
             if set(captures) != {'self'}:
                 raise ValueError('iterator grammar currently requires only a self capture')
             source = captures['self'].term
         else:
-            if source.kind == 'call':
+            if source.kind in ('call', 'interval', 'index_domain') or source.kind == 'binary' and source.token.text == '..':
                 from py_compiler.syntax.complex.tensor import ArgumentValue
                 value = cfg.expr(source, env)
                 owner = root_binding(source,cfg,env) or cfg.call_result_owners.get(value.identity)

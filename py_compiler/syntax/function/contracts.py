@@ -185,9 +185,42 @@ def signature(node, owner=""):
     return entry
 
 
+def predicate_value_type(node, parameters, context):
+    if node.kind == 'name' and isinstance(parameters, dict) and parameters.get(node.token.text):
+        return context.type(parameters[node.token.text])
+    if node.kind == 'member' and node.token.text in ('first', 'last'):
+        from py_compiler.syntax.symbol.range import endpoint_type
+        receiver = predicate_value_type(node.operands[0], parameters, context)
+        return endpoint_type(receiver, context) if receiver is not None else None
+    if node.kind == 'index':
+        receiver = predicate_value_type(node.operands[0], parameters, context)
+        if receiver is not None:
+            if callable(getattr(receiver, 'indexed_type', None)):
+                return receiver.indexed_type(node.operands[1])
+            from py_compiler.syntax.symbol.range import collection_item_types
+            pair = collection_item_types(receiver, context)
+            return pair[1] if pair else None
+    return None
+
+
 def pure_predicate(node, parameters, context=None):
     if node.kind == 'call' and len(node.operands) == 2:
         callee, argument = node.operands
+        if context is not None and callee.kind == 'name' and argument.kind == 'comprehension':
+            from py_compiler.syntax.complex.collection import collection_namespace
+            entries = context.lookup_functions(callee.token.text, context.scope)
+            if entries and all(entry.name == collection_namespace(context) + 'all' for entry in entries):
+                item, target, source, condition = argument.operands
+                source_type = predicate_value_type(source, parameters, context)
+                template = getattr(getattr(source_type, 'declaration', None), 'template_name', '').rsplit('.', 1)[-1]
+                if source_type is not None and (template == 'list' or source_type.family in ('array', 'tensor', 'tuple')):
+                    from py_compiler.syntax.symbol.range import collection_item_types
+                    pair = collection_item_types(source_type, context)
+                    scope = {**parameters, target.token.text: pair[1].name}
+                    pure_predicate(source, parameters, context)
+                    pure_predicate(item, scope, context)
+                    if condition is not None: pure_predicate(condition, scope, context)
+                    return
         if context is not None and callee.kind == 'name' and not context.lookup_functions(callee.token.text, context.scope):
             from py_compiler.syntax.prelude import builtin_call_providers
             provider = builtin_call_providers().get(callee.token.text)
@@ -209,6 +242,10 @@ def pure_predicate(node, parameters, context=None):
         pure_predicate(node.operands[0], parameters, context)
         return
     if node.kind == "literal":
+        return
+    if node.kind in ('index', 'interval') or node.kind == 'binary' and node.token.text == '..':
+        for operand in node.operands:
+            pure_predicate(operand, parameters, context)
         return
     if node.kind == "name" and node.token.text in parameters:
         return

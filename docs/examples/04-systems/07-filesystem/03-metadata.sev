@@ -1,7 +1,6 @@
 import file
 import os
 
-
 test with integ "file metadata":
     path = "/tmp/severian-metadata.txt"
 
@@ -9,7 +8,8 @@ test with integ "file metadata":
 
     information = os.stat(path)
 
-    assert(information.path == path)
-    assert(information.is_file)
-    assert(not information.is_directory)
-    assert(information.size == 8B)
+    assert:
+        information.path == path
+        information.is_file
+        not information.is_directory
+        information.size == 8B

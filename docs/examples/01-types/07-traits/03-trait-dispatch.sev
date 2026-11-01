@@ -1,16 +1,16 @@
 trait File:
     def read(path: string) -> string
 
-#LuaFile implements the filetype for .lua so when read takes place 
+# LuaFile implements the filetype for .lua so when read takes place
 class LuaFile: File
-    def read(path: string) -> string with 
+    def read(path: string) -> string with
     {
         ".lua" in path,
     }:
         return "lua"
 
-class JsonFile: File
-    def read(path: string) -> string with 
+class JSONFile: File
+    def read(path: string) -> string with
     {
         ".json" in path,
     }:
@@ -25,7 +25,6 @@ test:
     assert(lua_path == "lua")
     assert(json_path == "json")
 
-
 test "unmatched path has no selected provider":
     throws "trait dispatch requires exactly one match":
         result = File.read("notes.txt")
@@ -34,13 +33,13 @@ test "overlapping providers are rejected at runtime":
     throws "trait dispatch requires exactly one match":
         result = File.read("test.lua.json")
 
-
 test "string membership handles presence absence and empty needles":
     path = "test.lua"
-    assert(".lua" in path)
-    assert(".json" not in path)
-    assert("" in path)
-    assert(not ".json" in path)
+    assert:
+        ".lua" in path
+        ".json" not in path
+        "" in path
+        not ".json" in path
 
 path_evaluations = 0
 

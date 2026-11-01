@@ -1,19 +1,20 @@
 import file
 import os
 
-
 test with integ "reader selected by extension":
     text_path = "/tmp/severian-example.txt"
 
-    #text implements how text should be written/read
+    # text implements how text should be written/read
     file.write(text_path, "hello")
-    #same with json if the write is invalid we can get error before write/while writing
 
-    #text returns string
+    '''
+    same with json if the write is invalid we can get error before write/while
+    writing
+    text returns string
+    '''
     text = file.read(text_path)
-    #json returns json object
 
+    # json returns json object
     assert("hello" == text)
-
 
     os.remove(text_path)

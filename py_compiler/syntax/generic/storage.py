@@ -23,6 +23,31 @@ def owns_storage(type_):
     return type_.family not in ('pointer', 'trait') and (type_.family == 'string' or callable(getattr(type_, 'release', None)))
 
 
+def is_unbound_temporary(value, cfg):
+    if value.identity not in cfg.owned_results:
+        return False
+    owner = cfg.call_result_owners.get(value.identity)
+    if owner is not None and owner.identity not in cfg.flow.moved:
+        if any(binding.identity == owner.identity for scope in cfg.active_scopes for binding in scope.values()):
+            return False
+    # Iterator grammars retain a frozen SSA value while the owner's current
+    # value advances through loop parameters. It is still borrowed storage.
+    for capture in cfg.grammar_captures.values():
+        if getattr(capture, 'value', None) is value:
+            owner = capture.binding(cfg)
+            if owner is not None and owner.identity not in cfg.flow.moved:
+                return False
+    return not any(cfg.values.get(binding.identity) is value
+                   for scope in cfg.active_scopes for binding in scope.values()
+                   if binding.identity not in cfg.flow.moved)
+
+
+def release_temporary(value, cfg, span):
+    if is_unbound_temporary(value, cfg):
+        release_storage(value, cfg, span)
+        cfg.owned_results.discard(value.identity)
+
+
 def copy_storage(value, cfg, span):
     if value.type.family in ('pointer', 'trait'):
         return value

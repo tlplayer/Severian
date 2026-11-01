@@ -7,14 +7,17 @@ import TokenForm from "../generic/token.sev"
 import SourceFile from "../source.sev"
 import recognize_keyword from "../keywords/keyword.sev"
 
-
 def recognize_while(source: SourceFile, start: u32) -> u32 | None:
     return recognize_keyword(source, start, "while")
 
-
 class WhileKeyword: Y
-    token_forms: list[TokenForm] = [TokenForm("WHILE", "while", recognize=recognize_while)]
-
+    token_forms: list[TokenForm] = [
+        TokenForm(
+            kind = "WHILE",
+            spelling = "while",
+            recognize = recognize_while,
+        ),
+    ]
 
 trait While: G
     symbol: Y = WhileKeyword()

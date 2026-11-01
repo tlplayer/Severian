@@ -4,15 +4,30 @@ from math import approximate
 Approximate comparison is a numeric test utility, not another assertion
 primitive. The predicate exposes explicit absolute and relative tolerances.
 '''
-
-
 test "floating-point values compare approximately":
     result = 0.1 + 0.2
 
-    assert(approximate(result, 0.3, rtol=1e-5, atol=1e-7))
-
+    assert(
+        approximate(actual = result, expected = 0.3, rtol = 1e-5, atol = 1e-7),
+    )
 
 test "approximate comparison works element by element":
-    assert(approximate(0.30000001, 0.3, rtol=1e-5, atol=1e-7))
-    assert(approximate(0.99999998, 1.0, rtol=1e-5, atol=1e-7))
-    assert(approximate(2.00000003, 2.0, rtol=1e-5, atol=1e-7))
+    assert:
+        approximate(
+            actual = 0.30000001,
+            expected = 0.3,
+            rtol = 1e-5,
+            atol = 1e-7,
+        )
+        approximate(
+            actual = 0.99999998,
+            expected = 1.0,
+            rtol = 1e-5,
+            atol = 1e-7,
+        )
+        approximate(
+            actual = 2.00000003,
+            expected = 2.0,
+            rtol = 1e-5,
+            atol = 1e-7,
+        )

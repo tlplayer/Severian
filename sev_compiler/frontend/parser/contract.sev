@@ -5,20 +5,19 @@ import TypeDeclaration from "../../syntax/function/syntax.sev"
 import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import Expression from "../../syntax/function/function.sev"
 
-
 class GrammarResolution:
     blocks: list[Block] = []
     types: list[TypeDeclaration] = []
     expressions: list[Expression] = []
     nodes: list[ResolvedGrammarNode] = []
 
-
 class GrammarMatch:
     consumed: int
+
     # Only the selected candidate may construct HIR.
-    construct: () -> GrammarResolution | Diagnostic
+    construct:() -> GrammarResolution | Diagnostic
     cached: GrammarResolution | Diagnostic | None = None
-    check: (() -> ProofResult | Diagnostic) | None = None
+    check:(() -> ProofResult | Diagnostic) | None = None
     captures: list[CapturedGrammar] = []
     selected: bool = false
     resolving: bool = false
@@ -33,7 +32,9 @@ class GrammarMatch:
         if cached != None:
             return cached
         if not selected:
-            throw Error("grammar construction requires a selected interpretation")
+            throw Error(
+                "grammar construction requires a selected interpretation",
+            )
         if resolving:
             throw Error("cyclic grammar construction")
         resolving = true
@@ -42,10 +43,9 @@ class GrammarMatch:
         resolving = false
         return resolved
 
-
 ((list[TokenTerm]) -> GrammarMatch | None | Diagnostic) as GrammarMatcher
 
-
-import LiteralValue, ResolvedGrammarNode from "../../syntax/grammar/resolution.sev"
+import LiteralValue,
+    ResolvedGrammarNode from "../../syntax/grammar/resolution.sev"
 
 import CapturedGrammar from "sequence.sev"

@@ -1,17 +1,36 @@
 enum ErrorType:
-    E {0} # Error: execution cannot proceed normally
-    C {1} # Compiler: Could not compile the application
-    U {2} # User error ie the format/input is bad and caused this
-    W {3} # Warning: valid but suspicious/problematic
-    N {4} # Note: supporting context
-    H {5} # Help: suggested action
-    L {6} # Lint: The format/code quality is diminished from this
+
+    # Error: execution cannot proceed normally
+    E {0}
+
+    # Compiler: Could not compile the application
+    C {1}
+
+    # User error ie the format/input is bad and caused this
+    U {2}
+
+    # Warning: valid but suspicious/problematic
+    W {3}
+
+    # Note: supporting context
+    N {4}
+
+    # Help: suggested action
+    H {5}
+
+    # Lint: The format/code quality is diminished from this
+    L {6}
 
 enum ErrorPersistence:
-    Transient # After a time this might succeed again
-    Permanent # This will not succeed even after waiting
-    Panic # This cannot recover or succeed
 
+    # After a time this might succeed again
+    Transient
+
+    # This will not succeed even after waiting
+    Permanent
+
+    # This cannot recover or succeed
+    Panic
 
 trait Error:
     type: ErrorType
@@ -22,7 +41,6 @@ trait Error:
     help: string {10 <= len(help) <= 200}
     prefix: string | absent
 
-
 class MessageError: Error
     note: string
     type: ErrorType = ErrorType.E
@@ -31,4 +49,3 @@ class MessageError: Error
     code: int = 0
     help: string = "Inspect the operation that reported this error."
     prefix: string | absent = absent
-

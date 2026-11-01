@@ -1,5 +1,7 @@
-# Each event replaces only the selected call in this test. Wrappers inherit
-# reachable lower-level scenarios; ordinary production calls remain unchanged.
+'''
+Each event replaces only the selected call in this test. Wrappers inherit
+reachable lower-level scenarios; ordinary production calls remain unchanged.
+'''
 def read() -> int | Error:
     return 65
 

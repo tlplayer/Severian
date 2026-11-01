@@ -22,6 +22,9 @@ def expression_type(node, cfg, env, expected=None):
         return match.provider.result
     if node.kind == 'capture':
         return node.operands[0].type(cfg, expected)
+    if node.kind in ('interval', 'index_domain') or node.kind == 'binary' and node.token.text == '..':
+        from py_compiler.syntax.symbol.range import special_type
+        return special_type(node, cfg, env)
     if node.kind in ('name', 'reference'):
         binding = cfg.lookup(node, env)
         if binding is None or binding.type is None:
@@ -32,6 +35,22 @@ def expression_type(node, cfg, env, expected=None):
         from py_compiler.hir.hir.src.program import resolve_literal
         return resolve_literal(Literal('', node.token.span, node.token.text, node.token.kind,
                                        expected.name if expected else None), cfg.syntax, cfg)[0]
+    if node.kind == 'tuple':
+        return cfg.context.type('tuple[' + ','.join(expression_type(item, cfg, env).name for item in node.operands) + ']')
+    if node.kind == 'comprehension':
+        from py_compiler.syntax.complex.collection import collection_iterator, collection_namespace
+        from py_compiler.mir.ownership.flow import Binding
+        item, target, source, predicate = node.operands
+        collection = expression_type(source, cfg, env)
+        collection_iterator(collection, cfg.context)
+        matches = [g[3].element for g in cfg.context.sentence_grammars
+                   if g[1] == ('iterator', '(', ('self', collection), ')') and g[3] is not None and g[3].family == 'iterator']
+        if collection.family == 'iterator': matches = [collection.element]
+        if len(matches) != 1:
+            raise ValueError('comprehension requires one typed iterator grammar')
+        binding = Binding('<comprehension-type>', target.token.text, matches[0], False, 'view', target.token.span)
+        result = expression_type(item, cfg, {**env, target.token.text: binding})
+        return cfg.context.type(collection_namespace(cfg.context) + 'list[' + result.name + ']')
     if node.kind in ('list', 'map', 'set'):
         if expected is not None:
             return expected
@@ -46,7 +65,11 @@ def expression_type(node, cfg, env, expected=None):
             condition_type(node.operands[0], cfg, env)
             return cfg.context.type('bool')
         return expression_type(node.operands[0], cfg, env, expected)
+    if node.kind == 'chain':
+        return cfg.context.type('bool')
     if node.kind == 'binary':
+        if node.token.text == 'in':
+            return cfg.context.type('bool')
         if node.token.text in ('and', 'or'):
             for operand in node.operands:
                 condition_type(operand, cfg, env)
@@ -67,6 +90,12 @@ def expression_type(node, cfg, env, expected=None):
                 raise ValueError('package has no exported global ' + node.token.text)
             return place.type
         receiver = expression_type(subject, cfg, env)
+        fields = dict(getattr(getattr(receiver, 'declaration', None), 'fields', ()))
+        if node.token.text in ('first', 'last') and node.token.text not in fields:
+            from py_compiler.syntax.symbol.range import endpoint_type
+            endpoint = endpoint_type(receiver, cfg.context)
+            if endpoint is not None:
+                return endpoint
         if receiver.family == 'shared':
             receiver = receiver.payload
         if receiver.family == 'union' and node.token.text in ('has_value', 'value'):
@@ -80,6 +109,12 @@ def expression_type(node, cfg, env, expected=None):
         raise ValueError(f'{receiver.name} has no field {node.token.text!r}')
     if node.kind == 'index':
         receiver = expression_type(node.operands[0], cfg, env)
+        if node.operands[1].kind == 'template_arguments' and getattr(getattr(receiver, 'declaration', None), 'template_name', '').rsplit('.', 1)[-1] == 'list':
+            from py_compiler.syntax.grammar.expression import Expression
+            indexed = node.operands[0]
+            for position in node.operands[1].operands:
+                indexed = Expression('index', node.token, (indexed, position))
+            return expression_type(indexed, cfg, env, expected)
         if node.operands[1].kind == 'slice':
             if receiver.family == 'string':
                 return receiver
@@ -111,6 +146,10 @@ def expression_type(node, cfg, env, expected=None):
     if node.kind == 'call':
         callee = node.operands[0]
         if callee.kind == 'name':
+            if callee.token.text in ('len', 'size'):
+                return cfg.context.type('int')
+            if callee.token.text == 'bool':
+                return cfg.context.type('bool')
             if callee.token.text in cfg.context.types:
                 return cfg.context.type(callee.token.text)
             entries = cfg.context.lookup_functions(callee.token.text, cfg.declaration_scope)

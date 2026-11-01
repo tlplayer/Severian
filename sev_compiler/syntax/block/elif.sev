@@ -1,5 +1,5 @@
 import Y from "../generic/symbol.sev"
-import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import B, BlockContext, BlockSentence, SourceBlockID from "../generic/block.sev"
 import source
 import if from "if.sev"
 
@@ -8,13 +8,14 @@ class elif: Y + B
     context: BlockContext = BlockContext()
     span: source.Span | None = None
     grammars: list[BlockSentence] = []
-    subblocks: list[SourceBlockId] = []
+    subblocks: list[SourceBlockID] = []
     parent: B
     previous: if | elif
     body: B
     conditions: list[bool] = []
 
-    grammar elif["elif", conditions...: bool, ":"]() -> B with {
+    grammar elif ["elif", conditions...: bool, ":"]() -> B with
+    {
         self.previous.parent == self.parent,
         len(conditions) > 0,
     }:

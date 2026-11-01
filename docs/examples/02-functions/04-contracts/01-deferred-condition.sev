@@ -10,7 +10,6 @@ def consume(items: list[i64]) -> i64 with
 
     return total
 
-
 def fill(buffer: borrow list[i64]) with
 {
     defer buffer.len() <= 4,

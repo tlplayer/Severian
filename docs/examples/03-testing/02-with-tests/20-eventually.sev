@@ -9,11 +9,22 @@ def worker_ready() -> bool:
 
 test with timeout(5s) "worker eventually becomes ready":
     module.observations = 0
-    assert(os.eventually(worker_ready, timeout_ms=100, interval_ms=1))
+    assert(
+        os.eventually(
+            condition = worker_ready,
+            timeout_ms = 100,
+            interval_ms = 1,
+        ),
+    )
     assert(module.observations == 3)
 
 test "eventually retains its final observation at the deadline":
-    result = os.eventually_value[f64](lambda: 2.00000001, lambda value: value == 3.0, timeout_ms=0)
-    assert(not result.matched)
-    assert(result.attempts == 1)
-    assert(approximate(result.value, 2.0, atol=1e-7))
+    result = os.eventually_value[f64](
+        lambda: 2.00000001,
+        lambda value: value == 3.0,
+        timeout_ms = 0,
+    )
+    assert:
+        not result.matched
+        result.attempts == 1
+        approximate(actual = result.value, expected = 2.0, atol = 1e-7)

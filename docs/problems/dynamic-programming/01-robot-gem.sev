@@ -1,0 +1,474 @@
+
+'''
+You are given an m x n integer array grid. There is a robot initially located at the top-left corner (i.e., grid[0][0]). The robot tries to move to the bottom-right corner (i.e., grid[m - 1][n - 1]). The robot can only move either down or right at any point in time.
+
+An obstacle and space are marked as 1 or 0 respectively in grid. A path that the robot takes cannot include any square that is an obstacle.
+
+Return the number of possible unique paths that the robot can take to reach the bottom-right corner.
+
+The testcases are generated so that the answer will be less than or equal to 2 * 109.
+
+Example 1:
+
+Input: obstacleGrid = [[0,0,0],[0,1,0],[0,0,0]]
+Output: 2
+Explanation: There is one obstacle in the middle of the 3x3 grid above.
+There are two ways to reach the bottom-right corner:
+1. Right -> Right -> Down -> Down
+2. Down -> Down -> Right -> Right
+'''
+
+
+from collections import list, map, all, sorted
+
+# Contract: rectangular grid containing 0 (open) or 1 (obstacle).
+# Empty grids, including grids with zero columns, have no paths.
+def initialize_robot_path_counts(grid: list[list[int]]) -> list[int]:
+    paths: list[int] = []
+    if len(grid) == 0:
+        return paths
+
+    first_row = grid.first[1]
+    for cells in grid:
+        if len(cells) != len(first_row):
+            throw Error("robot grid must be rectangular")
+
+    for column in ..first_row:
+        paths.append(0)
+
+    if len(paths) != 0:
+        paths[0] = 1
+    return paths
+
+
+# O(rows * columns) time, O(columns) storage; grid remains unchanged.
+def robot_paths(grid: list[list[int]]) -> int with {
+    all([len(cells) == len(grid.first[1]) for cells in grid]),
+    all([all([cell in 0..1 for cell in cells]) for cells in grid]),
+}:
+    paths = initialize_robot_path_counts(grid)
+    if len(paths) == 0:
+        return 0
+
+    # Each item is a valid coordinate; column advances fastest.
+    # Before visiting a cell, paths[column] counts arrivals from above.
+    # paths[column - 1] already counts arrivals from the left on this row.
+    for row, column in ..grid:
+        if grid[row][column] == 1:
+            paths[column] = 0
+        elif (column - 1) in ..paths:
+            paths[column] += paths[column - 1]
+
+    return paths.last[1]
+
+
+# Same recurrence with coordinate indexing.
+def robot_paths_coordinate_access(grid: list[list[int]]) -> int with {
+    all([len(cells) == len(grid.first[1]) for cells in grid]),
+    all([all([cell in 0..1 for cell in cells]) for cells in grid]),
+}:
+    paths = initialize_robot_path_counts(grid)
+    if len(paths) == 0:
+        return 0
+
+    for row,column in ..grid:
+        if grid[row,column] == 1:
+            paths[column] = 0
+        elif (column - 1) in ..paths:
+            paths[column] += paths[column - 1]
+    return paths.last[1]
+
+
+# C.last returns (K,V); ..collection.last includes the final key.
+def robot_paths_while(grid: list[list[int]]) -> int with {
+    all([len(cells) == len(grid.first[1]) for cells in grid]),
+    all([all([cell in 0..1 for cell in cells]) for cells in grid]),
+}:
+    paths = initialize_robot_path_counts(grid)
+    if len(paths) == 0:
+        return 0
+
+    while row in ..grid.last with row = 0:
+        while column in ..grid[row].last with column = 0:
+            if grid[row][column] == 1:
+                paths[column] = 0
+            elif (column - 1) in ..paths:
+                paths[column] += paths[column - 1]
+            column += 1
+        row += 1
+
+    return paths.last[1]
+
+
+def assert_robot_paths(grid: list[list[int]], expected: int):
+    if robot_paths(grid) != expected:
+        throw Error("coordinate traversal returned the wrong robot path count")
+    if robot_paths_coordinate_access(grid) != expected:
+        throw Error("coordinate indexing returned the wrong robot path count")
+    if robot_paths_while(grid) != expected:
+        throw Error("bounded while returned the wrong robot path count")
+
+
+# Independent oracle uses numeric bounds and enumerates routes, so shared
+# mistakes in the enhanced domain syntax or DP recurrence cannot hide here.
+def enumerate_robot_routes(grid: list[list[int]], row: int, column: int) -> int:
+    if row >= len(grid):
+        return 0
+    if column >= len(grid[row]):
+        return 0
+    if grid[row][column] == 1:
+        return 0
+    if row == len(grid) - 1 and column == len(grid[row]) - 1:
+        return 1
+    return enumerate_robot_routes(grid, row + 1, column) + enumerate_robot_routes(grid, row, column + 1)
+
+
+# Only generated runs are size-bounded; the solvers accept larger grids.
+def verify_generated_robot_paths(grid: list[list[int]]) with {
+    0 <= len(grid) <= 6,
+    all([0 <= len(cells) <= 6 for cells in grid]),
+    all([len(cells) == len(grid.first[1]) for cells in grid]),
+    all([all([cell in 0..1 for cell in cells]) for cells in grid]),
+}:
+    original = [[cell for cell in cells] for cells in grid]
+    expected = enumerate_robot_routes(grid, 0, 0)
+    assert_robot_paths(grid, expected)
+    if grid != original:
+        throw Error("robot solver modified its input")
+
+    # Transposing exchanges right/down moves without changing the route count.
+    transposed: list[list[int]] = []
+    if len(grid) != 0:
+        first_row = grid.first[1]
+        for column in ..first_row:
+            transposed.append([cells[column] for cells in grid])
+    assert_robot_paths(transposed, expected)
+
+
+
+def main():
+    grid = [[0,0,0], [0,1,0], [0,0,0]]
+    print(robot_paths(grid)) # 2
+
+
+test "robot routes around the center obstacle without modifying the grid":
+    grid = [[0,0,0], [0,1,0], [0,0,0]]
+    assert_robot_paths(grid, 2)
+    assert(grid == [[0,0,0], [0,1,0], [0,0,0]])
+
+
+test "empty grids never access a first or last cell":
+    empty: list[list[int]] = []
+    assert_robot_paths(empty, 0)
+    assert_robot_paths([[]], 0)
+    assert_robot_paths([[],[]], 0)
+
+
+test "one cell is both the start and destination":
+    assert_robot_paths([[0]], 1)
+    assert_robot_paths([[1]], 0)
+
+
+test "blocked start or destination prevents every route":
+    assert_robot_paths([[1,0], [0,0]], 0)
+    assert_robot_paths([[0,0], [0,1]], 0)
+
+
+test "one row includes the destination and stops after it":
+    assert_robot_paths([[0,0,0,0]], 1)
+    assert_robot_paths([[0,1,0,0]], 0)
+    assert_robot_paths([[0,0,0,1]], 0)
+
+
+test "one column includes the destination and resets the column cursor":
+    assert_robot_paths([[0], [0], [0], [0]], 1)
+    assert_robot_paths([[0], [1], [0], [0]], 0)
+    assert_robot_paths([[0], [0], [0], [1]], 0)
+
+
+test "first row and first column obstacles do not leak path counts":
+    assert_robot_paths([[0,1,0], [0,0,0]], 1)
+    assert_robot_paths([[0,0], [1,0], [0,0]], 1)
+
+
+test "a complete barrier separates otherwise open endpoints":
+    assert_robot_paths([[0,0,0], [1,1,1], [0,0,0]], 0)
+    assert_robot_paths([[0,1,0], [0,1,0], [0,1,0]], 0)
+
+
+test "rectangular grids distinguish row and column bounds":
+    assert_robot_paths([[0,0,0], [0,0,0]], 3)
+    assert_robot_paths([[0,0], [0,0], [0,0]], 3)
+    assert_robot_paths([[0,0,0,0,0], [0,0,0,0,0], [0,0,0,0,0]], 15)
+    assert_robot_paths([[0,0,0], [0,0,0], [0,0,0], [0,0,0], [0,0,0]], 15)
+
+
+test "grid coordinates visit each cell once with the column advancing fastest":
+    grid = [[0,0,0], [0,0,0]]
+    coordinates: list[tuple[int,int]] = []
+    for row, column in ..grid:
+        coordinates.append((row, column))
+    assert(coordinates == [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2)])
+
+
+test "tensor coordinates use the same traversal order as the robot grid":
+    grid = tensor[int,(2,3)]{0}
+    coordinates: list[tuple[int,int]] = []
+    for row, column in ..grid:
+        grid[row,column] += 1 # Element mutation preserves the index domain.
+        coordinates.append((row, column))
+    assert(coordinates == [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2)])
+    for row, column in ..grid:
+        assert(grid[row,column] == 1)
+
+
+test "empty coordinate domains perform zero iterations":
+    empty: list[list[int]] = []
+    visits = 0
+    for row, column in ..empty:
+        visits += 1
+    zero_columns: list[list[int]] = [[],[]]
+    for row, column in ..zero_columns:
+        visits += 1
+    assert(visits == 0)
+
+
+test "closed last index and excluded length describe the same corridor":
+    corridor = [0,0,0,0]
+    closed: list[int] = []
+    for column in ..corridor.last:
+        closed.append(column)
+    half_open: list[int] = []
+    for column in [0..len(corridor)):
+        half_open.append(column)
+    assert(closed == [0,1,2,3])
+    assert(half_open == closed)
+
+    after_start: list[int] = []
+    for column in (corridor.first[0]..corridor.last[0]]:
+        after_start.append(column)
+    assert(after_start == [1,2,3])
+
+    interior: list[int] = []
+    for column in (corridor.first[0]..corridor.last[0]):
+        interior.append(column)
+    assert(interior == [1,2])
+
+
+test "C first and last return key value items while indexing returns values":
+    corridor = [4,1,9,2]
+    assert(corridor.first == (0,4))
+    assert(corridor.last == (3,2))
+    assert(corridor[0] == 4)
+    assert(corridor[-1] == 2)
+
+    column_indices = list(..corridor)
+    assert(column_indices.first == (0,0))
+    assert(column_indices.last == (3,3))
+
+    ordered = sorted(corridor)
+    assert(ordered.first == (0,1)) # Item containing the minimum value.
+    assert(ordered.last == (3,9))  # Item containing the maximum value.
+
+    grid = [[7,8,9], [4,5,6]]
+    assert(grid.first == (0,[7,8,9]))
+    assert(grid.last == (1,[4,5,6]))
+    assert(grid[0] == [7,8,9])
+    assert(grid[-1] == [4,5,6])
+    assert(list(..grid.last) == [0,1])
+    assert(list(..grid[0].last) == [0,1,2])
+
+    singleton = [42]
+    assert(singleton.first == (0,42))
+    assert(singleton.last == (0,42))
+    assert(list(..singleton.last) == [0])
+
+
+test "while reevaluates a retreating obstacle boundary":
+    # Moving endpoints distinguish a live condition from a captured iterator.
+    visited: list[int] = []
+    while column in [0..boundary) with column = 0, boundary = 4:
+        visited.append(column)
+        column += 1
+        boundary -= 1
+    assert(visited == [0,1])
+
+
+test "bare integer ranges include both endpoints without brackets":
+    assert(list(0..1) == [0,1])
+    assert(list(2..2) == [2])
+    assert(len(list(2..1)) == 0)
+    assert(0 in 0..1)
+    assert(1 in 0..1)
+    assert(not (-1 in 0..1))
+    assert(not (2 in 0..1))
+    visited: list[int] = []
+    for index in 0..1:
+        visited.append(index)
+    assert(visited == [0,1])
+
+
+test "closed maximum integer endpoint does not overflow after the final item":
+    maximum = 9223372036854775807
+    assert(list(maximum..maximum) == [maximum])
+    assert(list(maximum - 1..maximum) == [maximum - 1, maximum])
+    assert(len(list((maximum..maximum])) == 0)
+    assert(len(list([maximum..maximum))) == 0)
+
+
+test "for captures range endpoints before its body changes them":
+    boundary = 3
+    visited: list[int] = []
+    for index in 0..boundary:
+        visited.append(index)
+        boundary = 0
+    assert(visited == [0,1,2,3])
+
+
+test "three dimensional tensor traversal advances the last axis first":
+    cube = tensor[int,(2,2,2)]{7}
+    visits = 0
+    for i,j,k in ..cube:
+        assert(visits == i * 4 + j * 2 + k)
+        assert(cube[i,j,k] == 7)
+        visits += 1
+    assert(visits == 8)
+
+
+test "ragged index domains visit only existing cells":
+    grid: list[list[int]] = [[7,8], [], [9]]
+    coordinates: list[tuple[int,int]] = []
+    for row,column in ..grid:
+        coordinates.append((row,column))
+    assert(coordinates == [(0,0), (0,1), (2,0)])
+
+
+test "integer map domains enumerate actual keys rather than positions":
+    values: map[int,int] = {10:7, 30:9}
+    visited: list[int] = []
+    for key in ..values:
+        visited.append(key)
+    assert(visited == [10,30])
+    assert(list(..values) == [10,30])
+    assert(10 in ..values)
+    assert(not (0 in ..values))
+    assert(values.first == (10,7))
+    assert(values.last == (30,9))
+
+
+test "string domains contain valid character indices":
+    word = "hello"
+    assert(list(..word) == [0,1,2,3,4])
+    assert(4 in ..word)
+    assert(not (5 in ..word))
+
+
+test "empty collections reject first item access without making up an index":
+    throws "empty collection has no first item":
+        values: list[int] = []
+        item = values.first
+
+
+test "empty collections reject last item access without making up an index":
+    throws "empty collection has no last item":
+        values: list[int] = []
+        item = values.last
+
+
+test "while checks every cursor against a one dimensional index domain":
+    corridor = [7,8,9]
+    visited: list[tuple[int,int]] = []
+    while left,right in ..corridor with left = 0, right = 2:
+        visited.append((left,right))
+        left += 1
+        right -= 1
+    assert(visited == [(0,2), (1,1), (2,0)])
+    visits = 0
+    while left,right in ..corridor and left <= right with left = 0, right = 2:
+        visits += 1
+        left += 1
+        right -= 1
+    assert(visits == 2)
+
+
+test "while checks a coordinate against the complete grid domain":
+    grid = [[7,8,9], [4,5,6]]
+    visited: list[tuple[int,int]] = []
+    while row,column in ..grid with row = 0, column = 0:
+        visited.append((row,column))
+        row += 1
+        column += 1
+    assert(visited == [(0,0), (1,1)])
+    coordinate = (1,2)
+    assert(coordinate in ..grid)
+    assert(not ((2,0) in ..grid))
+    assert(not ((-1,0) in ..grid))
+    assert(not ((0,-1) in ..grid))
+    assert(not ((0,3) in ..grid))
+    assert((0,1) in ..[[7,8]])
+    ragged: list[list[int]] = [[7,8], []]
+    assert(not ((1,0) in ..ragged))
+    cube = tensor[int,(2,2,2)]{0}
+    assert((1,1,1) in ..cube)
+    assert(not ((1,1,2) in ..cube))
+
+
+test with fuzz "generated robot grids agree with route enumeration and transpose":
+    fuzz(verify_generated_robot_paths)
+
+    test "fuzz regression b98853ee1641cf36534b":
+        replay(verify_generated_robot_paths, cases=[[[]]])
+
+    test "fuzz regression 2b8e92d7967fbc38bb9e":
+        replay(verify_generated_robot_paths, cases=[[[[1], [0], [1], [0], [0], [0]]]])
+
+    test "fuzz regression 7aaf6ed480591a4b17b7":
+        replay(verify_generated_robot_paths, cases=[[[[]]]])
+
+    test "fuzz regression 3efd5c7db2f43ac851fc":
+        replay(verify_generated_robot_paths, cases=[[[[0, 1, 1], [1, 1, 1], [0, 0, 0]]]])
+
+    test "fuzz regression b1725d6a6dba6e95e8df":
+        replay(verify_generated_robot_paths, cases=[[[[0, 0]]]])
+
+    test "fuzz regression 0d97819ee4598a9ffd54":
+        replay(verify_generated_robot_paths, cases=[[[[0]]]])
+
+    test "fuzz regression 44a771a4b8accefaf0b1":
+        replay(verify_generated_robot_paths, cases=[[[[0, 1, 0], [0, 1, 0], [1, 1, 1], [1, 0, 0], [1, 1, 0], [1, 0, 1]]]])
+
+    test "fuzz regression e5fc46c3b3c96d28064f":
+        replay(verify_generated_robot_paths, cases=[[[[0, 1]]]])
+
+    test "fuzz regression f9c4f5f817ba34a1d303":
+        replay(verify_generated_robot_paths, cases=[[[[1, 1, 1], [0, 0, 1], [1, 1, 0], [0, 1, 1], [0, 0, 0], [0, 1, 1]]]])
+
+    test "fuzz regression 70e84c59e2227b24170e":
+        replay(verify_generated_robot_paths, cases=[[[[1, 1, 1, 1]]]])
+
+    test "fuzz regression 47e9a354cb8d20793614":
+        replay(verify_generated_robot_paths, cases=[[[[0, 0, 1], [1, 1, 0]]]])
+
+    test "fuzz regression ca2087df1e0a7446b2a2":
+        replay(verify_generated_robot_paths, cases=[[[[1, 1, 1, 1, 1, 1], [1, 0, 1, 0, 0, 0], [1, 1, 1, 0, 0, 0], [1, 1, 1, 1, 1, 0], [0, 0, 1, 0, 1, 0], [0, 1, 1, 1, 0, 0]]]])
+
+    test "fuzz regression 4da66fa24b799cd747c0":
+        replay(verify_generated_robot_paths, cases=[[[[0, 1, 1], [0, 1, 1]]]])
+
+    test "fuzz regression 4ff34ec78654353b34e3":
+        replay(verify_generated_robot_paths, cases=[[[[0, 0, 1], [1, 0, 1], [1, 0, 0], [1, 0, 1]]]])
+
+    test "fuzz regression 2981ea3ae780bc2e96ea":
+        replay(verify_generated_robot_paths, cases=[[[[1, 0, 1, 0, 1], [1, 0, 0, 0, 0], [1, 1, 1, 0, 0], [0, 0, 0, 1, 0], [0, 1, 1, 1, 1], [0, 0, 0, 0, 1]]]])
+
+    test "fuzz regression aaca0b27026410eed9ee":
+        replay(verify_generated_robot_paths, cases=[[[[0, 0, 1], [1, 0, 1]]]])
+
+    test "fuzz regression 6b6025ea9bd3cab3c98d":
+        replay(verify_generated_robot_paths, cases=[[[[0, 0, 1], [0, 0, 0], [1, 1, 0]]]])
+
+    test "fuzz regression 74ffd40629352ef43cbf":
+        replay(verify_generated_robot_paths, cases=[[[[0, 1, 0, 1], [1, 1, 1, 0], [1, 1, 1, 1], [0, 1, 0, 0], [0, 1, 1, 1], [1, 1, 0, 0]]]])
+
+    test "fuzz regression 5ec0d69cf3454b1db021":
+        replay(verify_generated_robot_paths, cases=[[[[0], [1]]]])

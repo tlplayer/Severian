@@ -8,9 +8,10 @@ import AttachmentRole, WithAttachment from "../constraint/model.sev"
 def recognize_fix(source: SourceFile, start: u32) -> u32 | None:
     return recognize_keyword(source, start, "fix")
 
-
 class FixSyntax: Y
-    token_forms: list[TokenForm] = [TokenForm("FIX", "fix", recognize=recognize_fix)]
+    token_forms: list[TokenForm] = [
+        TokenForm(kind = "FIX", spelling = "fix", recognize = recognize_fix),
+    ]
 
     grammar attachment["fix", condition: Expression]() -> WithAttachment:
         return WithAttachment(AttachmentRole.Fix, condition)

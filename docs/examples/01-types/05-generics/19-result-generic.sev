@@ -1,12 +1,12 @@
 from collections import list
 
-# R - Result
-# Merge pass results while preserving the concrete result representation.
-
+'''
+R - Result
+Merge pass results while preserving the concrete result representation.
+'''
 trait ResultTerm:
     def empty() -> Self
     def merge(other: Self) -> Self
-
 
 class AnalysisResult: ResultTerm
     facts: usize
@@ -18,7 +18,6 @@ class AnalysisResult: ResultTerm
     def merge(other: Self) -> Self:
         return AnalysisResult(facts + other.facts, warnings + other.warnings)
 
-
 def merge_results[R: ResultTerm](results: list[R]) -> R:
     merged = R.empty()
 
@@ -26,7 +25,6 @@ def merge_results[R: ResultTerm](results: list[R]) -> R:
         merged = merged.merge(result)
 
     return merged
-
 
 test:
     results := [AnalysisResult(12, 1), AnalysisResult(30, 2)]

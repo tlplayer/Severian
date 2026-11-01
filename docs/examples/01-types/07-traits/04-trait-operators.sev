@@ -1,43 +1,37 @@
-# Two traits claim the exact same operator signature:
-#
-#     string | string -> string
-#
-# The active trait namespace determines which implementation is selected.
+'''
+Two traits claim the exact same operator signature:
 
+    string | string -> string
 
+The active trait namespace determines which implementation is selected.
+'''
 trait BinaryStringOperator:
     @binary_strings
 
     operator |(left: string, right: string) -> string
 
-
 class BinaryString: BinaryStringOperator
 
     operator |(left: string, right: string) -> string:
-        return "binary:" + left + ":" + right
-
+        return """binary:{left}:{right}"""
 
 trait AlternativeOperator:
     @alternatives
 
     operator |(left: string, right: string) -> string
 
-
 class AlternativeString: AlternativeOperator
 
     operator |(left: string, right: string) -> string:
-        return "alternative:" + left + ":" + right
-
+        return """alternative:{left}:{right}"""
 
 @binary_strings(|)
 def binary_or(left: string, right: string) -> string:
     return left | right
 
-
 @alternatives(|)
 def alternative_or(left: string, right: string) -> string:
     return left | right
-
 
 test "same operator dispatches through different traits":
     binary = binary_or("left", "right")
@@ -46,14 +40,12 @@ test "same operator dispatches through different traits":
     assert(binary == "binary:left:right")
     assert(alternative == "alternative:left:right")
 
-
 test with compiler "string operator requires a trait namespace":
     reject:
         left: string = "left"
         right: string = "right"
 
         result = left | right
-
 
 test with compiler "operator trait namespace cannot be ambiguous":
     reject:

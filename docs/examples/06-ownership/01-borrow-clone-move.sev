@@ -1,10 +1,8 @@
 def inspect(value: borrow string):
     print(value)
 
-
 def consume(value: move string):
     print(value)
-
 
 test:
     name := "severian"
@@ -17,7 +15,6 @@ test:
 
     consume(name)
 
-
 test with compiler:
     value := "severian"
     consume(value)
@@ -28,7 +25,7 @@ test with compiler:
 test "copied string survives consuming its original":
     original = "owned"
     independent = copy original
-    assert(not (independent is original))
+    assert(not independent is original)
     consume(original)
     assert(independent == "owned")
 

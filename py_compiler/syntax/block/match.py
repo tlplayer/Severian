@@ -2,6 +2,58 @@
 from py_compiler.syntax.generic.block import BlockProvider
 
 
+def alternative_cases(node):
+    """Alternatives share a body, with each pattern checked independently."""
+    from dataclasses import replace
+    from py_compiler.frontend.lint.layout import split_at, groups
+    children = []
+    for case in node.children:
+        header = case.header
+        enclosing = groups(header)
+        if enclosing and enclosing[0] == (0, len(header) - 1) and header[0].text == '(':
+            header = header[1:-1]
+        patterns = split_at(header, {'|'})
+        if len(patterns) > 1 and any(token.text == '(' for token in header):
+            raise ValueError('enum alternatives require bare variants')
+        for pattern in patterns:
+            if pattern and pattern[0].text == '|':
+                pattern = pattern[1:]
+            if not pattern:
+                raise ValueError('empty enum case alternative')
+            children.append(replace(case, header=tuple(pattern)))
+    return replace(node, children=children)
+
+
+def coalesce_alternatives(chain):
+    from dataclasses import replace
+    result, index = [], 0
+    while index < len(chain):
+        stop = index + 1
+        while stop < len(chain) and chain[stop].identity == chain[index].identity:
+            stop += 1
+        node = chain[index]
+        if stop - index > 1:
+            node = replace(node, provider=AlternativeBranch(tuple(item.provider for item in chain[index:stop])))
+        result.append(node)
+        index = stop
+    return result
+
+
+class AlternativeBranch:
+    has_condition = True
+
+    def __init__(self, branches):
+        self.branches = branches
+
+    def condition_value(self, cfg, node, env):
+        from py_compiler.syntax.generic.owned import select
+        values = [branch.condition_value(cfg, node, env) for branch in self.branches]
+        result = values[0]
+        for value in values[1:]:
+            result = select(result.type, 'F.operator', '|').expand(cfg, result, value, node.span)
+        return result
+
+
 class Match(BlockProvider):
     spelling = "match"
 
@@ -22,6 +74,7 @@ class Match(BlockProvider):
         from py_compiler.syntax.grammar.expression import expression
         term = expression(node.header)
         subject = cfg.expr(term, env)
+        node = alternative_cases(node)
         retain_subject(node,term,subject,cfg,env)
         if subject is not None and getattr(subject.type, 'enum_payloads', False):
             from py_compiler.syntax.generic.storage import root_binding
@@ -37,6 +90,8 @@ class Match(BlockProvider):
             if pattern.kind == 'name' and pattern.token.text == '_':
                 wildcard = True
                 ordinal = None
+                if cfg.context.lint is not None:
+                    cfg.context.lint.enum_default(case, subject.type, seen)
             elif pattern.kind == 'name':
                 ordinal = subject.type.variant(pattern.token.text)
             elif pattern.kind == 'member' and pattern.operands[0].kind == 'name':
@@ -53,6 +108,7 @@ class Match(BlockProvider):
             chain.append(replace(case, provider=branch))
         if not wildcard and len(seen) != len(subject.type.variants):
             raise ValueError('non-exhaustive enum match')
+        chain = coalesce_alternatives(chain)
         chain[-1].provider.has_condition = False
         lower_chain(node,cfg,chain,env)
         return 1
@@ -119,6 +175,8 @@ def lower_payload_match(node, subject, cfg, env, owner=None):
         term=expression(case.header)
         if term.kind == 'name' and term.token.text == '_':
             wildcard=True
+            if cfg.context.lint is not None:
+                cfg.context.lint.enum_default(case, subject.type, seen)
             chain.append(replace(case,provider=PayloadBranch(subject,None)))
             continue
         callee=term.operands[0] if term.kind=='call' else term
@@ -148,6 +206,7 @@ def lower_payload_match(node, subject, cfg, env, owner=None):
         chain.append(replace(case,provider=PayloadBranch(subject,ordinal),children=children))
     if not wildcard and len(seen)!=len(subject.type.variants):
         raise ValueError('non-exhaustive enum match')
+    chain = coalesce_alternatives(chain)
     chain[-1].provider.has_condition=False
     lower_chain(node,cfg,chain,env)
     return 1

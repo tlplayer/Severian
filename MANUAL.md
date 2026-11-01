@@ -64,8 +64,64 @@ def two_sum(s: list[int], target: int):
 
     return None
 
+s = "hello"
+for i in ..s:
+    print(i) # prints indices of s (0,1,2,3,4) Note, .. is for indices ie keys into the collection
+
+values = {1:0,2:1,3:2,4:3,5:4}
+
+# This is similar to .keys() in python to iterate items() it would just be i in values:
+for key in ..values:
+    print(key)
+
+'''
+Note, how the indices are inclusive [0..values] because it's index based note length based. 
+an important note is when there's a multi dimensional array NxMXU the indices will be (i,j,k)
+'''
+A = tensor[int,(10,10,10)]{0}
+# k increments, then j, then i, left to right incrementation
+for i,j,k in ..A:
+    print(f"({i},{j},{k}):{A[i,j,k]}") # (0,0,0):0 , (0,0,1):0 # we iterate
 
 
+# It's important to note the meanings here, while i,j in ..s: would make sure we are within the bounds of the collection at the condition
+# for i,j in ..s: would iterate over the elements. This doesn't replace the standard nested loops, but it does allow flattening when convenient. 
+
+
+It's also convenient to have a quick/easy to code way to get the first/last item
+C.first/last -> (K,V) tuple
+
+This is different than 0,-1 which would return the V of the first/last element
+
+grid = [[7,8,9], [4,5,6]]
+
+grid.last       # (1,[4,5,6]) — last key which is a numeric index and last row
+..grid.last   # iterates to the last index inclusive meaning [0..1]
+
+
+an interesting edge case is the middle element. This is used for binary search and merge sort and it's a pain in the ass. 
+Without indexing/iteration help it trips many people up. 
+
+A = [1,2,3]
+# This is the middle element for an odd lengthed array
+r = len(A)
+m = (len(A)-1)//2
+l = 0
+t = 3
+while l < r:
+    if A[m] == t:
+        return m
+    if A[m] < t:
+        l = m+1
+    if A[m] > t:
+        r = m-1
+    m = l+(r-l)//2 # (3-2)//2+2
+
+# if we had a mid we can do away with pinch point math
+def search(slice, target):
+    if slice.mid == target:
+        return slice.mid
+    if slice.mid[1] < 
 ```
 
 ## Package structure and layout
@@ -97,17 +153,17 @@ This is a dynamic function which the caller owns.
 
 Severian has the following scopes:
 
-- global 
+- module
 - main
 - test
 
-By isolating global certain setup work can occur before all else
+By isolating module certain setup work can occur before all else
 By isolating test into it's own block we can break some rules for safety/behavior while not polluting the file
 We also get to keep tests proximally close to what they test 
 
 
 ```sev
-#Constant global executes
+#Constant module executes
 
 X = "value"
 

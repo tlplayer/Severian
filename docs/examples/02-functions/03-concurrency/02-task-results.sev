@@ -4,10 +4,11 @@ def fetch(url: string) -> bool | Error:
     wait(0.1s)
     return true
 
-test with profile with 
-{
-    defer 0.1s < time -> Error("Await didn't actually wait"),
-}:
+test with profile with {defer 0.1s < time -> Error
+"""\
+
+Await didn't actually wait
+""",}:
     task = async fetch("https://example.test") with self
     result = await task
     assert(result)

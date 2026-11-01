@@ -1,6 +1,5 @@
 import os
 
-
 test with integ "create and list directory":
     directory = "/tmp/severian-directory-example"
 

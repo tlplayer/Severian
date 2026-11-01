@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "columns": 80,
+  "indentation": 4,
+  "conditions": 3,
+  "operation_block": 3,
+  "positional_arguments": 3,
+  "maximum_passes": 8,
+  "acronyms": ["id", "mlir", "hir", "thir", "mir", "lir", "ast", "cfg", "http", "https", "nasa", "utf", "ascii", "tcp", "udp", "ipv4", "ipv6", "io", "abi", "ffi", "ipc", "cpu", "gpu", "simd", "json", "xml", "url", "uri", "cli", "api"],
+  "abbreviations": {"frmt": "format"},
+  "allowed_abbreviations": ["min", "max"],
+  "language_types": ["list", "dict", "map", "set", "count", "tuple", "array", "tensor", "channel", "iterator", "string", "bool", "int", "float", "char", "dynamic", "any", "union", "type", "index", "pointer", "absent", "None"],
+  "rules": ["source.layout", "source.width", "source.names"]
+}

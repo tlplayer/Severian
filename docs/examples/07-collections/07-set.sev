@@ -3,26 +3,27 @@ from collections import set
 # set[T]: unique values, ordered by default.
 def main():
     levels := {30, 10, 20, 10}
-    if not (levels.len() == 3):
+    if not levels.len() == 3:
         throw Error("set invariant failed")
-    if not (levels.contains(20)):
+    if not levels.contains(20):
         throw Error("set invariant failed")
 
     inserted = levels.add(20)
-    if not (not inserted):
+    if not not inserted:
         throw Error("set invariant failed")
     inserted = levels.add(40)
-    if not (inserted):
+    if not inserted:
         throw Error("set invariant failed")
 
     found = levels.remove(30)
-    if not (found):
+    if not found:
         throw Error("set invariant failed")
-    if not (not levels.contains(30)):
+    if not not levels.contains(30):
         throw Error("set invariant failed")
     for level in levels.iter():
-        print(level)  # 10, 20, 40 on successive lines.
 
+        # 10, 20, 40 on successive lines.
+        print(level)
 
 test "set ignores duplicates and reports removal":
     values := {30, 10, 20, 10}
@@ -44,7 +45,8 @@ test "set iterates unique values in ascending order":
 
 test "set infers string elements and removes duplicates":
     names := {"ada", "grace", "ada"}
-    assert(names.len() == 2)
-    assert(names.contains("ada"))
-    assert(names.contains("grace"))
-    assert(not names.contains("katherine"))
+    assert:
+        names.len() == 2
+        names.contains("ada")
+        names.contains("grace")
+        not names.contains("katherine")

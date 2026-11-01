@@ -3,16 +3,13 @@ import python from xxi
 @python(symbol = "add")
 def add(left: int, right: int) -> int
 
-
 @python(symbol = "greeting")
 def greeting(name: string) -> string
-
 
 test:
     unsafe:
         assert(add(20, 22) == 42)
         assert(greeting("severian") == "hello severian")
-
 
 def main():
     unsafe:

@@ -1,20 +1,17 @@
-import BlockId, ValueId from "model.sev"
+import BlockID, ValueID from "model.sev"
 import IntegerInterval from "proof.sev"
 
-
 class ValueRefinement:
-    value: ValueId
+    value: ValueID
     version: int
-    block: BlockId
+    block: BlockID
     interval: IntegerInterval
-
 
 class RefinementState:
     versions: list[int] = []
     facts: list[ValueRefinement] = []
 
-
-def invalidate_refinement(state: RefinementState, value: ValueId):
+def invalidate_refinement(state: RefinementState, value: ValueID):
     while len(state.versions) <= value.index:
         state.versions.append(0)
     state.versions[value.index] += 1
@@ -24,7 +21,6 @@ def invalidate_refinement(state: RefinementState, value: ValueId):
             retained.append(fact)
     state.facts = retained
 
-
 def invalidate_memory(state: RefinementState):
     state.facts.clear()
     index := 0
@@ -32,13 +28,18 @@ def invalidate_memory(state: RefinementState):
         state.versions[index] += 1
         index += 1
 
-
 # Joins keep only facts true on every incoming edge at the same memory version.
-def join_refinements(left: RefinementState, right: RefinementState) -> RefinementState:
+def join_refinements(
+    left: RefinementState,
+    right: RefinementState,
+) -> RefinementState:
     result = RefinementState(left.versions[:], [])
     for first in left.facts:
         for second in right.facts:
-            if first.value.index == second.value.index and first.version == second.version and first.block.index == second.block.index:
-                if first.interval.lower == second.interval.lower and first.interval.upper == second.interval.upper:
+            if first.value.index == second.value.index
+                and first.version == second.version
+                and first.block.index == second.block.index:
+                if first.interval.lower == second.interval.lower
+                    and first.interval.upper == second.interval.upper:
                     result.facts.append(first)
     return result

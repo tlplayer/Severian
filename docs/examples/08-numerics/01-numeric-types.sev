@@ -1,15 +1,12 @@
 '''
 A tensor looks something like this:
 Tensor[T]
-    dtype: T
-    shape: list[int]
-    strides: list[int]
-    values: ...
-    operations:...
+dtype: T
+shape: list[int]
+strides: list[int]
+values: ...
+operations:...
 '''
-
-
-
 def main():
     small: i8 = 8
     count: i32 = 42
@@ -24,13 +21,11 @@ def main():
     print(ratio)
     print(precise)
 
-
 test "integer arithmetic":
     left: i32 = 20
     right: i32 = 22
 
     assert(left + right == 42)
-
 
 test "floating point arithmetic":
     left: f64 = 1.5

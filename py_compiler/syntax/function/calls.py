@@ -28,14 +28,22 @@ def coerce(value, expected, cfg, span):
         return value
     if expected.family == "union" and value.type in expected.variants:
         from py_compiler.syntax.complex.object import UnionBox
-        from py_compiler.syntax.generic.storage import copy_storage
-        result = cfg.emit('memory-copy', expected, (copy_storage(value, cfg, span),), UnionBox(expected.variants.index(value.type)), span)
+        from py_compiler.syntax.generic.storage import copy_storage, is_unbound_temporary
+        temporary = is_unbound_temporary(value, cfg)
+        payload = value if temporary else copy_storage(value, cfg, span)
+        result = cfg.emit('memory-copy', expected, (payload,), UnionBox(expected.variants.index(value.type)), span)
+        if temporary:
+            cfg.owned_results.discard(value.identity)
         cfg.owned_results.add(result.identity)
         return result
     if expected.family == 'union' and value.type.family == 'union' and expected.accepts_type(value.type):
         from py_compiler.syntax.block.union import UnionWiden
-        copied = value.type.copy_value(value, cfg, span)
-        result = cfg.emit('memory-copy', expected, (copied,), UnionWiden(), span)
+        from py_compiler.syntax.generic.storage import is_unbound_temporary
+        temporary = is_unbound_temporary(value, cfg)
+        payload = value if temporary else value.type.copy_value(value, cfg, span)
+        result = cfg.emit('memory-copy', expected, (payload,), UnionWiden(), span)
+        if temporary:
+            cfg.owned_results.discard(value.identity)
         cfg.owned_results.add(result.identity)
         return result
     if value.type.family == 'record' and expected.family == 'trait':
@@ -60,7 +68,7 @@ def expand_spreads(arguments, cfg, env):
         if source.kind in ('tuple', 'list'):
             expanded.extend(expand_spreads(source.operands, cfg, env))
             continue
-        if source.kind == 'binary' and source.token.text == '..':
+        if source.kind == 'interval' or source.kind == 'binary' and source.token.text == '..':
             def integer(term):
                 if term.kind == 'literal' and term.token.text.isdecimal():
                     return int(term.token.text)
@@ -68,7 +76,10 @@ def expand_spreads(arguments, cfg, env):
                     return integer(term.operands[0]) * (-1 if term.token.text == '-' else 1)
                 raise ValueError('range spread requires constant bounds')
             start, stop = map(integer, source.operands)
-            if stop - start > 65536:
+            start_closed, stop_closed = source.interval or (True, True)
+            start += not start_closed
+            stop += stop_closed
+            if max(0, stop - start) > 65536:
                 raise ValueError('range spread exceeds the static argument limit')
             expanded.extend(Expression('literal', source.token.with_text(str(value), kind='NUMBER')) for value in range(start, stop))
             continue
@@ -123,6 +134,7 @@ def select_variadic(entries, arguments, cfg, env, explicit):
         specialized = replace(entry, parameters=parameters, variadic=None, body=None, compiling=False,
                               declaration_signature=tuple(type_.name for type_ in parameter_types),
                               parameter_ownership=dict(entry.parameter_ownership))
+        specialized.lint_variadic = True
         cfg.context.realizations[key] = specialized
         cfg.context.compilers[id(specialized)] = cfg.context.compilers[id(entry)]
     captured = [Expression('capture', argument.token, (ArgumentValue(value, root_binding(argument, cfg, env)),))
@@ -598,9 +610,17 @@ def dispatch(receiver, method, arguments, cfg, env, span, contract_name=None):
 
 
 def lower_expression(node, cfg, env, expected=None):
+    from py_compiler.syntax.grammar.expression import Expression
     context, span = cfg.context, node.token.span
     if node.kind == 'member':
         subject = node.operands[0]
+        if node.token.text in ('first', 'last'):
+            from py_compiler.syntax.generic.place import expression_type
+            from py_compiler.syntax.complex.collection import indexed_arguments
+            receiver_type = expression_type(subject, cfg, env)
+            fields = dict(getattr(getattr(receiver_type, 'declaration', None), 'fields', ()))
+            if node.token.text not in fields and (indexed_arguments(receiver_type, context) is not None or context.functions.get(receiver_type.name + '.' + node.token.text)):
+                return cfg.expr(Expression('call', node.token, (node,)), env, expected)
         if subject.kind == 'name' and subject.token.text in context.package_imports:
             key = subject.token.text + '.' + node.token.text
             place = context.imported_globals.get(key)
@@ -622,21 +642,41 @@ def lower_expression(node, cfg, env, expected=None):
         provider = receiver.type if callable(getattr(receiver.type,'field_place',None)) else context.provider_by_name.get(receiver.type.name, receiver.type)
         if not hasattr(provider, 'field_place'):
             raise ValueError('type has no field access provider')
-        value = provider.field_place(receiver, node.token.text, cfg, span).read(cfg, span)
-        if receiver.identity in cfg.call_result_owners and value.type.binding_ownership != 'copy':
+        place = provider.field_place(receiver, node.token.text, cfg, span)
+        value = place.read(cfg, span)
+        from py_compiler.syntax.generic.storage import is_unbound_temporary, owns_storage, release_temporary
+        temporary_receiver = is_unbound_temporary(receiver, cfg)
+        if temporary_receiver:
+            if owns_storage(value.type):
+                if getattr(getattr(receiver.type, 'declaration', None), 'destructor', False):
+                    raise ValueError('cannot extract an owned field from a temporary with a destructor; bind the owner first')
+                # Clear the source initialization flag before dropping siblings.
+                # A resource copy would retain the same native handle.
+                value = place.take(cfg, span, value)
+            release_temporary(receiver, cfg, span)
+        if not temporary_receiver and receiver.identity in cfg.call_result_owners and value.type.binding_ownership != 'copy':
             cfg.call_result_owners[value.identity] = cfg.call_result_owners[receiver.identity]
             cfg.call_result_modes[value.identity] = cfg.call_result_modes.get(receiver.identity, 'view')
             if receiver.identity in cfg.call_result_sources:
                 cfg.call_result_sources[value.identity] = cfg.call_result_sources[receiver.identity]
         return coerce(value, expected, cfg, span)
     callee, *arguments = node.operands
+    if callee.kind == 'name' and callee.token.text == 'list' and len(arguments) == 1:
+        from py_compiler.syntax.complex.collection import lower_comprehension
+        target = Expression('name', node.token.with_text('__materialized_item', kind='IDENTIFIER'))
+        return lower_comprehension(Expression('comprehension', node.token, (target, target, arguments[0], None)), cfg, env, expected)
     if any(argument.kind == 'spread' for argument in arguments):
+        original_arguments = tuple(arguments)
         arguments = expand_spreads(arguments, cfg, env)
+        if getattr(context, 'lint', None) is not None:
+            context.lint.spread_arguments(original_arguments, arguments)
         from dataclasses import replace
         node = replace(node, operands=(callee, *arguments))
     if callee.kind in ('name', 'reference'):
         binding = cfg.lookup(callee, env)
         if binding is not None and binding.type.family == 'function':
+            if getattr(context, 'lint', None) is not None:
+                context.lint.opaque_arguments(arguments)
             receiver = cfg.expr(callee, env)
             result = receiver.type.call(receiver, arguments, cfg, env, span)
             return coerce(result, expected, cfg, span) if expected else result
@@ -819,6 +859,9 @@ def lower_expression(node, cfg, env, expected=None):
     else:
         raise ValueError('expression does not provide a callable')
     entry, values = select(entries, arguments, cfg, env, explicit)
+    if getattr(context, 'lint', None) is not None:
+        context.lint.arguments(arguments, entry.parameters,
+                               variadic=bool(entry.variadic or getattr(entry, 'lint_variadic', False)))
     if entry.receiver and entry.receiver_ownership is None:
         cfg.context.compile(entry)
     if receiver is not None and receiver_binding is None:
@@ -840,6 +883,11 @@ def lower_expression(node, cfg, env, expected=None):
             with BindingPlace(receiver_binding, rebind=False).capture(cfg, 'borrow', preserve_shape=stable):
                 pass
     value = invoke(entry, values, cfg, span, receiver)
+    if value is not None and value.type.family == 'task':
+        # The handle owns asynchronous completion. The callee's returned-view
+        # provenance belongs to its eventual payload, not to the task binding.
+        # Keep temporary receivers/arguments alive through task cleanup.
+        return coerce(value, expected, cfg, span) if expected else value
     if (receiver_binding is not None and receiver_binding.name.startswith('<temporary receiver ')
             and not getattr(entry.body, 'result_sources', ())
             and -1 not in getattr(entry.body, 'retained_result_sources', ())
@@ -1101,3 +1149,167 @@ def work() -> int:
 """, Syntax(include_tests=False))
         self.assertFalse(result.diagnostics, result.diagnostics)
         self.assertEqual(len([body for body in result.program.bodies if body.declaration == 'count']), 2)
+
+
+class TemporaryUnionBoxingTests(unittest.TestCase):
+    def test_widening_transfers_temporary_union_but_copies_live_union(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.syntax.block.union import UnionWiden
+        result = compile_source('widening-union.sev', '''def text() -> string | None:
+    return "owned"
+def temporary() -> string | None | Error:
+    return text()
+def bound(value: view string | None) -> string | None | Error:
+    return value
+''', Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        temporary = next(body for body in result.program.bodies if body.declaration == 'temporary')
+        operations = [op for block in temporary.blocks for op in block.operations]
+        called = next(op for op in operations if op.kind == 'call')
+        widened = next(op for op in operations if isinstance(op.payload, UnionWiden))
+        self.assertEqual(widened.operands, (called.result,))
+        bound = next(body for body in result.program.bodies if body.declaration == 'bound')
+        widened = next(op for block in bound.blocks for op in block.operations if isinstance(op.payload, UnionWiden))
+        self.assertNotEqual(widened.operands, (bound.blocks[0].parameters[0],))
+
+    def test_owned_constructor_result_moves_into_union_without_a_second_copy(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = '''class Failure: Error
+    code: int
+class Resource:
+    handle: int
+    def drop():
+        return
+def create() -> Resource | Failure:
+    return Resource(42)
+'''
+        result = compile_source('temporary-union.sev', source, Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'create')
+        allocations = [op for block in body.blocks for op in block.operations if op.kind == 'allocate']
+        self.assertEqual(len(allocations), 1)
+        boxes = [op for block in body.blocks for op in block.operations
+                 if op.kind == 'memory-copy' and op.result.type.family == 'union']
+        self.assertEqual(boxes[0].operands[0], allocations[0].result)
+
+
+class TemporaryFieldTests(unittest.TestCase):
+    def test_scalar_field_releases_temporary_receiver_owned_fields(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = '''class Address:
+    host: string
+    port: int
+def work() -> int:
+    return Address("127.0.0.1", 7777).port
+'''
+        result = compile_source('temporary-field.sev', source, Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'work')
+        releases = [op for block in body.blocks for op in block.operations if op.kind == 'deallocate']
+        self.assertEqual(len(releases), 1)
+
+    def test_owned_field_survives_temporary_receiver_cleanup(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = '''class Address:
+    host: string
+    port: int
+def work() -> string:
+    return Address("127.0.0.1", 7777).host
+'''
+        result = compile_source('temporary-owned-field.sev', source, Syntax(include_tests=False))
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        body = next(body for body in result.program.bodies if body.declaration == 'work')
+        operations = [op for block in body.blocks for op in block.operations]
+        copies = [op for op in operations if op.kind == 'memory-copy' and op.result.type.family == 'string']
+        releases = [op for op in operations if op.kind == 'deallocate']
+        self.assertEqual(len(copies), 0)
+        # Cleanup retains a guarded release for the cleared source field.
+        # Its false initialization flag prevents destroying the returned value.
+        self.assertEqual(len(releases), 1)
+        self.assertTrue(any(op.kind == 'field-clear' for op in operations))
+        returned = next(block.terminator.value for block in body.blocks
+                        if block.terminator.kind == 'finish')
+        self.assertNotEqual(releases[0].operands[0], returned)
+
+    def test_temporary_with_destructor_cannot_lose_an_owned_field(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        result = compile_source('temporary-destructor-field.sev', '''class Resource:
+    handle: int
+    def drop():
+        return
+class Envelope:
+    resource: Resource
+    def drop():
+        return
+def selected() -> Resource:
+    return Envelope(Resource(7)).resource
+''', Syntax(include_tests=False))
+        self.assertIn('temporary with a destructor', str(result.diagnostics))
+
+    def test_native_temporary_projection_moves_resource_and_cleans_siblings(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.packaging.testing import test_package
+        source = '''released: int = 0
+class Resource:
+    handle: int
+    def drop():
+        module.released += handle
+class Envelope:
+    selected: Resource
+    sibling: Resource
+class Outer:
+    inner: Envelope
+def selected() -> Resource:
+    return Outer(Envelope(Resource(7), Resource(11))).inner.selected
+test "only the sibling closes before the extracted resource":
+    module.released = 0
+    resource = selected()
+    assert(released == 11 and resource.handle == 7)
+    drop resource
+    assert(released == 18)
+'''
+        with tempfile.TemporaryDirectory(prefix='sev-temporary-resource-') as directory:
+            root = Path(directory)
+            (root / 'lib.sev').write_text(source)
+            (root / 'package.json').write_text(json.dumps({
+                'package': {'name': 'temporary-resource', 'version': '0.1.0'},
+                'sources': ['lib.sev'],
+            }))
+            result = test_package(root, memory=True, timeout=3)
+            self.assertTrue(result['success'], result)
+
+
+class RangeSpreadTests(unittest.TestCase):
+    def expand(self, spelling):
+        from py_compiler.frontend.source.source import SourceFile
+        from py_compiler.frontend.lexer.lexer import lex
+        from py_compiler.syntax.recognition import Syntax
+        from py_compiler.syntax.grammar.expression import expression, Expression
+        source = SourceFile('range-spread.sev', spelling)
+        term = expression(tuple(token for token in lex(source, Syntax())
+                                if token.kind not in ('NEWLINE', 'EOF')))
+        spread = Expression('spread', term.token, (term,))
+        return tuple(int(item.token.text) for item in expand_spreads((spread,), None, None))
+
+    def test_spreads_match_interval_endpoint_flags(self):
+        for spelling, expected in (
+                ('0..3', (0, 1, 2, 3)), ('[0..3]', (0, 1, 2, 3)),
+                ('[0..3)', (0, 1, 2)), ('(0..3]', (1, 2, 3)),
+                ('(0..3)', (1, 2)), ('[3..3]', (3,)),
+                ('(3..3]', ()), ('[3..2]', ()), ('[-2..0]', (-2, -1, 0))):
+            with self.subTest(spelling=spelling):
+                self.assertEqual(self.expand(spelling), expected)
+
+    def test_spread_limit_counts_included_endpoints(self):
+        self.assertEqual(len(self.expand('[0..65536)')), 65536)
+        with self.assertRaisesRegex(ValueError, 'static argument limit'):
+            self.expand('[0..65536]')
+        maximum = 9223372036854775807
+        self.assertEqual(self.expand(f'[{maximum}..{maximum}]'), (maximum,))

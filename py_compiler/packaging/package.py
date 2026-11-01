@@ -89,7 +89,7 @@ def write_atomic(path, text):
 def compiler_identity():
     root = Path(__file__).resolve().parents[1]
     return digest(encode([(path.relative_to(root).as_posix(), path.read_text())
-                          for path in sorted(root.rglob('*.py'))]))
+                          for path in sorted((*root.rglob('*.py'), *root.rglob('*.grammar')))]))
 
 
 def write_generated(path, data):
@@ -315,9 +315,12 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
         snapshots.append((path.relative_to(root).as_posix(), path.read_bytes().decode("utf-8")))
     lock = (root / "package.lock").read_text(encoding="utf-8") if (root / "package.lock").exists() else encode({"version": 1, "packages": []})
     def compile_snapshot(pair):
-        return compile_source(pair[0], pair[1], syntax, stop_after=stop_after or 'mir',
-                              interface=package['name'], c_packages=packages,
-                              debug_path=str(root / pair[0]))
+        result = compile_source(pair[0], pair[1], syntax, stop_after=stop_after or 'mir',
+                                interface=package['name'], c_packages=packages,
+                                debug_path=str(root / pair[0]))
+        from py_compiler.frontend.lint.lint import rewrite_file
+        rewrite_file(root / pair[0], pair[1], result.source.text)
+        return result
     # Keep single-source compilation on the interruptible main thread.
     if len(snapshots) == 1 or jobs == 1:
         results = [compile_snapshot(pair) for pair in snapshots]
@@ -325,6 +328,18 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
         # Executor.map preserves source order for independent source units.
         with ThreadPoolExecutor(max_workers=jobs) as executor:
             results = list(executor.map(compile_snapshot, snapshots))
+    snapshots = [(name, result.source.text) for (name, _), result in zip(snapshots, results)]
+    extra_sources = {}
+    selected_names = {name for name, _ in snapshots}
+    for result in results:
+        for path, text in result.source_inputs:
+            path = Path(path).resolve()
+            if not path.is_relative_to(root):
+                raise ValueError('linted source import escapes the package')
+            name = path.relative_to(root).as_posix()
+            if name not in selected_names:
+                extra_sources[name] = text
+    snapshots.extend(sorted(extra_sources.items()))
     errors = [diagnostic for result in results for diagnostic in result.diagnostics]
     if errors:
         report("\n\n".join(map(str, errors)) + "\n", True)
@@ -442,6 +457,7 @@ def _build(root, output, target, pointer_bits, jobs, mlir_opt, report, include_t
                  "aliases": aliases}
     interface_text = encode(interface)
     realization = {"format": "py_compiler.realization", "version": 1, "package": identity,
+                   "source-inputs": [name for name, _ in snapshots],
                    "scope": "test" if include_tests else "production",
                    "build-id": build_id, "state": "compiled-object", "compiler": compiler_id,
                    "target": target, "abi": abi_id, "pointer-bits": pointer_bits,
@@ -596,6 +612,7 @@ class PackageTests(unittest.TestCase):
         self.assertIn('packaging/package.py', sources)
         self.assertIn('packaging/testing.py', sources)
         self.assertIn('packaging/coverage.py', sources)
+        self.assertIn('frontend/lint/sev.grammar', sources)
 
     def test_c_generic_defaults_and_class_grammars(self):
         from py_compiler.packaging.testing import test_package

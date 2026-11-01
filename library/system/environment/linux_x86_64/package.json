@@ -1,0 +1,7 @@
+{
+  "package": {"name": "system.environment", "version": "0.1.0"},
+  "dependencies": {
+    "string": {"path": "../../../core/string/c"},
+    "collections": {"path": "../../../core/collections/collection"}
+  }
+}

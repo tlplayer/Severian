@@ -8,7 +8,6 @@ import LexicalDiagnostic from "diagnostic.sev"
 import SentenceField from "../../syntax/grammar/grammar.sev"
 import "../../syntax/recognition.sev" as syntax
 
-
 def lexer(input: SourceFile) -> TokenStream | list[Diagnostic]:
     grammars = syntax.registry()
     tokens: list[Token] = []
@@ -44,47 +43,122 @@ def lexer(input: SourceFile) -> TokenStream | list[Diagnostic]:
                     if stop is Diagnostic:
                         return [stop]
                     if stop != None:
-                        if stop < cursor or stop > end or (stop == cursor and not form.boundary):
-                            return [LexicalDiagnostic("token form returned an invalid source range", Span(input.source_id, cursor, cursor), "lexer.tokens")]
+                        if stop < cursor
+                            or stop > end
+                            or (stop == cursor and not form.boundary):
+                            return [
+                                LexicalDiagnostic(
+                                    "token form returned an invalid source ra"
+                                    "nge",
+                                    Span(input.source_id, cursor, cursor),
+                                    "lexer.tokens",
+                                ),
+                            ]
                         span = Span(input.source_id, cursor, stop)
-                        matches.append(Token(form.kind, Lexeme(input.text[cursor:stop], span), span, [name]))
+                        matches.append(
+                            Token(
+                                kind = form.kind,
+                                lexeme = Lexeme(input.text[cursor:stop], span),
+                                span = span,
+                                declarations = [name],
+                            ),
+                        )
                     continue
                 if form.boundary:
                     span = Span(input.source_id, cursor, cursor)
-                    matches.append(Token(form.kind, Lexeme("", span), span, [name]))
+                    matches.append(
+                        Token(
+                            kind = form.kind,
+                            lexeme = Lexeme("", span),
+                            span = span,
+                            declarations = [name],
+                        ),
+                    )
                     continue
-                stop := end if form.spelling == None else cursor + u32(len(form.spelling))
+                stop := end if form.spelling == None else cursor + u32(
+                    len(form.spelling),
+                )
                 while stop > cursor and stop <= end:
                     span = Span(input.source_id, cursor, stop)
                     lexeme = Lexeme(input.text[cursor:stop], span)
-                    if (form.spelling == None or lexeme.text == form.spelling) and (form.accepts == None or form.accepts(lexeme)):
-                        matches.append(Token(form.kind, lexeme, span, [name]))
+                    if (form.spelling == None or lexeme.text == form.spelling)
+                        and (form.accepts == None or form.accepts(lexeme)):
+                        matches.append(
+                            Token(
+                                kind = form.kind,
+                                lexeme = lexeme,
+                                span = span,
+                                declarations = [name],
+                            ),
+                        )
                         break
                     if form.spelling != None:
                         break
                     stop -= 1
-            # Compiler-generated lexical declarations include quoted captures;
-            # their delimiters and contents form one atomic token.
-            if cursor < end and grammar.token_form and grammar.recognize != None:
-                probe = SourceWindow(input, 0, end, cursor)
+
+            '''
+            Compiler-generated lexical declarations include quoted captures;
+            their delimiters and contents form one atomic token.
+            '''
+            if cursor < end
+                and grammar.token_form
+                and grammar.recognize != None:
+                probe = SourceWindow(
+                    source = input,
+                    start = 0,
+                    end = end,
+                    cursor = cursor,
+                )
                 matched = grammar.recognize(probe)
                 if matched is Diagnostic:
                     return [matched]
                 if probe.cursor != cursor:
-                    return [LexicalDiagnostic("token recognition changed the source cursor", Span(input.source_id, cursor, cursor), "lexer.tokens")]
+                    return [
+                        LexicalDiagnostic(
+                            "token recognition changed the source cursor",
+                            Span(input.source_id, cursor, cursor),
+                            "lexer.tokens",
+                        ),
+                    ]
                 if matched != None:
-                    matches.append(Token(name, matched.lexeme, matched.lexeme.span, [name]))
+                    matches.append(
+                        Token(
+                            kind = name,
+                            lexeme = matched.lexeme,
+                            span = matched.lexeme.span,
+                            declarations = [name],
+                        ),
+                    )
             for token in matches:
                 span = token.span
-                if span.source_id != input.source_id or span.start != cursor or (span.end < cursor or (span.end == cursor and cursor != end)) or span.end > end or token.lexeme.text != input.text[cursor:span.end]:
-                    return [LexicalDiagnostic("token form returned an invalid source range", Span(input.source_id, cursor, cursor), "lexer.tokens")]
+                if span.source_id != input.source_id
+                    or span.start != cursor
+                    or (
+                        span.end < cursor
+                        or (span.end == cursor and cursor != end)
+                    )
+                    or span.end > end
+                    or token.lexeme.text != input.text[cursor:span.end]:
+                    return [
+                        LexicalDiagnostic(
+                            "token form returned an invalid source range",
+                            Span(input.source_id, cursor, cursor),
+                            "lexer.tokens",
+                        ),
+                    ]
                 if span.end > longest:
                     candidates = [token]
                     longest = span.end
                 elif span.end == longest:
                     candidates.append(token)
         if len(candidates) == 0:
-            return [LexicalDiagnostic("no declared token form recognizes this source", Span(input.source_id, cursor, cursor + 1), "lexer.tokens")]
+            return [
+                LexicalDiagnostic(
+                    "no declared token form recognizes this source",
+                    Span(input.source_id, cursor, cursor + 1),
+                    "lexer.tokens",
+                ),
+            ]
         selected = candidates[0]
         for candidate in candidates[1:]:
             for declaration in candidate.declarations:
@@ -102,7 +176,6 @@ def lexer(input: SourceFile) -> TokenStream | list[Diagnostic]:
         cursor = longest
     return TokenStream(input, tokens)
 
-
 test "lexer emits the equal symbol declared by syntax":
 
     source = virtual_source("equal.sev", "=")
@@ -116,10 +189,13 @@ test "lexer emits the equal symbol declared by syntax":
     assert(token.span.source_id == source.source_id)
     assert(token.span.start == 0 and token.span.end == 1)
     assert(token.lexeme.span == token.span)
-    assert(result.print() == "equal.sev:1:1  [0] EQUAL \"=\"\nequal.sev:1:2  [1,2) EOF \"\"\n")
-    print(token.kind + " " + token.lexeme.text)
+    assert(
+        (result.print() ==
+            "equal.sev:1:1  [0] EQUAL \"=\"\nequal.sev:1:2  [1,2) EOF \"\"\n"
+            ),
+    )
+    print("""{token.kind} {token.lexeme.text}""")
     print(result.print())
-
 
 test "lexer emits every fixed symbol with its longest spelling":
 
@@ -186,18 +262,36 @@ test "lexer emits every fixed symbol with its longest spelling":
         assert(result.end.token.kind == "EOF")
         assert(result.end.token.span.start == len(spelling))
         assert(result.end.token.span.end == len(spelling))
-        print(token.kind + " " + token.lexeme.text)
-
+        print("""{token.kind} {token.lexeme.text}""")
 
 test "keywords retain their classification without splitting identifiers":
-    for spelling, kind in [("if", "IF"), ("while", "WHILE"), ("for", "FOR"), ("enum", "ENUM"), ("throw", "THROW"), ("not", "NOT"), ("copy", "COPY"), ("move", "MOVE"), ("in", "IN"), ("and", "AND"), ("or", "OR"), ("is", "IS")]:
+    for spelling, kind in [
+        ("if", "IF"),
+        ("while", "WHILE"),
+        ("for", "FOR"),
+        ("enum", "ENUM"),
+        ("throw", "THROW"),
+        ("not", "NOT"),
+        ("copy", "COPY"),
+        ("move", "MOVE"),
+        ("in", "IN"),
+        ("and", "AND"),
+        ("or", "OR"),
+        ("is", "IS"),
+    ]:
         source = virtual_source("keywords.sev", spelling)
         result = lexer(source)
         assert(result is TokenStream)
         assert(len(result.tokens) == 1)
         assert(result.tokens[0].kind == kind)
         assert(result.tokens[0].lexeme.text == spelling)
-        assert(result.tokens[0].span == Span(source.source_id, 0, u32(len(spelling))))
+        assert(
+            result.tokens[0].span == Span(
+                source.source_id,
+                0,
+                u32(len(spelling)),
+            ),
+        )
         assert(kind in result.tokens[0].kinds)
         assert("IDENTIFIER" in result.tokens[0].kinds)
         for suffix in ["_value", "2", "λ"]:
@@ -206,7 +300,6 @@ test "keywords retain their classification without splitting identifiers":
             assert(len(longer.tokens) == 1)
             assert(longer.tokens[0].kind == "IDENTIFIER")
             assert(longer.tokens[0].lexeme.text == spelling + suffix)
-
 
 test "quoted and structural forms retain their complete source":
 
@@ -236,20 +329,29 @@ test "quoted and structural forms retain their complete source":
         assert(result.tokens[0].span.source_id == source.source_id)
         assert(result.tokens[0].span.start == 0)
         assert(result.tokens[0].span.end == len(spelling))
-        print(kind + " " + result.print())
-
+        print("""{kind} {result.print()}""")
 
 test "spacing does not merge symbols and comments end at the newline":
 
     result = lexer(virtual_source("spacing.sev", "  > =\t# comment\r\n\t+=..."))
     assert(result is TokenStream)
-    expected = ["INDENT", "GREATER", "SPACE", "EQUAL", "SPACE", "COMMENT", "NEWLINE", "INDENT", "PLUS_EQUAL", "ELLIPSIS"]
+    expected = [
+        "INDENT",
+        "GREATER",
+        "SPACE",
+        "EQUAL",
+        "SPACE",
+        "COMMENT",
+        "NEWLINE",
+        "INDENT",
+        "PLUS_EQUAL",
+        "ELLIPSIS",
+    ]
     assert(len(result.tokens) == len(expected))
     for index, kind in enumerate(expected):
         assert(result.tokens[index].kind == kind)
     assert(result.tokens[0].lexeme.text == "  ")
     assert(result.tokens[6].lexeme.text == "\r\n")
-
 
 test "adjacent quoted literals stop at their own closing delimiter":
 
@@ -259,12 +361,22 @@ test "adjacent quoted literals stop at their own closing delimiter":
     assert(result.tokens[0].lexeme.text == "\"a\"")
     assert(result.tokens[1].lexeme.text == "\"b\"")
 
-
 test "unterminated literals and invalid character widths report diagnostics":
 
-    for spelling in ["\"open", "'open", "\"\"\"open", "'''open", "f\"open", "f\"\"\"open", "''", "'ab'", "\"line\nbreak\""]:
-        assert(lexer(virtual_source("invalid.sev", spelling)) is list[Diagnostic])
-
+    for spelling in [
+        "\"open",
+        "'open",
+        "\"\"\"open",
+        "'''open",
+        "f\"open",
+        "f\"\"\"open",
+        "''",
+        "'ab'",
+        "\"line\nbreak\"",
+    ]:
+        assert(
+            lexer(virtual_source("invalid.sev", spelling)) is list[Diagnostic],
+        )
 
 test "empty input has one classified end boundary":
 

@@ -1,11 +1,11 @@
 from collections import list
 
-# W - With-clause operation (constraint)
-# Evaluate every semantic constraint against the same candidate value.
-
+'''
+W - With-clause operation (constraint)
+Evaluate every semantic constraint against the same candidate value.
+'''
 trait ConstraintTerm:
     def accepts(value: i64) -> bool
-
 
 class RangeConstraint: ConstraintTerm
     minimum: i64
@@ -14,14 +14,12 @@ class RangeConstraint: ConstraintTerm
     def accepts(value: i64) -> bool:
         return minimum <= value and value <= maximum
 
-
 def satisfies_all[W: ConstraintTerm](constraints: list[W], value: i64) -> bool:
     for constraint in constraints:
         if constraint.accepts(value) == false:
             return false
 
     return true
-
 
 test:
     constraints := [RangeConstraint(0, 100), RangeConstraint(4, 9)]

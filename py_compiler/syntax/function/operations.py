@@ -12,6 +12,10 @@ def binary(cfg, node, env, expected=None):
     if selected is not None:
         return selected
     if node.token.text == 'in':
+        from py_compiler.syntax.symbol.range import domain_membership
+        result = domain_membership(node, cfg, env)
+        if result is not None:
+            return result
         from py_compiler.syntax.generic.place import expression_type
         container = expression_type(node.operands[1],cfg,env)
         entries = cfg.context.functions.get(container.name+'.contains',())

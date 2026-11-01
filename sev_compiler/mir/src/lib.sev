@@ -1,35 +1,36 @@
 import TypedProgram, TypedSubmodule from "../../thir/src/lib.sev"
-import InterfaceId, semantic_digest from "../../syntax/symbol/symbol.sev"
+import InterfaceID, semantic_digest from "../../syntax/symbol/symbol.sev"
 
-
-class MirSubmodule:
+class MIRSubmodule:
     typed: TypedSubmodule
     label: string
     dependencies: list[string] = []
 
-
-class MirModule:
+class MIRModule:
     source: int
-    submodules: list[MirSubmodule] = []
+    submodules: list[MIRSubmodule] = []
 
+class MIRInterface:
+    identity: InterfaceID
+    modules: list[MIRModule] = []
 
-class MirInterface:
-    identity: InterfaceId
-    modules: list[MirModule] = []
-
-
-# Registration is not executable readiness. CFG, ownership and LIR remain
-# separate passes; no object inventory or linkable artifact is invented here.
-class MirState:
+'''
+Registration is not executable readiness. CFG, ownership and LIR remain
+separate passes; no object inventory or linkable artifact is invented here.
+'''
+class MIRState:
     typed: TypedProgram
-    interfaces: list[MirInterface] = []
+    interfaces: list[MIRInterface] = []
     roots: list[string] = []
 
-
-def register(typed: TypedProgram) -> MirState | Error:
-    result = MirState(typed)
-    labels: map[string, string] = {}
-    keys: map[string, string] = {}
+def register(typed: TypedProgram) -> MIRState | Error:
+    result = MIRState(typed)
+    labels: map[string, string] =
+    {
+    }
+    keys: map[string, string] =
+    {
+    }
     for submodule in typed.submodules:
         if submodule.key in labels:
             throw Error("duplicate typed submodule at MIR handoff")
@@ -39,17 +40,22 @@ def register(typed: TypedProgram) -> MirState | Error:
         labels[submodule.key] = label
         keys[label] = submodule.key
     for submodule in typed.submodules:
-        if submodule.module < 0 or submodule.module >= len(typed.source.modules):
+        if submodule.module < 0
+            or submodule.module >= len(typed.source.modules):
             throw Error("MIR realization has no source module")
-        if submodule.source not in typed.source.modules[submodule.module].submodules:
+        if submodule.source not in typed.source.modules[
+            submodule.module
+        ].submodules:
             throw Error("MIR realization disagrees with HIR membership")
         interface_index := -1
         for index in range(len(result.interfaces)):
-            if result.interfaces[index].identity.value == submodule.interface.value:
+            if result.interfaces[
+                index
+            ].identity.value == submodule.interface.value:
                 interface_index = index
         if interface_index < 0:
             interface_index = len(result.interfaces)
-            result.interfaces.append(MirInterface(submodule.interface))
+            result.interfaces.append(MIRInterface(submodule.interface))
         interface = result.interfaces[interface_index]
         module_index := -1
         for index in range(len(interface.modules)):
@@ -57,8 +63,8 @@ def register(typed: TypedProgram) -> MirState | Error:
                 module_index = index
         if module_index < 0:
             module_index = len(interface.modules)
-            interface.modules.append(MirModule(submodule.module))
-        registered = MirSubmodule(submodule, labels[submodule.key])
+            interface.modules.append(MIRModule(submodule.module))
+        registered = MIRSubmodule(submodule, labels[submodule.key])
         for dependency in submodule.dependencies:
             if dependency not in labels:
                 throw Error("MIR dependency has no typed realization")
@@ -70,33 +76,57 @@ def register(typed: TypedProgram) -> MirState | Error:
         result.roots.append(labels[root])
     return result
 
-
-import prepare, RealizationRequest, hash_typing_fixture from "../../thir/src/lib.sev"
+import prepare,
+    RealizationRequest,
+    HashTypingFixture from "../../thir/src/lib.sev"
 import TyInterner from "../../syntax/type/system.sev"
-
 
 test "MIR groups three hash realizations under one interface and module":
     types = TyInterner()
-    program, provider, inputs = hash_typing_fixture(types)
-    requests = [RealizationRequest(provider.template.definition, [value]) for value in inputs]
-    typed = prepare(program, types, provider, requests)
+    program, provider, inputs = HashTypingFixture(types)
+    requests = [
+        RealizationRequest(
+            provider.template.definition,
+            [value],
+        ) for value in inputs,
+    ]
+    typed = prepare(
+        program = program,
+        types = types,
+        provider = provider,
+        roots = requests,
+    )
     mir = register(typed)
-    assert(len(mir.interfaces) == 1)
-    assert(mir.interfaces[0].identity.value == "geometry")
-    assert(len(mir.interfaces[0].modules) == 1)
+    assert:
+        len(mir.interfaces) == 1
+        mir.interfaces[0].identity.value == "geometry"
+        len(mir.interfaces[0].modules) == 1
     submodules = mir.interfaces[0].modules[0].submodules
     assert(len(submodules) == 3 and len(mir.roots) == 3)
     assert(submodules[0].label != submodules[1].label)
-    assert(submodules[0].typed.blocks[0].source == program.submodules[0].blocks[0])
-    reordered = register(prepare(program, types, provider, [requests[2], requests[0], requests[1]]))
+    assert(
+        submodules[0].typed.blocks[0].source == program.submodules[0].blocks[0],
+    )
+    reordered = register(
+        prepare(
+            program = program,
+            types = types,
+            provider = provider,
+            roots = [requests[2], requests[0], requests[1]],
+        ),
+    )
     assert(reordered.roots == [mir.roots[2], mir.roots[0], mir.roots[1]])
-
 
 test "MIR carries recursive labels and rejects missing dependency realizations":
     types = TyInterner()
-    program, provider, inputs = hash_typing_fixture(types)
+    program, provider, inputs = HashTypingFixture(types)
     provider.recursive = true
-    typed = prepare(program, types, provider, [RealizationRequest(provider.template.definition, [inputs[0]])])
+    typed = prepare(
+        program = program,
+        types = types,
+        provider = provider,
+        roots = [RealizationRequest(provider.template.definition, [inputs[0]])],
+    )
     mir = register(typed)
     submodule = mir.interfaces[0].modules[0].submodules[0]
     assert(submodule.dependencies == [submodule.label])

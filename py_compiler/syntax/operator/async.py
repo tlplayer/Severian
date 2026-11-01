@@ -18,11 +18,15 @@ class Async(PrefixOperator):
             options = []
             while cursor[0] < len(tokens):
                 word = tokens[cursor[0]].text
-                if word not in ('self', 'local', 'runtime', 'module', 'lock'):
+                if word in ('virtual', 'process'):
+                    raise ValueError(word + ' task executor is not implemented')
+                if word not in ('self', 'local', 'runtime', 'module', 'lock', 'thread'):
                     raise ValueError('async requires a supported owning scope or lock')
+                if word in options:
+                    raise ValueError('duplicate async option ' + word)
                 options.append(word)
                 cursor[0] += 1
-                if cursor[0] >= len(tokens) or tokens[cursor[0]].text != 'and':
+                if cursor[0] >= len(tokens) or tokens[cursor[0]].text not in ('and', ','):
                     break
                 cursor[0] += 1
         return Expression('owned', token, (self, operation, tuple(options)))
@@ -50,6 +54,7 @@ class TaskType:
     symbol: str
     result_storage: str
     locked: bool = False
+    result_ownership: str = 'own'
     family: str = 'task'
     mlir: str = '!llvm.ptr'
     binding_ownership: str = 'view'
@@ -75,13 +80,18 @@ class TaskType:
     def join(self, value, cfg, span):
         cfg.effect('task-join', (value,), TaskOperation('join', self), span)
 
+    def call_method(self, value, method, arguments, cfg, env, span, binding=None):
+        if method != 'completed' or arguments:
+            raise ValueError('tasks provide completed() without arguments')
+        return cfg.emit('task-completed', cfg.context.type('bool'), (value,), TaskOperation('completed', self), span)
+
     def read(self, value, cfg, span, position, type_):
         return cfg.emit('task-value', type_, (value,), TaskOperation('read', self, position), span)
 
-    def release(self, value, cfg, span):
+    def release(self, value, cfg, span, *, release_result=True):
         from py_compiler.syntax.generic.storage import owns_storage, release_storage
         self.join(value, cfg, span)
-        if self.result.mlir and owns_storage(self.result):
+        if release_result and self.result_ownership == 'own' and self.result.mlir and owns_storage(self.result):
             release_storage(self.read(value, cfg, span, 2, self.result), cfg, span)
         for index, (type_, mode) in enumerate(zip(self.inputs, self.modes)):
             if mode == 'snapshot' and owns_storage(type_):
@@ -102,6 +112,7 @@ class TaskOperation:
     @property
     def external_symbol_contracts(self):
         return (('pthread_join', ('i64', '!llvm.ptr'), 'i32'),
+                ('pthread_tryjoin_np', ('i64', '!llvm.ptr'), 'i32'),
                 ('pthread_create', ('!llvm.ptr',) * 4, 'i32'),
                 ('pthread_mutex_lock', ('!llvm.ptr',), 'i32'),
                 ('pthread_mutex_unlock', ('!llvm.ptr',), 'i32'))
@@ -129,7 +140,31 @@ class TaskOperation:
     cf.br ^done
   ^done:
     return
-  }}''',)
+  }}''', f'''func.func private @{self.owner.symbol}_completed(%task: !llvm.ptr) -> i1 attributes {{llvm.linkage = #llvm.linkage<internal>}} {{
+    %flag = llvm.getelementptr %task[0, 1] : (!llvm.ptr) -> !llvm.ptr, {frame}
+    %joined = llvm.load %flag : !llvm.ptr -> i1
+    cf.cond_br %joined, ^done, ^poll
+  ^poll:
+    %thread = llvm.load %task : !llvm.ptr -> i64
+    %null = llvm.mlir.zero : !llvm.ptr
+    %status = func.call @pthread_tryjoin_np(%thread, %null) : (i64, !llvm.ptr) -> i32
+    %zero = arith.constant 0 : i32
+    %ok = arith.cmpi eq, %status, %zero : i32
+    cf.cond_br %ok, ^joined_now, ^pending
+  ^joined_now:
+    %joined_true = arith.constant true
+    llvm.store %joined_true, %flag : i1, !llvm.ptr
+    cf.br ^done
+  ^pending:
+    %busy = arith.constant 16 : i32
+    %expected = arith.cmpi eq, %status, %busy : i32
+    cf.assert %expected, "task completion poll failed"
+    %false = arith.constant false
+    return %false : i1
+  ^done:
+    %true = arith.constant true
+    return %true : i1
+  }}''')
 
     def render_operation(self, operation):
         from py_compiler.mlir.src.cfg import name, temporary_suffix
@@ -137,13 +172,18 @@ class TaskOperation:
         value = name(operation.operands[0])
         if self.kind == 'join':
             return [f'func.call @{self.owner.symbol}_join({value}) : (!llvm.ptr) -> ()']
+        if self.kind == 'completed':
+            return [f'{name(operation.result)} = func.call @{self.owner.symbol}_completed({value}) : (!llvm.ptr) -> i1']
         if self.kind == 'free':
             return [f'llvm.call @free({value}) : (!llvm.ptr) -> ()']
         prefix = '%task_read_' + temporary_suffix(operation)
         storage = self.owner.result_storage if self.position == 2 else self.owner.storage[self.position - 3]
         lines = [f'{prefix}_slot = llvm.getelementptr {value}[0, {self.position}] : (!llvm.ptr) -> !llvm.ptr, {self.owner.frame}',
                  f'{prefix}_stored = llvm.load {prefix}_slot : !llvm.ptr -> {storage}']
-        unpack_value(lines, prefix + '_stored', operation.result.type, storage, name(operation.result))
+        if operation.result.type.family == 'record' and storage == '!llvm.ptr':
+            lines.append(f'{name(operation.result)} = builtin.unrealized_conversion_cast {prefix}_stored : !llvm.ptr to !llvm.ptr')
+        else:
+            unpack_value(lines, prefix + '_stored', operation.result.type, storage, name(operation.result))
         return lines
 
 
@@ -163,7 +203,8 @@ class TaskStart(TaskOperation):
     def symbol_contracts(self):
         if getattr(self.entry, 'synthetic', False):
             return ()
-        result = self.owner.result_storage if self.owner.result.family == 'record' else self.owner.result.mlir
+        result = (self.owner.result_storage if self.owner.result.family == 'record' and self.owner.result_ownership == 'own'
+                  else self.owner.result.mlir)
         return ((self.entry.symbol, tuple(t.mlir for t in self.owner.inputs), result),)
 
     def global_definitions(self):
@@ -184,10 +225,11 @@ class TaskStart(TaskOperation):
             else:
                 unpack_value(lines, prefix + '_stored', type_, storage, prefix)
                 args.append(prefix)
-        result = owner.result_storage if owner.result.family == 'record' else owner.result.mlir
+        result = owner.result_storage if owner.result.family == 'record' and owner.result_ownership == 'own' else owner.result.mlir
         lines.append(('%result = ' if result else '') + f'func.call {symbol_ref(self.entry.symbol)}({", ".join(args)}) : ({", ".join(t.mlir for t in owner.inputs)}) -> {result or "()"}')
         if result:
-            stored = '%result' if owner.result.family == 'record' else pack_value(lines, '%result', owner.result, owner.result_storage, '%stored_result')
+            stored = ('%result' if owner.result.family == 'record' and owner.result_ownership == 'own'
+                      else pack_value(lines, '%result', owner.result, owner.result_storage, '%stored_result'))
             lines += [f'%result_slot = llvm.getelementptr %task[0, 2] : (!llvm.ptr) -> !llvm.ptr, {frame}',
                       f'llvm.store {stored}, %result_slot : {owner.result_storage}, !llvm.ptr']
         if owner.locked:
@@ -259,10 +301,129 @@ def start(entry, values, cfg, span, receiver=None):
         operands.append(value); modes.append('move' if mode == 'move' else 'snapshot')
         storage.append(stored_type(value.type, cfg.context))
     result = cfg.context.type(entry.result or 'absent')
+    contract = getattr(entry, 'semantic_result', None)
+    result_ownership = contract.ownership if contract is not None else getattr(entry, 'result_ownership', 'own')
+    result_storage = stored_type(result, cfg.context)
     symbol = '__sev_task_' + sha256((entry.symbol + str(locked)).encode()).hexdigest()[:24]
     type_ = TaskType(result, tuple(v.type for v in operands), tuple(storage), tuple(modes), symbol,
-                     stored_type(result, cfg.context), locked)
+                     result_storage, locked, result_ownership)
     output = cfg.emit('task-start', type_, operands, TaskStart('start', type_, entry=entry), span)
     cfg.owned_results.add(output.identity)
     cfg.value_dependencies[output.identity] = dependencies
     return output
+
+
+import unittest
+
+
+class TaskCompletionTests(unittest.TestCase):
+    def compile(self, source):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        return compile_source('task-completion.sev', source, Syntax(include_tests=True))
+
+    def test_explicit_thread_completion_keeps_the_task_available_for_await(self):
+        from py_compiler.mlir.src.lib import lower, render
+        result = self.compile('''def twice(value: int) -> int:
+    return value * 2
+test:
+    task = async twice(21) with local, thread
+    while not task.completed():
+        continue
+    assert(task.completed())
+    assert(await task == 42)
+''')
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+        output = render(lower(result.program))
+        self.assertIn('pthread_tryjoin_np', output)
+        self.assertIn('task completion poll failed', output)
+
+    def test_consumed_tasks_and_unavailable_executors_are_rejected(self):
+        definitions = 'def work() -> int:\n    return 42\n'
+        consumed = self.compile(definitions + 'test:\n    task = async work()\n    result = await task\n    ready = task.completed()\n')
+        self.assertIn('moved', str(consumed.diagnostics))
+        for executor in ('virtual', 'process'):
+            result = self.compile(definitions + f'test:\n    task = async work() with local, {executor}\n')
+            self.assertIn(executor + ' task executor is not implemented', str(result.diagnostics))
+
+    def test_native_completion_and_owned_resource_transfer(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from py_compiler.packaging.testing import test_package
+        source = '''@mlir("llvm.inline_asm", asm_string="syscall", constraints="={ax},{ax},{di},{si},{dx},~{rcx},~{r11},~{memory},~{cc}", has_side_effects=true, target="x86_64-linux")
+def system_call(number: int, first: int, second: int, third: int) -> int
+class Event:
+    descriptor: int
+    def drop():
+        system_call(3, descriptor, 0, 0)
+def create() -> Event:
+    descriptor = system_call(290, 0, 524288, 0)
+    if descriptor < 0:
+        throw Error("eventfd allocation failed")
+    return Event(descriptor)
+def gated(gate: channel[int]) -> int:
+    return await gate
+def echo(value: view string) -> view string:
+    return value
+class Box:
+    text: string
+def echo_box(value: view Box) -> view Box:
+    return value
+class Counter:
+    value: int
+    def increment():
+        value += 1
+def finish_children(counter: borrow Counter):
+    async counter.increment() with local, thread, lock
+    async counter.increment() with local, thread, lock
+def fail() -> int | Error:
+    throw Error("worker failure")
+test "polling observes completion without consuming an owned result":
+    task = async create() with local, thread
+    while not task.completed():
+        continue
+    assert(task.completed())
+    event = await task
+    descriptor = event.descriptor
+    assert(system_call(72, descriptor, 1, 0) == 1)
+    drop event
+    assert(system_call(72, descriptor, 1, 0) == -9)
+test "pending observation does not wait for a blocked worker":
+    gate = channel[int](1)
+    task = async gated(gate) with local, thread
+    pending = task.completed()
+    gate.send(42)
+    value = await task
+    assert(not pending and value == 42)
+test "borrowed task results survive release of their input snapshot":
+    text = "owned snapshot"
+    task = async echo(text) with local, thread
+    result = await task
+    drop text
+    assert(len(result) == 14 and result[0] == u8(111))
+test "borrowed record results copy their snapshot before frame destruction":
+    original = Box("record snapshot")
+    task = async echo_box(original) with local, thread
+    result = await task
+    drop original
+    assert(len(result.text) == 15 and result.text[0] == u8(114))
+test "function scope joins every discarded child before returning":
+    counter = Counter(0)
+    finish_children(counter)
+    assert(counter.value == 2)
+test "await preserves a worker error for one explicit consumer":
+    task = async fail() with local, thread
+    result ?= await task
+    assert(result is Error)
+'''
+        with tempfile.TemporaryDirectory(prefix='sev-task-completion-') as directory:
+            root = Path(directory)
+            (root/'lib.sev').write_text(source)
+            (root/'package.json').write_text(json.dumps({'package':{'name':'task-completion','version':'0.1.0'},'sources':['lib.sev']}))
+            result = test_package(root, memory=True, timeout=3)
+            detail = result
+            if not result['success'] and 'report' in result:
+                report = json.loads(Path(result['report']).read_text())
+                detail = [(test['label'], test.get('stderr'), test.get('exit')) for test in report['tests'] if not test['passed']]
+            self.assertTrue(result['success'], detail)

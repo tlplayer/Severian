@@ -10,7 +10,6 @@ def update_temperature() -> i64 with
 
     return temperature
 
-
 test "valid updates satisfy the return-time temperature contract":
     assert(update_temperature() == 90)
 

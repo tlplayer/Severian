@@ -1,9 +1,9 @@
-# T - Type (kind metadata)
-# Select the wider compiler kind while preserving its concrete kind type.
-
+'''
+T - Type (kind metadata)
+Select the wider compiler kind while preserving its concrete kind type.
+'''
 trait KindTerm:
     def width() -> usize
-
 
 class IntegerKind: KindTerm
     bits: usize
@@ -12,13 +12,13 @@ class IntegerKind: KindTerm
     def width() -> usize:
         return bits
 
-
 def wider_kind[T: KindTerm](left: T, right: T) -> T:
-    if left.width() >= right.width():
+    if left
+        .width() >= right
+        .width():
         return left
 
     return right
-
 
 test:
     narrow := IntegerKind(16, true)

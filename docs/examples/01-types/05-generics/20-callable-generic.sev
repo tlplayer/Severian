@@ -1,9 +1,9 @@
-# F - Callable
-# Invoke a concrete callable through a generic callable parameter.
-
+'''
+F - Callable
+Invoke a concrete callable through a generic callable parameter.
+'''
 trait CallableTerm:
     def call(value: i64) -> i64
-
 
 class AffineCallable: CallableTerm
     scale: i64
@@ -12,10 +12,8 @@ class AffineCallable: CallableTerm
     def call(value: i64) -> i64:
         return value * scale + bias
 
-
 def invoke_twice[F: CallableTerm](callable: F, value: i64) -> i64:
     return callable.call(callable.call(value))
-
 
 test:
     callable := AffineCallable(2, 1)

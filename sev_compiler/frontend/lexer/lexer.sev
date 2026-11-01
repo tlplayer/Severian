@@ -1,7 +1,7 @@
 import SourceFile from "../source/source.sev"
 import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import LexicalMatch from "recognize.sev"
-import SourceWindow, Window, source_window from "window.sev"
+import SourceWindow, Window, SourceWindow from "window.sev"
 import RegisteredGrammar from "../../syntax/recognition.sev"
 import "../../syntax/recognition.sev" as syntax
 import LexicalDiagnostic from "diagnostic.sev"
@@ -12,19 +12,22 @@ import Span from "../source/source.sev"
 import TokenStream from "stream.sev"
 import lexer from "tokenize.sev"
 
-
 trait Lexer:
-    # Resolve source spellings using registered token forms.
-    # Grammar selection and HIR construction belong to the parser.
-    def lex(input: SourceFile) -> TokenStream | list[Diagnostic]
 
+    '''
+    Resolve source spellings using registered token forms.
+    Grammar selection and HIR construction belong to the parser.
+    '''
+    def lex(input: SourceFile) -> TokenStream | list[Diagnostic]
 
 class RegistryLexer: Lexer
     def lex(input: SourceFile) -> TokenStream | list[Diagnostic]:
         return lexer(input)
 
-
-def recognize_window(input: Window, include_boundary: bool = false) -> list[LexicalMatch] | Diagnostic:
+def recognize_window(
+    input: Window,
+    include_boundary: bool = false,
+) -> list[LexicalMatch] | Diagnostic:
     grammars = syntax.registry()
     matches: list[LexicalMatch] = []
     while not input.finished() or include_boundary:
@@ -32,21 +35,42 @@ def recognize_window(input: Window, include_boundary: bool = false) -> list[Lexi
         candidates: list[LexicalMatch] := []
         longest := input.cursor
         for label, sequence in grammars:
-            # Each probe gets its own cursor. Trying a declaration cannot move
-            # the caller or execute construction/evaluation of its result.
+
+            '''
+            Each probe gets its own cursor. Trying a declaration cannot move
+            the caller or execute construction/evaluation of its result.
+            '''
             if sequence.recognize == None:
                 continue
-            probe = SourceWindow(input.source, input.start, input.end, input.cursor)
+            probe = SourceWindow(
+                source = input.source,
+                start = input.start,
+                end = input.end,
+                cursor = input.cursor,
+            )
             candidate = sequence.recognize(probe)
             if candidate is Diagnostic:
                 return candidate
             if candidate == None:
                 continue
             span = candidate.lexeme.span
-            if probe.cursor != input.cursor or span.source_id != input.source.source_id or span.start != input.cursor or span.end < span.start or span.end > input.end or (span.end == span.start and not at_boundary):
-                return LexicalDiagnostic("grammar returned an invalid consumed source range", input.span(), "lexer.recognize")
+            if probe.cursor != input.cursor
+                or span.source_id != input.source.source_id
+                or span.start != input.cursor
+                or span.end < span.start
+                or span.end > input.end
+                or (span.end == span.start and not at_boundary):
+                return LexicalDiagnostic(
+                    "grammar returned an invalid consumed source range",
+                    input.span(),
+                    "lexer.recognize",
+                )
             if candidate.lexeme.text != input.source.text[span.start:span.end]:
-                return LexicalDiagnostic("grammar changed the original matched source spelling", span, "lexer.recognize")
+                return LexicalDiagnostic(
+                    "grammar changed the original matched source spelling",
+                    span,
+                    "lexer.recognize",
+                )
             if span.end > longest:
                 candidates = [candidate]
                 longest = span.end
@@ -55,43 +79,81 @@ def recognize_window(input: Window, include_boundary: bool = false) -> list[Lexi
         if len(candidates) == 0:
             if at_boundary:
                 return matches
-            return LexicalDiagnostic("no registered grammar recognizes this source", Span(input.source.source_id, input.cursor, input.cursor + 1), "lexer.recognize")
+            return LexicalDiagnostic(
+                "no registered grammar recognizes this source",
+                Span(input.source.source_id, input.cursor, input.cursor + 1),
+                "lexer.recognize",
+            )
         if len(candidates) != 1:
-            return LexicalDiagnostic("ambiguous grammar declarations match this source", candidates[0].lexeme.span, "lexer.select")
+            return LexicalDiagnostic(
+                "ambiguous grammar declarations match this source",
+                candidates[0].lexeme.span,
+                "lexer.select",
+            )
         selected = candidates[0]
         for capture in selected.captures:
             child = capture.window
             span = selected.lexeme.span
-            if child.source.source_id != input.source.source_id or child.start < span.start or child.end > span.end or child.start > child.end or child.cursor != child.start:
-                return LexicalDiagnostic("grammar capture escaped its matched source range", span, "lexer.capture")
+            if child.source.source_id != input.source.source_id
+                or child.start < span.start
+                or child.end > span.end
+                or child.start > child.end
+                or child.cursor != child.start:
+                return LexicalDiagnostic(
+                    "grammar capture escaped its matched source range",
+                    span,
+                    "lexer.capture",
+                )
             if capture.terminal:
                 continue
             if child.start == span.start and child.end == span.end:
-                return LexicalDiagnostic("recursive capture must reduce the source window", span, "lexer.capture")
-            nested = recognize_window(SourceWindow(child.source, child.start, child.end, child.start))
+                return LexicalDiagnostic(
+                    "recursive capture must reduce the source window",
+                    span,
+                    "lexer.capture",
+                )
+            nested = recognize_window(
+                SourceWindow(
+                    source = child.source,
+                    start = child.start,
+                    end = child.end,
+                    cursor = child.start,
+                ),
+            )
             if nested is Diagnostic:
                 return nested
             capture.matches = nested
         input.advance(longest - input.cursor)
         matches.append(selected)
-        # A boundary match is visited once. Empty matches elsewhere remain
-        # invalid, and nested captures never receive the root boundary pass.
+
+        '''
+        A boundary match is visited once. Empty matches elsewhere remain
+        invalid, and nested captures never receive the root boundary pass.
+        '''
         if at_boundary:
             return matches
     return matches
 
-
 import virtual_source from "../source/source.sev"
 
-
-# TODO: Scope these fixtures to their tests when block-local declarations are supported.
+'''
+TODO: Scope these fixtures to their tests when block-local declarations are
+supported.
+'''
 class TestBoundary: Y
     def recognize(input: Window) -> LexicalMatch | None:
         if not input.finished() or input.end != len(input.source.characters):
             return None
-        lexeme = Lexeme("", Span(input.source.source_id, input.cursor, input.cursor))
-        return LexicalMatch(self, lexeme, None, [])
-
+        lexeme = Lexeme(
+            "",
+            Span(input.source.source_id, input.cursor, input.cursor),
+        )
+        return LexicalMatch(
+            syntax = self,
+            lexeme = lexeme,
+            token = None,
+            captures = [],
+        )
 
 class TestSpelling: Y
     spelling: string
@@ -102,88 +164,137 @@ class TestSpelling: Y
         end = input.cursor + u32(len(self.spelling))
         if input.source.text[input.cursor:end] != self.spelling:
             return None
-        lexeme = Lexeme(self.spelling, Span(input.source.source_id, input.cursor, end))
-        return LexicalMatch(self, lexeme, None, [])
+        lexeme = Lexeme(
+            self.spelling,
+            Span(input.source.source_id, input.cursor, end),
+        )
+        return LexicalMatch(
+            syntax = self,
+            lexeme = lexeme,
+            token = None,
+            captures = [],
+        )
 
+test
+"""\
 
-test "registered source boundary matches once and only in the root boundary pass":
+registered source boundary matches once and only in the root boundary pass
+""":
     boundary = TestBoundary()
-    rules: list[(Y, RegisteredGrammar)] = [(boundary, RegisteredGrammar(boundary, Y, boundary.recognize))]
+    rules: list[(
+        Y,
+        RegisteredGrammar,
+    )] = [(boundary, RegisteredGrammar(boundary, Y, boundary.recognize))]
     mock(syntax.registry() -> rules)
     source = virtual_source("empty.sev", "")
-    matches = recognize_window(source_window(source), include_boundary=true)
-    assert(matches is list[LexicalMatch])
-    assert(len(matches) == 1)
-    assert(matches[0].lexeme.text == "")
-    assert(matches[0].lexeme.span.start == 0 and matches[0].lexeme.span.end == 0)
-    assert(recognize_window(source_window(source)) == [])
-
+    matches = recognize_window(
+        input = SourceWindow(source),
+        include_boundary = true,
+    )
+    assert:
+        matches is list[LexicalMatch]
+        len(matches) == 1
+        matches[0].lexeme.text == ""
+    assert(
+        matches[0].lexeme.span.start == 0 and matches[0].lexeme.span.end == 0,
+    )
+    assert(recognize_window(SourceWindow(source)) == [])
 
 test "duplicate source boundary declarations are ambiguous":
     boundary = TestBoundary()
     rule = (boundary, RegisteredGrammar(boundary, Y, boundary.recognize))
     rules: list[(Y, RegisteredGrammar)] = [rule, rule]
     mock(syntax.registry() -> rules)
-    assert(recognize_window(source_window(virtual_source("empty.sev", "")), include_boundary=true) is Diagnostic)
-
+    assert(
+        recognize_window(
+            input = SourceWindow(virtual_source("empty.sev", "")),
+            include_boundary = true,
+        ) is Diagnostic,
+    )
 
 test "empty syntax registry has no source boundary match":
     rules: list[(Y, RegisteredGrammar)] = []
     mock(syntax.registry() -> rules)
-    assert(recognize_window(source_window(virtual_source("empty.sev", "")), include_boundary=true) == [])
-
+    assert(
+        recognize_window(
+            input = SourceWindow(virtual_source("empty.sev", "")),
+            include_boundary = true,
+        ) == [],
+    )
 
 test "basic lex preserves the explicit conditional example":
     source = virtual_source("basic.sev", "if true:\n    return 0\n")
     rules: list[(Y, RegisteredGrammar)] = []
     for spelling in ["if", " ", "true", ":", "\n", "return", "0"]:
         declaration = TestSpelling(spelling)
-        rules.append((declaration, RegisteredGrammar(declaration, Y, declaration.recognize)))
+        rules.append(
+            (
+                declaration,
+                RegisteredGrammar(declaration, Y, declaration.recognize),
+            ),
+        )
     mock(syntax.registry() -> rules)
-    matches = recognize_window(source_window(source))
-    assert(matches is list[LexicalMatch])
-    assert(matches[0].lexeme.text == "if")
-    assert(matches[2].lexeme.text == "true")
-    assert(matches[9].lexeme.text == "return")
-    assert(matches[11].lexeme.text == "0")
-    assert(matches[9].lexeme.span.start == 13)
-
+    matches = recognize_window(SourceWindow(source))
+    assert:
+        matches is list[LexicalMatch]
+        matches[0].lexeme.text == "if"
+        matches[2].lexeme.text == "true"
+        matches[9].lexeme.text == "return"
+        matches[11].lexeme.text == "0"
+        matches[9].lexeme.span.start == 13
 
 test "longest contiguous spelling wins when the short form is registered first":
     short = TestSpelling(">")
     long = TestSpelling(">=")
-    rules: list[(Y, RegisteredGrammar)] = [(short, RegisteredGrammar(short, Y, short.recognize)), (long, RegisteredGrammar(long, Y, long.recognize))]
+    rules: list[(Y, RegisteredGrammar)] = [
+        (short, RegisteredGrammar(short, Y, short.recognize)),
+        (long, RegisteredGrammar(long, Y, long.recognize)),
+    ]
     mock(syntax.registry() -> rules)
-    matches = recognize_window(source_window(virtual_source("operator.sev", ">=")))
+    matches = recognize_window(
+        SourceWindow(virtual_source("operator.sev", ">=")),
+    )
     assert(matches is list[LexicalMatch])
     assert(len(matches) == 1 and matches[0].lexeme.text == ">=")
-    assert(recognize_window(source_window(virtual_source("separate.sev", "> ="))) is Diagnostic)
-
+    assert(
+        recognize_window(
+            SourceWindow(virtual_source("separate.sev", "> =")),
+        ) is Diagnostic,
+    )
 
 test "longest contiguous spelling wins when the long form is registered first":
     short = TestSpelling(">")
     long = TestSpelling(">=")
-    rules: list[(Y, RegisteredGrammar)] = [(long, RegisteredGrammar(long, Y, long.recognize)), (short, RegisteredGrammar(short, Y, short.recognize))]
+    rules: list[(Y, RegisteredGrammar)] = [
+        (long, RegisteredGrammar(long, Y, long.recognize)),
+        (short, RegisteredGrammar(short, Y, short.recognize)),
+    ]
     mock(syntax.registry() -> rules)
-    matches = recognize_window(source_window(virtual_source("operator.sev", ">=")))
+    matches = recognize_window(
+        SourceWindow(virtual_source("operator.sev", ">=")),
+    )
     assert(matches is list[LexicalMatch])
     assert(len(matches) == 1 and matches[0].lexeme.text == ">=")
 
-
 test "ambiguous matches produce diagnostics without advancing":
     declaration = TestSpelling("x")
-    rule = (declaration, RegisteredGrammar(declaration, Y, declaration.recognize))
+    rule = (
+        declaration,
+        RegisteredGrammar(declaration, Y, declaration.recognize),
+    )
     rules: list[(Y, RegisteredGrammar)] = [rule, rule]
     mock(syntax.registry() -> rules)
-    window = source_window(virtual_source("ambiguous.sev", "x"))
+    window = SourceWindow(virtual_source("ambiguous.sev", "x"))
     assert(recognize_window(window) is Diagnostic)
     assert(window.cursor == 0)
 
-
 test "empty matches produce diagnostics without advancing":
     empty = TestSpelling("")
-    rules: list[(Y, RegisteredGrammar)] = [(empty, RegisteredGrammar(empty, Y, empty.recognize))]
+    rules: list[(
+        Y,
+        RegisteredGrammar,
+    )] = [(empty, RegisteredGrammar(empty, Y, empty.recognize))]
     mock(syntax.registry() -> rules)
-    window = source_window(virtual_source("empty-match.sev", "x"))
+    window = SourceWindow(virtual_source("empty-match.sev", "x"))
     assert(recognize_window(window) is Diagnostic)
     assert(window.cursor == 0)

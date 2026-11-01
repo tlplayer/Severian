@@ -1,19 +1,267 @@
-import AssertionLocation, AssertionOrigin, CoverageKind, CoveragePoint, QualityRegion from "../source.sev"
-import AbiId, ArtifactId, AttrValue, AttributeId, BindingId, BlockId, CompiledRegionId, CompilerId, DeclarationId, DefinitionID, FfiId, FunctionId, GenericParamId, HirId, IndexedId, InferVarId, InterfaceId, LocalId, ModuleId, NamedId, OpId, PackageId, PrimitiveId, ProviderId, RegionId, ScopeId, StableId, Substitution, Symbol, SymbolId, SymbolKind, SymbolName, TypeBinding, TypeConstructorBinding, TypeId, ValueId, VariantId, definition_from_key, named_definition, same_definition, semantic_digest, semantic_key from "../symbol/symbol.sev"
+import AssertionLocation,
+    AssertionOrigin,
+    CoverageKind,
+    CoveragePoint,
+    QualityRegion from "../source.sev"
+import ABIID,
+    ArtifactID,
+    AttrValue,
+    AttributeID,
+    BindingID,
+    BlockID,
+    CompiledRegionID,
+    CompilerID,
+    DeclarationID,
+    DefinitionID,
+    FFIID,
+    FunctionID,
+    GenericParamID,
+    HIRID,
+    IndexedID,
+    InferVarID,
+    InterfaceID,
+    LocalID,
+    ModuleID,
+    NamedID,
+    OpID,
+    PackageID,
+    PrimitiveID,
+    ProviderID,
+    RegionID,
+    ScopeID,
+    StableID,
+    Substitution,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    SymbolName,
+    TypeBinding,
+    TypeConstructorBinding,
+    TypeID,
+    ValueID,
+    VariantID,
+    definition_from_key,
+    named_definition,
+    same_definition,
+    semantic_digest,
+    semantic_key from "../symbol/symbol.sev"
 import source
-import Binding, Capture, Grammar, MatchArm, SemanticObject, Sentence, SentenceDefinition, SentenceField, SentenceMatch, Statement, Term, TermRole, accepts_shape, iteration_grammars, match_grammar, resolve_grammar from "../grammar/grammar.sev"
-import Add, Associativity, AttachmentRole, BackendId, BinaryOperation, BinaryOperator, BitwiseAnd, BitwiseOr, BitwiseXor, BoundaryModifier, CallArgument, CallType, CallableAlternative, CanonicalRewrite, CompileRoute, CompilerCapability, CompilerExpectation, CompilerTestCase, Constant, Constraint, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, Constructor, Contains, Conversion, ConversionKind, Decorator, DecoratorArgument, DecoratorValue, DialectId, DispatchCandidate, DispatchFamily, Divide, EffectSet, Equal, Expression, ExpressionConversion, ExpressionConversionKind, ExpressionKind, ExternalCall, FieldConstraint, Fixity, FloorDivide, FunctionDeclaration, FunctionLinkage, FunctionParameter, GenericConstraint, Greater, GreaterEqual, ImportDeclaration, ImportSubject, InferenceContext, IrContext, LeftShift, Less, LessEqual, Lexeme, LexemeTerm, LiteralSyntax, LiteralConstruction, LiteralValue, LogicalAnd, LogicalOr, LoweredFloatFormat, LoweredOperation, LoweredType, LoweringCapability, LoweringRequirements, MlirObject, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, MockFunction, Move, Multiply, Negative, Not, NotEqual, Operation, OperationDiagnostic, OperationId, OperationInterface, OperationRegistry, Operator, OperatorDeclaration, OperatorDomain, OperatorParameter, OperatorSignature, OperatorSyntax, Positive, Power, Primitive, PrimitiveAlias, PrimitiveCategory, PrimitiveRepresentation, ProofResult, PropertyDeclaration, RecordDeclaration, RegisteredOperation, Remainder, ResolvedCallee, RightShift, RuntimeId, ScalarOperation, Signature, Size, SourceFile, SourceMap, Span, Subtract, TestCaseRow, TestDeclaration, TestExpectation, TestMode, TestModeArguments, TestStream, TokenTerm, TraitDeclaration, TraitRef, TyInterner, TypeAnnotation, TypeAnnotationKind, TypeConstraint, TypeDeclaration, TypeKind, TypePattern, TypeRef, UnaryOperation, UnaryOperator, UnifyError, WithAttachment, Y, allocate_effect, annotation_key, array_mlir, attribute_id, backend_id, byte_view_mlir, callable_key, control_flow, declared_mlir_binding, dialect_id, free_effect, hashing, index_mlir, insert_type, io_effect, load, memref_mlir, named_operation, named_type, no_effects, operation_id, operator_syntax, outcome_variants, provider_id, ranked_memref_storage, read_effect, record_mlir_binding, resolve_expression, resolved_function, runtime_id, same_constructor, same_parameters, scalar_boundary, scalar_mlir, scalar_operand_segments, scalar_requirement_names, scalar_requirements, simple_type_name, span, struct_mlir, tensor_mlir, test_mode_name, throw_effect, type_children, union_variants, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source, write_effect from "../function/lowering.sev"
+import Binding,
+    Capture,
+    Grammar,
+    MatchArm,
+    SemanticObject,
+    Sentence,
+    SentenceDefinition,
+    SentenceField,
+    SentenceMatch,
+    Statement,
+    Term,
+    TermRole,
+    accepts_shape,
+    iteration_grammars,
+    match_grammar,
+    resolve_grammar from "../grammar/grammar.sev"
+import Add,
+    Associativity,
+    AttachmentRole,
+    BackendID,
+    BinaryOperation,
+    BinaryOperator,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BoundaryModifier,
+    CallArgument,
+    CallType,
+    CallableAlternative,
+    CanonicalRewrite,
+    CompileRoute,
+    CompilerCapability,
+    CompilerExpectation,
+    CompilerTestCase,
+    Constant,
+    Constraint,
+    ConstraintGraph,
+    ConstraintID,
+    ConstraintObligation,
+    ConstraintRequirement,
+    ConstraintStage,
+    Constructor,
+    Contains,
+    Conversion,
+    ConversionKind,
+    Decorator,
+    DecoratorArgument,
+    DecoratorValue,
+    DialectID,
+    DispatchCandidate,
+    DispatchFamily,
+    Divide,
+    EffectSet,
+    Equal,
+    Expression,
+    ExpressionConversion,
+    ExpressionConversionKind,
+    ExpressionKind,
+    ExternalCall,
+    FieldConstraint,
+    Fixity,
+    FloorDivide,
+    FunctionDeclaration,
+    FunctionLinkage,
+    FunctionParameter,
+    GenericConstraint,
+    Greater,
+    GreaterEqual,
+    ImportDeclaration,
+    ImportSubject,
+    InferenceContext,
+    IrContext,
+    LeftShift,
+    Less,
+    LessEqual,
+    Lexeme,
+    LexemeTerm,
+    LiteralSyntax,
+    LiteralConstruction,
+    LiteralValue,
+    LogicalAnd,
+    LogicalOr,
+    LoweredFloatFormat,
+    LoweredOperation,
+    LoweredType,
+    LoweringCapability,
+    LoweringRequirements,
+    MLIRObject,
+    MLIRTypeBinding,
+    MLIRTypeParameter,
+    MLIRTypeProvider,
+    MockFunction,
+    Move,
+    Multiply,
+    Negative,
+    Not,
+    NotEqual,
+    Operation,
+    OperationDiagnostic,
+    OperationID,
+    OperationInterface,
+    OperationRegistry,
+    Operator,
+    OperatorDeclaration,
+    OperatorDomain,
+    OperatorParameter,
+    OperatorSignature,
+    OperatorSyntax,
+    Positive,
+    Power,
+    Primitive,
+    PrimitiveAlias,
+    PrimitiveCategory,
+    PrimitiveRepresentation,
+    ProofResult,
+    PropertyDeclaration,
+    RecordDeclaration,
+    RegisteredOperation,
+    Remainder,
+    ResolvedCallee,
+    RightShift,
+    RuntimeID,
+    ScalarOperation,
+    Signature,
+    Size,
+    SourceFile,
+    SourceMap,
+    Span,
+    Subtract,
+    TestCaseRow,
+    TestDeclaration,
+    TestExpectation,
+    TestMode,
+    TestModeArguments,
+    TestStream,
+    TokenTerm,
+    TraitDeclaration,
+    TraitRef,
+    TyInterner,
+    TypeAnnotation,
+    TypeAnnotationKind,
+    TypeConstraint,
+    TypeDeclaration,
+    TypeKind,
+    TypePattern,
+    TypeRef,
+    UnaryOperation,
+    UnaryOperator,
+    UnifyError,
+    WithAttachment,
+    Y,
+    allocate_effect,
+    annotation_key,
+    array_mlir,
+    AttributeID,
+    BackendID,
+    byte_view_mlir,
+    callable_key,
+    control_flow,
+    declared_mlir_binding,
+    DialectID,
+    free_effect,
+    hashing,
+    index_mlir,
+    insert_type,
+    io_effect,
+    load,
+    memref_mlir,
+    named_operation,
+    named_type,
+    no_effects,
+    OperationID,
+    OperatorSyntax,
+    outcome_variants,
+    ProviderID,
+    ranked_memref_storage,
+    read_effect,
+    record_mlir_binding,
+    resolve_expression,
+    resolved_function,
+    RuntimeID,
+    same_constructor,
+    same_parameters,
+    scalar_boundary,
+    scalar_mlir,
+    scalar_operand_segments,
+    scalar_requirement_names,
+    scalar_requirements,
+    simple_type_name,
+    Span,
+    struct_mlir,
+    tensor_mlir,
+    test_mode_name,
+    throw_effect,
+    type_children,
+    union_variants,
+    unranked_memref_mlir,
+    unranked_tensor_mlir,
+    utf8_offset,
+    virtual_source,
+    write_effect from "../function/lowering.sev"
+Span as span
 import CfgEdge, CfgExit, CfgTerminator from "control_flow.sev"
 
 class BlockLayout:
-    id: SourceBlockId
+    id: SourceBlockID
     owner: DefinitionID
     span: Span | None
-    parent: SourceBlockId | None = None
-    introduced_by: SentenceId | None = None
-    children: list[SourceBlockId] = []
+    parent: SourceBlockID | None = None
+    introduced_by: SentenceID | None = None
+    children: list[SourceBlockID] = []
 
-# Source ancestry and compiler call paths are distinct from runtime stack frames.
+'''
+Source ancestry and compiler call paths are distinct from runtime stack
+frames.
+'''
 class CallableOrigin:
     definition_id: DefinitionID
     name: string
@@ -21,13 +269,17 @@ class CallableOrigin:
 
 class OperationOrigin:
     span: Span | None = None
-    block: SourceBlockId | None = None
+    block: SourceBlockID | None = None
     callable: DefinitionID | None = None
     path: list[CallableOrigin] = []
 
-
-import B, BlockContext, BlockSentence, BlockTerm, BlockTermRole, SentenceId, SourceBlockId from "../generic/block.sev"
-
+import B,
+    BlockContext,
+    BlockSentence,
+    BlockTerm,
+    BlockTermRole,
+    SentenceID,
+    SourceBlockID from "../generic/block.sev"
 
 class BlockSyntax:
     name: string
@@ -37,7 +289,6 @@ class BlockSyntax:
     follows: list[string] = []
     parents: list[string] = []
 
-
 class Block: B
     statements: list[Statement] = []
     operations: list[Operation] = []
@@ -45,28 +296,32 @@ class Block: B
     span: source.Span | None = None
     layout: BlockLayout | None = None
     grammars: list[BlockSentence] = []
-    subblocks: list[SourceBlockId] = []
-    id: SourceBlockId = SourceBlockId(0)
-    parent: SourceBlockId | None = None
+    subblocks: list[SourceBlockID] = []
+    id: SourceBlockID = SourceBlockID(0)
+    parent: SourceBlockID | None = None
     syntax_name: string = ""
     name: string = ""
     header: BlockSentence | None = None
-    previous: SourceBlockId | None = None
-    chain: SourceBlockId | None = None
-    # Executable realizations use the same block contract. CFG compaction may
-    # change cfg_index; source id, layout and containment must remain stable.
+    previous: SourceBlockID | None = None
+    chain: SourceBlockID | None = None
+
+    '''
+    Executable realizations use the same block contract. CFG compaction may
+    change cfg_index; source id, layout and containment must remain stable.
+    '''
     cfg_index: int = -1
-    parameters: list[ValueId] = []
+    parameters: list[ValueID] = []
     terminator: CfgTerminator | None = None
     origins: list[OperationOrigin] = []
     origin: OperationOrigin = OperationOrigin()
     context: BlockContext = BlockContext()
+
     # Ordered indices into BlockGraph.nodes; the same block survives HIR/MIR.
     contents: list[int] = []
     implementation: B | None = None
-    # Internal execution regions travel with their owning compilation block.
-    partition_owner: SourceBlockId | None = None
 
+    # Internal execution regions travel with their owning compilation block.
+    partition_owner: SourceBlockID | None = None
 
 class BlockFile:
     path: string
@@ -74,20 +329,26 @@ class BlockFile:
     blocks: list[Block]
     next_grammar: u32 = 0
 
-
 def global_source_block(file: source.SourceFile) -> Block:
-    return Block(span=source.Span(file.source_id, 0, u32(len(file.characters))), syntax_name="global", name=file.path)
-
+    return Block(
+        span = source.Span(file.source_id, 0, u32(len(file.characters))),
+        syntax_name = "global",
+        name = file.path,
+    )
 
 # Discovery consumes these contracts; spelling and containment rules live here.
-def resolve_block_syntax(header: BlockSentence, syntaxes: list[BlockSyntax]) -> BlockSyntax | None:
+def resolve_block_syntax(
+    header: BlockSentence,
+    syntaxes: list[BlockSyntax],
+) -> BlockSyntax | None:
     selected: BlockSyntax | None := None
     for syntax in syntaxes:
         if len(syntax.prefix) == 0 or len(syntax.prefix) > len(header.terms):
             continue
         matches := true
         for index in range(int(len(syntax.prefix))):
-            if header.terms[index].spelling != syntax.prefix[index] or header.terms[index].role == BlockTermRole.Opaque:
+            if header.terms[index].spelling != syntax.prefix[index]
+                or header.terms[index].role == BlockTermRole.Opaque:
                 matches = false
         if syntax.name_position >= 0:
             if syntax.name_position >= len(header.terms):
@@ -100,10 +361,14 @@ def resolve_block_syntax(header: BlockSentence, syntaxes: list[BlockSyntax]) -> 
             selected = syntax
     return selected
 
-
-def declared_source_block(file: BlockFile, parent: SourceBlockId, header: BlockSentence, syntaxes: list[BlockSyntax]) -> Block:
-    id = SourceBlockId(u32(len(file.blocks)))
-    block = Block(span=header.span, id=id, parent=parent, header=header)
+def declared_source_block(
+    file: BlockFile,
+    parent: SourceBlockID,
+    header: BlockSentence,
+    syntaxes: list[BlockSyntax],
+) -> Block:
+    id = SourceBlockID(u32(len(file.blocks)))
+    block = Block(span = header.span, id = id, parent = parent, header = header)
     syntax ?= resolve_block_syntax(header, syntaxes)
     if syntax == None:
         return block
@@ -120,34 +385,81 @@ def declared_source_block(file: BlockFile, parent: SourceBlockId, header: BlockS
         previous_header ?= previous.header
         if previous_header == None:
             throw Error("missing preceding block header for " + syntax.name)
-        if previous.syntax_name not in syntax.follows or previous_header.id != owner.grammars[-2].id:
+        if previous.syntax_name not in syntax.follows
+            or previous_header.id != owner.grammars[-2].id:
             throw Error("invalid preceding block for " + syntax.name)
         block.previous = previous.id
         block.chain = previous.chain if previous.chain != None else previous.id
     return block
 
-
-# Bootstrap declarations, supplied as data to the structural parser. Packages
-# can supply additional BlockSyntax values without adding parser keyword cases.
+'''
+Bootstrap declarations, supplied as data to the structural parser. Packages
+can supply additional BlockSyntax values without adding parser keyword cases.
+'''
 def standard_block_syntax() -> list[BlockSyntax]:
     return [
-        BlockSyntax("function", ["def"], 1, bodyless=true),
-        BlockSyntax("operator", ["operator"], bodyless=true),
-        BlockSyntax("class", ["class"], 1, bodyless=true),
-        BlockSyntax("trait", ["trait"], 1, bodyless=true),
-        BlockSyntax("enum", ["enum"], 1, bodyless=true),
-        BlockSyntax("extension", ["extend"], 1, bodyless=true),
-        BlockSyntax("test", ["test"], bodyless=true),
+        BlockSyntax(
+            name = "function",
+            name_position = ["def"],
+            bodyless = 1,
+            bodyless = true,
+        ),
+        BlockSyntax(
+            name = "operator",
+            name_position = ["operator"],
+            bodyless = true,
+        ),
+        BlockSyntax(
+            name = "class",
+            name_position = ["class"],
+            bodyless = 1,
+            bodyless = true,
+        ),
+        BlockSyntax(
+            name = "trait",
+            name_position = ["trait"],
+            bodyless = 1,
+            bodyless = true,
+        ),
+        BlockSyntax(
+            name = "enum",
+            name_position = ["enum"],
+            bodyless = 1,
+            bodyless = true,
+        ),
+        BlockSyntax(
+            name = "extension",
+            name_position = ["extend"],
+            bodyless = 1,
+            bodyless = true,
+        ),
+        BlockSyntax(name = "test", name_position = ["test"], bodyless = true),
         BlockSyntax("for", ["for"]),
         BlockSyntax("while", ["while"]),
         BlockSyntax("if", ["if"]),
-        BlockSyntax("elif", ["elif"], follows=["if", "elif"]),
-        BlockSyntax("else", ["else"], follows=["if", "elif"]),
+        BlockSyntax(
+            name = "elif",
+            name_position = ["elif"],
+            follows = ["if", "elif"],
+        ),
+        BlockSyntax(
+            name = "else",
+            name_position = ["else"],
+            follows = ["if", "elif"],
+        ),
         BlockSyntax("try", ["try"]),
-        BlockSyntax("catch", ["catch"], follows=["try", "catch"]),
+        BlockSyntax(
+            name = "catch",
+            name_position = ["catch"],
+            follows = ["try", "catch"],
+        ),
         BlockSyntax("match", ["match"]),
         BlockSyntax("switch", ["switch"]),
-        BlockSyntax("case", ["case"], parents=["match", "switch", "select"]),
+        BlockSyntax(
+            name = "case",
+            name_position = ["case"],
+            parents = ["match", "switch", "select"],
+        ),
         BlockSyntax("with", ["with"]),
         BlockSyntax("unsafe", ["unsafe"]),
         BlockSyntax("accept", ["accept"]),
@@ -155,11 +467,11 @@ def standard_block_syntax() -> list[BlockSyntax]:
         BlockSyntax("select", ["select"]),
     ]
 
-
 test "empty block construction uses field defaults":
     block = Block()
-    assert(len(block.statements) == 0)
-    assert(len(block.operations) == 0)
-    assert(len(block.lowered_operations) == 0)
-    assert(block.cfg_index == -1)
-    assert(block.terminator == None)
+    assert:
+        len(block.statements) == 0
+        len(block.operations) == 0
+        len(block.lowered_operations) == 0
+        block.cfg_index == -1
+        block.terminator == None

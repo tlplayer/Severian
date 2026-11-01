@@ -335,6 +335,9 @@ class TensorPlace:
     indices: tuple
     type: object
 
+    def preserves_shape(self, cfg):
+        return True
+
     def read(self, cfg, span):
         return cfg.emit('memory-load', self.type, (self.receiver, *self.indices), TensorOperation('load'), span)
 

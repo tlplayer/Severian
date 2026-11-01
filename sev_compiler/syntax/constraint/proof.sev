@@ -1,12 +1,13 @@
 import ProofResult from "model.sev"
 
-
 class IntegerInterval:
     lower: i128 | None = None
     upper: i128 | None = None
 
-
-def prove_interval(actual: IntegerInterval, required: IntegerInterval) -> ProofResult:
+def prove_interval(
+    actual: IntegerInterval,
+    required: IntegerInterval,
+) -> ProofResult:
     low ?= actual.lower
     high ?= actual.upper
     minimum ?= required.lower
@@ -35,8 +36,11 @@ def prove_interval(actual: IntegerInterval, required: IntegerInterval) -> ProofR
     if high != None:
         if maximum != None:
             upper_proven = high <= maximum
-    return ProofResult.Proven if lower_proven and upper_proven else ProofResult.Unknown
-
+    return
+        ProofResult.Proven
+        if lower_proven
+        and upper_proven
+        else ProofResult.Unknown
 
 def require_static(result: ProofResult) -> absent | Error:
     if result == ProofResult.Refuted:

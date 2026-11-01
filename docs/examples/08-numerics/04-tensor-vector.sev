@@ -1,21 +1,21 @@
 import tensor_math
 from tensor_math import sum
-from collections import equal
+from collections import Equal
 
 # Rank-one data uses the same tensor type as multidimensional data.
 test "rank one tensor shape and values":
-    initial = tuple[f64,3](1.0,2.0,3.0)
-    values = tensor[f64,(3,)](initial)
+    initial = tuple[f64, 3](1.0, 2.0, 3.0)
+    values = tensor[f64, (3,)](initial)
     shape = values.shape
     assert(shape[0] == 3)
     flat = values.values
-    assert(equal(flat, initial))
+    assert(Equal(flat, initial))
 
 test "elementwise addition and dot product":
-    left = tensor[f64,(3,)](tuple[f64,3](1.0,2.0,3.0))
-    right = tensor[f64,(3,)](tuple[f64,3](4.0,5.0,6.0))
+    left = tensor[f64, (3,)](tuple[f64, 3](1.0, 2.0, 3.0))
+    right = tensor[f64, (3,)](tuple[f64, 3](4.0, 5.0, 6.0))
     added = left + right
-    expected = tuple[f64,3](5.0,7.0,9.0)
-    assert(equal(added, expected))
+    expected = tuple[f64, 3](5.0, 7.0, 9.0)
+    assert(Equal(added, expected))
     products = left * right
     assert(sum(products) == 32.0)

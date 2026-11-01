@@ -1,0 +1,391 @@
+import io
+import string
+
+# Linux x86-64 ABI only. Socket creation is atomic NONBLOCK | CLOEXEC.
+# Packet encoding, bounds checks, framing and retries remain Severian/MLIR.
+@mlir("llvm.inline_asm", asm_string="syscall", constraints="={ax},{ax},{di},{si},{dx},{r10},{r8},{r9},~{rcx},~{r11},~{memory},~{cc}", has_side_effects=true, target="x86_64-linux")
+def __socket_call(number: int, first: int, second: int, third: int, fourth: int = 0, fifth: int = 0, sixth: int = 0) -> int
+
+@mlir("memref.extract_aligned_pointer_as_index")
+def __byte_address(data: view tensor[u8]) -> index
+
+@mlir("memref.extract_aligned_pointer_as_index")
+def __word_address(data: view tensor[int]) -> index
+
+@mlir("arith.index_cast")
+def __integer(value: index) -> int
+
+class NetworkError: Error
+    operation: string
+    code: int
+
+class Address:
+    host: string
+    port: int
+
+    def display(self: view Self) -> string:
+        return host + ":" + string(port)
+
+def valid_port(port: int) -> bool:
+    return port >= 0 and port <= 65535
+
+# No DNS or permissive inet_aton shorthand. Four decimal octets are required.
+def __address(host: view string, port: int) -> tensor[u8] | NetworkError:
+    if not valid_port(port):
+        throw NetworkError("address.port", -22)
+    result = tensor[u8](16)
+    result[0] = u8(2)
+    result[2] = u8(port >> 8)
+    result[3] = u8(port & 255)
+    octet = 0
+    value = 0
+    digits = 0
+    position = 0
+    while position <= len(host):
+        end = position == len(host)
+        character = 46
+        if not end:
+            character = int(host[position])
+        if character == 46:
+            if digits == 0 or octet > 3:
+                throw NetworkError("address.ipv4", -22)
+            result[4 + octet] = u8(value)
+            octet += 1
+            value = 0
+            digits = 0
+            if end:
+                break
+        else:
+            if character < 48 or character > 57 or digits == 3:
+                throw NetworkError("address.ipv4", -22)
+            value = value * 10 + character - 48
+            digits += 1
+            if value > 255:
+                throw NetworkError("address.ipv4", -22)
+        position += 1
+    if octet != 4:
+        throw NetworkError("address.ipv4", -22)
+    return result
+
+def __decode_address(data: view tensor[u8]) -> Address:
+    return Address(string(int(data[4])) + "." + string(int(data[5])) + "." +
+                   string(int(data[6])) + "." + string(int(data[7])),
+                   int(data[2]) * 256 + int(data[3]))
+
+def __local_address(handle: int) -> Address | NetworkError:
+    data = tensor[u8](16)
+    length = tuple[int,1](16)
+    status = __socket_call(51, handle, __integer(__byte_address(data)), __integer(__word_address(length)))
+    if status < 0:
+        throw NetworkError("getsockname", status)
+    return __decode_address(data)
+
+def __buffer_address(data: view tensor[u8], offset: int, count: int) -> int | NetworkError:
+    if offset < 0 or offset > len(data) or count < 0 or count > len(data) - offset:
+        throw NetworkError("buffer.bounds", -22)
+    return __integer(__byte_address(data)) + offset
+
+# Native attempt results: >=0 bytes; -11 pending; -4 interrupted; other <0 error.
+# Integer counts at this provider boundary count bytes, not tensor elements.
+# TCP receive(positive count)==0 is EOF; zero-sized requests do not establish EOF.
+class Connection:
+    handle: int
+
+    def close() -> int:
+        descriptor = handle
+        handle = -1
+        if descriptor < 0:
+            return 0
+        return io.close(descriptor)
+
+    def drop():
+        close()
+
+    def receive(data: borrow tensor[u8], offset: int, count: int) -> int | NetworkError:
+        pointer = __buffer_address(data, offset, count)
+        if handle < 0:
+            return -9
+        if count == 0:
+            return 0
+        return __socket_call(45, handle, pointer, count)
+
+    def send(data: view tensor[u8], offset: int, count: int) -> int | NetworkError:
+        pointer = __buffer_address(data, offset, count)
+        if handle < 0:
+            return -9
+        if count == 0:
+            return 0
+        # MSG_NOSIGNAL reports EPIPE instead of terminating the process.
+        return __socket_call(44, handle, pointer, count, 16384)
+
+    def shutdown_write() -> int:
+        return __socket_call(48, handle, 1, 0)
+
+    def address(self: view Self) -> Address | NetworkError:
+        return __local_address(handle)
+
+class Listener:
+    handle: int
+
+    def close() -> int:
+        descriptor = handle
+        handle = -1
+        if descriptor < 0:
+            return 0
+        return io.close(descriptor)
+
+    def drop():
+        close()
+
+    def accept() -> Connection | NetworkError:
+        descriptor = __socket_call(288, handle, 0, 0, 526336)
+        if descriptor < 0:
+            throw NetworkError("accept", descriptor)
+        return Connection(descriptor)
+
+    def address(self: view Self) -> Address | NetworkError:
+        return __local_address(handle)
+
+def __bound_socket(host: view string, port: int, kind: int) -> int | NetworkError:
+    address = __address(host, port)
+    handle = __socket_call(41, 2, kind | 526336, 0)
+    if handle < 0:
+        throw NetworkError("socket", handle)
+    # SO_REUSEADDR allows restarting a listener after its accepted streams close.
+    enabled = tuple[int,1](1)
+    status = __socket_call(54, handle, 1, 2, __integer(__word_address(enabled)), 4)
+    if status == 0:
+        status = __socket_call(49, handle, __integer(__byte_address(address)), 16)
+    if status < 0:
+        io.close(handle)
+        throw NetworkError("bind", status)
+    return handle
+
+def listen(host: view string = "127.0.0.1", port: int = 7777, backlog: int = 64) -> Listener | NetworkError:
+    if backlog < 1 or backlog > 65535:
+        throw NetworkError("listen.backlog", -22)
+    handle = __bound_socket(host, port, 1)
+    status = __socket_call(50, handle, backlog, 0)
+    if status < 0:
+        io.close(handle)
+        throw NetworkError("listen", status)
+    return Listener(handle)
+
+# pollfd is {i32 fd, i16 events, i16 revents}: one 64-bit word on this target.
+# PollSet observes descriptors; it never acquires ownership. Rebuild registrations
+# after closing/removing a socket so a recycled descriptor cannot inherit events.
+def __poll_entries(capacity: int) -> tensor[int]:
+    if capacity < 1 or capacity > 65536:
+        throw NetworkError("poll.capacity", -22)
+    return tensor[int](capacity)
+
+class PollSet:
+    entries: tensor[int]
+
+    def PollSet(capacity: int):
+        entries := __poll_entries(capacity)
+        position = 0
+        while position < capacity:
+            entries[position] = 4294967295
+            position += 1
+
+    def watch(slot: int, descriptor: int, readable: bool = true, writable: bool = false):
+        events = 0
+        if readable:
+            events = events | 1
+        if writable:
+            events = events | 4
+        entries[slot] = (descriptor & 4294967295) | (events << 32)
+
+    def clear():
+        position = 0
+        while position < len(entries):
+            entries[position] = 4294967295
+            position += 1
+
+    def wait(timeout_ms: int = 1000) -> int:
+        if timeout_ms < -1 or timeout_ms > 2147483647:
+            return -22
+        return __socket_call(7, __integer(__word_address(entries)), len(entries), timeout_ms)
+
+    def readable(self: view Self, slot: int) -> bool:
+        # Errors/hangup must reach receive(): it drains remaining bytes before EOF.
+        return ((entries[slot] >> 48) & 57) != 0
+
+    def writable(self: view Self, slot: int) -> bool:
+        return ((entries[slot] >> 48) & 60) != 0
+
+def connect(host: view string, port: int, timeout_ms: int = 1000) -> Connection | NetworkError:
+    if timeout_ms < 0 or timeout_ms > 2147483647:
+        throw NetworkError("connect.timeout", -22)
+    address = __address(host, port)
+    handle = __socket_call(41, 2, 526337, 0)
+    if handle < 0:
+        throw NetworkError("socket", handle)
+    status = __socket_call(42, handle, __integer(__byte_address(address)), 16)
+    if status == -115 or status == -4:
+        events = PollSet(1)
+        events.watch(0, handle, false, true)
+        deadline = io.monotonic_nanoseconds() + timeout_ms * 1000000
+        remaining = timeout_ms
+        while true:
+            status = events.wait(remaining)
+            if status != -4:
+                break
+            now = io.monotonic_nanoseconds()
+            if now >= deadline:
+                status = -110
+                break
+            remaining = (deadline - now + 999999) / 1000000
+        if status == 0:
+            status = -110
+        elif status > 0:
+            error = tuple[int,1](0)
+            length = tuple[int,1](4)
+            status = __socket_call(55, handle, 1, 4, __integer(__word_address(error)), __integer(__word_address(length)))
+            if status == 0:
+                status = -error[0]
+    if status < 0:
+        io.close(handle)
+        throw NetworkError("connect", status)
+    return Connection(handle)
+
+class Datagram:
+    data: tensor[u8]
+    address: Address
+    truncated: bool
+    wire_bytes: int
+
+class UdpSocket:
+    handle: int
+
+    def close() -> int:
+        descriptor = handle
+        handle = -1
+        if descriptor < 0:
+            return 0
+        return io.close(descriptor)
+
+    def drop():
+        close()
+
+    def address(self: view Self) -> Address | NetworkError:
+        return __local_address(handle)
+
+    def send(data: view tensor[u8], host: view string, port: int) -> int | NetworkError:
+        if len(data) > 65507:
+            return -90
+        destination = __address(host, port)
+        return __socket_call(44, handle, __integer(__byte_address(data)), len(data), 16384,
+                             __integer(__byte_address(destination)), 16)
+
+    def receive(capacity: int = 65507) -> Datagram | NetworkError:
+        if capacity < 0 or capacity > 65507:
+            throw NetworkError("udp.capacity", -22)
+        data = tensor[u8](capacity)
+        sender = tensor[u8](16)
+        length = tuple[int,1](16)
+        count = __socket_call(45, handle, __integer(__byte_address(data)), capacity, 32,
+                              __integer(__byte_address(sender)), __integer(__word_address(length)))
+        if count < 0:
+            throw NetworkError("udp.receive", count)
+        used = count
+        if used > capacity:
+            used = capacity
+        data.resize(used)
+        return Datagram(data, __decode_address(sender), count > capacity, count)
+
+def udp_bind(host: view string = "127.0.0.1", port: int = 0) -> UdpSocket | NetworkError:
+    return UdpSocket(__bound_socket(host, port, 2))
+
+# Adjacent tests use ephemeral loopback ports; no external service or DNS.
+test "IPv4 addresses validate every octet and port":
+    address = __address("127.0.0.1", 65535)
+    assert(address[4] == u8(127) and address[7] == u8(1))
+    assert(address[2] == u8(255) and address[3] == u8(255))
+    throws(__address("256.0.0.1", 1) -> NetworkError)
+    throws(__address("127.0.0", 1) -> NetworkError)
+    throws(__address("127.0.0.1.", 1) -> NetworkError)
+    throws(__address("127..0.1", 1) -> NetworkError)
+    throws(__address("localhost", 1) -> NetworkError)
+    throws(__address("::1", 1) -> NetworkError)
+    throws(__address("127.0.0.1", 65536) -> NetworkError)
+
+test with integ "TCP counts binary bytes and observes half-close EOF":
+    listener = listen("127.0.0.1", 0)
+    address = listener.address()
+    assert(address.port > 0)
+    client = connect(address.host, address.port)
+    ready = PollSet(1)
+    ready.watch(0, listener.handle)
+    assert(ready.wait(1000) == 1)
+    server = listener.accept()
+    payload = tuple[u8,4](65, 0, 255, 10)
+    assert(client.send(payload, 0, 4) == 4)
+    assert(client.shutdown_write() == 0)
+    ready.watch(0, server.handle)
+    assert(ready.wait(1000) == 1)
+    data = tensor[u8](4)
+    used = 0
+    while used < 4:
+        received = server.receive(data, used, 4 - used)
+        if received == -11 or received == -4:
+            assert(ready.wait(1000) > 0)
+        else:
+            assert(received > 0)
+            used += received
+    assert(data[0] == u8(65) and data[1] == u8(0) and data[2] == u8(255))
+    assert(ready.wait(1000) > 0)
+    assert(server.receive(data, 0, 1) == 0)
+    assert(server.close() == 0 and server.close() == 0)
+
+test with integ "UDP retains sender, truncation, and empty datagrams":
+    receiver = udp_bind()
+    sender = udp_bind()
+    address = receiver.address()
+    data = tuple[u8,4](1, 0, 255, 4)
+    assert(sender.send(data, address.host, address.port) == 4)
+    ready = PollSet(1)
+    ready.watch(0, receiver.handle)
+    assert(ready.wait(1000) == 1)
+    packet = receiver.receive(2)
+    assert(packet.truncated and packet.wire_bytes == 4 and len(packet.data) == 2)
+    assert(packet.data[1] == u8(0))
+    assert(packet.address.port == sender.address().port)
+    empty = tensor[u8](0)
+    assert(sender.send(empty, address.host, address.port) == 0)
+    assert(ready.wait(1000) == 1)
+    empty_packet = receiver.receive(0)
+    assert(not empty_packet.truncated and empty_packet.wire_bytes == 0)
+
+test "poll validates timeout and closed handles are harmless":
+    events = PollSet(1)
+    assert(events.wait(0) == 0)
+    assert(events.wait(-2) == -22)
+    closed = Connection(-1)
+    data = tensor[u8](1)
+    assert(closed.send(data, 0, 1) == -9)
+    assert(closed.receive(data, 0, 1) == -9)
+    assert(closed.close() == 0)
+
+test with integ "bind collisions and invalid requests preserve typed errors":
+    listener = listen("127.0.0.1", 0)
+    address = listener.address()
+    try:
+        duplicate = listen(address.host, address.port)
+        assert(false)
+    catch error: NetworkError:
+        assert(error.code == -98 and error.operation == "bind")
+    throws(connect(address.host, address.port, -1) -> NetworkError)
+    throws(listen("127.0.0.1", 0, 0) -> NetworkError)
+    closed = Connection(-1)
+    data = tensor[u8](1)
+    throws(closed.send(data, -1, 1) -> NetworkError)
+    throws(closed.receive(data, 0, 2) -> NetworkError)
+    # A failed second bind cannot invalidate the original listener.
+    connection = connect(address.host, address.port)
+    ready = PollSet(1)
+    ready.watch(0, listener.handle)
+    assert(ready.wait(1000) > 0)
+    accepted = listener.accept()
+    assert(accepted.handle >= 0)

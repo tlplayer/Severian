@@ -1,4 +1,5 @@
 class Counter:
+
     # External: read yes, write no.
     _value: int
 
@@ -20,7 +21,6 @@ class Counter:
     def reset():
         __reset()
 
-
 test:
     counter := Counter()
     counter.inc()
@@ -28,7 +28,6 @@ test:
     assert(counter._value == 1)
     counter.reset()
     assert(counter._value == 0)
-
 
 test with compiler:
     counter := Counter()

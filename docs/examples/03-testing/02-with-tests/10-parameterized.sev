@@ -1,27 +1,20 @@
 '''
 Table cases share one declaration shape: named parameters followed by `with
 cases` and a brace-delimited table. Each row executes the same test body.
-
 Parameterized sets may also form a Cartesian product. Every value of `a`
 executes against every value of `b`.
 '''
-
-
 from collections import list
 
 def square(value: int) -> int:
     return value * value
 
+test square(value, expected) with cases
+"""\
 
-test square(value, expected) with cases "squares signed integers"
-{
-    (0, 0),
-    (3, 9),
-    (-4, 16),
-    (12, 144),
-}:
+squares signed integers
+""" {(0, 0), (3, 9), (-4, 16), (12, 144),}:
     assert(square(value) == expected)
-
 
 def clamp(value: int, minimum: int, maximum: int) -> int:
     if value < minimum:
@@ -30,20 +23,17 @@ def clamp(value: int, minimum: int, maximum: int) -> int:
         return maximum
     return value
 
+test clamp(value, minimum, maximum, expected,) with cases
+"""\
 
-test clamp(value, minimum, maximum, expected) with cases "clamps each range position"
-{
-    (-5, 0, 10, 0),
-    (5, 0, 10, 5),
-    (15, 0, 10, 10),
-}:
+clamps each range position
+""" {(-5, 0, 10, 0), (5, 0, 10, 5), (15, 0, 10, 10),}:
     assert(clamp(value, minimum, maximum) == expected)
 
+test[a in [1, 2, 3], b in [2, 3, 4],] with cases
+"""\
 
-test
-[
-    a in [1, 2, 3],
-    b in [2, 3, 4],
-] with cases "executes the Cartesian product":
+executes the Cartesian product
+""":
     assert(a in [1, 2, 3])
     assert(b in [2, 3, 4])

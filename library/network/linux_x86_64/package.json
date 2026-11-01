@@ -1,0 +1,11 @@
+{
+  "package": {
+    "name": "network",
+    "version": "0.1.0",
+    "description": "Nonblocking IPv4 TCP/UDP through Linux x86-64 MLIR syscalls"
+  },
+  "dependencies": {
+    "io": {"path": "../../system/io/linux_x86_64"},
+    "string": {"path": "../../core/string/c"}
+  }
+}

@@ -1,21 +1,286 @@
 import ResolvedGrammarNode from "../../../syntax/grammar/resolution.sev"
-import AbiId, Add, ArtifactId, AssertionLocation, AssertionOrigin, Associativity, AttachmentRole, AttrValue, AttributeId, B, BackendId, BinaryOperation, BinaryOperator, Binding, BindingId, BitwiseAnd, BitwiseOr, BitwiseXor, Block, BlockFile, BlockId, BlockLayout, BlockSentence, BlockSyntax, BlockTerm, BlockTermRole, BoundaryModifier, CallArgument, CallType, CallableAlternative, CallableOrigin, CanonicalRewrite, Capture, CfgEdge, CfgExit, CfgTerminator, CompileRoute, CompiledRegionId, CompilerCapability, CompilerExpectation, CompilerId, CompilerTestCase, Constant, Constraint, ConstraintGraph, ConstraintId, ConstraintObligation, ConstraintRequirement, ConstraintStage, Constructor, Contains, Conversion, ConversionKind, CoverageKind, CoveragePoint, DeclarationId, Decorator, DecoratorArgument, DecoratorValue, DefinitionID, DialectId, DispatchCandidate, DispatchFamily, Divide, EffectSet, Equal, Expression, ExpressionConversion, ExpressionConversionKind, ExpressionKind, ExternalCall, FfiId, FieldConstraint, Fixity, FloorDivide, FunctionDeclaration, FunctionId, FunctionLinkage, FunctionParameter, GenericConstraint, GenericParamId, Grammar, Greater, GreaterEqual, HirId, ImportDeclaration, ImportSubject, IndexedId, InferVarId, InferenceContext, InterfaceId, IrContext, LeftShift, Less, LessEqual, Lexeme, LexemeTerm, LiteralSyntax, LiteralConstruction, LiteralValue, LocalId, LogicalAnd, LogicalOr, LoweredFloatFormat, LoweredOperation, LoweredType, LoweringCapability, LoweringRequirements, MatchArm, MlirObject, MlirTypeBinding, MlirTypeParameter, MlirTypeProvider, MockFunction, ModuleId, Move, Multiply, NamedId, Negative, Not, NotEqual, OpId, Operation, OperationDiagnostic, OperationId, OperationInterface, OperationOrigin, OperationRegistry, Operator, OperatorDeclaration, OperatorDomain, OperatorParameter, OperatorSignature, OperatorSyntax, PackageId, Positive, Power, Primitive, PrimitiveAlias, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, ProofResult, PropertyDeclaration, ProviderId, QualityRegion, RecordDeclaration, RegionId, RegisteredOperation, Remainder, ResolvedCallee, RightShift, RuntimeId, ScalarOperation, ScopeId, SemanticObject, Sentence, SentenceDefinition, SentenceField, SentenceId, SentenceMatch, Signature, Size, SourceBlockId, SourceFile, SourceMap, Span, StableId, Statement, Substitution, Subtract, Symbol, SymbolId, SymbolKind, SymbolName, Term, TermRole, TestCaseRow, TestDeclaration, TestExpectation, TestMode, TestModeArguments, TestStream, TokenTerm, TraitDeclaration, TraitRef, TyInterner, Type, TypeAnnotation, TypeAnnotationKind, TypeBinding, TypeConstraint, TypeConstructorBinding, TypeDeclaration, TypeId, TypeKind, TypePattern, TypeRef, UnaryOperation, UnaryOperator, UnifyError, ValueId, VariantId, WithAttachment, Y, accepts_shape, allocate_effect, annotation_key, array_mlir, attribute_id, backend_id, byte_view_mlir, callable_key, control_flow, declared_mlir_binding, definition_from_key, dialect_id, free_effect, hashing, index_mlir, insert_type, io_effect, iteration_grammars, load, match_grammar, memref_mlir, named_definition, named_operation, named_type, no_effects, operation_id, operator_syntax, outcome_variants, provider_id, ranked_memref_storage, read_effect, record_mlir_binding, resolve_expression, resolve_grammar, resolved_function, runtime_id, same_constructor, same_definition, same_parameters, scalar_boundary, scalar_mlir, scalar_operand_segments, scalar_requirement_names, scalar_requirements, semantic_digest, semantic_key, simple_type_name, span, standard_block_syntax, struct_mlir, tensor_mlir, test_mode_name, throw_effect, type_children, union_variants, unranked_memref_mlir, unranked_tensor_mlir, utf8_offset, virtual_source, write_effect from "../../../syntax/block/block.sev"
+import ABIID,
+    Add,
+    ArtifactID,
+    AssertionLocation,
+    AssertionOrigin,
+    Associativity,
+    AttachmentRole,
+    AttrValue,
+    AttributeID,
+    B,
+    BackendID,
+    BinaryOperation,
+    BinaryOperator,
+    Binding,
+    BindingID,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    Block,
+    BlockFile,
+    BlockID,
+    BlockLayout,
+    BlockSentence,
+    BlockSyntax,
+    BlockTerm,
+    BlockTermRole,
+    BoundaryModifier,
+    CallArgument,
+    CallType,
+    CallableAlternative,
+    CallableOrigin,
+    CanonicalRewrite,
+    Capture,
+    CfgEdge,
+    CfgExit,
+    CfgTerminator,
+    CompileRoute,
+    CompiledRegionID,
+    CompilerCapability,
+    CompilerExpectation,
+    CompilerID,
+    CompilerTestCase,
+    Constant,
+    Constraint,
+    ConstraintGraph,
+    ConstraintId,
+    ConstraintObligation,
+    ConstraintRequirement,
+    ConstraintStage,
+    Constructor,
+    Contains,
+    Conversion,
+    ConversionKind,
+    CoverageKind,
+    CoveragePoint,
+    DeclarationID,
+    Decorator,
+    DecoratorArgument,
+    DecoratorValue,
+    DefinitionID,
+    DialectID,
+    DispatchCandidate,
+    DispatchFamily,
+    Divide,
+    EffectSet,
+    Equal,
+    Expression,
+    ExpressionConversion,
+    ExpressionConversionKind,
+    ExpressionKind,
+    ExternalCall,
+    FFIID,
+    FieldConstraint,
+    Fixity,
+    FloorDivide,
+    FunctionDeclaration,
+    FunctionID,
+    FunctionLinkage,
+    FunctionParameter,
+    GenericConstraint,
+    GenericParamID,
+    Grammar,
+    Greater,
+    GreaterEqual,
+    HIRID,
+    ImportDeclaration,
+    ImportSubject,
+    IndexedID,
+    InferVarID,
+    InferenceContext,
+    InterfaceID,
+    IrContext,
+    LeftShift,
+    Less,
+    LessEqual,
+    Lexeme,
+    LexemeTerm,
+    LiteralSyntax,
+    LiteralConstruction,
+    LiteralValue,
+    LocalID,
+    LogicalAnd,
+    LogicalOr,
+    LoweredFloatFormat,
+    LoweredOperation,
+    LoweredType,
+    LoweringCapability,
+    LoweringRequirements,
+    MatchArm,
+    MLIRObject,
+    MLIRTypeBinding,
+    MLIRTypeParameter,
+    MLIRTypeProvider,
+    MockFunction,
+    ModuleID,
+    Move,
+    Multiply,
+    NamedID,
+    Negative,
+    Not,
+    NotEqual,
+    OpID,
+    Operation,
+    OperationDiagnostic,
+    OperationID,
+    OperationInterface,
+    OperationOrigin,
+    OperationRegistry,
+    Operator,
+    OperatorDeclaration,
+    OperatorDomain,
+    OperatorParameter,
+    OperatorSignature,
+    OperatorSyntax,
+    PackageID,
+    Positive,
+    Power,
+    Primitive,
+    PrimitiveAlias,
+    PrimitiveCategory,
+    PrimitiveID,
+    PrimitiveRepresentation,
+    ProofResult,
+    PropertyDeclaration,
+    ProviderID,
+    QualityRegion,
+    RecordDeclaration,
+    RegionID,
+    RegisteredOperation,
+    Remainder,
+    ResolvedCallee,
+    RightShift,
+    RuntimeID,
+    ScalarOperation,
+    ScopeID,
+    SemanticObject,
+    Sentence,
+    SentenceDefinition,
+    SentenceField,
+    SentenceID,
+    SentenceMatch,
+    Signature,
+    Size,
+    SourceBlockID,
+    SourceFile,
+    SourceMap,
+    Span,
+    StableID,
+    Statement,
+    Substitution,
+    Subtract,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    SymbolName,
+    Term,
+    TermRole,
+    TestCaseRow,
+    TestDeclaration,
+    TestExpectation,
+    TestMode,
+    TestModeArguments,
+    TestStream,
+    TokenTerm,
+    TraitDeclaration,
+    TraitRef,
+    TyInterner,
+    Type,
+    TypeAnnotation,
+    TypeAnnotationKind,
+    TypeBinding,
+    TypeConstraint,
+    TypeConstructorBinding,
+    TypeDeclaration,
+    TypeID,
+    TypeKind,
+    TypePattern,
+    TypeRef,
+    UnaryOperation,
+    UnaryOperator,
+    UnifyError,
+    ValueID,
+    VariantID,
+    WithAttachment,
+    Y,
+    accepts_shape,
+    allocate_effect,
+    annotation_key,
+    array_mlir,
+    AttributeID,
+    BackendID,
+    byte_view_mlir,
+    callable_key,
+    control_flow,
+    declared_mlir_binding,
+    definition_from_key,
+    DialectID,
+    free_effect,
+    hashing,
+    index_mlir,
+    insert_type,
+    io_effect,
+    iteration_grammars,
+    load,
+    match_grammar,
+    memref_mlir,
+    named_definition,
+    named_operation,
+    named_type,
+    no_effects,
+    OperationID,
+    OperatorSyntax,
+    outcome_variants,
+    ProviderID,
+    ranked_memref_storage,
+    read_effect,
+    record_mlir_binding,
+    resolve_expression,
+    resolve_grammar,
+    resolved_function,
+    RuntimeID,
+    same_constructor,
+    same_definition,
+    same_parameters,
+    scalar_boundary,
+    scalar_mlir,
+    scalar_operand_segments,
+    scalar_requirement_names,
+    scalar_requirements,
+    semantic_digest,
+    semantic_key,
+    simple_type_name,
+    span,
+    standard_block_syntax,
+    struct_mlir,
+    tensor_mlir,
+    test_mode_name,
+    throw_effect,
+    type_children,
+    union_variants,
+    unranked_memref_mlir,
+    unranked_tensor_mlir,
+    utf8_offset,
+    virtual_source,
+    write_effect from "../../../syntax/block/block.sev"
 import source
-
 
 # A file-local block ID is meaningful only within its owning source unit.
 class BlockAddress:
     unit: int
-    block: SourceBlockId
-
+    block: SourceBlockID
 
 class BlockUnit:
     key: string
     package: string
-    module: string  # Logical module supplied by the package, not the file path.
-    submodule: string  # Legacy display hint; HIR computes membership from edges.
-    file: BlockFile
 
+    # Logical module supplied by the package, not the file path.
+    module: string
+
+    # Legacy display hint; HIR computes membership from edges.
+    submodule: string
+    file: BlockFile
 
 enum BlockBindingKind:
     Declaration
@@ -23,45 +288,49 @@ enum BlockBindingKind:
     Package
     Prelude
 
-
 class BlockBinding:
     scope: BlockAddress
     name: string
     provider: BlockAddress
     kind: BlockBindingKind = BlockBindingKind.Declaration
-    # Re-export/import scopes retain lookup provenance without consuming siblings.
-    through: list[BlockAddress] = []
 
+    '''
+    Re-export/import scopes retain lookup provenance without consuming
+    siblings.
+    '''
+    through: list[BlockAddress] = []
 
 class PreludeBlock:
     name: string
     provider: BlockAddress
-
 
 class BlockUse:
     consumer: BlockAddress
     name: string
     span: source.Span | None = None
 
-
 class BlockDependency:
     consumer: BlockAddress
     provider: BlockAddress
 
-
-# Selected grammar/type providers retain their declaration identity. Literal
-# recognition and construction remain on the owning type, before HIR.
+'''
+Selected grammar/type providers retain their declaration identity. Literal
+recognition and construction remain on the owning type, before HIR.
+'''
 class BlockProvider:
     definition: DefinitionID
     provider: BlockAddress
-
 
 class BlockGraph:
     units: list[BlockUnit] = []
     bindings: list[BlockBinding] = []
     uses: list[BlockUse] = []
     dependencies: list[BlockDependency] = []
-    # Prelude is an explicit set of visible declarations, never a compiler model.
+
+    '''
+    Prelude is an explicit set of visible declarations, never a compiler
+    model.
+    '''
     prelude: list[PreludeBlock] = []
     providers: list[BlockProvider] = []
     types: list[TypeDeclaration] = []
@@ -72,31 +341,44 @@ class BlockGraph:
         result := ""
         visited: list[BlockAddress] = []
         for unit in range(len(self.units)):
-            label := self.units[unit].module if self.units[unit].module != "" else self.units[unit].key
+            label := self.units[unit].module if self.units[unit].module !=
+                ""
+                else self.units[unit].key
             if self.units[unit].submodule != "":
                 label += "/" + self.units[unit].submodule
             result += label + ":\n"
             for block in self.units[unit].file.blocks:
                 if block.parent == None:
-                    result += print_block_graph(self, BlockAddress(unit, block.id), "  ", [], visited)
+                    result += print_block_graph(
+                        graph = self,
+                        address = BlockAddress(unit, block.id),
+                        indent = "  ",
+                        active = [],
+                        visited = visited,
+                    )
             for block in self.units[unit].file.blocks:
                 address = BlockAddress(unit, block.id)
                 if not contains_block(visited, address):
-                    result += print_block_graph(self, address, "  ", [], visited)
+                    result += print_block_graph(
+                        graph = self,
+                        address = address,
+                        indent = "  ",
+                        active = [],
+                        visited = visited,
+                    )
         for declaration in self.types:
-            result += "type " + declaration.name + "\n"
+            result += """\
+type {declaration.name}
+"""
         return result
-
 
 class BlockSelection:
     bodies: list[BlockAddress] = []
     scopes: list[BlockAddress] = []
     units: list[int] = []
 
-
 def same_block(left: BlockAddress, right: BlockAddress) -> bool:
     return left.unit == right.unit and left.block.index == right.block.index
-
 
 def contains_block(values: list[BlockAddress], value: BlockAddress) -> bool:
     for existing in values:
@@ -104,21 +386,36 @@ def contains_block(values: list[BlockAddress], value: BlockAddress) -> bool:
             return true
     return false
 
-
-def print_block_graph(graph: BlockGraph, address: BlockAddress, indent: string, active: list[BlockAddress], visited: list[BlockAddress]) -> string:
-    identity = string(address.unit) + ":" + string(address.block.index)
+def print_block_graph(
+    graph: BlockGraph,
+    address: BlockAddress,
+    indent: string,
+    active: list[BlockAddress],
+    visited: list[BlockAddress],
+) -> string:
+    identity = """{address.unit}:{address.block.index}"""
     if contains_block(active, address):
-        return indent + "-> " + identity + " [cycle]\n"
+        return """\
+{indent}-> {identity} [cycle]
+"""
     if contains_block(visited, address):
-        return indent + "-> " + identity + " [shared]\n"
+        return """\
+{indent}-> {identity} [shared]
+"""
     if address.unit < 0 or address.unit >= len(graph.units):
-        return indent + "-> " + identity + " [missing unit]\n"
+        return """\
+{indent}-> {identity} [missing unit]
+"""
     file = graph.units[address.unit].file
     if address.block.index >= len(file.blocks):
-        return indent + "-> " + identity + " [missing block]\n"
+        return """\
+{indent}-> {identity} [missing block]
+"""
     block = file.blocks[address.block.index]
     label = block.name if block.name != "" else block.syntax_name
-    result := indent + "|- " + label + " [" + identity + "]\n"
+    result := """\
+{indent}|- {label} [{identity}]
+"""
     visited.append(address)
     path = active[:]
     path.append(address)
@@ -130,12 +427,23 @@ def print_block_graph(graph: BlockGraph, address: BlockAddress, indent: string, 
         if child.parent == block.id and not contains_block(children, candidate):
             children.append(candidate)
     for child in children:
-        result += print_block_graph(graph, child, indent + "|  ", path, visited)
+        result += print_block_graph(
+            graph = graph,
+            address = child,
+            indent = indent + "|  ",
+            active = path,
+            visited = visited,
+        )
     for dependency in graph.dependencies:
         if same_block(dependency.consumer, address):
-            result += print_block_graph(graph, dependency.provider, indent + "|  ", path, visited)
+            result += print_block_graph(
+                graph = graph,
+                address = dependency.provider,
+                indent = indent + "|  ",
+                active = path,
+                visited = visited,
+            )
     return result
-
 
 def checked_block(graph: BlockGraph, address: BlockAddress) -> Block:
     if address.unit < 0 or address.unit >= len(graph.units):
@@ -148,7 +456,6 @@ def checked_block(graph: BlockGraph, address: BlockAddress) -> Block:
     if parent != None and parent.index >= address.block.index:
         throw Error("block parent must precede its child")
     return block
-
 
 def index_block_file(graph: BlockGraph, unit: BlockUnit) -> int:
     for existing in graph.units:
@@ -166,9 +473,15 @@ def index_block_file(graph: BlockGraph, unit: BlockUnit) -> int:
     for block in unit.file.blocks:
         parent ?= block.parent
         if parent != None and block.name != "":
-            bind_block(graph, BlockBinding(BlockAddress(index, parent), block.name, BlockAddress(index, block.id)))
+            bind_block(
+                graph,
+                BlockBinding(
+                    BlockAddress(index, parent),
+                    block.name,
+                    BlockAddress(index, block.id),
+                ),
+            )
     return index
-
 
 def bind_block(graph: BlockGraph, binding: BlockBinding):
     checked_block(graph, binding.scope)
@@ -176,26 +489,39 @@ def bind_block(graph: BlockGraph, binding: BlockBinding):
     for scope in binding.through:
         checked_block(graph, scope)
     for existing in graph.bindings:
-        if same_block(existing.scope, binding.scope) and existing.name == binding.name and same_block(existing.provider, binding.provider):
+        if same_block(existing.scope, binding.scope)
+            and existing.name == binding.name
+            and same_block(existing.provider, binding.provider):
             return
     graph.bindings.append(binding)
 
-
-def use_block_name(graph: BlockGraph, consumer: BlockAddress, name: string, span: source.Span | None = None):
+def use_block_name(
+    graph: BlockGraph,
+    consumer: BlockAddress,
+    name: string,
+    span: source.Span | None = None,
+):
     checked_block(graph, consumer)
     graph.uses.append(BlockUse(consumer, name, span))
 
-
-def require_block(graph: BlockGraph, consumer: BlockAddress, provider: BlockAddress):
+def require_block(
+    graph: BlockGraph,
+    consumer: BlockAddress,
+    provider: BlockAddress,
+):
     checked_block(graph, consumer)
     checked_block(graph, provider)
     for edge in graph.dependencies:
-        if same_block(edge.consumer, consumer) and same_block(edge.provider, provider):
+        if same_block(edge.consumer, consumer)
+            and same_block(edge.provider, provider):
             return
     graph.dependencies.append(BlockDependency(consumer, provider))
 
-
-def resolve_block_name(graph: BlockGraph, consumer: BlockAddress, name: string) -> list[BlockBinding]:
+def resolve_block_name(
+    graph: BlockGraph,
+    consumer: BlockAddress,
+    name: string,
+) -> list[BlockBinding]:
     scope := consumer
     while true:
         matches: list[BlockBinding] = []
@@ -203,8 +529,11 @@ def resolve_block_name(graph: BlockGraph, consumer: BlockAddress, name: string) 
             if same_block(binding.scope, scope) and binding.name == name:
                 matches.append(binding)
         if len(matches) > 0:
-            # An overload family is retained until callable/value dispatch picks
-            # its members. Scope lookup does not guess an implementation.
+
+            '''
+            An overload family is retained until callable/value dispatch picks
+            its members. Scope lookup does not guess an implementation.
+            '''
             return matches
         parent ?= checked_block(graph, scope).parent
         if parent == None:
@@ -214,13 +543,23 @@ def resolve_block_name(graph: BlockGraph, consumer: BlockAddress, name: string) 
     for binding in graph.prelude:
         if binding.name == name:
             checked_block(graph, binding.provider)
-            matches.append(BlockBinding(consumer, name, binding.provider, BlockBindingKind.Prelude))
+            matches.append(
+                BlockBinding(
+                    scope = consumer,
+                    name = name,
+                    provider = binding.provider,
+                    kind = BlockBindingKind.Prelude,
+                ),
+            )
     if len(matches) == 0:
         throw Error("unresolved consumed block name: " + name)
     return matches
 
-
-def retain_block_scope(graph: BlockGraph, selection: BlockSelection, address: BlockAddress):
+def retain_block_scope(
+    graph: BlockGraph,
+    selection: BlockSelection,
+    address: BlockAddress,
+):
     current := address
     while not contains_block(selection.scopes, current):
         block = checked_block(graph, current)
@@ -232,21 +571,24 @@ def retain_block_scope(graph: BlockGraph, selection: BlockSelection, address: Bl
             return
         current = BlockAddress(current.unit, parent)
 
-
 trait BlockResolver:
     def resolve(graph: BlockGraph, address: BlockAddress) -> absent
-
 
 # Already-indexed HIR uses need no further body loading.
 class IndexedBlockResolver: BlockResolver
     def resolve(graph: BlockGraph, address: BlockAddress) -> absent:
         return absent
 
-
-# Edges come from HIR name/primitive/call resolution, not a scan of identifier
-# spellings. This preserves shadowing, literal opacity and import selection.
-# Cycles are legal; each consumed body is visited once.
-def consume_blocks_with[R: BlockResolver](graph: BlockGraph, roots: list[BlockAddress], resolver: R) -> BlockSelection:
+'''
+Edges come from HIR name/primitive/call resolution, not a scan of identifier
+spellings. This preserves shadowing, literal opacity and import selection.
+Cycles are legal; each consumed body is visited once.
+'''
+def consume_blocks_with[R: BlockResolver](
+    graph: BlockGraph,
+    roots: list[BlockAddress],
+    resolver: R,
+) -> BlockSelection:
     selection = BlockSelection()
     pending = roots[:]
     cursor := 0
@@ -258,8 +600,11 @@ def consume_blocks_with[R: BlockResolver](graph: BlockGraph, roots: list[BlockAd
             continue
         selection.bodies.append(consumer)
         retain_block_scope(graph, selection, consumer)
-        # Resolve/load only the body just reached. The resolver may register
-        # provider units, import bindings and dependencies on demand.
+
+        '''
+        Resolve/load only the body just reached. The resolver may register
+        provider units, import bindings and dependencies on demand.
+        '''
         resolver.resolve(graph, consumer)
         for edge in graph.dependencies:
             if same_block(edge.consumer, consumer):
@@ -273,18 +618,20 @@ def consume_blocks_with[R: BlockResolver](graph: BlockGraph, roots: list[BlockAd
                         retain_block_scope(graph, selection, scope)
     return selection
 
-
-def consume_blocks(graph: BlockGraph, roots: list[BlockAddress]) -> BlockSelection:
+def consume_blocks(
+    graph: BlockGraph,
+    roots: list[BlockAddress],
+) -> BlockSelection:
     return consume_blocks_with(graph, roots, IndexedBlockResolver())
 
-
-def selected_block_units(graph: BlockGraph, selection: BlockSelection) -> list[BlockUnit]:
+def selected_block_units(
+    graph: BlockGraph,
+    selection: BlockSelection,
+) -> list[BlockUnit]:
     units: list[BlockUnit] = []
     for index in selection.units:
         units.append(graph.units[index])
     return units
-
-
 
 def bind_block_provider(graph: BlockGraph, binding: BlockProvider):
     checked_block(graph, binding.provider)
@@ -295,8 +642,11 @@ def bind_block_provider(graph: BlockGraph, binding: BlockProvider):
             return
     graph.providers.append(binding)
 
-
-def require_block_provider(graph: BlockGraph, consumer: BlockAddress, definition: DefinitionID):
+def require_block_provider(
+    graph: BlockGraph,
+    consumer: BlockAddress,
+    definition: DefinitionID,
+):
     checked_block(graph, consumer)
     for binding in graph.providers:
         if same_definition(binding.definition, definition):
@@ -304,67 +654,260 @@ def require_block_provider(graph: BlockGraph, consumer: BlockAddress, definition
             return
     throw Error("resolved declaration has no provider block")
 
-
 test "block graph printing marks cycles and shared submodules":
     graph = BlockGraph()
-    first = index_block_file(graph, BlockUnit("main.sev", "app", "app", "main", BlockFile("main.sev", 0, [Block([], id=SourceBlockId(0), name="global")])))
-    second = index_block_file(graph, BlockUnit("helper.sev", "app", "app", "helper", BlockFile("helper.sev", 1, [Block([], id=SourceBlockId(0), name="helper")])))
-    caller = BlockAddress(first, SourceBlockId(0))
-    helper = BlockAddress(second, SourceBlockId(0))
+    first = index_block_file(
+        graph,
+        BlockUnit(
+            "main.sev",
+            "app",
+            "app",
+            "main",
+            BlockFile(
+                "main.sev",
+                0,
+                [
+                    Block(
+                        statements = [],
+                        id = SourceBlockID(0),
+                        name = "global",
+                    ),
+                ],
+            ),
+        ),
+    )
+    second = index_block_file(
+        graph,
+        BlockUnit(
+            "helper.sev",
+            "app",
+            "app",
+            "helper",
+            BlockFile(
+                "helper.sev",
+                1,
+                [
+                    Block(
+                        statements = [],
+                        id = SourceBlockID(0),
+                        name = "helper",
+                    ),
+                ],
+            ),
+        ),
+    )
+    caller = BlockAddress(first, SourceBlockID(0))
+    helper = BlockAddress(second, SourceBlockID(0))
     graph.dependencies.append(BlockDependency(caller, helper))
     graph.dependencies.append(BlockDependency(helper, caller))
-    assert(graph.print() == "app/main:\n  |- global [0:0]\n  |  |- helper [1:0]\n  |  |  -> 0:0 [cycle]\napp/helper:\n  -> 1:0 [shared]\n")
-
+    assert(
+        graph.print() ==
+            "app/main:\n  |- global [0:0]\n  |  |- helper [1:0]\n  |  |  -> 0:"
+            "0 [cycle]\napp/helper:\n  -> 1:0 [shared]\n",
+    )
 
 test "block reachability follows cycles without consuming sibling bodies":
-    blocks = [Block([], id=SourceBlockId(0)), Block([], id=SourceBlockId(1), parent=SourceBlockId(0), name="entry"), Block([], id=SourceBlockId(2), parent=SourceBlockId(0), name="helper"), Block([], id=SourceBlockId(3), parent=SourceBlockId(0), name="unused")]
+    blocks = [
+        Block(statements = [], id = SourceBlockID(0)),
+        Block(
+            statements = [],
+            id = SourceBlockID(1),
+            parent = SourceBlockID(0),
+            name = "entry",
+        ),
+        Block(
+            statements = [],
+            id = SourceBlockID(2),
+            parent = SourceBlockID(0),
+            name = "helper",
+        ),
+        Block(
+            statements = [],
+            id = SourceBlockID(3),
+            parent = SourceBlockID(0),
+            name = "unused",
+        ),
+    ]
     graph = BlockGraph()
-    unit = index_block_file(graph, BlockUnit("main.sev", "app", "app", "main", BlockFile("main.sev", 0, blocks)))
-    entry = BlockAddress(unit, SourceBlockId(1))
-    helper = BlockAddress(unit, SourceBlockId(2))
+    unit = index_block_file(
+        graph,
+        BlockUnit(
+            "main.sev",
+            "app",
+            "app",
+            "main",
+            BlockFile("main.sev", 0, blocks),
+        ),
+    )
+    entry = BlockAddress(unit, SourceBlockID(1))
+    helper = BlockAddress(unit, SourceBlockID(2))
     use_block_name(graph, entry, "helper")
     use_block_name(graph, helper, "entry")
-    use_block_name(graph, BlockAddress(unit, SourceBlockId(3)), "missing_but_unused")
+    use_block_name(
+        graph,
+        BlockAddress(unit, SourceBlockID(3)),
+        "missing_but_unused",
+    )
     selected = consume_blocks(graph, [entry])
     assert(len(selected.bodies) == 2)
-    assert(contains_block(selected.scopes, BlockAddress(unit, SourceBlockId(0))))
-    assert(not contains_block(selected.bodies, BlockAddress(unit, SourceBlockId(0))))
-    assert(not contains_block(selected.bodies, BlockAddress(unit, SourceBlockId(3))))
-
+    assert(
+        contains_block(selected.scopes, BlockAddress(unit, SourceBlockID(0))),
+    )
+    assert(
+        not contains_block(
+            selected.bodies,
+            BlockAddress(unit, SourceBlockID(0)),
+        ),
+    )
+    assert(
+        not contains_block(
+            selected.bodies,
+            BlockAddress(unit, SourceBlockID(3)),
+        ),
+    )
 
 test "imported blocks retain provider submodules without loading siblings":
     graph = BlockGraph()
-    first = index_block_file(graph, BlockUnit("app.sev", "app", "app", "root", BlockFile("app.sev", 0, [Block([], id=SourceBlockId(0))])))
-    second = index_block_file(graph, BlockUnit("library.sev", "library", "library", "helpers", BlockFile("library.sev", 1, [Block([], id=SourceBlockId(0)), Block([], id=SourceBlockId(1), parent=SourceBlockId(0), name="used"), Block([], id=SourceBlockId(2), parent=SourceBlockId(0), name="unused")])))
-    consumer = BlockAddress(first, SourceBlockId(0))
-    provider = BlockAddress(second, SourceBlockId(1))
-    bind_block(graph, BlockBinding(consumer, "imported", provider, BlockBindingKind.Import))
+    first = index_block_file(
+        graph,
+        BlockUnit(
+            "app.sev",
+            "app",
+            "app",
+            "root",
+            BlockFile(
+                "app.sev",
+                0,
+                [Block(statements = [], id = SourceBlockID(0))],
+            ),
+        ),
+    )
+    second = index_block_file(
+        graph,
+        BlockUnit(
+            "library.sev",
+            "library",
+            "library",
+            "helpers",
+            BlockFile(
+                "library.sev",
+                1,
+                [
+                    Block(statements = [], id = SourceBlockID(0)),
+                    Block(
+                        statements = [],
+                        id = SourceBlockID(1),
+                        parent = SourceBlockID(0),
+                        name = "used",
+                    ),
+                    Block(
+                        statements = [],
+                        id = SourceBlockID(2),
+                        parent = SourceBlockID(0),
+                        name = "unused",
+                    ),
+                ],
+            ),
+        ),
+    )
+    consumer = BlockAddress(first, SourceBlockID(0))
+    provider = BlockAddress(second, SourceBlockID(1))
+    bind_block(
+        graph,
+        BlockBinding(
+            scope = consumer,
+            name = "imported",
+            provider = provider,
+            kind = BlockBindingKind.Import,
+        ),
+    )
     use_block_name(graph, consumer, "imported")
     selected = consume_blocks(graph, [consumer])
     assert(contains_block(selected.bodies, provider))
-    assert(not contains_block(selected.bodies, BlockAddress(second, SourceBlockId(2))))
+    assert(
+        not contains_block(
+            selected.bodies,
+            BlockAddress(second, SourceBlockID(2)),
+        ),
+    )
     assert(len(selected.units) == 2)
-
 
 test "local block declarations shadow the prelude":
     graph = BlockGraph()
-    unit = index_block_file(graph, BlockUnit("scope.sev", "app", "app", "scope", BlockFile("scope.sev", 0, [Block([], id=SourceBlockId(0)), Block([], id=SourceBlockId(1), parent=SourceBlockId(0), name="entry"), Block([], id=SourceBlockId(2), parent=SourceBlockId(0), name="print"), Block([], id=SourceBlockId(3), parent=SourceBlockId(0), name="prelude_print")])))
-    entry = BlockAddress(unit, SourceBlockId(1))
-    local = BlockAddress(unit, SourceBlockId(2))
-    implicit = BlockAddress(unit, SourceBlockId(3))
+    unit = index_block_file(
+        graph,
+        BlockUnit(
+            "scope.sev",
+            "app",
+            "app",
+            "scope",
+            BlockFile(
+                "scope.sev",
+                0,
+                [
+                    Block(statements = [], id = SourceBlockID(0)),
+                    Block(
+                        statements = [],
+                        id = SourceBlockID(1),
+                        parent = SourceBlockID(0),
+                        name = "entry",
+                    ),
+                    Block(
+                        statements = [],
+                        id = SourceBlockID(2),
+                        parent = SourceBlockID(0),
+                        name = "print",
+                    ),
+                    Block(
+                        statements = [],
+                        id = SourceBlockID(3),
+                        parent = SourceBlockID(0),
+                        name = "prelude_print",
+                    ),
+                ],
+            ),
+        ),
+    )
+    entry = BlockAddress(unit, SourceBlockID(1))
+    local = BlockAddress(unit, SourceBlockID(2))
+    implicit = BlockAddress(unit, SourceBlockID(3))
     graph.prelude.append(PreludeBlock("print", implicit))
     use_block_name(graph, entry, "print")
     selected = consume_blocks(graph, [entry])
     assert(contains_block(selected.bodies, local))
     assert(not contains_block(selected.bodies, implicit))
 
-
 test "a selected declaration consumes its provider without reparsing a literal":
     graph = BlockGraph()
-    unit = index_block_file(graph, BlockUnit("literal.sev", "app", "app", "literal", BlockFile("literal.sev", 0, [Block(id=SourceBlockId(0)), Block(id=SourceBlockId(1), parent=SourceBlockId(0), name="entry"), Block(id=SourceBlockId(2), parent=SourceBlockId(0), name="int")])))
-    entry = BlockAddress(unit, SourceBlockId(1))
-    provider = BlockAddress(unit, SourceBlockId(2))
-    definition = DefinitionID(1, 2, DeclarationId(3))
+    unit = index_block_file(
+        graph,
+        BlockUnit(
+            "literal.sev",
+            "app",
+            "app",
+            "literal",
+            BlockFile(
+                "literal.sev",
+                0,
+                [
+                    Block(id = SourceBlockID(0)),
+                    Block(
+                        id = SourceBlockID(1),
+                        parent = SourceBlockID(0),
+                        name = "entry",
+                    ),
+                    Block(
+                        id = SourceBlockID(2),
+                        parent = SourceBlockID(0),
+                        name = "int",
+                    ),
+                ],
+            ),
+        ),
+    )
+    entry = BlockAddress(unit, SourceBlockID(1))
+    provider = BlockAddress(unit, SourceBlockID(2))
+    definition = DefinitionID(1, 2, DeclarationID(3))
     bind_block_provider(graph, BlockProvider(definition, provider))
     require_block_provider(graph, entry, definition)
     require_block_provider(graph, entry, definition)

@@ -1,7 +1,6 @@
 import file
 import os
 
-
 test with integ "file lock":
     path = "/tmp/severian-lock.txt"
 

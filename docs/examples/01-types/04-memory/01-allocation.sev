@@ -2,7 +2,6 @@ class Point:
     x: int
     y: int
 
-
 test "managed memory allocation":
     point := Point(10, 20)
 

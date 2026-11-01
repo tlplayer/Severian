@@ -1,5 +1,48 @@
 import string
 
+# Integer intervals retain both endpoint flags and never manufacture stop + 1.
+class _Interval:
+    start: int
+    stop: int
+    start_closed: bool
+    stop_closed: bool
+
+    def contains(self: view Self, value: int) -> bool:
+        return (value >= start if start_closed else value > start) and (value <= stop if stop_closed else value < stop)
+
+    grammar iterate["iterator", "(", self, ")"]() -> iterator[int]:
+        value = self.start
+        if self.start_closed or value < 9223372036854775807:
+            if not self.start_closed:
+                value += 1
+            while value < self.stop or (self.stop_closed and value == self.stop):
+                yield value
+                if value == 9223372036854775807:
+                    break
+                value += 1
+
+def all[Container](values: Container) -> bool:
+    for value in values:
+        if not bool(value):
+            return false
+    return true
+
+def sorted[T](values: list[T]) -> list[T]:
+    result = copy values
+    result.sort()
+    return result
+
+def _indexed_first[V,Container](values: Container) -> tuple[int,V]:
+    if len(values) == 0:
+        throw Error("empty collection has no first item")
+    return tuple[int,V](0, values.get(0))
+
+def _indexed_last[V,Container](values: Container) -> tuple[int,V]:
+    if len(values) == 0:
+        throw Error("empty collection has no last item")
+    key = len(values) - 1
+    return tuple[int,V](key, values.get(key))
+
 # Collection algorithms use their supplied storage and indexing operations.
 # No array/vector runtime lies between these algorithms and tensor memrefs.
 def equal[Left,Right](left: Left, right: Right) -> bool:
@@ -99,8 +142,17 @@ test with compiler "tuple key contracts preserve member types":
         keys = set[tuple[f64,2]]()
     reject:
         pair = (1, 2)
-        triple = (1, 2, 3)
-        pair.equal(triple)
+        flags = (true, false)
+        pair.equal(flags)
+
+test "tuple equality compares values across different sequence lengths":
+    pair = (1, 2)
+    triple = (1, 2, 3)
+    assert(not pair.equal(triple))
+    assert(not triple.equal(pair))
+    assert(pair != triple and triple != pair)
+    assert(tuple[int,0]() != pair)
+    assert(pair.equal((1, 2)))
 
 def sum[K,V:Numeric,Container:C[K,V]](values: Container) -> V:
     return values.sum()
@@ -201,6 +253,20 @@ trait C[K,V]: Sized + Indexable[K,V]
     def values(self: view Self) -> list[V]
     def items(self: view Self) -> list[tuple[K,V]]
 
+    def first(self: view Self) -> tuple[K,V]:
+        keys = self.keys()
+        if len(keys) == 0:
+            throw Error("empty collection has no first item")
+        key = keys.get(0)
+        return tuple[K,V](key, self.get(key))
+
+    def last(self: view Self) -> tuple[K,V]:
+        keys = self.keys()
+        if len(keys) == 0:
+            throw Error("empty collection has no last item")
+        key = keys.get(len(keys) - 1)
+        return tuple[K,V](key, self.get(key))
+
     def enumerate(self: view Self) -> list[tuple[K,V]]:
         return self.items()
 
@@ -275,7 +341,10 @@ class list[T]: Sequence[T] + Contains[T]
             index = 0
             while index < count:
                 if storage.initialized(index):
-                    replacement[index] = storage[index]
+                    # Relocation transfers ownership; copying a resource here
+                    # would release its live handle with the previous storage.
+                    item = storage.take(index)
+                    replacement[index] = move item
                 index += 1
             storage = replacement
 
@@ -299,7 +368,8 @@ class list[T]: Sequence[T] + Contains[T]
             reserve(count * 2 + 1)
         position = count
         while position > index:
-            storage[position] = storage.take(position - 1)
+            shifted = storage.take(position - 1)
+            storage[position] = move shifted
             position -= 1
         storage[index] = item
         count += 1
@@ -310,7 +380,8 @@ class list[T]: Sequence[T] + Contains[T]
         result = storage.take(index)
         position = index
         while position + 1 < count:
-            storage[position] = storage.take(position + 1)
+            shifted = storage.take(position + 1)
+            storage[position] = move shifted
             position += 1
         count -= 1
         return result
@@ -357,12 +428,16 @@ class list[T]: Sequence[T] + Contains[T]
         return result
 
     def get(self: view Self, index: int) -> T:
+        if index < 0:
+            index += count
         if index < 0 or index >= count:
             throw Error("list index outside initialized storage")
         result = copy storage[index]
         return result
 
     def view_at(self: view Self, index: int) -> view T:
+        if index < 0:
+            index += count
         if index < 0 or index >= count:
             throw Error("list index outside initialized storage")
         return view storage[index]
@@ -1412,3 +1487,48 @@ test "collection conditions evaluate reached calls once and short circuit":
     else:
         assert(false)
     assert(calls[0] == 1)
+
+# Resource owners must survive capacity growth and element relocation.
+LIST_MOVE_RELEASE_TOTAL = 0
+
+class ListMoveProbe:
+    identity: int
+
+    def drop():
+        module.LIST_MOVE_RELEASE_TOTAL += identity
+
+test "list relocation moves resource owners and releases each once":
+    module.LIST_MOVE_RELEASE_TOTAL = 0
+    values = list[ListMoveProbe]()
+    first = ListMoveProbe(10)
+    values.append_owned(first)
+    second = ListMoveProbe(20)
+    values.append_owned(second)  # Grows capacity and relocates the first owner.
+    assert(LIST_MOVE_RELEASE_TOTAL == 0)
+    removed = values.remove(0)   # Shifts the remaining owner to slot zero.
+    assert(LIST_MOVE_RELEASE_TOTAL == 0)
+    assert(values.view_at(0).identity == 20)
+    drop(removed)
+    assert(LIST_MOVE_RELEASE_TOTAL == 10)
+    values.clear()
+    assert(LIST_MOVE_RELEASE_TOTAL == 30)
+
+
+test "C endpoints carry the key and value and indexing selects only the value":
+    values: list[int] = [4,1,9,2]
+    assert(values.first == (0,4))
+    assert(values.last == (3,2))
+    assert(values[-1] == 2)
+    ordered = sorted(values)
+    assert(ordered.first == (0,1))
+    assert(ordered.last == (3,9))
+
+test "C first item access rejects an empty collection":
+    throws "empty collection has no first item":
+        values: list[int] = []
+        item = values.first
+
+test "C last item access rejects an empty collection":
+    throws "empty collection has no last item":
+        values: list[int] = []
+        item = values.last

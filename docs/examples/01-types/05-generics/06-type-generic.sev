@@ -1,9 +1,10 @@
-# T - Type
-# Substitute one compiler type while preserving the concrete type representation.
-
+'''
+T - Type
+Substitute one compiler type while preserving the concrete type
+representation.
+'''
 trait TypeTerm:
     def same_type(other: Self) -> bool
-
 
 class TypeReference: TypeTerm
     id: u64
@@ -12,10 +13,8 @@ class TypeReference: TypeTerm
     def same_type(other: Self) -> bool:
         return id == other.id
 
-
 def substitute_type[T: TypeTerm](subject: T, parameter: T, replacement: T) -> T:
     return replacement if subject.same_type(parameter) else subject
-
 
 test:
     parameter := TypeReference(1, true)
@@ -25,6 +24,7 @@ test:
     substituted := substitute_type(parameter, parameter, integer)
     unchanged := substitute_type(integer, parameter, floating)
 
-    assert(substituted.id == 2)
-    assert(substituted.is_parameter == false)
-    assert(unchanged.id == 2)
+    assert:
+        substituted.id == 2
+        substituted.is_parameter == false
+        unchanged.id == 2

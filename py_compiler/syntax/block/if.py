@@ -7,6 +7,7 @@ from py_compiler.mir.ownership.flow import FlowState
 class Conditional(BlockProvider):
     spelling = "if"
     has_condition = True
+    lint_condition = True
     attachment = "condition-chain"
 
     def parse_header(self, items):

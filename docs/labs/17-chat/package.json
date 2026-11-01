@@ -1,0 +1,15 @@
+{
+  "package": {
+    "name": "lab-chat",
+    "version": "0.1.0",
+    "description": "Bounded multi-client TCP chat server"
+  },
+  "dependencies": {
+    "network": {"path": "../../../library/network/linux_x86_64"},
+    "io": {"path": "../../../library/system/io/linux_x86_64"},
+    "process": {"path": "../../../library/system/process/linux_x86_64"},
+    "cli": {"path": "../../../library/system/cli/c"},
+    "string": {"path": "../../../library/core/string/c"},
+    "collections": {"path": "../../../library/core/collections/collection"}
+  }
+}

@@ -7,14 +7,22 @@ class Mock(BlockProvider):
     required_scope = 'test'
 
     def parse_header(self, items):
+        if len(items) == 2 and items[-1].text == ':':
+            return ()
         if len(items) < 4 or items[1].text != '(' or items[-1].text != ')':
             raise ValueError('mock requires parenthesized call-to-result cases')
         return tuple(items[2:-1])
 
     def has_body(self, node):
-        return False
+        return node.tokens[-1].text == ':'
 
     def lower(self, node, cfg, env, nodes, index):
+        if not node.header:
+            if not node.children or any(getattr(child.provider, 'spelling', None) != 'mock' for child in node.children):
+                raise ValueError('mock block requires mock operations')
+            for child in node.children:
+                self.lower(child, cfg, env, node.children, 0)
+            return 1
         from py_compiler.syntax.block.test import groups
         from py_compiler.syntax.grammar.expression import expression
         cases, fallback = {}, None

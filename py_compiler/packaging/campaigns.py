@@ -5,12 +5,18 @@ import math
 import random
 import struct
 import time
+import operator
+from functools import lru_cache
 from pathlib import Path
 
 
 def domain(annotation):
     if annotation == 'bool':
         return {'type': annotation, 'lower': 0, 'upper': 1}
+    if annotation in ('float', 'f64', 'f32', 'f16'):
+        maximum = {'f16':65504.0, 'f32':float.fromhex('0x1.fffffep127')}.get(annotation, float.fromhex('0x1.fffffffffffffp1023'))
+        return {'type':annotation, 'lower':-maximum, 'upper':maximum,
+                'float-bits':{'f16':16, 'f32':32}.get(annotation, 64)}
     if annotation == 'int' or annotation.startswith(('i', 'u')) and annotation[1:].isdigit():
         bits = 64 if annotation == 'int' else int(annotation[1:])
         unsigned = annotation.startswith('u')
@@ -23,45 +29,238 @@ def domain(annotation):
     raise ValueError('no campaign input generator for ' + str(annotation))
 
 
+def rounded_float(value, bounds):
+    value = float(value)
+    format_ = {16:'e', 32:'f', 64:'d'}[bounds['float-bits']]
+    try:
+        return struct.unpack('='+format_, struct.pack('='+format_, value))[0]
+    except OverflowError:
+        return math.copysign(math.inf, value)
+
+
+def adjacent_float(value, bounds, upward):
+    bits = bounds['float-bits']
+    if bits == 64:
+        return math.nextafter(value, math.inf if upward else -math.inf)
+    format_, integer = ('e','H') if bits == 16 else ('f','I')
+    if value == 0:
+        encoded = 1 if upward else (1 << (bits-1)) | 1
+    else:
+        encoded = struct.unpack('='+integer, struct.pack('='+format_, value))[0]
+        encoded += 1 if (value > 0) == upward else -1
+    return struct.unpack('='+format_, struct.pack('='+integer, encoded))[0]
+
+
+def comparison_bound(value, bounds, *, lower, strict=False):
+    if 'float-bits' not in bounds:
+        return (math.floor(value)+1 if strict else math.ceil(value)) if lower else (math.ceil(value)-1 if strict else math.floor(value))
+    rounded = rounded_float(value, bounds)
+    if (rounded < value if lower else rounded > value) or strict and rounded == value:
+        return adjacent_float(rounded, bounds, lower)
+    return rounded
+
+
+def random_scalar(bounds, rng, upper=None):
+    upper = bounds['upper'] if upper is None else upper
+    if 'float-bits' not in bounds:
+        return rng.randint(bounds['lower'], upper)
+    lower = bounds['lower']
+    fraction = rng.random()
+    # Weighted endpoints avoid overflow in upper-lower for the full f64 range.
+    candidate = lower * (1.0-fraction) + upper * fraction
+    return max(lower, min(upper, rounded_float(candidate, bounds)))
+
+
+@lru_cache(maxsize=256)
+def constraint_expression(predicate, parameters, containers):
+    """Validate the bounded integer predicate language without executing code."""
+    expression = ast.parse(predicate, mode='eval').body
+    if sum(1 for _ in ast.walk(expression)) > 128:
+        raise ValueError('campaign constraint exceeds 128 syntax nodes')
+    def check(term, locals_=()):
+        if isinstance(term, ast.Constant) and (type(term.value) in (int, bool) or type(term.value) is float and math.isfinite(term.value)):
+            return
+        if isinstance(term, ast.Name) and term.id in (*parameters, *locals_, 'true', 'false'):
+            return
+        if (isinstance(term, ast.Call) and isinstance(term.func, ast.Name)
+                and term.func.id in ('len', 'all', 'first', 'last') and len(term.args) == 1 and not term.keywords):
+            check(term.args[0], locals_)
+            return
+        if isinstance(term, ast.ListComp) and len(term.generators) == 1:
+            generator = term.generators[0]
+            if not isinstance(generator.target, ast.Name) or generator.is_async:
+                raise ValueError('campaign comprehension requires one synchronous item binding')
+            check(generator.iter, locals_)
+            scope = (*locals_, generator.target.id)
+            check(term.elt, scope)
+            for condition in generator.ifs: check(condition, scope)
+            return
+        if isinstance(term, ast.List):
+            for child in term.elts: check(child, locals_)
+            return
+        if isinstance(term, ast.Subscript):
+            check(term.value, locals_)
+            check(term.slice, locals_)
+            return
+        if isinstance(term, ast.BoolOp) and isinstance(term.op, (ast.And, ast.Or)):
+            for child in term.values: check(child, locals_)
+            return
+        if (isinstance(term, ast.UnaryOp) and
+                (isinstance(term.op, ast.Not) or isinstance(term.op, (ast.USub, ast.UAdd))
+                 and isinstance(term.operand, ast.Constant))):
+            check(term.operand, locals_)
+            return
+        if isinstance(term, ast.Compare) and all(isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq)) for op in term.ops):
+            for child in (term.left, *term.comparators): check(child, locals_)
+            return
+        raise ValueError('unsupported campaign constraint: ' + predicate)
+    check(expression)
+    return expression
+
+
+def satisfies_constraints(arguments, domains, predicates=()):
+    operations = {ast.Lt:operator.lt, ast.LtE:operator.le, ast.Gt:operator.gt,
+                  ast.GtE:operator.ge, ast.Eq:operator.eq, ast.NotEq:operator.ne}
+    def evaluate(term, scope=None):
+        scope = arguments if scope is None else scope
+        if isinstance(term, ast.Constant): return term.value
+        if isinstance(term, ast.Name):
+            return {'true':True, 'false':False}[term.id] if term.id in ('true', 'false') else scope[term.id]
+        if isinstance(term, ast.Call):
+            value = evaluate(term.args[0], scope)
+            if term.func.id == 'len': return len(value)
+            if term.func.id == 'all': return all(value)
+            index = 0 if term.func.id == 'first' else len(value) - 1
+            return index, value[index]
+        if isinstance(term, ast.Subscript): return evaluate(term.value, scope)[evaluate(term.slice, scope)]
+        if isinstance(term, ast.List): return [evaluate(child, scope) for child in term.elts]
+        if isinstance(term, ast.ListComp):
+            generator = term.generators[0]
+            result = []
+            for value in evaluate(generator.iter, scope):
+                local = {**scope, generator.target.id: value}
+                if all(evaluate(condition, local) for condition in generator.ifs):
+                    result.append(evaluate(term.elt, local))
+            return result
+        if isinstance(term, ast.UnaryOp):
+            value = evaluate(term.operand, scope)
+            return not value if isinstance(term.op, ast.Not) else -value if isinstance(term.op, ast.USub) else +value
+        if isinstance(term, ast.BoolOp):
+            values = (bool(evaluate(child, scope)) for child in term.values)
+            return all(values) if isinstance(term.op, ast.And) else any(values)
+        left = evaluate(term.left, scope)
+        left_term = term.left
+        for op, child in zip(term.ops, term.comparators):
+            right = evaluate(child, scope)
+            left_bounds = domains.get(left_term.id, {}) if isinstance(left_term, ast.Name) else {}
+            right_bounds = domains.get(child.id, {}) if isinstance(child, ast.Name) else {}
+            if 'float-bits' in left_bounds and isinstance(child, (ast.Constant, ast.UnaryOp)):
+                right = rounded_float(right, left_bounds)
+            if 'float-bits' in right_bounds and isinstance(left_term, (ast.Constant, ast.UnaryOp)):
+                left = rounded_float(left, right_bounds)
+            if not operations[type(op)](left, right): return False
+            left = right
+            left_term = child
+        return True
+    containers = tuple(name for name, bounds in domains.items() if 'element' in bounds)
+    try:
+        return all(bool(evaluate(constraint_expression(predicate, tuple(domains), containers))) for predicate in predicates)
+    except (ZeroDivisionError, OverflowError, IndexError, TypeError):
+        return False
+
+
 def constrain(domains, predicate):
-    """Intersect comparison bounds; reject unsupported constraints rather than ignore them."""
+    """Narrow independent bounds and retain the whole predicate for joint checks."""
+    constraint_expression(predicate, tuple(domains), tuple(name for name, bounds in domains.items() if 'element' in bounds))
+    bindings = dict(domains)
+    def collection(term):
+        if isinstance(term, ast.Name): return bindings.get(term.id)
+        if (isinstance(term, ast.Subscript) and isinstance(term.value, ast.Call)
+                and isinstance(term.value.func, ast.Name) and term.value.func.id in ('first', 'last')
+                and isinstance(term.slice, ast.Constant) and term.slice.value == 1):
+            parent = collection(term.value.args[0])
+            if parent is not None:
+                parent['uniform-length'] = True
+                return parent.get('element')
+        return None
     def target(term):
-        if isinstance(term, ast.Name) and term.id in domains and 'element' not in domains[term.id]:
-            return domains[term.id]
-        if isinstance(term, ast.Call) and isinstance(term.func, ast.Name) and term.func.id == 'len' and len(term.args)==1 and isinstance(term.args[0], ast.Name):
-            value = domains.get(term.args[0].id)
+        if isinstance(term, ast.Name) and term.id in bindings and 'element' not in bindings[term.id]:
+            return bindings[term.id]
+        if isinstance(term, ast.Call) and isinstance(term.func, ast.Name) and term.func.id == 'len' and len(term.args)==1:
+            value = collection(term.args[0])
             if value is not None and 'element' in value:
                 return value
         return None
     def visit(term):
+        if (isinstance(term, ast.Call) and isinstance(term.func, ast.Name) and term.func.id == 'all'
+                and isinstance(term.args[0], ast.ListComp)):
+            comprehension = term.args[0]
+            generator = comprehension.generators[0]
+            parent = collection(generator.iter)
+            if parent is not None and 'element' in parent and not generator.ifs:
+                previous = bindings.get(generator.target.id)
+                bindings[generator.target.id] = parent['element']
+                visit(comprehension.elt)
+                if previous is None: bindings.pop(generator.target.id)
+                else: bindings[generator.target.id] = previous
+            return
         if isinstance(term, ast.BoolOp) and isinstance(term.op, ast.And):
             for value in term.values: visit(value)
             return
         if not isinstance(term, ast.Compare):
-            raise ValueError('campaign constraint needs a supported comparison: ' + predicate)
+            return
         for left, operation, right in zip([term.left, *term.comparators], term.ops, term.comparators):
+            left_bounds, right_bounds = target(left), target(right)
+            if left_bounds is not None and right_bounds is not None:
+                kind = type(operation)
+                if kind in (ast.Gt, ast.GtE):
+                    left_bounds, right_bounds = right_bounds, left_bounds
+                    kind = ast.Lt if kind is ast.Gt else ast.LtE
+                if kind in (ast.Lt, ast.LtE, ast.Eq):
+                    right_bounds['lower'] = max(right_bounds['lower'], comparison_bound(left_bounds['lower'], right_bounds, lower=True, strict=kind is ast.Lt))
+                    if right_bounds['upper'] is not None:
+                        upper = comparison_bound(right_bounds['upper'], left_bounds, lower=False, strict=kind is ast.Lt)
+                        left_bounds['upper'] = min(left_bounds['upper'], upper) if left_bounds['upper'] is not None else upper
+                    if kind is ast.Eq:
+                        left_bounds['lower'] = max(left_bounds['lower'], comparison_bound(
+                            right_bounds['lower'], left_bounds, lower=True))
+                        if left_bounds['upper'] is not None:
+                            upper = comparison_bound(left_bounds['upper'], right_bounds, lower=False)
+                            right_bounds['upper'] = min(right_bounds['upper'], upper) if right_bounds['upper'] is not None else upper
+                continue
             bounds = target(left)
             reverse = bounds is None
             if reverse: bounds = target(right)
             if bounds is None:
-                raise ValueError('campaign cannot derive this parameter constraint: ' + predicate)
+                continue
             try: constant = ast.literal_eval(left if reverse else right)
             except (ValueError, TypeError):
-                raise ValueError('campaign joint constraints require a generator: ' + predicate) from None
-            if type(constant) is not int:
-                raise ValueError('campaign bound must be an integer')
+                continue
+            if type(constant) not in (int, bool, float):
+                continue
+            if 'float-bits' in bounds:
+                constant = rounded_float(constant, bounds)
             kind = type(operation)
             if reverse: kind = {ast.Lt:ast.Gt, ast.LtE:ast.GtE, ast.Gt:ast.Lt, ast.GtE:ast.LtE, ast.Eq:ast.Eq}.get(kind)
             if kind in (ast.Gt, ast.GtE, ast.Eq):
-                bounds['lower'] = max(bounds['lower'], constant + (kind is ast.Gt))
+                bounds['lower'] = max(bounds['lower'], comparison_bound(constant, bounds, lower=True, strict=kind is ast.Gt))
             if kind in (ast.Lt, ast.LtE, ast.Eq):
-                upper = constant - (kind is ast.Lt)
+                upper = comparison_bound(constant, bounds, lower=False, strict=kind is ast.Lt)
                 bounds['upper'] = min(bounds['upper'], upper) if bounds['upper'] is not None else upper
-            if kind not in (ast.Gt, ast.GtE, ast.Lt, ast.LtE, ast.Eq):
-                raise ValueError('unsupported campaign comparison: ' + predicate)
             if bounds['upper'] is not None and bounds['lower'] > bounds['upper']:
                 raise ValueError('campaign constraint has an empty domain')
-    visit(ast.parse(predicate, mode='eval').body)
+    term = ast.parse(predicate, mode='eval').body
+    for _ in range(len(domains) + 2):
+        before = [(bounds['lower'], bounds['upper']) for bounds in domains.values()]
+        visit(term)
+        after = [(bounds['lower'], bounds['upper']) for bounds in domains.values()]
+        if any(upper is not None and lower > upper for lower, upper in after):
+            raise ValueError('campaign constraint has an empty domain')
+        if before == after:
+            break
+    else:
+        raise ValueError('campaign constraint has an empty domain (cyclic strict bounds)')
+    return predicate
 
 
 def magnitudes(bounds):
@@ -81,61 +280,139 @@ class GenerationBudgetExpired(Exception):
     pass
 
 
+class GenerationConstraintUnsatisfied(Exception):
+    pass
+
+
 def value(bounds, magnitude, rng, pattern='random', deadline=None):
     lo, hi = bounds['lower'], bounds['upper']
     n = max(lo, magnitude)
     if hi is not None: n = min(n, hi)
     if 'element' not in bounds:
+        if 'float-bits' in bounds:
+            return max(lo, min(hi, rounded_float(n, bounds)))
         return bool(n) if bounds['type']=='bool' else n
     element = bounds['element']
     values = []
     lower = max(element['lower'], -max(1,n))
     upper = min(element['upper'] if element['upper'] is not None else n, max(1,n))
     if upper < lower: upper = lower
+    shared_magnitude = random_scalar({**element, 'lower':lower}, rng, upper) if bounds.get('uniform-length') else None
     for index in range(n):
         if deadline is not None and index % 256 == 0 and time.monotonic() >= deadline:
             raise GenerationBudgetExpired()
-        values.append(value(element, rng.randint(lower, upper), rng, deadline=deadline))
+        size = shared_magnitude if shared_magnitude is not None else random_scalar({**element, 'lower':lower}, rng, upper)
+        values.append(value(element, size, rng, deadline=deadline))
     if pattern == 'ascending': values.sort()
     elif pattern == 'descending': values.sort(reverse=True)
     elif pattern == 'duplicates': values = [value(element, 0, rng)] * n
     return values
 
 
+def equal_parameter_groups(domains, predicates):
+    """Collect scalar equalities required by conjunctions, never optional arms."""
+    parents = {name: name for name, bounds in domains.items() if 'element' not in bounds}
+    def root(name):
+        while parents[name] != name:
+            name = parents[name]
+        return name
+    def visit(term):
+        if isinstance(term, ast.BoolOp) and isinstance(term.op, ast.And):
+            for child in term.values:
+                visit(child)
+        elif isinstance(term, ast.Compare):
+            for left, operation, right in zip([term.left, *term.comparators], term.ops, term.comparators):
+                if (isinstance(operation, ast.Eq) and isinstance(left, ast.Name)
+                        and isinstance(right, ast.Name) and left.id in parents and right.id in parents):
+                    parents[root(right.id)] = root(left.id)
+    containers = tuple(name for name, bounds in domains.items() if 'element' in bounds)
+    for predicate in predicates:
+        visit(constraint_expression(predicate, tuple(domains), containers))
+    groups = {}
+    for name in parents:
+        groups.setdefault(root(name), []).append(name)
+    return tuple(tuple(names) for names in groups.values() if len(names) > 1)
+
+
+def couple_equal_parameters(arguments, domains, groups, rng, preferred=None):
+    """Share one representable sample across each required equality group."""
+    for names in groups:
+        bounds = [domains[name] for name in names]
+        lower = max(bound['lower'] for bound in bounds)
+        upper = min(bound['upper'] for bound in bounds)
+        floats = [bound for bound in bounds if 'float-bits' in bound]
+        integral = any('float-bits' not in bound for bound in bounds)
+        common = dict(min(floats, key=lambda bound: bound['float-bits']) if floats else bounds[0])
+        if integral:
+            lower, upper = math.ceil(lower), math.floor(upper)
+        common['lower'] = comparison_bound(lower, common, lower=True)
+        common['upper'] = comparison_bound(upper, common, lower=False)
+        if common['lower'] > common['upper']:
+            raise GenerationConstraintUnsatisfied('equal campaign parameters have no common representable value')
+        sample = arguments[preferred if preferred in names else names[0]]
+        if not common['lower'] <= sample <= common['upper']:
+            sample = random_scalar(common, rng)
+        if floats:
+            sample = rounded_float(sample, common)
+        if integral:
+            sample = int(sample)
+        for name in names:
+            arguments[name] = (rounded_float(sample, domains[name]) if 'float-bits' in domains[name]
+                               else bool(sample) if domains[name]['type'] == 'bool' else sample)
+
+
 def inputs(spec, corpus=None, deadline=None):
     rng = random.Random()
     domains = spec['domains']
+    predicates = spec.get('constraints', ())
+    equality_groups = equal_parameter_groups(domains, predicates)
+    def accepted(arguments):
+        return satisfies_constraints(arguments, domains, predicates)
     if spec.get('replay-cases'):
         for arguments in spec['replay-cases']:
-            yield arguments, {'sizes':{name:len(v) if isinstance(v,list) else int(v) for name,v in arguments.items()},'pattern':'captured'}
+            if not accepted(arguments):
+                raise GenerationConstraintUnsatisfied('captured case violates joint parameter constraints')
+            yield arguments, {'sizes':{name:len(v) if isinstance(v,list) else v for name,v in arguments.items()},'pattern':'captured'}
         return
     if spec['mode'] in ('fuzz','differential'):
         for index in range(spec['times']):
-            arguments = {}
-            for name, bounds in domains.items():
-                lo, hi = bounds['lower'], bounds['upper']
-                if index == 0: n = max(lo, min(0, hi)) if hi is not None else lo
-                elif index == 1: n = lo
-                elif index == 2 and hi is not None: n = hi
-                else:
-                    # Unbounded domains grow until the campaign execution budget stops them.
-                    upper = hi if hi is not None else max(lo, 1 << index)
-                    n = rng.randint(lo, upper)
-                arguments[name] = value(bounds, n, rng, deadline=deadline)
-            if corpus and domains and index > 2 and rng.randrange(2):
-                import copy
-                arguments = copy.deepcopy(rng.choice(corpus))
-                name = rng.choice(list(domains)); bounds = domains[name]
-                if isinstance(arguments[name],list) and arguments[name] and 'element' not in bounds['element']:
-                    position=rng.randrange(len(arguments[name]))
-                    arguments[name][position]=rng.randint(bounds['element']['lower'],bounds['element']['upper'])
-                elif 'element' not in bounds:
-                    arguments[name]=rng.randint(bounds['lower'],bounds['upper'])
-            yield arguments, None
+            for attempt in range(1024):
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise GenerationBudgetExpired()
+                arguments = {}
+                for name, bounds in domains.items():
+                    lo, hi = bounds['lower'], bounds['upper']
+                    if attempt == 0 and index == 0: n = max(lo, min(0, hi)) if hi is not None else lo
+                    elif attempt == 0 and index == 1: n = lo
+                    elif attempt == 0 and index == 2 and hi is not None: n = hi
+                    else:
+                        # Rejections use fresh inputs and the original deadline.
+                        upper = hi if hi is not None else max(lo, 1 << index)
+                        n = random_scalar(bounds, rng, upper)
+                    arguments[name] = value(bounds, n, rng, deadline=deadline)
+                mutated_name = None
+                if corpus and domains and index > 2 and rng.randrange(2):
+                    import copy
+                    arguments = copy.deepcopy(rng.choice(corpus))
+                    name = rng.choice(list(domains)); bounds = domains[name]
+                    mutated_name = name
+                    if isinstance(arguments[name],list) and arguments[name] and 'element' not in bounds['element']:
+                        position=rng.randrange(len(arguments[name]))
+                        arguments[name][position]=random_scalar(bounds['element'],rng)
+                    elif 'element' not in bounds:
+                        arguments[name]=random_scalar(bounds,rng)
+                couple_equal_parameters(arguments, domains, equality_groups, rng, mutated_name)
+                if accepted(arguments):
+                    yield arguments, None
+                    break
+            else:
+                raise GenerationConstraintUnsatisfied('no satisfying campaign input found after 1024 attempts; provide captured cases or tighter bounds')
     else:
         streams = {name: iter(magnitudes(bounds)) for name,bounds in domains.items()}
         current = {name: bounds['lower'] for name,bounds in domains.items()}
         while streams:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise GenerationBudgetExpired()
             advanced = []
             for name, stream in list(streams.items()):
                 try: current[name] = next(stream); advanced.append(name)
@@ -146,21 +423,31 @@ def inputs(spec, corpus=None, deadline=None):
             variations.append(dict(current))
             for sizes in variations:
                 for pattern in ('random','ascending','descending','duplicates') if any('element' in d for d in domains.values()) else ('random',):
-                    yield {name:value(bounds,sizes[name],rng,pattern,deadline) for name,bounds in domains.items()}, {'sizes':sizes,'pattern':pattern}
+                    arguments = {name:value(bounds,sizes[name],rng,pattern,deadline) for name,bounds in domains.items()}
+                    if accepted(arguments):
+                        yield arguments, {'sizes':sizes,'pattern':pattern}
 
 
-def encode_inputs(arguments):
+def encode_inputs(arguments, domains=None):
     values = []
-    def flatten(value):
+    def flatten(value, bounds=None):
         if isinstance(value,list):
-            values.append(len(value))
-            for item in value: flatten(item)
-        else: values.append(int(value))
-    for argument in arguments.values(): flatten(argument)
-    return b''.join(struct.pack('=Q', n & ((1<<64)-1)) for n in values)
+            values.append(struct.pack('=Q', len(value)))
+            for item in value: flatten(item, bounds.get('element') if bounds else None)
+        elif bounds and 'float-bits' in bounds or isinstance(value, float):
+            values.append(struct.pack('=d', float(value)))
+        else:
+            values.append(struct.pack('=Q', int(value) & ((1<<64)-1)))
+    for name, argument in arguments.items(): flatten(argument, domains.get(name) if domains else None)
+    return b''.join(values)
 
 
-def reductions(arguments, domains):
+def reductions(arguments, domains, predicates=()):
+    return (candidate for candidate in reduction_candidates(arguments, domains)
+            if satisfies_constraints(candidate, domains, predicates))
+
+
+def reduction_candidates(arguments, domains):
     for name, original in arguments.items():
         bounds = domains[name]
         if isinstance(original, list):
@@ -241,7 +528,7 @@ def run(binary, spec, execute, timeout, env, coverage_file=None):
     budget = timeout
     def invoke(arguments):
         ordered = {name:arguments[name] for name in spec.get('parameters',spec['domains'])}
-        path.write_bytes(encode_inputs(ordered)*len(spec.get('functions',[None])))
+        path.write_bytes(encode_inputs(ordered,spec['domains'])*len(spec.get('functions',[None])))
         metrics.unlink(missing_ok=True); difference.unlink(missing_ok=True)
         if coverage_file: Path(coverage_file).unlink(missing_ok=True)
         settings = {**env,'SEV_CAMPAIGN_INPUT':str(path),'SEV_CAMPAIGN_PROFILE':str(metrics)}
@@ -267,9 +554,13 @@ def run(binary, spec, execute, timeout, env, coverage_file=None):
         return record,hits
     corpus=[]
     generated=iter(inputs(spec,corpus,started+budget))
+    generation_error = None
     while time.monotonic()-started < budget:
         try: arguments,scale=next(generated)
         except (StopIteration, GenerationBudgetExpired): break
+        except GenerationConstraintUnsatisfied as failure:
+            generation_error = str(failure)
+            break
         samples=[]; record={}
         for iteration in range(spec['times']+3 if spec['mode']=='profile' else 1):
             record,hits=invoke(arguments)
@@ -286,7 +577,7 @@ def run(binary, spec, execute, timeout, env, coverage_file=None):
             confirmed,confirmed_hits=invoke(arguments)
             if confirmed['passed']==record['passed'] and confirmed.get('exit')==record.get('exit') and confirmed.get('error')==record.get('error') and confirmed.get('stdout')==record.get('stdout') and confirmed.get('stderr')==record.get('stderr') and new<=confirmed_hits:
                 best=arguments
-                for attempt,candidate in enumerate(reductions(best,spec['domains'])):
+                for attempt,candidate in enumerate(reductions(best,spec['domains'],spec.get('constraints', ()))):
                     if attempt >= 32 or time.monotonic()-started>=2*budget: break
                     trial,trial_hits=invoke(candidate)
                     if trial['passed']==record['passed'] and trial.get('exit')==record.get('exit') and trial.get('error')==record.get('error') and trial.get('stdout')==record.get('stdout') and trial.get('stderr')==record.get('stderr') and (not record['passed'] or new<=trial_hits):
@@ -299,8 +590,10 @@ def run(binary, spec, execute, timeout, env, coverage_file=None):
         if not record['passed']: break
     if coverage_file:
         Path(coverage_file).write_bytes(b''.join(struct.pack('=Q', hit) for hit in sorted(seen)))
-    report = {'passed':bool(records) and all(r['passed'] for r in records),'cases':records,
+    report = {'passed':bool(records) and not generation_error and all(r['passed'] for r in records),'cases':records,
               'budget-seconds':budget,'budget-exhausted':time.monotonic()-started>=budget}
+    if generation_error:
+        report['generation-error'] = generation_error
     if spec['mode']=='profile':
         report['growth']=growth(spec,records)
         report['passed'] = report['passed'] and not any(item['result']=='violated' for item in report['growth'])
@@ -322,7 +615,7 @@ class CampaignTests(unittest.TestCase):
         self.assertEqual(domains['values']['lower'],0)
 
     def test_constraints_are_not_silently_ignored(self):
-        with self.assertRaises(ValueError): constrain({'n':domain('int')}, 'n != 3')
+        with self.assertRaises(ValueError): constrain({'n':domain('int')}, 'abs(n) != 3')
         with self.assertRaises(ValueError): constrain({'n':domain('int')}, '1 < n < 0')
 
     def test_c_encoding_preserves_negative_and_empty_inputs(self):
@@ -397,7 +690,12 @@ def validate_cases(spec, cases):
     def valid(value,bounds):
         if 'element' in bounds:
             return isinstance(value,list) and bounds['lower'] <= len(value) and (bounds['upper'] is None or len(value)<=bounds['upper']) and all(valid(item,bounds['element']) for item in value)
+        if 'float-bits' in bounds:
+            return isinstance(value,(int,float)) and math.isfinite(value) and bounds['lower'] <= value <= bounds['upper'] and math.isfinite(rounded_float(value,bounds))
         return isinstance(value,(int,bool)) and bounds['lower'] <= value <= bounds['upper']
+    def normalize(value,bounds):
+        if 'element' in bounds: return [normalize(item,bounds['element']) for item in value]
+        return rounded_float(value,bounds) if 'float-bits' in bounds else value
     results=[]
     for case in cases:
         if not isinstance(case,list) or len(case)!=len(spec['domains']):
@@ -405,12 +703,199 @@ def validate_cases(spec, cases):
         arguments=dict(zip(spec.get('parameters',spec['domains']),case))
         if not all(valid(arguments[name],bounds) for name,bounds in spec['domains'].items()):
             raise ValueError('captured case violates parameter constraints')
+        arguments = {name:normalize(value,spec['domains'][name]) for name,value in arguments.items()}
+        if not satisfies_constraints(arguments, spec['domains'], spec.get('constraints', ())):
+            raise ValueError('captured case violates joint parameter constraints')
         results.append(arguments)
     return results
 
 
 def growth_regression(spec, cases, metric):
     return captured_regression(spec,cases,'complexity-'+metric,profile=True)
+
+
+class FloatCampaignTests(unittest.TestCase):
+    def test_finite_fractional_generation_and_strict_bounds(self):
+        for annotation in ('float', 'f64', 'f32', 'f16'):
+            domains = {'value':domain(annotation)}
+            predicate = constrain(domains, '-0.5 < value < 0.5')
+            spec = {'mode':'fuzz', 'times':32, 'domains':domains, 'constraints':[predicate]}
+            cases = [arguments['value'] for arguments, _ in inputs(spec)]
+            self.assertEqual(len(cases), 32)
+            self.assertTrue(all(math.isfinite(value) and -0.5 < value < 0.5 for value in cases))
+            self.assertTrue(any(value != int(value) for value in cases))
+
+    def test_float_transport_preserves_fraction_sign_and_list_elements(self):
+        domains = {'value':domain('float'), 'items':domain('list[f32]')}
+        data = encode_inputs({'value':-0.0, 'items':[1.25,-2.5]}, domains)
+        self.assertEqual(data[:8], struct.pack('=d', -0.0))
+        self.assertEqual(struct.unpack('=Qdd', data[8:]), (2,1.25,-2.5))
+        self.assertEqual(struct.unpack('=d', encode_inputs({'value':1}, {'value':domain('f32')})), (1.0,))
+        values = value(domain('list[f32]'), 8, random.Random(17))
+        self.assertTrue(all(isinstance(item,float) and math.isfinite(item) for item in values))
+
+    def test_f32_replay_and_comparisons_use_native_precision(self):
+        domains = {'value':domain('f32')}
+        predicate = constrain(domains, 'value > 0.1')
+        boundary = rounded_float(0.1, domains['value'])
+        self.assertGreater(domains['value']['lower'], boundary)
+        self.assertFalse(satisfies_constraints({'value':boundary}, domains, [predicate]))
+        spec = {'domains':{'value':domain('f32')}}
+        self.assertEqual(validate_cases(spec, [[0.1]]), [{'value':boundary}])
+        for invalid in (math.nan, math.inf, -math.inf, 1e100):
+            with self.assertRaisesRegex(ValueError, 'parameter constraints'):
+                validate_cases(spec, [[invalid]])
+
+    def test_full_float_domain_generation_stays_finite(self):
+        for annotation in ('float', 'f32', 'f16'):
+            bounds = domain(annotation)
+            rng = random.Random(9)
+            self.assertTrue(all(math.isfinite(random_scalar(bounds, rng)) for _ in range(100)))
+
+    def test_native_fractional_replay_uses_mlir_decoding(self):
+        import tempfile
+        from py_compiler.packaging.testing import test_package
+        source = '''def wide(value: float) -> float:
+    if value != 1.25 and value != -2.5:
+        throw Error("wide replay lost its fractional input")
+    return value
+def narrow(value: f32) -> f32:
+    if value != f32(0.1) and value != f32(-2.5):
+        throw Error("narrow replay lost its fractional input")
+    return value
+test "wide fractional replay":
+    replay(wide, cases=[[1.25],[-2.5]])
+test "narrow fractional replay":
+    replay(narrow, cases=[[0.1],[-2.5]])
+'''
+        with tempfile.TemporaryDirectory(prefix='sev-float-campaign-') as directory:
+            root = Path(directory)
+            (root/'lib.sev').write_text(source)
+            (root/'package.json').write_text(json.dumps({'package':{'name':'float-campaign','version':'0.1.0'},'sources':['lib.sev']}))
+            result = test_package(root, timeout=2)
+            self.assertTrue(result['success'], result)
+
+
+class EqualParameterGenerationTests(unittest.TestCase):
+    def test_full_width_equal_parameters_share_samples_and_corpus_mutations(self):
+        for mode in ('fuzz', 'differential'):
+            domains = {name: domain('int') for name in ('left', 'middle', 'right')}
+            predicates = [constrain(domains, 'left == middle'), constrain(domains, 'middle == right')]
+            specification = {'mode': mode, 'times': 32, 'domains': domains, 'constraints': predicates}
+            cases = list(inputs(specification, [{'left': 42, 'middle': 42, 'right': 42}]))
+            self.assertEqual(len(cases), 32)
+            self.assertTrue(all(arguments['left'] == arguments['middle'] == arguments['right']
+                                for arguments, _ in cases))
+            self.assertGreater(len({arguments['left'] for arguments, _ in cases}), 3)
+
+    def test_equal_parameter_groups_intersect_bounds_and_preserve_float_precision(self):
+        for annotations in (('i64', 'i8'), ('f64', 'f32'), ('int', 'f32'), ('bool', 'int')):
+            domains = dict(zip(('left', 'right'), (domain(annotation) for annotation in annotations)))
+            predicates = [constrain(domains, 'left == right')]
+            specification = {'mode': 'fuzz', 'times': 16, 'domains': domains, 'constraints': predicates}
+            cases = list(inputs(specification))
+            self.assertEqual(len(cases), 16)
+            for arguments, _ in cases:
+                self.assertEqual(arguments['left'], arguments['right'])
+                for name, bounds in domains.items():
+                    self.assertLessEqual(bounds['lower'], arguments[name])
+                    self.assertLessEqual(arguments[name], bounds['upper'])
+                    if 'float-bits' in bounds:
+                        self.assertEqual(rounded_float(arguments[name], bounds), arguments[name])
+                    else:
+                        self.assertIsInstance(bounds['lower'], int)
+                        self.assertIsInstance(bounds['upper'], int)
+
+    def test_equalities_in_optional_boolean_arms_do_not_couple_parameters(self):
+        domains = {name: domain('int') for name in ('left', 'middle', 'right')}
+        self.assertEqual(equal_parameter_groups(domains, ['left == middle or middle == right']), ())
+        self.assertEqual(equal_parameter_groups(domains, ['not (left == middle)']), ())
+        self.assertEqual(equal_parameter_groups(domains, ['left == middle == right']),
+                         (('left', 'middle', 'right'),))
+
+
+class JointConstraintTests(unittest.TestCase):
+    def specification(self, mode='fuzz', predicate='low < high'):
+        domains = {'low':domain('int'), 'high':domain('int')}
+        constraints = [constrain(domains, text) for text in
+                       ('0 <= low <= 4', '0 <= high <= 4', predicate)]
+        return {'mode':mode, 'times':32, 'domains':domains, 'constraints':constraints}
+
+    def test_generated_and_mutated_inputs_satisfy_joint_constraints(self):
+        for mode in ('fuzz', 'differential'):
+            spec = self.specification(mode)
+            cases = list(inputs(spec, [{'low':1, 'high':2}], time.monotonic()+1))
+            self.assertEqual(len(cases), 32)
+            self.assertTrue(all(arguments['low'] < arguments['high'] for arguments, _ in cases))
+
+    def test_profile_axes_filter_invalid_pairs(self):
+        cases = list(inputs(self.specification('profile')))
+        self.assertTrue(cases)
+        self.assertTrue(all(arguments['low'] < arguments['high'] for arguments, _ in cases))
+
+    def test_chained_bounds_propagate_in_both_directions(self):
+        domains = {'low':domain('int'), 'high':domain('int')}
+        constrain(domains, '0 <= low < high <= 4')
+        self.assertEqual((domains['low']['lower'], domains['low']['upper']), (0,3))
+        self.assertEqual((domains['high']['lower'], domains['high']['upper']), (1,4))
+        with self.assertRaisesRegex(ValueError, 'empty domain'):
+            constrain(domains, 'low < high and high < low')
+
+    def test_replay_and_shrinking_preserve_the_joint_domain(self):
+        spec = self.specification()
+        self.assertEqual(validate_cases(spec, [[1,2]]), [{'low':1, 'high':2}])
+        with self.assertRaisesRegex(ValueError, 'joint parameter'):
+            validate_cases(spec, [[2,1]])
+        shrunk = list(reductions({'low':1, 'high':2}, spec['domains'], spec['constraints']))
+        self.assertEqual(shrunk, [{'low':0, 'high':2}])
+        spec['replay-cases'] = [{'low':2, 'high':1}]
+        with self.assertRaises(GenerationConstraintUnsatisfied): list(inputs(spec))
+
+    def test_joint_lengths_boolean_branches_and_inequality(self):
+        domains = {'items':domain('list[int]'), 'count':domain('int')}
+        predicate = constrain(domains, 'not (count == 0) and (len(items) < count or count != 2)')
+        self.assertFalse(satisfies_constraints({'items':[], 'count':0}, domains, [predicate]))
+        self.assertFalse(satisfies_constraints({'items':[1,2], 'count':2}, domains, [predicate]))
+        self.assertTrue(satisfies_constraints({'items':[1], 'count':2}, domains, [predicate]))
+
+    def test_impossible_predicates_have_bounded_rejection_and_report_failure(self):
+        import tempfile
+        spec = self.specification(predicate='low != low')
+        with self.assertRaisesRegex(GenerationConstraintUnsatisfied, '1024 attempts'):
+            list(inputs(spec))
+        def execute(*args, **kwargs):
+            self.fail('unsatisfiable inputs must not reach the executable')
+        with tempfile.TemporaryDirectory() as directory:
+            report, discoveries = run(Path(directory)/'test', spec, execute, 1, {})
+        self.assertFalse(report['passed'])
+        self.assertIn('1024 attempts', report['generation-error'])
+        self.assertEqual(discoveries, [])
+        with self.assertRaises(GenerationBudgetExpired):
+            list(inputs(spec, deadline=time.monotonic()-1))
+
+    def test_indexed_constraints_validate_replay_and_shrinking(self):
+        domains = {'items': domain('list[int]'), 'count': domain('int')}
+        predicate = 'items[0] == count'
+        self.assertEqual(constrain(domains, predicate), predicate)
+        specification = {'domains': domains, 'constraints': [predicate]}
+        valid = {'items': [7], 'count': 7}
+        self.assertTrue(satisfies_constraints(valid, domains, [predicate]))
+        self.assertEqual(validate_cases(specification, [[[7], 7]]), [valid])
+
+        for case in ([[7], 8], [[], 7]):
+            with self.subTest(case=case):
+                arguments = dict(zip(('items', 'count'), case))
+                self.assertFalse(satisfies_constraints(arguments, domains, [predicate]))
+                with self.assertRaisesRegex(ValueError, 'joint parameter'):
+                    validate_cases(specification, [case])
+
+        self.assertEqual(list(reductions(valid, domains, [predicate])), [])
+
+    def test_unsupported_constraints_are_diagnostics(self):
+        for predicate in ('abs(count) > 0', 'count.real == 1',
+                          'count + 1 > 0', '__import__("os")', 'unknown < count'):
+            with self.subTest(predicate=predicate), self.assertRaises(ValueError):
+                constrain({'items':domain('list[int]'), 'count':domain('int')}, predicate)
 
 
 class CampaignReplayTests(unittest.TestCase):
@@ -434,13 +919,11 @@ class CampaignReplayTests(unittest.TestCase):
         with self.assertRaises(GenerationBudgetExpired):
             value(domain('list[int]'),10**12,random.Random(),deadline=time.monotonic()-1)
 
-    @unittest.expectedFailure
-    def test_joint_parameter_constraints_pending(self):
+    def test_joint_parameter_constraints_are_retained(self):
         domains={'low':domain('int'),'high':domain('int')}
-        constrain(domains,'low < high')
+        self.assertEqual(constrain(domains,'low < high'), 'low < high')
 
-    @unittest.expectedFailure
-    def test_float_generator_pending(self):
+    def test_float_generator_has_a_finite_domain(self):
         self.assertEqual(domain('float')['type'],'float')
 
     def test_c_callable_campaign_replays_and_persists(self):
@@ -682,3 +1165,32 @@ test "replay independent nonempty inputs":
             self.assertTrue(result['success'],report)
             self.assertEqual(path.read_text(),source)
             self.assertEqual(report['differential-persistence'],[])
+
+
+class RectangularCampaignTests(unittest.TestCase):
+    def test_nested_constraints_generate_valid_rectangles(self):
+        domains = {'grid': domain('list[list[int]]')}
+        predicates = [
+            '0 <= len(grid) <= 6',
+            'all([0 <= len(row) <= 6 for row in grid])',
+            'all([len(row) == len(first(grid)[1]) for row in grid])',
+            'all([all([0 <= cell <= 1 for cell in row]) for row in grid])',
+        ]
+        for predicate in predicates:
+            constrain(domains, predicate)
+        spec = {'domains': domains, 'constraints': predicates, 'mode': 'fuzz', 'times': 40}
+        samples = list(inputs(spec))
+        self.assertEqual(len(samples), 40)
+        self.assertEqual(samples[0][0]['grid'], [])
+        self.assertEqual(len(samples[2][0]['grid']), 6)
+        for arguments, _ in samples:
+            grid = arguments['grid']
+            self.assertTrue(satisfies_constraints(arguments, domains, predicates))
+            self.assertTrue(all(len(row) == len(grid[0]) for row in grid))
+            self.assertTrue(all(cell in (0, 1) for row in grid for cell in row))
+        self.assertFalse(satisfies_constraints({'grid': [[0], [0, 1]]}, domains, predicates))
+        self.assertFalse(satisfies_constraints({'grid': [[2]]}, domains, predicates))
+
+    def test_comprehension_constraints_reject_executable_calls(self):
+        with self.assertRaises(ValueError):
+            constraint_expression('all([exec(cell) for cell in grid])', ('grid',), ('grid',))

@@ -45,6 +45,10 @@ class BlockProvider(Grammar):
     development_scope = False
     required_scope = None
 
+    def lint_rules(self):
+        from py_compiler.frontend.lint.rules import LintRule
+        return (LintRule('G.block.layout', 'source'),)
+
     def bind_scope(self, node, parent=None):
         if self.required_scope and (parent is None or not parent.contains_kind(self.required_scope)):
             raise ValueError(f'{self.spelling} requires {self.required_scope} scope')

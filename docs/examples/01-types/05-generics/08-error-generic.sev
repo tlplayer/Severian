@@ -1,48 +1,50 @@
-# E - Error
-# Attach compiler context while preserving the concrete Error subtype.
-
+'''
+E - Error
+Attach compiler context while preserving the concrete Error subtype.
+'''
 class CompileFailure: Error
     code: u64
 
     def CompileFailure(code_value: u64):
         code := code_value
 
-
 class ContextualError[E]:
     error: E
     pass_id: u64
     offset: usize
 
-
-def contextualize_error[E: Error](error: E, pass_id: u64, offset: usize) -> ContextualError[E]:
+def contextualize_error[E: error](
+    error: E,
+    pass_id: u64,
+    offset: usize,
+) -> ContextualError[E]:
     preserved = copy error
     return ContextualError[E](preserved, pass_id, offset)
-
 
 test:
     contextualized := contextualize_error(CompileFailure(17), 4, 128)
 
-    assert(contextualized.error is CompileFailure)
-    assert(contextualized.error.code == 17)
-    assert(contextualized.pass_id == 4)
-    assert(contextualized.offset == 128)
-
-
+    assert:
+        contextualized.error is CompileFailure
+        contextualized.error.code == 17
+        contextualized.pass_id == 4
+        contextualized.offset == 128
 
 class DetailedFailure: Error
     code: u64
     reason: string
 
 test "context preserves owned fields of the concrete error":
-    original = DetailedFailure(17,"invalid instruction")
-    context = contextualize_error(original,4,128)
-    drop(original)
-    assert(context.error is DetailedFailure)
-    assert(context.error.code == 17)
-    assert(context.error.reason == "invalid instruction")
+    original = DetailedFailure(17, "invalid instruction")
+    context = contextualize_error(original, 4, 128)
+    drop original
+    assert:
+        context.error is DetailedFailure
+        context.error.code == 17
+        context.error.reason == "invalid instruction"
 
 test with compiler "an identical record without Error does not satisfy E":
     reject "does not satisfy Error":
         class OrdinaryRecord:
             code: u64
-        context = contextualize_error(OrdinaryRecord(17),4,128)
+        context = contextualize_error(OrdinaryRecord(17), 4, 128)

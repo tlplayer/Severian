@@ -1,13 +1,16 @@
-
-CONSTANT_VARIABLE = view 1
+CONSTANT_VARIABLE := view 1
 
 def main():
     print(f"The constant variable is:{CONSTANT_VARIABLE}")
 
 test:
     mutable = CONSTANT_VARIABLE
-    # The binding is constant cosntant_binding = 10 is a compiler error 
-    # Mutable is mutable, the int returns a copy by default for these ops, whereas a more complex type might return a view/borrow etc.
+
+    '''
+    The binding is constant cosntant_binding = 10 is a compiler error
+    Mutable is mutable, the int returns a copy by default for these ops,
+    whereas a more complex type might return a view/borrow etc.
+    '''
     constant_binding := mutable
     mutable += 1
     assert(constant_binding == 1)

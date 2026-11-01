@@ -13,9 +13,44 @@ class FrontendResult:
     diagnostics: tuple[Diagnostic, ...]
     templates: tuple = ()
     aliases: tuple = ()
+    source_inputs: tuple = ()
 
 
-def compile_source(path, text, syntax, *, stop_after='mir', interface=None, c_packages=None, debug_path=None):
+def compile_source(path, text, syntax, *, stop_after='mir', interface=None, c_packages=None, debug_path=None, lint=None):
+    # In-memory callers can explicitly request lint. File-backed package and
+    # executable compilation always use it; internal synthesized sources do not
+    # become edits of the user's source file.
+    lint = bool(debug_path) if lint is None else lint
+    if not lint:
+        return _compile_source(path, text, syntax, stop_after=stop_after, interface=interface,
+                               c_packages=c_packages, debug_path=debug_path)
+    from py_compiler.frontend.lint.lint import prepare_source, ResolvedLint
+    from py_compiler.frontend.lint.rules import policy
+    source = SourceFile(path, text, debug_path)
+    try:
+        seen = set()
+        for _ in range(policy()['maximum_passes']):
+            source = prepare_source(source, syntax, c_packages)
+            if source.text in seen:
+                raise Diagnostic('lint', 'resolved fixes form a cycle', source, source.span(0, min(1, len(source.text))))
+            seen.add(source.text)
+            collector = ResolvedLint(source, syntax)
+            result = _compile_source(path, source.text, syntax, stop_after=stop_after, interface=interface,
+                                     c_packages=c_packages, debug_path=debug_path, lint_collector=collector)
+            corrected = collector.finish()
+            if corrected.text == source.text and not collector.changed_imports:
+                return replace(result, source_inputs=tuple((imported.debug_path or imported.path, imported.text)
+                                                           for imported, _ in collector.imports.values()))
+            if collector.changed_imports:
+                seen.discard(source.text)
+            source = corrected
+        raise Diagnostic('lint', 'resolved fixes did not reach a canonical form', source,
+                         source.span(0, min(1, len(source.text))))
+    except Diagnostic as failure:
+        return FrontendResult(failure.source, Program((), ()), (failure,))
+
+
+def _compile_source(path, text, syntax, *, stop_after='mir', interface=None, c_packages=None, debug_path=None, lint_collector=None):
     if stop_after not in ('thir', 'mir'):
         raise ValueError('stop_after must be thir or mir')
     source = SourceFile(path, text, debug_path)
@@ -60,7 +95,7 @@ def compile_source(path, text, syntax, *, stop_after='mir', interface=None, c_pa
 
     phase = 'HIR'
     try:
-        module = resolve(source, root, syntax, Checker, c_packages, interface)
+        module = resolve(source, root, syntax, Checker, c_packages, interface, lint=lint_collector)
         phase = 'THIR'
         typed = prepare(module, interface)
         constants = tuple(o.payload for b in typed.bodies for block in b.blocks for o in block.operations if o.kind == "constant")
@@ -105,6 +140,8 @@ def compile_source(path, text, syntax, *, stop_after='mir', interface=None, c_pa
         aliases = tuple({'name': name, 'target': alias.target}
                         for name, alias in module.context.function_aliases.items()
                         if not alias.prelude and not alias.scope and '.' not in name)
+        aliases += tuple({'kind': 'type', 'name': name, 'target': target}
+                         for name, target in getattr(module.context, 'type_aliases', {}).items())
         return FrontendResult(source, Program(constants, module.submodules, mir.bodies, typed.declarations,
                                               (typed,), (mir,), 'mir'), (), templates, aliases)
     except Diagnostic as failure:

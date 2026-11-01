@@ -1,23 +1,27 @@
 import Y from "../generic/symbol.sev"
 import TokenForm from "../generic/token.sev"
-import B, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import B, BlockContext, BlockSentence, SourceBlockID from "../generic/block.sev"
 import SourceFile, Span from "../source.sev"
 import recognize_keyword from "../keywords/keyword.sev"
 import TypeAnnotation from "../type/annotation.sev"
 import Expression, FunctionParameter from "../function/function.sev"
 import Symbol from "../symbol/symbol.sev"
 
-
 def recognize_unsafe(source: SourceFile, start: u32) -> u32 | None:
     return recognize_keyword(source, start, "unsafe")
 
-
 class UnsafeBlock: Y + B
-    token_forms: list[TokenForm] = [TokenForm("UNSAFE", "unsafe", recognize=recognize_unsafe)]
+    token_forms: list[TokenForm] = [
+        TokenForm(
+            kind = "UNSAFE",
+            spelling = "unsafe",
+            recognize = recognize_unsafe,
+        ),
+    ]
     context: BlockContext = BlockContext()
     span: Span | None = None
     grammars: list[BlockSentence] = []
-    subblocks: list[SourceBlockId] = []
+    subblocks: list[SourceBlockID] = []
     parent: B | None = None
 
     grammar region["unsafe", ":"]() -> B:

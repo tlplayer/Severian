@@ -39,6 +39,12 @@ class Import(DeclarationProvider):
         return False
 
     def parse_header(self, items):
+        from py_compiler.syntax.block.imports_layout import normalize_import_tokens
+        items = normalize_import_tokens(items)
+        if len(items) in (2, 4) and items[1].kind == 'STRING':
+            if len(items) == 4 and (items[2].text != 'as' or items[3].kind != 'IDENTIFIER'):
+                raise ValueError('source import alias requires as name')
+            return tuple(items[1:])
         if any(token.text == 'from' for token in items[1:]):
             position = next(i for i, token in enumerate(items) if token.text == 'from')
             if position != len(items) - 2:
@@ -266,6 +272,12 @@ class Import(DeclarationProvider):
         from py_compiler.syntax.complex.generic import CallableAlias
         for binding in package.get('aliases', ()):
             name = alias + '.' + binding['name']
+            if binding.get('kind') == 'type':
+                target = context.type(qualify(binding['target']))
+                if name in context.types and context.types[name] != target:
+                    raise ValueError('duplicate imported type alias ' + name)
+                context.types[name] = target
+                continue
             if name in context.functions or name in context.function_aliases:
                 raise ValueError('duplicate imported callable alias ' + name)
             context.function_aliases[name] = CallableAlias(alias + '.' + binding['target'], ())
@@ -368,6 +380,8 @@ class FromImport(Import):
     spelling = 'from'
 
     def parse_header(self, items):
+        from py_compiler.syntax.block.imports_layout import normalize_import_tokens
+        items = normalize_import_tokens(items)
         if len(items) < 4 or items[1].kind not in ('IDENTIFIER', 'STRING') or items[2].text != 'import':
             raise ValueError('expected from package_alias import name[, name]')
         names = items[3::2]
@@ -399,6 +413,12 @@ class FromImport(Import):
                 return
             context.loaded_source_imports = loaded | {source_path}
             source = SourceFile(str(source_path), source_path.read_text(), str(source_path))
+            if getattr(context, 'lint', None) is not None:
+                from py_compiler.frontend.lint.lint import prepare_source, rewrite_file
+                original = source.text
+                source = prepare_source(source, context.syntax, context.c_packages)
+                rewrite_file(source_path, original, source.text)
+                context.lint.register_source(source)
             root, diagnostics = parse_blocks(source, lex(source, context.syntax), context.syntax)
             if diagnostics:
                 raise ValueError('source import failed: ' + str(diagnostics[0]))

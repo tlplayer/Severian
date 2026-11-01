@@ -7,10 +7,15 @@ import Program, partition from "../../hir/hir/src/program.sev"
 import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import "../../syntax/recognition.sev" as syntax
 import PointerPrimitive from "../../syntax/primitive/pointer/declarations.sev"
-import MlirTypeBinding, TypeMapping, DeclaredTypeMapping from "../../mlir/src/types.sev"
-import TypedProgram, TypingProvider, RealizationRequest, prepare from "../../thir/src/lib.sev"
+import MLIRTypeBinding,
+    TypeMapping,
+    DeclaredTypeMapping from "../../mlir/src/types.sev"
+import TypedProgram,
+    TypingProvider,
+    RealizationRequest,
+    prepare from "../../thir/src/lib.sev"
 import TyInterner from "../../syntax/type/system.sev"
-import MirState, register from "../../mir/src/lib.sev"
+import MIRState, register from "../../mir/src/lib.sev"
 
 class FrontendState:
     source: SourceFile
@@ -20,17 +25,17 @@ class FrontendState:
     graph: BlockGraph | None = None
     program: Program | None = None
     diagnostics: list[Diagnostic] = []
-    pointer: MlirTypeBinding | None = None
+    pointer: MLIRTypeBinding | None = None
     types: TypeMapping | None = None
     typed: TypedProgram | None = None
-    mir: MirState | None = None
+    mir: MIRState | None = None
 
 trait FrontendStage:
     name: string
     provider: string
     def apply(state: FrontendState) -> absent | Error
 
-class MlirStage: FrontendStage
+class MLIRStage: FrontendStage
     name: string = "mlir"
     provider: string = "sev-compiler-mlir"
     def apply(state: FrontendState) -> absent | Error:
@@ -71,7 +76,7 @@ class ParserStage: FrontendStage
             throw Error("parser rejected source")
         state.graph = result
 
-class HirStage: FrontendStage
+class HIRStage: FrontendStage
     name: string = "hir"
     provider: string = "sev-compiler-hir"
     def apply(state: FrontendState) -> absent | Error:
@@ -80,8 +85,7 @@ class HirStage: FrontendStage
             throw Error("HIR requires parser output")
         state.program = partition(graph)
 
-
-class ThirStage: FrontendStage
+class THIRStage: FrontendStage
     typing: TypingProvider
     interner: TyInterner
     roots: list[RealizationRequest]
@@ -94,10 +98,14 @@ class ThirStage: FrontendStage
         program ?= state.program
         if program == None:
             throw Error("THIR requires HIR output")
-        state.typed = prepare(program, self.interner, self.typing, self.roots)
+        state.typed = prepare(
+            program = program,
+            types = self.interner,
+            provider = self.typing,
+            roots = self.roots,
+        )
 
-
-class MirRegistrationStage: FrontendStage
+class MIRRegistrationStage: FrontendStage
     name: string = "mir-registration"
     provider: string = "sev-compiler-mir"
 
@@ -110,24 +118,28 @@ class MirRegistrationStage: FrontendStage
             throw Error("MIR registration requires the current HIR program")
         state.mir = register(typed)
 
-
 def stages() -> list[FrontendStage]:
-    return [MlirStage(), SyntaxStage(), LexerStage(), ParserStage(), HirStage()]
+    return [MLIRStage(), SyntaxStage(), LexerStage(), ParserStage(), HIRStage()]
 
-
-def typed_stages(typing: TypingProvider, interner: TyInterner, roots: list[RealizationRequest]) -> list[FrontendStage]:
+def typed_stages(
+    typing: TypingProvider,
+    interner: TyInterner,
+    roots: list[RealizationRequest],
+) -> list[FrontendStage]:
     result = stages()
-    result.append(ThirStage(typing, interner, roots))
-    result.append(MirRegistrationStage())
+    result.append(THIRStage(typing, interner, roots))
+    result.append(MIRRegistrationStage())
     return result
-
 
 def inspect(state: FrontendState) -> string | Error:
     program ?= state.program
     if program == None:
         throw Error("frontend has no realized Program")
-    return "Program: " + string(len(program.modules)) + " modules, " + string(len(program.submodules)) + " submodules\n" + program.graph.print()
-
+    return """\
+Program: {len(program.modules)} modules, {string(len(program.submodules),)} sub\
+modules
+{program.graph.print()}\
+"""
 
 test "parser stage requires actual lexer output":
     state = FrontendState(SourceFile(0, "missing.sev", "true"))
@@ -135,18 +147,24 @@ test "parser stage requires actual lexer output":
     assert(result is Error)
     assert(state.graph == None and state.program == None)
 
-
-import hash_typing_fixture from "../../thir/src/lib.sev"
-
+import HashTypingFixture from "../../thir/src/lib.sev"
 
 test "frontend hands typed hash submodules to MIR and clears rejected output":
     types = TyInterner()
-    program, typing, inputs = hash_typing_fixture(types)
-    state = FrontendState(SourceFile(0, "hash.sev", ""), program=program)
-    roots = [RealizationRequest(typing.template.definition, [value]) for value in inputs]
-    stage = ThirStage(typing, types, roots)
+    program, typing, inputs = HashTypingFixture(types)
+    state = FrontendState(
+        source = SourceFile(0, "hash.sev", ""),
+        program = program,
+    )
+    roots = [
+        RealizationRequest(
+            typing.template.definition,
+            [value],
+        ) for value in inputs,
+    ]
+    stage = THIRStage(typing, types, roots)
     stage.apply(state)
-    MirRegistrationStage().apply(state)
+    MIRRegistrationStage().apply(state)
     mir ?= state.mir
     assert(mir != None)
     assert(len(mir.interfaces[0].modules[0].submodules) == 3)

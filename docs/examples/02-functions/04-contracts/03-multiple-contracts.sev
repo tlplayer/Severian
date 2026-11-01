@@ -1,8 +1,4 @@
-def transfer(
-    source: i64,
-    destination: i64,
-    amount: i64,
-) -> (i64,i64) with
+def transfer(source: i64, destination: i64, amount: i64) -> (i64, i64) with
 {
     amount > 0,
     amount <= source,
@@ -16,18 +12,18 @@ def transfer(
 
     return (source, destination)
 
-
 test "transfer":
-    balances = transfer(10,10,10)
+    balances = transfer(10, 10, 10)
 
     assert(balances[0] == 0)
     assert(balances[1] == 20)
 
 test "transfer preserves the total across partial movement":
     balances = transfer(25, 7, 9)
-    assert(balances[0] == 16)
-    assert(balances[1] == 16)
-    assert(balances[0] + balances[1] == 32)
+    assert:
+        balances[0] == 16
+        balances[1] == 16
+        balances[0] + balances[1] == 32
 
 test "transfer rejects zero amount":
     throws "prefix contract failed":

@@ -1,10 +1,24 @@
 import ForKeyword from "block/for.sev"
 import ThrowKeyword from "keywords/throw.sev"
-import CaptureContract, DeclarationSource, DeclaredConstraint, DeclaredGrammarField, GrammarCallable, GrammarDeclarationContract from "grammar/declaration.sev"
+import CaptureContract,
+    DeclarationSource,
+    DeclaredConstraint,
+    DeclaredGrammarField,
+    GrammarCallable,
+    GrammarDeclarationContract from "grammar/declaration.sev"
 import TypeAnnotation, TypeAnnotationKind from "type/annotation.sev"
-import DefinitionID, DeclarationId from "source.sev"
-import CapturedGrammar, GrammarContext, capture_one, capture_many, captures_ready, context_field, context_value, context_receiver, context_receiver_state, match_declared_grammar from "../frontend/parser/sequence.sev"
-import LiteralValue, literal_value from "grammar/resolution.sev"
+import DefinitionID, DeclarationID from "source.sev"
+import CapturedGrammar,
+    GrammarContext,
+    capture_one,
+    capture_many,
+    captures_ready,
+    context_field,
+    context_value,
+    context_receiver,
+    context_receiver_state,
+    match_declared_grammar from "../frontend/parser/sequence.sev"
+import LiteralValue, LiteralValue from "grammar/resolution.sev"
 import ProofResult from "constraint/model.sev"
 import Y from "generic/symbol.sev"
 import Diagnostic from "primitive/error/diagnostic.sev"
@@ -15,8 +29,8 @@ import Span from "../frontend/source/source.sev"
 import SentenceField, TermRole from "grammar/grammar.sev"
 import GrammarMatcher, GrammarMatch from "../frontend/parser/contract.sev"
 import TokenTerm from "generic/token.sev"
-import match_declared_token, match_contextual_token from "../frontend/parser/match.sev"
-
+import match_declared_token,
+    match_contextual_token from "../frontend/parser/match.sev"
 
 import Equal from "symbol/equal.sev"
 import ColonEqual from "symbol/colon_equal.sev"
@@ -66,8 +80,17 @@ import Dot from "symbol/dot.sev"
 import Range from "symbol/range.sev"
 import Ellipsis from "symbol/ellipsis.sev"
 import At from "symbol/at.sev"
-import Identifier, StringSymbol, Character, BlockString, FormattedString, FormattedBlockString, Comment, Indent, Space, Newline, EndOfFile from "symbol/forms.sev"
-
+import Identifier,
+    StringSymbol,
+    Character,
+    BlockString,
+    FormattedString,
+    FormattedBlockString,
+    Comment,
+    Indent,
+    Space,
+    Newline,
+    EndOfFile from "symbol/forms.sev"
 
 import NotKeyword from "keywords/not.sev"
 import CopyKeyword from "keywords/copy.sev"
@@ -80,151 +103,754 @@ import WhileKeyword from "block/while.sev"
 import IsKeyword from "keywords/is.sev"
 import EnumKeyword from "block/enum.sev"
 
-
 # Registration retains the owner's arrangement, recognition, and type contract.
 class RegisteredGrammar:
     syntax: Y
     result: type | None
-    recognize: ((Window) -> LexicalMatch | None | Diagnostic) | None
+    recognize:(Window -> LexicalMatch | None | Diagnostic) | None
     sequence: list[SentenceField] = []
     match_tokens: GrammarMatcher | None = None
     token_form: bool = false
     capture_types: list[type] = []
     repetitions: list[int] = []
-    accepts: ((list[CapturedGrammar], GrammarContext) -> ProofResult | Diagnostic) | None = None
-    construct: ((list[CapturedGrammar], GrammarContext) -> LiteralValue | Diagnostic) | None = None
+    accepts:((
+        list[CapturedGrammar],
+        GrammarContext,
+    ) -> ProofResult | Diagnostic) | None = None
+    construct:((
+        list[CapturedGrammar],
+        GrammarContext,
+    ) -> LiteralValue | Diagnostic) | None = None
     declaration: GrammarDeclarationContract | None = None
-    match_context: ((list[TokenTerm], GrammarContext) -> GrammarMatch | None | Diagnostic) | None = None
+    match_context:((
+        list[TokenTerm],
+        GrammarContext,
+    ) -> GrammarMatch | None | Diagnostic) | None = None
 
     def has_parser_adapter() -> bool:
-        return self.match_tokens != None or self.construct != None or self.match_context != None
+        return
+            self.match_tokens
+            != None
+            or self.construct
+            != None
+            or self.match_context
+            != None
 
-
-# Discovery constructs declaration metadata on demand, after imports resolve.
-# The compiler appends declaration-generated entries to this return value.
+'''
+Discovery constructs declaration metadata on demand, after imports resolve.
+The compiler appends declaration-generated entries to this return value.
+'''
 def registered_grammars() -> list[(Y, RegisteredGrammar)]:
     entries: list[(Y, RegisteredGrammar)] = [
-        (ForKeyword(), RegisteredGrammar(ForKeyword(), None, None, token_form=true)),
-        (ThrowKeyword(), RegisteredGrammar(ThrowKeyword(), None, None, token_form=true)),
-        (NotKeyword(), RegisteredGrammar(NotKeyword(), None, None, token_form=true)),
-        (CopyKeyword(), RegisteredGrammar(CopyKeyword(), None, None, token_form=true)),
-        (MoveKeyword(), RegisteredGrammar(MoveKeyword(), None, None, token_form=true)),
-        (InKeyword(), RegisteredGrammar(InKeyword(), None, None, token_form=true)),
-        (AndKeyword(), RegisteredGrammar(AndKeyword(), None, None, token_form=true)),
-        (OrKeyword(), RegisteredGrammar(OrKeyword(), None, None, token_form=true)),
-        (IfKeyword(), RegisteredGrammar(IfKeyword(), None, None, token_form=true)),
-        (WhileKeyword(), RegisteredGrammar(WhileKeyword(), None, None, token_form=true)),
-        (IsKeyword(), RegisteredGrammar(IsKeyword(), None, None, token_form=true)),
-        (EnumKeyword(), RegisteredGrammar(EnumKeyword(), None, None, token_form=true)),
-        (Equal(), RegisteredGrammar(Equal(), None, None, token_form=true)),
-        (ColonEqual(), RegisteredGrammar(ColonEqual(), None, None, token_form=true)),
-        (QuestionEqual(), RegisteredGrammar(QuestionEqual(), None, None, token_form=true)),
-        (Equality(), RegisteredGrammar(Equality(), None, None, token_form=true)),
-        (NotEqual(), RegisteredGrammar(NotEqual(), None, None, token_form=true)),
-        (Less(), RegisteredGrammar(Less(), None, None, token_form=true)),
-        (LessEqual(), RegisteredGrammar(LessEqual(), None, None, token_form=true)),
-        (Greater(), RegisteredGrammar(Greater(), None, None, token_form=true)),
-        (GreaterEqual(), RegisteredGrammar(GreaterEqual(), None, None, token_form=true)),
-        (Plus(), RegisteredGrammar(Plus(), None, None, token_form=true)),
-        (Minus(), RegisteredGrammar(Minus(), None, None, token_form=true)),
-        (Star(), RegisteredGrammar(Star(), None, None, token_form=true)),
-        (Slash(), RegisteredGrammar(Slash(), None, None, token_form=true)),
-        (FloorDivide(), RegisteredGrammar(FloorDivide(), None, None, token_form=true)),
-        (Percent(), RegisteredGrammar(Percent(), None, None, token_form=true)),
-        (Power(), RegisteredGrammar(Power(), None, None, token_form=true)),
-        (PlusEqual(), RegisteredGrammar(PlusEqual(), None, None, token_form=true)),
-        (MinusEqual(), RegisteredGrammar(MinusEqual(), None, None, token_form=true)),
-        (StarEqual(), RegisteredGrammar(StarEqual(), None, None, token_form=true)),
-        (SlashEqual(), RegisteredGrammar(SlashEqual(), None, None, token_form=true)),
-        (FloorDivideEqual(), RegisteredGrammar(FloorDivideEqual(), None, None, token_form=true)),
-        (PercentEqual(), RegisteredGrammar(PercentEqual(), None, None, token_form=true)),
-        (Ampersand(), RegisteredGrammar(Ampersand(), None, None, token_form=true)),
-        (Pipe(), RegisteredGrammar(Pipe(), None, None, token_form=true)),
-        (Caret(), RegisteredGrammar(Caret(), None, None, token_form=true)),
-        (Bang(), RegisteredGrammar(Bang(), None, None, token_form=true)),
-        (LeftShift(), RegisteredGrammar(LeftShift(), None, None, token_form=true)),
-        (RightShift(), RegisteredGrammar(RightShift(), None, None, token_form=true)),
-        (AmpersandEqual(), RegisteredGrammar(AmpersandEqual(), None, None, token_form=true)),
-        (PipeEqual(), RegisteredGrammar(PipeEqual(), None, None, token_form=true)),
-        (CaretEqual(), RegisteredGrammar(CaretEqual(), None, None, token_form=true)),
-        (LeftShiftEqual(), RegisteredGrammar(LeftShiftEqual(), None, None, token_form=true)),
-        (RightShiftEqual(), RegisteredGrammar(RightShiftEqual(), None, None, token_form=true)),
-        (Arrow(), RegisteredGrammar(Arrow(), None, None, token_form=true)),
-        (ApproxArrow(), RegisteredGrammar(ApproxArrow(), None, None, token_form=true)),
-        (Conversion(), RegisteredGrammar(Conversion(), None, None, token_form=true)),
-        (LeftParen(), RegisteredGrammar(LeftParen(), None, None, token_form=true)),
-        (RightParen(), RegisteredGrammar(RightParen(), None, None, token_form=true)),
-        (LeftBracket(), RegisteredGrammar(LeftBracket(), None, None, token_form=true)),
-        (RightBracket(), RegisteredGrammar(RightBracket(), None, None, token_form=true)),
-        (LeftBrace(), RegisteredGrammar(LeftBrace(), None, None, token_form=true)),
-        (RightBrace(), RegisteredGrammar(RightBrace(), None, None, token_form=true)),
-        (Colon(), RegisteredGrammar(Colon(), None, None, token_form=true)),
-        (Comma(), RegisteredGrammar(Comma(), None, None, token_form=true)),
-        (Dot(), RegisteredGrammar(Dot(), None, None, token_form=true)),
-        (Range(), RegisteredGrammar(Range(), None, None, token_form=true)),
-        (Ellipsis(), RegisteredGrammar(Ellipsis(), None, None, token_form=true)),
-        (At(), RegisteredGrammar(At(), None, None, token_form=true)),
-        (StringSymbol(), RegisteredGrammar(StringSymbol(), None, None, token_form=true)),
-        (Character(), RegisteredGrammar(Character(), None, None, token_form=true)),
-        (BlockString(), RegisteredGrammar(BlockString(), None, None, token_form=true)),
-        (FormattedString(), RegisteredGrammar(FormattedString(), None, None, token_form=true)),
-        (FormattedBlockString(), RegisteredGrammar(FormattedBlockString(), None, None, token_form=true)),
-        (Comment(), RegisteredGrammar(Comment(), None, None, token_form=true)),
-        (Indent(), RegisteredGrammar(Indent(), None, None, token_form=true)),
-        (Space(), RegisteredGrammar(Space(), None, None, token_form=true)),
-        (Newline(), RegisteredGrammar(Newline(), None, None, token_form=true)),
-        (EndOfFile(), RegisteredGrammar(EndOfFile(), None, None, token_form=true)),
-        (Identifier(), RegisteredGrammar(Identifier(), None, None, token_form=true)),
+        (
+            ForKeyword(),
+            RegisteredGrammar(
+                syntax = ForKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            ThrowKeyword(),
+            RegisteredGrammar(
+                syntax = ThrowKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            NotKeyword(),
+            RegisteredGrammar(
+                syntax = NotKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            CopyKeyword(),
+            RegisteredGrammar(
+                syntax = CopyKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            MoveKeyword(),
+            RegisteredGrammar(
+                syntax = MoveKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            InKeyword(),
+            RegisteredGrammar(
+                syntax = InKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            AndKeyword(),
+            RegisteredGrammar(
+                syntax = AndKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            OrKeyword(),
+            RegisteredGrammar(
+                syntax = OrKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            IfKeyword(),
+            RegisteredGrammar(
+                syntax = IfKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            WhileKeyword(),
+            RegisteredGrammar(
+                syntax = WhileKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            IsKeyword(),
+            RegisteredGrammar(
+                syntax = IsKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            EnumKeyword(),
+            RegisteredGrammar(
+                syntax = EnumKeyword(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Equal(),
+            RegisteredGrammar(
+                syntax = Equal(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            ColonEqual(),
+            RegisteredGrammar(
+                syntax = ColonEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            QuestionEqual(),
+            RegisteredGrammar(
+                syntax = QuestionEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Equality(),
+            RegisteredGrammar(
+                syntax = Equality(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            NotEqual(),
+            RegisteredGrammar(
+                syntax = NotEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Less(),
+            RegisteredGrammar(
+                syntax = Less(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            LessEqual(),
+            RegisteredGrammar(
+                syntax = LessEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Greater(),
+            RegisteredGrammar(
+                syntax = Greater(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            GreaterEqual(),
+            RegisteredGrammar(
+                syntax = GreaterEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Plus(),
+            RegisteredGrammar(
+                syntax = Plus(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Minus(),
+            RegisteredGrammar(
+                syntax = Minus(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Star(),
+            RegisteredGrammar(
+                syntax = Star(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Slash(),
+            RegisteredGrammar(
+                syntax = Slash(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            FloorDivide(),
+            RegisteredGrammar(
+                syntax = FloorDivide(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Percent(),
+            RegisteredGrammar(
+                syntax = Percent(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Power(),
+            RegisteredGrammar(
+                syntax = Power(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            PlusEqual(),
+            RegisteredGrammar(
+                syntax = PlusEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            MinusEqual(),
+            RegisteredGrammar(
+                syntax = MinusEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            StarEqual(),
+            RegisteredGrammar(
+                syntax = StarEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            SlashEqual(),
+            RegisteredGrammar(
+                syntax = SlashEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            FloorDivideEqual(),
+            RegisteredGrammar(
+                syntax = FloorDivideEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            PercentEqual(),
+            RegisteredGrammar(
+                syntax = PercentEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Ampersand(),
+            RegisteredGrammar(
+                syntax = Ampersand(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Pipe(),
+            RegisteredGrammar(
+                syntax = Pipe(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Caret(),
+            RegisteredGrammar(
+                syntax = Caret(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Bang(),
+            RegisteredGrammar(
+                syntax = Bang(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            LeftShift(),
+            RegisteredGrammar(
+                syntax = LeftShift(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            RightShift(),
+            RegisteredGrammar(
+                syntax = RightShift(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            AmpersandEqual(),
+            RegisteredGrammar(
+                syntax = AmpersandEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            PipeEqual(),
+            RegisteredGrammar(
+                syntax = PipeEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            CaretEqual(),
+            RegisteredGrammar(
+                syntax = CaretEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            LeftShiftEqual(),
+            RegisteredGrammar(
+                syntax = LeftShiftEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            RightShiftEqual(),
+            RegisteredGrammar(
+                syntax = RightShiftEqual(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Arrow(),
+            RegisteredGrammar(
+                syntax = Arrow(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            ApproxArrow(),
+            RegisteredGrammar(
+                syntax = ApproxArrow(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Conversion(),
+            RegisteredGrammar(
+                syntax = Conversion(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            LeftParen(),
+            RegisteredGrammar(
+                syntax = LeftParen(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            RightParen(),
+            RegisteredGrammar(
+                syntax = RightParen(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            LeftBracket(),
+            RegisteredGrammar(
+                syntax = LeftBracket(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            RightBracket(),
+            RegisteredGrammar(
+                syntax = RightBracket(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            LeftBrace(),
+            RegisteredGrammar(
+                syntax = LeftBrace(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            RightBrace(),
+            RegisteredGrammar(
+                syntax = RightBrace(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Colon(),
+            RegisteredGrammar(
+                syntax = Colon(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Comma(),
+            RegisteredGrammar(
+                syntax = Comma(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Dot(),
+            RegisteredGrammar(
+                syntax = Dot(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Range(),
+            RegisteredGrammar(
+                syntax = Range(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Ellipsis(),
+            RegisteredGrammar(
+                syntax = Ellipsis(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            At(),
+            RegisteredGrammar(
+                syntax = At(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            StringSymbol(),
+            RegisteredGrammar(
+                syntax = StringSymbol(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Character(),
+            RegisteredGrammar(
+                syntax = Character(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            BlockString(),
+            RegisteredGrammar(
+                syntax = BlockString(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            FormattedString(),
+            RegisteredGrammar(
+                syntax = FormattedString(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            FormattedBlockString(),
+            RegisteredGrammar(
+                syntax = FormattedBlockString(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Comment(),
+            RegisteredGrammar(
+                syntax = Comment(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Indent(),
+            RegisteredGrammar(
+                syntax = Indent(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Space(),
+            RegisteredGrammar(
+                syntax = Space(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Newline(),
+            RegisteredGrammar(
+                syntax = Newline(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            EndOfFile(),
+            RegisteredGrammar(
+                syntax = EndOfFile(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
+        (
+            Identifier(),
+            RegisteredGrammar(
+                syntax = Identifier(),
+                result = None,
+                recognize = None,
+                token_form = true,
+            ),
+        ),
     ]
     for owner in prelude_token_owners():
-        entries.append((owner, RegisteredGrammar(owner, None, None, token_form=true)))
+        entries.append(
+            (
+                owner,
+                RegisteredGrammar(
+                    syntax = owner,
+                    result = None,
+                    recognize = None,
+                    token_form = true,
+                ),
+            ),
+        )
     return entries
-
-
 
 @compiler_grammar_registry
 def registry(result: type | None = None) -> list[(Y, RegisteredGrammar)]:
     entries: list[(Y, RegisteredGrammar)] = []
     for label, sequence in registered_grammars():
-        # Optional exact lookup is retained for legacy adapters. Discovery uses
-        # registry() and reads declaration.result; matching owns applicability.
+
+        '''
+        Optional exact lookup is retained for legacy adapters. Discovery uses
+        registry() and reads declaration.result; matching owns applicability.
+        '''
         if result == None or sequence.result == result:
             entries.append((label, sequence))
     return entries
 
-
-def grammar_declaration(definition: DefinitionID) -> GrammarDeclarationContract | None:
+def grammar_declaration(
+    definition: DefinitionID,
+) -> GrammarDeclarationContract | None:
     for label, grammar in registry():
         declaration = grammar.declaration
-        if declaration != None and declaration.callable.definition == definition:
+        if declaration != None
+            and declaration.callable.definition == definition:
             return declaration
     return None
-
 
 import SyntaxDeclaration from "generic/declaration.sev"
 import syntax_prelude, prelude_token_owners from "prelude.sev"
 
-
 def recognition_order() -> list[SyntaxDeclaration]:
     return syntax_prelude()
-
-
 
 import F from "generic/terms.sev"
 import B from "generic/block.sev"
 
-
 def registry_test_no_match(input: Window) -> LexicalMatch | None | Diagnostic:
     return None
-
 
 test "registry exposes all grammars and filters by the requested type contract":
     function_label = SyntaxDeclaration("registry-test.sev", "function")
     block_label = SyntaxDeclaration("registry-test.sev", "block")
-    function_sequence = RegisteredGrammar(function_label, F, registry_test_no_match, [SentenceField.Literal("call")])
-    block_sequence = RegisteredGrammar(block_label, B, registry_test_no_match, [SentenceField.Literal("block")])
+    function_sequence = RegisteredGrammar(
+        syntax = function_label,
+        result = F,
+        recognize = registry_test_no_match,
+        sequence = [SentenceField.Literal("call")],
+    )
+    block_sequence = RegisteredGrammar(
+        syntax = block_label,
+        result = B,
+        recognize = registry_test_no_match,
+        sequence = [SentenceField.Literal("block")],
+    )
 
-    declared = [(function_label, function_sequence), (block_label, block_sequence)]
+    declared = [
+        (function_label, function_sequence),
+        (block_label, block_sequence),
+    ]
     mock(registered_grammars() -> declared)
 
     grammars = registry()

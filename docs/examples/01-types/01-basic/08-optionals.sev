@@ -1,4 +1,3 @@
-
 def find_name(found: bool) -> string | None:
     if found:
         return "Severian"
@@ -6,15 +5,19 @@ def find_name(found: bool) -> string | None:
     return None
 
 def main():
-    #Sometimes values may be present so we wrap them in an optional
-    optional_name = find_name(false)    
-    #Other times, there is a 99.99% probability of being present (os.ls() for example)
-    #so there's no question just take the value or throw an error
+
+    # Sometimes values may be present so we wrap them in an optional
+    optional_name = find_name(false)
+
+    '''
+    Other times, there is a 99.99% probability of being present (os.ls() for
+    example)
+    so there's no question just take the value or throw an error
+    '''
     known_name: string = find_name(true) else throw Error("expected a name")
 
     # The fallback is evaluated only when the optional is absent.
     handled_name: string = find_name(false) else "default name"
-
 
     if not optional_name.has_value:
         print("No name found")
@@ -22,13 +25,10 @@ def main():
         throw Error("name is not to be found")
     print(known_name)
 
-
 test with integ:
     main()
     assert("No name found" in stdout)
     assert("Severian" in stdout)
-
-
 
 test "missing optional throws the requested error":
     throws "name is not to be found":
@@ -57,14 +57,14 @@ test "fallback effects happen only on the absent branch":
 test "fallback result owns its string after dropping the optional":
     source = find_name(true)
     selected = source else "fallback"
-    drop(source)
+    drop source
     assert(selected == "Severian")
 
 test "fallback result copies a borrowed default":
     source = find_name(false)
     default_name = "fallback"
     selected = source else default_name
-    drop(default_name)
+    drop default_name
     assert(selected == "fallback")
 
 test with compiler "fallback must have the present type":
@@ -75,10 +75,10 @@ test "zero false and empty strings remain present values":
     number: int | None = 0
     flag: bool | None = false
     text: string | None = ""
-    assert((number else 99) == 0)
-    assert((flag else true) == false)
-    assert((text else "missing") == "")
-
+    assert:
+        (number else 99) == 0
+        (flag else true) == false
+        (text else "missing") == ""
 
 test with compiler "optional pointer fallback cannot escape local storage":
     reject:
@@ -90,17 +90,17 @@ test with compiler "optional pointer fallback cannot escape local storage":
                 selected = optional else address
                 return selected
 
-
 test "pointer fallback borrows either source without freeing it":
     unsafe:
-        left = tensor[int](tuple[int,1](7))
-        right = tensor[int](tuple[int,1](9))
+        left = tensor[int](tuple[int, 1](7))
+        right = tensor[int](tuple[int, 1](9))
         left_pointer = &left[0]
         right_pointer = &right[0]
         present: pointer[int] | None = left_pointer
         missing: pointer[int] | None = None
         selected = present else right_pointer
         defaulted = missing else right_pointer
-        assert(selected[0] == 7)
-        assert(defaulted[0] == 9)
-        assert(left[0] == 7 and right[0] == 9)
+        assert:
+            selected[0] == 7
+            defaulted[0] == 9
+            left[0] == 7 and right[0] == 9

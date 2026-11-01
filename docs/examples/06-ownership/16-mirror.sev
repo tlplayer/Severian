@@ -1,7 +1,7 @@
-from collections import equal
+from collections import Equal
 
 test with profile "mirrors retain storage until a writer detaches":
-    owner = array[int,1024]()
+    owner = array[int, 1024]()
     owner[0] = 42
     before = allocations
     first = mirror owner
@@ -12,50 +12,36 @@ test with profile "mirrors retain storage until a writer detaches":
 
 test with compiler "conditional mutation cannot authorize a mirror chain":
     reject:
-        owner = array[int,2]([1,2])
+        owner = array[int, 2]([1, 2])
         first = mirror owner
         if false:
             first[0] = 3
         second = mirror first
 
-
 '''
 # Mirror ownership
-
 `mirror` creates a persistent read-sharing relationship with one owner.
-
 ```text
-        owner
-      /   |   \
- mirror mirror mirror
-
- Post mutation
+owner
+/   |   \
+mirror mirror mirror
+Post mutation
 owner's mutated copy
-
-
- owner mirror
-      /   |   \
- mirror mirror mirror
+owner mirror
+/   |   \
+mirror mirror mirror
 ```
-
 A mirror reads the same storage as its owner until either side mutates.
-
 On the first write, the writer receives an independent copy and the mirror
 relationship is moved to a new donor to avoid making NxReader copies.
-
 Mirrors never form chains:
-
 ```text
 owner -> mirror -> mirror    # invalid
 ```
-
 An owner may have any number of mirrors.
-
 After a mirror detaches because it writes, the detached value becomes an owner
 and may itself be mirrored.
 '''
-
-
 test "owner can have many mirrors":
     owner := array[i32, 4]([1, 2, 3, 4])
 
@@ -63,36 +49,35 @@ test "owner can have many mirrors":
     b := mirror owner
     c := mirror owner
 
-    assert(a[0] == 1)
-    assert(b[1] == 2)
-    assert(c[2] == 3)
-
-    assert(a == owner)
-    assert(b == owner)
-    assert(c == owner)
-
+    assert:
+        a[0] == 1
+        b[1] == 2
+        c[2] == 3
+        a == owner
+        b == owner
+        c == owner
 
 test "mirror reads observe the owner while storage is unchanged":
     owner := array[i32, 4]([1, 2, 3, 4])
-    snapshot :=  mirror owner
+    snapshot := mirror owner
 
-    assert(snapshot[0] == owner[0])
-    assert(snapshot[1] == owner[1])
-    assert(snapshot[2] == owner[2])
-    assert(snapshot[3] == owner[3])
-
+    assert:
+        snapshot[0] == owner[0]
+        snapshot[1] == owner[1]
+        snapshot[2] == owner[2]
+        snapshot[3] == owner[3]
 
 test "writing a mirror detaches it":
     owner := array[i32, 4]([1, 2, 3, 4])
-    snapshot :=  mirror owner
+    snapshot := mirror owner
 
     snapshot[0] = 99
 
-    assert(owner[0] == 1)
-    assert(snapshot[0] == 99)
-    assert(owner[1] == 2)
-    assert(snapshot[1] == 2)
-
+    assert:
+        owner[0] == 1
+        snapshot[0] == 99
+        owner[1] == 2
+        snapshot[1] == 2
 
 test "detaching one mirror does not affect sibling mirrors":
     owner := array[i32, 4]([1, 2, 3, 4])
@@ -102,10 +87,10 @@ test "detaching one mirror does not affect sibling mirrors":
 
     left[0] = 99
 
-    assert(left[0] == 99)
-    assert(owner[0] == 1)
-    assert(right[0] == 1)
-
+    assert:
+        left[0] == 99
+        owner[0] == 1
+        right[0] == 1
 
 test "owner write preserves mirror snapshot":
     owner := array[i32, 4]([1, 2, 3, 4])
@@ -115,10 +100,10 @@ test "owner write preserves mirror snapshot":
 
     owner[0] = 99
 
-    assert(owner[0] == 99)
-    assert(left[0] == 1)
-    assert(right[0] == 1)
-
+    assert:
+        owner[0] == 99
+        left[0] == 1
+        right[0] == 1
 
 test "owner can continue writing after detaching from mirrors":
     owner := array[i32, 3]([1, 2, 3])
@@ -127,11 +112,11 @@ test "owner can continue writing after detaching from mirrors":
     owner[0] = 10
     owner[1] = 20
 
-    assert(owner[0] == 10)
-    assert(owner[1] == 20)
-    assert(snapshot[0] == 1)
-    assert(snapshot[1] == 2)
-
+    assert:
+        owner[0] == 10
+        owner[1] == 20
+        snapshot[0] == 1
+        snapshot[1] == 2
 
 test "mirror becomes an owner after first write":
     root := array[i32, 3]([1, 2, 3])
@@ -141,10 +126,10 @@ test "mirror becomes an owner after first write":
 
     child := mirror branch
 
-    assert(root[0] == 1)
-    assert(branch[0] == 10)
-    assert(child[0] == 10)
-
+    assert:
+        root[0] == 1
+        branch[0] == 10
+        child[0] == 10
 
 test "new mirror of detached owner follows detached storage":
     root := array[i32, 3]([1, 2, 3])
@@ -155,33 +140,31 @@ test "new mirror of detached owner follows detached storage":
 
     branch[1] = 20
 
-    assert(root[0] == 1)
-    assert(root[1] == 2)
-    assert(branch[0] == 10)
-    assert(branch[1] == 20)
-    assert(child[0] == 10)
-    assert(child[1] == 2)
-
+    assert:
+        root[0] == 1
+        root[1] == 2
+        branch[0] == 10
+        branch[1] == 20
+        child[0] == 10
+        child[1] == 2
 
 test "dropping a mirror does not drop owner storage":
     owner := array[i32, 2]([10, 20])
-    snapshot :=  mirror owner
+    snapshot := mirror owner
 
     drop snapshot
 
     assert(owner[0] == 10)
     assert(owner[1] == 20)
 
-
 test "dropping owner keeps mirrored snapshot alive":
     owner := array[i32, 2]([10, 20])
-    snapshot :=  mirror owner
+    snapshot := mirror owner
 
     drop owner
 
     assert(snapshot[0] == 10)
     assert(snapshot[1] == 20)
-
 
 test with compiler "cannot mirror a mirror":
     reject:
@@ -189,18 +172,16 @@ test with compiler "cannot mirror a mirror":
         first := mirror owner
         second := mirror first
 
-
 test with compiler "mirror remains read-shared until mutation":
     accept:
         owner := array[i32, 4]([1, 2, 3, 4])
-        snapshot :=  mirror owner
+        snapshot := mirror owner
 
         x := snapshot[0]
         y := snapshot[1]
 
         assert(x == 1)
         assert(y == 2)
-
 
 test with compiler "detached mirror may be mirrored":
     accept:
@@ -213,7 +194,6 @@ test with compiler "detached mirror may be mirrored":
 
         assert(child[0] == 9)
 
-
 test "mirror copy-on-write preserves value semantics":
     original := array[i32, 4]([1, 2, 3, 4])
 
@@ -225,11 +205,11 @@ test "mirror copy-on-write preserves value semantics":
     b[1] = 20
     c[2] = 30
 
-    assert(original == array[i32, 4]([1, 2, 3, 4]))
-    assert(a == array[i32, 4]([10, 2, 3, 4]))
-    assert(b == array[i32, 4]([1, 20, 3, 4]))
-    assert(c == array[i32, 4]([1, 2, 30, 4]))
-
+    assert:
+        original == array[i32, 4]([1, 2, 3, 4])
+        a == array[i32, 4]([10, 2, 3, 4])
+        b == array[i32, 4]([1, 20, 3, 4])
+        c == array[i32, 4]([1, 2, 30, 4])
 
 test "mirror graph remains one level":
     root := array[i32, 2]([1, 2])
@@ -242,8 +222,9 @@ test "mirror graph remains one level":
     a1 := mirror a
     a2 := mirror a
 
-    assert(root == array[i32, 2]([1, 2]))
-    assert(b == array[i32, 2]([1, 2]))
-    assert(a == array[i32, 2]([10, 2]))
-    assert(a1 == array[i32, 2]([10, 2]))
-    assert(a2 == array[i32, 2]([10, 2]))
+    assert:
+        root == array[i32, 2]([1, 2])
+        b == array[i32, 2]([1, 2])
+        a == array[i32, 2]([10, 2])
+        a1 == array[i32, 2]([10, 2])
+        a2 == array[i32, 2]([10, 2])

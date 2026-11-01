@@ -58,9 +58,17 @@ class DemandPackages(dict):
         return alias, self.get(alias)
 
 
-def source_files(root, manifest):
+def source_files(root, manifest, previous_inputs=()):
     selected = manifest.get('sources')
-    return [root / name for name in selected] if selected is not None else sorted((root / 'src').rglob('*.sev'))
+    files = [root / name for name in selected] if selected is not None else sorted((root / 'src').rglob('*.sev'))
+    for name in sorted(previous_inputs):
+        relative = Path(name)
+        if relative.is_absolute() or '..' in relative.parts:
+            raise ValueError('invalid recorded source input')
+        path = root / relative
+        if path not in files and path.is_file():
+            files.append(path)
+    return files
 
 
 def prepare_dependencies(root, manifest, *, target=TARGET, pointer_bits=64, jobs=4,
@@ -84,6 +92,7 @@ def prepare_dependencies(root, manifest, *, target=TARGET, pointer_bits=64, jobs
             progress('Checking dependency: ' + str(path))
         current = json.loads((path / 'package.json').read_text())
         metadata_path = path / 'package.pkg/metadata/realizations/dev.json'
+        previous = {}
         if metadata_path.is_file():
             previous = json.loads(metadata_path.read_text())
             for specification in previous.get('dependency-specifications', current.get('dependencies', {})).values():
@@ -91,7 +100,7 @@ def prepare_dependencies(root, manifest, *, target=TARGET, pointer_bits=64, jobs
         valid = False
         manifest_text = (path / 'package.json').read_text()
         snapshots = [(source.relative_to(path).as_posix(), source.read_bytes().decode('utf-8'))
-                     for source in source_files(path, current)]
+                     for source in source_files(path, current, previous.get('source-inputs', ()))]
         lock_path = path / 'package.lock'
         lock = lock_path.read_text() if lock_path.exists() else encode({'version': 1, 'packages': []})
         content_id = digest(encode([manifest_text, lock, snapshots]))
@@ -253,6 +262,7 @@ def build_source(source, output=None):
     if source.suffix != '.sev' or not source.is_file():
         raise ValueError('source must be a .sev file')
     root, manifest = source_package(source)
+    identity_manifest = json.loads(encode(manifest))
     destination = Path(output).resolve() if output is not None else root / 'package.pkg/build/dev' / (source.stem + '.exe')
     if destination == source or destination.suffix == '.sev':
         raise ValueError('executable output must not overwrite Severian source')
@@ -265,7 +275,7 @@ def build_source(source, output=None):
         for name in provider.get('sources', ()):
             path = root / name
             snapshots.append((name, sha256(path.read_bytes()).hexdigest()))
-    source_identity = digest(encode([compiler_identity(), str(source), manifest, snapshots, TARGET]))
+    source_identity = digest(encode([compiler_identity(), str(source), identity_manifest, snapshots, TARGET]))
     metadata = root / 'package.pkg/build/dev/.metadata' / (digest(str(destination)) + '.json')
     if metadata.is_file() and destination.is_file() and os.access(destination, os.X_OK):
         try:
@@ -280,9 +290,14 @@ def build_source(source, output=None):
             identity = digest(encode([source_identity, packages.resolved]))
             if saved.get('identity') == identity and saved.get('checksum') == sha256(destination.read_bytes()).hexdigest():
                 return {'executable': str(destination), 'reused': True}
-    result = compile_source(str(source.relative_to(root)), source.read_text(),
+    original_source = source.read_text()
+    result = compile_source(str(source.relative_to(root)), original_source,
                             Syntax(64, include_tests=False, target=TARGET),
                             c_packages=packages, debug_path=str(source))
+    from py_compiler.frontend.lint.lint import rewrite_file
+    rewrite_file(source, original_source, result.source.text)
+    snapshots = [(name, sha256((root / name).read_bytes()).hexdigest()) for name, _ in snapshots]
+    source_identity = digest(encode([compiler_identity(), str(source), identity_manifest, snapshots, TARGET]))
     if result.diagnostics:
         raise ValueError('\n\n'.join(map(str, result.diagnostics)))
     from py_compiler.packaging.registry import record_lock

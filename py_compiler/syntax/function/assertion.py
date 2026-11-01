@@ -5,6 +5,14 @@ from py_compiler.syntax.complex.object import Assert
 
 class Assertion:
     def lower(self, node, cfg, env):
+        # assert(expr,) remains one assertion, as in any one-argument call.
+        from dataclasses import replace
+        from py_compiler.frontend.lint.layout import groups, split_at
+        arguments = node.tokens[1:]
+        if arguments and arguments[0].text == '(' and groups(arguments) and groups(arguments)[0] == (0, len(arguments) - 1):
+            parts = [part for part in split_at(arguments[1:-1], {','}) if part]
+            if len(parts) == 1:
+                node = replace(node, tokens=(node.tokens[0], arguments[0], *parts[0], arguments[-1]))
         scope = getattr(cfg, 'block_scope', None)
         if scope is None or not scope.contains_kind('test'):
             raise ValueError('assert requires test scope; use throw Error for runtime failures')
@@ -152,6 +160,13 @@ class AssertionScopeTests(unittest.TestCase):
         operations = [op.kind for block in body.blocks for op in block.operations]
         self.assertLess(operations.index('length'), operations.index('deallocate'))
 
+    def test_suffix_can_read_qualified_live_locals(self):
+        from py_compiler.frontend.src.lib import compile_source
+        from py_compiler.syntax.recognition import Syntax
+        source = 'test "qualified storage" with {suffix len(local.value) == 2,}:\n    value = "ok"\n    assert(true)\n'
+        result = compile_source('qualified-suffix.sev', source, Syntax(), lint=True)
+        self.assertFalse(result.diagnostics, str(result.diagnostics))
+
 
     def test_negative_stdout_expectations_are_preserved(self):
         from py_compiler.frontend.src.lib import compile_source
@@ -176,14 +191,15 @@ class AssertionBlock(BlockProvider):
         return None
 
     def lower(self, node, cfg, env, nodes, index):
-        from py_compiler.syntax.grammar.expression import expression
-        from py_compiler.syntax.complex.object import Assert
+        from dataclasses import replace
         if not node.children:
             raise ValueError('assert block requires conditions')
         for child in node.children:
             if child.provider is not None:
                 raise ValueError('assert block contains conditions, not nested control flow')
-            value = cfg.expr(expression(child.tokens), env, cfg.context.type('bool'))
-            line, column = cfg.source.position(child.span.start)
-            cfg.effect('assert', (value,), Assert(f'assertion failed at {cfg.source.path}:{line}:{column}'), child.span)
+            opening = child.tokens[0].with_text('(', kind='SYMBOL')
+            closing = child.tokens[-1].with_text(')', kind='SYMBOL')
+            statement = replace(child, parent=node.parent,
+                                tokens=(node.tokens[0], opening, *child.tokens, closing))
+            Assertion().lower(statement, cfg, env)
         return 1

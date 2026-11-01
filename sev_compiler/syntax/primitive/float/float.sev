@@ -1,10 +1,21 @@
-import BF16Primitive, F128Primitive, F16Primitive, F32Primitive, F64Primitive, F8E4M3FnPrimitive, F8E5M2Primitive from "declarations.sev"
-import LiteralSyntax, MlirTypeBinding, Primitive, PrimitiveCategory, PrimitiveId, PrimitiveRepresentation, TypeId from "../contract.sev"
+import Bf16Primitive,
+    F128Primitive,
+    F16Primitive,
+    F32Primitive,
+    F64Primitive,
+    F8E4M3FnPrimitive,
+    F8E5M2Primitive from "declarations.sev"
+import LiteralSyntax,
+    MLIRTypeBinding,
+    Primitive,
+    PrimitiveCategory,
+    PrimitiveID,
+    PrimitiveRepresentation,
+    TypeID from "../contract.sev"
 import Error from "../primitive.sev"
 import Lexeme from "../../generic/lexeme.sev"
 
 import Equatable, Ordered, Truth from "../../function/trait.sev"
-
 
 '''
 # `float`
@@ -63,8 +74,6 @@ NaN      -> true
 
 Truth testing does not change the floating type.
 '''
-
-
 trait FloatArithmetic:
     operator +(right: Self) -> Self
     operator -(right: Self) -> Self
@@ -72,15 +81,14 @@ trait FloatArithmetic:
     operator /(right: Self) -> Self
     operator //(right: Self) -> Self
     operator %(right: Self) -> Self
-    operator **(right: Self) -> Self
+    operator**(right: Self) -> Self
 
-    operator +=(right: Self)
-    operator -=(right: Self)
-    operator *=(right: Self)
-    operator /=(right: Self)
-    operator //=(right: Self)
-    operator %=(right: Self)
-
+    operator += right: Self
+    operator -= right: Self
+    operator *= right: Self
+    operator /= right: Self
+    operator //= right: Self
+    operator %= right: Self
 
 trait Floating:
     Primitive
@@ -99,26 +107,24 @@ trait Floating:
     supports_infinity: bool
     supports_nan: bool
 
-
 '''
 # Float family
 
-The family is closed. A numeric class may convert to or from a floating primitive,
+The family is closed. A numeric class may convert to or from a floating
+primitive,
 but implementing `Floating` does not make it a member of `float`.
 '''
-union f8:
-    f8e4m3fn
-    f8e5m2
-
+union F8:
+    F8E4M3Fn
+    F8E5M2
 
 union float:
-    f8
-    bf16
-    f16
-    f32
-    f64
-    f128
-
+    F8
+    Bf16
+    F16
+    F32
+    F64
+    F128
 
 '''
 # Primitive declarations
@@ -127,10 +133,10 @@ union float:
 has one. The compiler uses this metadata when classifying float-to-float
 conversion edges.
 '''
-class f8e4m3fn: Floating
-    identity: PrimitiveId = F8E4M3FnPrimitive().identity
-    mlir: MlirTypeBinding = F8E4M3FnPrimitive().mlir
-    id: TypeId = F8E4M3FnPrimitive().id
+class F8E4M3Fn: Floating
+    identity: PrimitiveID = F8E4M3FnPrimitive().identity
+    mlir: MLIRTypeBinding = F8E4M3FnPrimitive().mlir
+    id: TypeID = F8E4M3FnPrimitive().id
     token_kind: string = F8E4M3FnPrimitive().token_kind
     literal_family: string = F8E4M3FnPrimitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = F8E4M3FnPrimitive().literal_syntaxes
@@ -144,15 +150,17 @@ class f8e4m3fn: Floating
     supports_nan: bool = true
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
-        8, 4, 3, false
+        8,
+        4,
+        3,
+        false,
     )
     default_literal: bool = F8E4M3FnPrimitive().default_literal
 
-
-class f8e5m2: Floating
-    identity: PrimitiveId = F8E5M2Primitive().identity
-    mlir: MlirTypeBinding = F8E5M2Primitive().mlir
-    id: TypeId = F8E5M2Primitive().id
+class F8E5M2: Floating
+    identity: PrimitiveID = F8E5M2Primitive().identity
+    mlir: MLIRTypeBinding = F8E5M2Primitive().mlir
+    id: TypeID = F8E5M2Primitive().id
     token_kind: string = F8E5M2Primitive().token_kind
     literal_family: string = F8E5M2Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = F8E5M2Primitive().literal_syntaxes
@@ -166,18 +174,20 @@ class f8e5m2: Floating
     supports_nan: bool = true
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
-        8, 5, 2, true
+        8,
+        5,
+        2,
+        true,
     )
     default_literal: bool = F8E5M2Primitive().default_literal
 
-
-class bf16: Floating
-    identity: PrimitiveId = BF16Primitive().identity
-    mlir: MlirTypeBinding = BF16Primitive().mlir
-    id: TypeId = BF16Primitive().id
-    token_kind: string = BF16Primitive().token_kind
-    literal_family: string = BF16Primitive().literal_family
-    literal_syntaxes: list[LiteralSyntax] = BF16Primitive().literal_syntaxes
+class Bf16: Floating
+    identity: PrimitiveID = Bf16Primitive().identity
+    mlir: MLIRTypeBinding = Bf16Primitive().mlir
+    id: TypeID = Bf16Primitive().id
+    token_kind: string = Bf16Primitive().token_kind
+    literal_family: string = Bf16Primitive().literal_family
+    literal_syntaxes: list[LiteralSyntax] = Bf16Primitive().literal_syntaxes
     name: string = "bf16"
     size: byte = 2B
     alignment: byte = 2B
@@ -188,15 +198,17 @@ class bf16: Floating
     supports_nan: bool = true
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
-        16, 8, 7, true
+        16,
+        8,
+        7,
+        true,
     )
-    default_literal: bool = BF16Primitive().default_literal
+    default_literal: bool = Bf16Primitive().default_literal
 
-
-class f16: Floating
-    identity: PrimitiveId = F16Primitive().identity
-    mlir: MlirTypeBinding = F16Primitive().mlir
-    id: TypeId = F16Primitive().id
+class F16: Floating
+    identity: PrimitiveID = F16Primitive().identity
+    mlir: MLIRTypeBinding = F16Primitive().mlir
+    id: TypeID = F16Primitive().id
     token_kind: string = F16Primitive().token_kind
     literal_family: string = F16Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = F16Primitive().literal_syntaxes
@@ -210,15 +222,17 @@ class f16: Floating
     supports_nan: bool = true
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
-        16, 5, 10, true
+        16,
+        5,
+        10,
+        true,
     )
     default_literal: bool = F16Primitive().default_literal
 
-
-class f32: Floating
-    identity: PrimitiveId = F32Primitive().identity
-    mlir: MlirTypeBinding = F32Primitive().mlir
-    id: TypeId = F32Primitive().id
+class F32: Floating
+    identity: PrimitiveID = F32Primitive().identity
+    mlir: MLIRTypeBinding = F32Primitive().mlir
+    id: TypeID = F32Primitive().id
     token_kind: string = F32Primitive().token_kind
     literal_family: string = F32Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = F32Primitive().literal_syntaxes
@@ -232,15 +246,17 @@ class f32: Floating
     supports_nan: bool = true
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
-        32, 8, 23, true
+        32,
+        8,
+        23,
+        true,
     )
     default_literal: bool = F32Primitive().default_literal
 
-
-class f64: Floating
-    identity: PrimitiveId = F64Primitive().identity
-    mlir: MlirTypeBinding = F64Primitive().mlir
-    id: TypeId = F64Primitive().id
+class F64: Floating
+    identity: PrimitiveID = F64Primitive().identity
+    mlir: MLIRTypeBinding = F64Primitive().mlir
+    id: TypeID = F64Primitive().id
     token_kind: string = F64Primitive().token_kind
     literal_family: string = F64Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = F64Primitive().literal_syntaxes
@@ -254,15 +270,17 @@ class f64: Floating
     supports_nan: bool = true
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
-        64, 11, 52, true
+        64,
+        11,
+        52,
+        true,
     )
     default_literal: bool = F64Primitive().default_literal
 
-
-class f128: Floating
-    identity: PrimitiveId = F128Primitive().identity
-    mlir: MlirTypeBinding = F128Primitive().mlir
-    id: TypeId = F128Primitive().id
+class F128: Floating
+    identity: PrimitiveID = F128Primitive().identity
+    mlir: MLIRTypeBinding = F128Primitive().mlir
+    id: TypeID = F128Primitive().id
     token_kind: string = F128Primitive().token_kind
     literal_family: string = F128Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = F128Primitive().literal_syntaxes
@@ -276,10 +294,12 @@ class f128: Floating
     supports_nan: bool = true
     category: PrimitiveCategory = PrimitiveCategory.Float
     representation: PrimitiveRepresentation = PrimitiveRepresentation.FloatBits(
-        128, 15, 112, true
+        128,
+        15,
+        112,
+        true,
     )
     default_literal: bool = F128Primitive().default_literal
-
 
 '''
 # Shared floating behavior
@@ -312,16 +332,16 @@ mlir:
 Formatting and parsing remain ordinary library behavior because they are not
 single MLIR primitive operations.
 '''
-
 class float: Floating
-    identity: PrimitiveId = F64Primitive().identity
-    mlir: MlirTypeBinding = F64Primitive().mlir
-    id: TypeId = F64Primitive().id
+    identity: PrimitiveID = F64Primitive().identity
+    mlir: MLIRTypeBinding = F64Primitive().mlir
+    id: TypeID = F64Primitive().id
     token_kind: string = F64Primitive().token_kind
     literal_family: string = F64Primitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = F64Primitive().literal_syntaxes
 
-    grammar literal[spelling: Lexeme]() -> float with float.literal_valid(spelling.text):
+    grammar literal[spelling: Lexeme]() -> float with
+        float.literal_valid(spelling.text):
         digits := ""
         for current in spelling.text:
             if current != '_':
@@ -359,7 +379,9 @@ class float: Floating
             elif current == '.' and not decimal and not exponent:
                 decimal = true
                 previous_digit = false
-            elif (current == 'e' or current == 'E') and not exponent and mantissa_digit:
+            elif (current == 'e' or current == 'E')
+                and not exponent
+                and mantissa_digit:
                 exponent = true
                 previous_digit = false
                 if offset + 1 < length:
@@ -369,13 +391,16 @@ class float: Floating
             else:
                 return false
             offset += 1
-        return mantissa_digit and (decimal or exponent) and (not exponent or exponent_digit)
+        return mantissa_digit and (
+            decimal
+            or exponent
+        ) and (not exponent or exponent_digit)
 
     operator if(self) -> bool:
-        return mlir(arith.cmpf, "une", self, self(0.0))
+        return mlir(arith.cmpf, "une", self, self 0.0)
 
     operator else(self) -> bool:
-        return mlir(arith.cmpf, "oeq", self, self(0.0))
+        return mlir(arith.cmpf, "oeq", self, self 0.0)
 
     operator +(right: float) -> float:
         return mlir(arith.addf, self, right)
@@ -399,7 +424,7 @@ class float: Floating
         product := mlir(arith.mulf, floor_quotient, right)
         return mlir(arith.subf, self, product)
 
-    operator **(right: float) -> float:
+    operator**(right: float) -> float:
         return mlir(math.powf, self, right)
 
     operator +(self) -> float:
@@ -559,7 +584,6 @@ class float: Floating
             return float(-1.0)
         return float(1.0)
 
-
 '''
 ## Conversion relations
 
@@ -609,46 +633,53 @@ f8e4m3fn ~> f8e5m2
 `~>` does not prescribe a failure policy. IEEE conversion may round, underflow,
 or overflow according to the selected target and package policy.
 '''
-
 extend float:
 
     operator <=>(self, T) -> T | TypeConversionError:
 
-        -> float_conversion[T: target_float]() with target_float in float:
+        -> float_conversion[T:target_float]() with target_float in float:
 
-            self -> target_float with (
-                float.precision_bits <= target_float.precision_bits
-                and float.exponent_bits <= target_float.exponent_bits
-                and (not float.supports_infinity or target_float.supports_infinity)
-            ):
+            self -> target_float with
+                (
+                    float.precision_bits <= target_float.precision_bits
+                    and float.exponent_bits <= target_float.exponent_bits
+                    and (
+                        not float.supports_infinity
+                        or target_float.supports_infinity
+                    )
+                ):
                 if float is target_float:
                     return self
 
                 if float.bits < target_float.bits:
-                    return mlir(arith.extf, self, to=target_float)
+                    return mlir(arith.extf, self, to = target_float)
 
                 if float.bits > target_float.bits:
-                    return mlir(arith.truncf, self, to=target_float)
+                    return mlir(arith.truncf, self, to = target_float)
 
-                widened := mlir(arith.extf, self, to=f32)
-                return mlir(arith.truncf, widened, to=target_float)
+                widened := mlir(arith.extf, self, to = F32)
+                return mlir(arith.truncf, widened, to = target_float)
 
-            self ~> target_float with (
-                float.precision_bits > target_float.precision_bits
-                or float.exponent_bits > target_float.exponent_bits
-                or (float.supports_infinity and not target_float.supports_infinity)
-            ):
+            self ~ > target_float with
+                (
+                    float.precision_bits > target_float.precision_bits
+                    or float.exponent_bits > target_float.exponent_bits
+                    or (
+                        float.supports_infinity
+                        and not target_float.supports_infinity
+                    )
+                ):
                 if float is target_float:
                     return self
 
                 if float.bits < target_float.bits:
-                    return mlir(arith.extf, self, to=target_float)
+                    return mlir(arith.extf, self, to = target_float)
 
                 if float.bits > target_float.bits:
-                    return mlir(arith.truncf, self, to=target_float)
+                    return mlir(arith.truncf, self, to = target_float)
 
-                widened := mlir(arith.extf, self, to=f32)
-                return mlir(arith.truncf, widened, to=target_float)
+                widened := mlir(arith.extf, self, to = F32)
+                return mlir(arith.truncf, widened, to = target_float)
 
         float_conversion[float]()
 
@@ -657,29 +688,32 @@ extend float:
 
         Integer/floating conversion is approximate in general. An integer may
         exceed a float's exact significand precision; a float may contain a
-        fraction, NaN, infinity, or a value outside the destination integer range.
+        fraction, NaN, infinity, or a value outside the destination integer
+        range.
         '''
-        -> integer_conversion[T: target_int]() with target_int in int:
+        -> integer_conversion[T:target_int]() with target_int in int:
 
-            self ~> target_int:
+            self ~ > target_int:
                 if not self.finite():
                     throw TypeConversionError(
-                        "non-finite float cannot convert to integer"
+                        "non-finite float cannot convert to integer",
                     )
 
                 if self < float(target_int.min) or self > float(target_int.max):
                     throw TypeConversionError(
-                        f"{self} is outside {target_int}[{target_int.min}, {target_int.max}]"
+                        """\
+{self} is outside {target_int}[{target_int.min}, {target_int.max}]\
+""",
                     )
 
                 if target_int.signed:
-                    return mlir(arith.fptosi, self, to=target_int)
-                return mlir(arith.fptoui, self, to=target_int)
+                    return mlir(arith.fptosi, self, to = target_int)
+                return mlir(arith.fptoui, self, to = target_int)
 
-            target_int ~> self:
+            target_int ~ > self:
                 if target_int.signed:
-                    return mlir(arith.sitofp, target_int, to=float)
-                return mlir(arith.uitofp, target_int, to=float)
+                    return mlir(arith.sitofp, target_int, to = float)
+                return mlir(arith.uitofp, target_int, to = float)
 
         integer_conversion[int]()
 
@@ -692,175 +726,165 @@ extend float:
         self -> string:
             return self.print()
 
-        string ~> self:
+        string ~ > self:
             parsed ?= string.parse_float[float](string)
             if parsed is Error:
                 throw TypeConversionError(
-                    f"cannot convert '{string}' to {float}"
+                    """\
+cannot convert '{string}' to {float}\
+""",
                 )
             return parsed
 
         _ -> [T]:
             throw TypeConversionError(
-                f"Failed to convert {float} to {type(T)}, no compatible conversion"
+                """\
+Failed to convert {float} to {type(T)}, no compatible conversion\
+""",
             )
 
-
-'''
-# Executable specification
-'''
-
+# # Executable specification
 float = zip(float)
 
-
 test "float is a closed family of concrete formats":
-    assert(f8e4m3fn is float)
-    assert(f8e5m2 is float)
-    assert(bf16 is float)
-    assert(f16 is float)
-    assert(f32 is float)
-    assert(f64 is float)
-    assert(f128 is float)
-
+    assert(F8E4M3Fn is float)
+    assert(F8E5M2 is float)
+    assert(Bf16 is float)
+    assert(F16 is float)
+    assert(F32 is float)
+    assert(F64 is float)
+    assert(F128 is float)
 
 test "float truth is zero versus nonzero":
-    if f32(0.0):
+    if F32(0.0):
         throw Error("positive zero must be false")
 
-    if f32(-0.0):
+    if F32(-0.0):
         throw Error("negative zero must be false")
 
-    if f32(0.5):
-        throw Error("Unimplemented (sev_compiler/universal/primitive/float.sev)")
+    if F32(0.5):
+        throw Error(
+            "Unimplemented (sev_compiler/universal/primitive/float.sev)",
+        )
     else:
         throw Error("nonzero float must be true")
 
-    nan := f32("nan")
+    nan := F32("nan")
     if nan:
-        throw Error("Unimplemented (sev_compiler/universal/primitive/float.sev)")
+        throw Error(
+            "Unimplemented (sev_compiler/universal/primitive/float.sev)",
+        )
     else:
         throw Error("NaN must be truthy")
 
-
 test "floating arithmetic stays in the concrete format":
-    a: f32 = 7.5
-    b: f32 = 2.0
+    a: F32 = 7.5
+    b: F32 = 2.0
 
-    assert(a + b == f32(9.5))
-    assert(a - b == f32(5.5))
-    assert(a * b == f32(15.0))
-    assert(a / b == f32(3.75))
-    assert(f32(2.0) ** f32(3.0) == f32(8.0))
-
+    assert(a + b == F32(9.5))
+    assert(a - b == F32(5.5))
+    assert(a * b == F32(15.0))
+    assert(a / b == F32(3.75))
+    assert(F32(2.0)**F32(3.0) == F32(8.0))
 
 test "floor division and modulo use floor semantics":
-    assert(f32(7.0) // f32(2.0) == f32(3.0))
-    assert(f32(7.0) % f32(2.0) == f32(1.0))
-    assert(f32(-7.0) // f32(2.0) == f32(-4.0))
-    assert(f32(-7.0) % f32(2.0) == f32(1.0))
-
+    assert(F32(7.0) // F32(2.0) == F32(3.0))
+    assert(F32(7.0) % F32(2.0) == F32(1.0))
+    assert(F32(-7.0) // F32(2.0) == F32(-4.0))
+    assert(F32(-7.0) % F32(2.0) == F32(1.0))
 
 test "float equality and ordering follow IEEE NaN behavior":
-    nan := f32("nan")
+    nan := F32("nan")
 
-    assert(not (nan == nan))
+    assert(not nan == nan)
     assert(nan != nan)
-    assert(not (nan < f32(0.0)))
-    assert(not (nan <= f32(0.0)))
-    assert(not (nan > f32(0.0)))
-    assert(not (nan >= f32(0.0)))
-
+    assert(not nan < F32(0.0))
+    assert(not nan <= F32(0.0))
+    assert(not nan > F32(0.0))
+    assert(not nan >= F32(0.0))
 
 test "float metadata describes representation":
-    assert(f16.bits == 16)
-    assert(f16.exponent_bits == 5)
-    assert(f16.precision_bits == 11)
+    assert(F16.bits == 16)
+    assert(F16.exponent_bits == 5)
+    assert(F16.precision_bits == 11)
 
-    assert(bf16.bits == 16)
-    assert(bf16.exponent_bits == 8)
-    assert(bf16.precision_bits == 8)
+    assert(Bf16.bits == 16)
+    assert(Bf16.exponent_bits == 8)
+    assert(Bf16.precision_bits == 8)
 
-    assert(f32.bits == 32)
-    assert(f32.precision_bits == 24)
-    assert(f64.bits == 64)
-    assert(f64.precision_bits == 53)
-
+    assert(F32.bits == 32)
+    assert(F32.precision_bits == 24)
+    assert(F64.bits == 64)
+    assert(F64.precision_bits == 53)
 
 test "float classification uses MLIR operations":
-    assert(f32("nan").nan())
-    assert(f32("inf").infinite())
-    assert(f32("-inf").infinite())
-    assert(f32(1.0).finite())
-    assert(f32(1.0).normal())
-
+    assert(F32("nan").nan())
+    assert(F32("inf").infinite())
+    assert(F32("-inf").infinite())
+    assert(F32(1.0).finite())
+    assert(F32(1.0).normal())
 
 test "float math functions preserve the concrete type":
-    value: f64 = 4.0
+    value: F64 = 4.0
 
-    assert(value.sqrt() == f64(2.0))
-    assert(value.abs() == f64(4.0))
-    assert(f64(-1.25).floor() == f64(-2.0))
-    assert(f64(-1.25).ceil() == f64(-1.0))
-    assert(f64(1.75).trunc() == f64(1.0))
-
+    assert(value.sqrt() == F64(2.0))
+    assert(value.abs() == F64(4.0))
+    assert(F64(-1.25).floor() == F64(-2.0))
+    assert(F64(-1.25).ceil() == F64(-1.0))
+    assert(F64(1.75).trunc() == F64(1.0))
 
 -> assert_float_widen[source_float, result_float](value: source_float):
     converted: result_float = result_float(value)
     assert(converted == value as result_float)
 
-
 test "wider float formats generate one-direction edges":
-    assert_float_widen[f16, f32](f16(1.5))
-    assert_float_widen[bf16, f32](bf16(1.5))
-    assert_float_widen[f32, f64](f32(1.5))
-    assert_float_widen[f64, f128](f64(1.5))
-
+    assert_float_widen[F16, F32](F16(1.5))
+    assert_float_widen[Bf16, F32](Bf16(1.5))
+    assert_float_widen[F32, F64](F32(1.5))
+    assert_float_widen[F64, F128](F64(1.5))
 
 test "narrower float formats generate approximate edges":
-    assert((f64(1.5) as f32) == f32(1.5))
-    assert((f32(1.5) as f16) == f16(1.5))
-    assert((f32(1.5) as bf16) == bf16(1.5))
-
+    assert((F64(1.5) as F32) == F32(1.5))
+    assert((F32(1.5) as F16) == F16(1.5))
+    assert((F32(1.5) as Bf16) == Bf16(1.5))
 
 test "f16 and bf16 are not interchangeable representations":
-    source: f16 = 1.1
-    converted := source as bf16
-    assert(converted is bf16)
-
+    source: F16 = 1.1
+    converted := source as Bf16
+    assert(converted is Bf16)
 
 test "float and integer conversion uses approximate edges":
-    assert((f32(7.0) as i32) == i32(7))
-    assert((i32(7) as f32) == f32(7.0))
+    assert((F32(7.0) as i32) == i32(7))
+    assert((i32(7) as F32) == F32(7.0))
 
-    throws(f32("inf") as i32)
-    throws(f32("nan") as i32)
-
+    throws(F32("inf") as i32)
+    throws(F32("nan") as i32)
 
 test "float string formatting and parsing use conversion graph":
-    parsed := f64("3.5")
-    assert(parsed == f64(3.5))
-    assert(string(f64(3.5)) == "3.5")
-    throws(f32("not-a-float"))
-
+    parsed := F64("3.5")
+    assert(parsed == F64(3.5))
+    assert(string(F64(3.5)) == "3.5")
+    throws(F32("not-a-float"))
 
 test "fused multiply add is available":
-    result := f32(2.0).fma(f32(3.0), f32(4.0))
-    assert(result == f32(10.0))
-
+    result := F32(2.0).fma(F32(3.0), F32(4.0))
+    assert(result == F32(10.0))
 
 test with compiler "float does not define bitwise operators":
     reject:
-        value := f32(1.0) & f32(2.0)
-
+        value := F32(1.0) & F32(2.0)
 
 test with compiler "unsupported float conversion has no graph edge":
     reject:
-        value := f32([1, 2, 3])
+        value := F32([1, 2, 3])
 
-test with cases "float x int" with
+test with cases
+"""\
+float x int\
+""" with
 {
-    float_type in {f16, bf16, f32, f64, f128},
-    int_type in {i8, i16, i32, i64, i128, u8, u16, u32, u64, u128}
+    float_type in {F16, Bf16, F32, F64, F128},
+    int_type in {i8, i16, i32, i64, i128, u8, u16, u32, u64, u128},
 }:
     a: float_type = float_type(6.0)
     b: int_type = int_type(2)
@@ -899,7 +923,6 @@ test with cases "float x int" with
     assert(a != b)
     assert(float_type(2.0) == b)
     assert(b == float_type(2.0))
-
 
 test "float grammar owns decimal and exponent spellings":
     assert(float.literal_valid("0.0"))

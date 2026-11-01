@@ -4,13 +4,11 @@ class InvalidValue: Error
     def InvalidValue(input: int):
         value := input
 
-
 def validate(value: int) -> int | InvalidValue:
     if value < 0:
         throw InvalidValue(value)
 
     return value
-
 
 def recover(value: int) -> int:
     try:
@@ -18,19 +16,16 @@ def recover(value: int) -> int:
     catch error: InvalidValue:
         return 0
 
-
 test "catch handles an error":
     assert(recover(-10) == 0)
     assert(recover(10) == 10)
 
-
 def log_and_rethrow(value: int) -> int | InvalidValue:
     try:
         return validate(value)
-    catch InvalidValue error:
+    catch invalid_value error:
         print("invalid:", error.value)
         throw error
-
 
 test "rethrow preserves the error":
     result ?= log_and_rethrow(-10)

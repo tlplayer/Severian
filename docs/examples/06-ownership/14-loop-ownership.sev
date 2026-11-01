@@ -1,6 +1,5 @@
 from collections import list
 
-
 test:
     values := ["a", "b", "c"]
 

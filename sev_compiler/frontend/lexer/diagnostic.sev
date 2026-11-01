@@ -2,7 +2,6 @@ import Diagnostic from "../../syntax/primitive/error/diagnostic.sev"
 import ErrorType, ErrorPersistence from "../../syntax/primitive/error/error.sev"
 import Span from "../source/source.sev"
 
-
 class LexicalDiagnostic: Diagnostic
     note: string
     span: Span
@@ -11,6 +10,7 @@ class LexicalDiagnostic: Diagnostic
     category: int = 1
     code: int = 1
     help: string = "Inspect the grammar and the indicated source region."
-    remediation: string = "Correct the source or the owning grammar declaration."
+    remediation: string =
+        "Correct the source or the owning grammar declaration."
     prefix: string | absent = absent
     persistence: ErrorPersistence = ErrorPersistence.Permanent

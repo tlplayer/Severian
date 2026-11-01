@@ -4,24 +4,19 @@ from collections import list
 def length(values: list[int]) -> int:
     return values.len()
 
-
 def clear(values: borrow list[int]):
     values.clear()
-
 
 def independent(values: copy list[int]) -> list[int]:
     values[0] = 99
     return values
 
-
 def consume(values: move list[int]) -> list[int]:
     return values
-
 
 def increment(value: int) -> int:
     value += 1
     return value
-
 
 test "default calls view owned values and copy primitive values":
     values = [1, 2, 3]
@@ -31,19 +26,16 @@ test "default calls view owned values and copy primitive values":
     assert(increment(value) == 42)
     assert(value == 41)
 
-
 test "copy parameters own independent storage":
     values = [1, 2, 3]
     changed = independent(values)
     assert(changed[0] == 99)
     assert(values[0] == 1)
 
-
 test "borrow parameters can mutate the caller":
     values = [1, 2, 3]
     clear(values)
     assert(length(values) == 0)
-
 
 test with compiler "move parameters consume their argument":
     values = [1, 2, 3]
@@ -52,7 +44,6 @@ test with compiler "move parameters consume their argument":
         print(values)
     accept:
         assert(length(owned) == 3)
-
 
 test with compiler "an explicit view cannot mutate or transfer ownership":
     reject:
@@ -67,17 +58,14 @@ test with compiler "an explicit view cannot mutate or transfer ownership":
             alias[0] = 99
     reject:
         def bad(values: view list[int]):
-            drop(values)
-
+            drop values
 
 class Counter:
     amount: int
 
-
 def change_copy(value: copy Counter) -> int:
     value.amount = 99
     return value.amount
-
 
 test "copy parameters also isolate records of primitive fields":
     original = Counter(1)

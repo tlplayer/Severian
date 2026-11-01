@@ -1,35 +1,38 @@
 import Y from "../generic/symbol.sev"
-import B, ExecutableBlock, BlockLowering, BlockContext, BlockSentence, SourceBlockId from "../generic/block.sev"
+import B,
+    ExecutableBlock,
+    BlockLowering,
+    BlockContext,
+    BlockSentence,
+    SourceBlockID from "../generic/block.sev"
 import source
-import ValueId from "../symbol/symbol.sev"
+import ValueID from "../symbol/symbol.sev"
 import Block from "block.sev"
-
 
 import TokenForm from "../generic/token.sev"
 import SourceFile from "../source.sev"
 import recognize_keyword from "../keywords/keyword.sev"
 
-
 def recognize_if(source: SourceFile, start: u32) -> u32 | None:
     return recognize_keyword(source, start, "if")
 
-
 class IfKeyword: Y
-    token_forms: list[TokenForm] = [TokenForm("IF", "if", recognize=recognize_if)]
-
+    token_forms: list[TokenForm] = [
+        TokenForm(kind = "IF", spelling = "if", recognize = recognize_if),
+    ]
 
 # The grammar belongs to the implementing block, including its CFG behavior.
 class if: Y + B + ExecutableBlock
     context: BlockContext = BlockContext()
     span: source.Span | None = None
     grammars: list[BlockSentence] = []
-    subblocks: list[SourceBlockId] = []
+    subblocks: list[SourceBlockID] = []
     parent: B
     body: B
 
     conditions: list[bool] = []
 
-    grammar if["if", conditions...: bool, ":"]() -> B:
+    grammar if ["if", conditions...: bool, ":"]() -> B:
         self.conditions = conditions
         return self
 
@@ -43,10 +46,9 @@ class if: Y + B + ExecutableBlock
         cfg.fallthrough(exit)
         cfg.at(exit)
 
-
 class RecordingBlockLowering: BlockLowering
     next: int = 0
-    branches: list[ValueId] = []
+    branches: list[ValueID] = []
     destinations: list[int] = []
     bodies: int = 0
     exit: int = -1
@@ -56,13 +58,13 @@ class RecordingBlockLowering: BlockLowering
         self.next += 1
         return result
 
-    def condition(value: bool) -> ValueId:
-        return ValueId(1 if value else 0)
+    def condition(value: bool) -> ValueID:
+        return ValueID(1 if value else 0)
 
     def body(value: B):
         self.bodies += 1
 
-    def branch(value: ValueId, taken: int, otherwise: int):
+    def branch(value: ValueID, taken: int, otherwise: int):
         self.branches.append(value)
         self.destinations.append(taken)
         self.destinations.append(otherwise)
@@ -73,36 +75,46 @@ class RecordingBlockLowering: BlockLowering
     def fallthrough(block: int):
         self.destinations.append(block)
 
-
 test "if owns conditional CFG lowering through explicit context":
     body = Block()
-    branch = if(parent=body, body=body, conditions=[true, false])
+    branch = if (parent = body, body = body, conditions = [true, false])
     cfg = RecordingBlockLowering()
     branch.lower(cfg)
     assert(cfg.next == 3)
-    assert(cfg.branches == [ValueId(1), ValueId(0)])
+    assert(cfg.branches == [ValueID(1), ValueID(0)])
     assert(cfg.destinations == [1, 0, 2, 0, 0])
     assert(cfg.bodies == 1 and cfg.exit == 0)
-
 
 import Expression, ExpressionKind from "../function/function.sev"
 import LiteralValue, LiteralValueOf from "../grammar/resolution.sev"
 
-
-# Shared by source branch construction and its semantic realization. Repeated
-# conditions are a short-circuit conjunction, including the empty conjunction.
-def branch_condition(conditions: list[Expression], span: source.Span) -> Expression:
-    result := Expression(ExpressionKind.LiteralValue(LiteralValueOf[bool](true)), span)
+'''
+Shared by source branch construction and its semantic realization. Repeated
+conditions are a short-circuit conjunction, including the empty conjunction.
+'''
+def branch_condition(
+    conditions: list[Expression],
+    span: source.Span,
+) -> Expression:
+    result := Expression(
+        ExpressionKind.LiteralValue(LiteralValueOf[bool](true)),
+        span,
+    )
     index := int(len(conditions)) - 1
     if index >= 0:
         result = conditions[index]
         index -= 1
     while index >= 0:
-        rejected = Expression(ExpressionKind.LiteralValue(LiteralValueOf[bool](false)), span)
-        result = Expression(ExpressionKind.Conditional(conditions[index], result, rejected), span)
+        rejected = Expression(
+            ExpressionKind.LiteralValue(LiteralValueOf[bool](false)),
+            span,
+        )
+        result = Expression(
+            ExpressionKind.Conditional(conditions[index], result, rejected),
+            span,
+        )
         index -= 1
     return result
-
 
 test "declared branch conditions preserve order and short circuit":
     span = source.Span(0, 0, 10)

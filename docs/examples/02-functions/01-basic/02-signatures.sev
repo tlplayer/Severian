@@ -2,13 +2,13 @@ def scale(value: float, factor: float = 1.0) -> float:
     return value * factor
 
 def describe(label: string, value: float) -> string:
-    return label + ": " + string(value)
+    return """{label}: {value}"""
 
 def main():
-    print(describe("width", scale(value=12.0, factor = 2.0)))
-
+    print(describe("width", scale(value = 12.0, factor = 2.0)))
 
 test "typed defaults and named arguments":
-    assert(scale(12.0) == 12.0)
-    assert(scale(factor=2.0, value=12.0) == 24.0)
-    assert(describe("width", 24.0) == "width: 24")
+    assert:
+        scale(12.0) == 12.0
+        scale(factor = 2.0, value = 12.0) == 24.0
+        describe("width", 24.0) == "width: 24"

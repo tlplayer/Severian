@@ -303,6 +303,7 @@ def collection_contract(actual, contract, context):
         'keys': ((), sequence(key.name)), 'values': ((), sequence(value.name)),
         'items': ((), sequence(pair)), 'enumerate': ((), sequence(pair)),
         'sum': ((), value.name), 'iter': ((), 'iterator[' + value.name + ']'),
+        'first': ((), pair), 'last': ((), pair),
     }
     canonical = lambda t: contract_annotation(substitute(t, {'Self': actual}), context)
     from py_compiler.syntax.block.trait import grammar_satisfies
@@ -329,7 +330,7 @@ def collection_contract(actual, contract, context):
 def collection_method(receiver, method, arguments, cfg, env, span, owner):
     """Primitive access stays here; collection algorithms live in lib.sev."""
     pair = indexed_arguments(receiver.type, cfg.context)
-    if pair is None or method not in ('get', 'len', 'keys', 'values', 'items', 'enumerate', 'sum', 'empty', 'iter'):
+    if pair is None or method not in ('get', 'len', 'keys', 'values', 'items', 'enumerate', 'sum', 'empty', 'iter', 'first', 'last'):
         return None
     from py_compiler.syntax.grammar.expression import Expression
     from py_compiler.syntax.complex.tensor import ArgumentValue
@@ -437,7 +438,12 @@ def sequence_equality(node, left, cfg, env):
     temporaries = []
     def capture_value(value, term):
         from py_compiler.mir.ownership.flow import Binding
+        from py_compiler.syntax.generic.storage import is_unbound_temporary
         owner = root_binding(term, cfg, env) or cfg.call_result_owners.get(value.identity)
+        # An indexed getter can return an owned copy. Its containing list is
+        # not the owner of that copy, which must survive every comparison.
+        if is_unbound_temporary(value, cfg):
+            owner = None
         if owner is None and callable(getattr(value.type, 'release', None)):
             name = f'<sequence operand {value.identity}>'
             owner = Binding(cfg.body.identity + ':' + name, name, value.type, False, 'own', node.token.span)
@@ -447,6 +453,10 @@ def sequence_equality(node, left, cfg, env):
             cfg.body.bindings.append(owner)
             cfg.record_lifetime('declare', owner.identity, name)
             temporaries.append(owner)
+            # Short-circuit comparisons carry owners through block parameters;
+            # their captured original SSA descriptors still have that owner.
+            cfg.call_result_owners[value.identity] = owner
+            cfg.call_result_modes[value.identity] = 'view'
         return Expression('capture', node.token, (ArgumentValue(value, owner),))
 
     def finish(result):

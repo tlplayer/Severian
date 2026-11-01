@@ -1,5 +1,6 @@
 import string
 import io
+import environment
 from collections import list
 
 @mlir("llvm.inline_asm", asm_string="syscall", constraints="={ax},{ax},{di},{si},{dx},~{rcx},~{r11},~{memory},~{cc}", has_side_effects=true, target="x86_64-linux")
@@ -22,18 +23,26 @@ def __integer(value: index) -> int
 
 # wait4 writes a 32-bit status. The zeroed 64-bit slot also supports decoding
 # without an unaligned pointer cast. EINTR retries do not lose the child.
-def __wait(pid: int) -> int:
+def __wait_status(pid: int, options: int) -> int | None:
+    # Zero and negative PIDs select process groups in wait4; Child is one PID.
+    if pid <= 0 or pid > 2147483647:
+        return -22
     storage = tuple[int,1](0)
     while true:
-        result = __syscall4(61, pid, __integer(__words_address(storage)), 0, 0)
+        result = __syscall4(61, pid, __integer(__words_address(storage)), options, 0)
         if result == -4:
             continue
         if result < 0:
             return result
+        if result == 0:
+            return None
         signal = storage[0] & 127
         if signal == 0:
             return (storage[0] >> 8) & 255
         return 128 + signal
+
+def __wait(pid: int) -> int:
+    return __wait_status(pid, 0) else -10
 
 class Child:
     pid: int
@@ -51,13 +60,33 @@ def wait(child: borrow Child) -> int:
         child.completed = true
     return child.status
 
-def kill(child: view Child) -> bool:
+def try_wait(child: borrow Child) -> int | None:
+    if child.completed:
+        return child.status
+    status = __wait_status(child.pid, 1)
+    if status is None:
+        return None
+    child.status = status.value
+    child.completed = true
+    return child.status
+
+def __signal(child: view Child, signal: int) -> bool:
     if child.completed or child.pid <= 0 or child.pid > 2147483647:
         return false
-    return __syscall(62, child.pid, 15, 0) == 0
+    return __syscall(62, child.pid, signal, 0) == 0
+
+def terminate(child: view Child) -> bool:
+    return __signal(child, 15)
+
+def kill(child: view Child) -> bool:
+    return __signal(child, 9)
+
+class SpawnOptions:
+    cwd: string | None = None
+    environment: environment.Snapshot | None = None
 
 # Arguments remain literal. Resolve PATH before fork, then only invoke syscalls.
-def __spawn(arguments: list[string], output: int = -1, error: int = -1) -> Child:
+def __spawn(arguments: list[string], output: int = -1, error: int = -1, options: SpawnOptions = SpawnOptions()) -> Child:
     if arguments.len() == 0:
         throw Error("process requires an executable")
     encoded: list[tensor[u8]] = []
@@ -73,20 +102,50 @@ def __spawn(arguments: list[string], output: int = -1, error: int = -1) -> Child
         addresses[position] = __integer(__bytes_address(bytes))
         position += 1
     addresses[position] = 0
-    executable_name = find_executable(arguments[0]).utf(true)
+    directory = options.cwd else ""
+    for character in directory:
+        if character == u8(0):
+            throw Error("process working directory contains NUL")
+    executable_text = arguments[0]
+    if not executable_text.contains("/"):
+        if options.environment is None:
+            executable_text = find_in_path(executable_text, __environment_path(), directory)
+        else:
+            path = options.environment.value.get("PATH") else "/bin:/usr/bin"
+            executable_text = find_in_path(executable_text, path, directory)
+    executable_name = executable_text.utf(true)
     executable = __integer(__bytes_address(executable_name))
     argv = __integer(__words_address(addresses))
-    environment = __environment()
+    environment_pointer = __environment()
+    environment_bytes = list[tensor[u8]]()
+    environment_addresses = tensor[int](0)
+    if options.environment is not None:
+        assignments = options.environment.value.assignments()
+        for entry in assignments:
+            environment_bytes.append(entry.utf(true))
+        environment_addresses.resize(environment_bytes.len() + 1)
+        position = 0
+        while position < environment_bytes.len():
+            bytes = environment_bytes.view_at(position)
+            environment_addresses[position] = __integer(__bytes_address(bytes))
+            position += 1
+        environment_addresses[position] = 0
+        environment_pointer = __integer(__words_address(environment_addresses))
+    directory_bytes = directory.utf(true)
+    directory_address = __integer(__bytes_address(directory_bytes))
+    change_directory = options.cwd is not None
     pid = __syscall(57, 0, 0, 0)
     if pid < 0:
         throw Error("process creation failed")
     if pid == 0:
         # No allocator or runtime lock is touched between fork and exec.
+        if change_directory and __syscall(80, directory_address, 0, 0) < 0:
+            __syscall(60, 126, 0, 0)
         if output >= 0 and __syscall(33, output, 1, 0) < 0:
             __syscall(60, 126, 0, 0)
         if error >= 0 and __syscall(33, error, 2, 0) < 0:
             __syscall(60, 126, 0, 0)
-        failure = __syscall(59, executable, argv, environment)
+        failure = __syscall(59, executable, argv, environment_pointer)
         status = 126
         if failure == -2:
             status = 127
@@ -95,8 +154,8 @@ def __spawn(arguments: list[string], output: int = -1, error: int = -1) -> Child
             __syscall(60, status, 0, 0)
     return Child(pid)
 
-def run(arguments: list[string]) -> int:
-    child = spawn(arguments)
+def run(arguments: list[string], options: SpawnOptions = SpawnOptions()) -> int:
+    child = spawn(arguments, options)
     return wait(child)
 
 # Linux exposes the original NUL-delimited argv without shell reparsing.
@@ -135,6 +194,30 @@ test "wait decodes normal child status":
     assert(wait(child) == 7)
     assert(wait(child) == 7)
     assert(not kill(child))
+    assert(try_wait(child) == 7)
+    assert(not terminate(child))
+
+test "try wait does not block and forced kill is reaped once":
+    child = spawn(["/bin/sh", "-c", "exec sleep 30"])
+    pending = try_wait(child)
+    stopped = kill(child)
+    status = wait(child)
+    assert(pending is None and stopped)
+    assert(status == 137 and try_wait(child) == 137 and wait(child) == 137)
+    assert(not kill(child) and not terminate(child))
+
+test "terminate requests the graceful signal and wait observes completion":
+    child = spawn(["/bin/sh", "-c", "exec sleep 30"])
+    requested = terminate(child)
+    status = wait(child)
+    assert(requested and status == 143)
+    assert(try_wait(child) == 143)
+
+test "invalid child handles never target a process group":
+    invalid = Child(0)
+    assert(not kill(invalid) and not terminate(invalid))
+    assert(try_wait(invalid) == -22)
+    assert(wait(invalid) == -22)
 
 test "failed executable has a distinct status":
     assert(run(["/severian-no-such-executable"]) == 127)
@@ -143,50 +226,35 @@ test "arguments preserve whitespace and shell metacharacters":
     assert(run(["/bin/sh", "-c", "test \"$1\" = 'a b;$HOME'", "example", "a b;$HOME"]) == 0)
 
 
-def spawn(arguments: list[string]) -> Child:
-    return __spawn(arguments)
+def spawn(arguments: list[string], options: SpawnOptions = SpawnOptions()) -> Child:
+    return __spawn(arguments, options=options)
 
 def current_directory() -> string:
     data = tensor[u8,(4096,)]()
     count = __syscall(79, __integer(__bytes_address(data)), len(data), 0)
     if count < 1:
         throw Error("cannot determine current directory")
-    return string(data[:count - 1])
+    return string(data[:count - 1))
 
 def __environment_path() -> string:
-    handle = io.open("/proc/self/environ")
-    if handle < 0:
-        throw Error("cannot read process environment")
-    defer io.close(handle)
-    chunk = tensor[u8,(4096,)]()
-    entry = ""
-    while true:
-        count = io.read(handle, chunk, 0, len(chunk))
-        if count < 0:
-            throw Error("cannot read process environment")
-        if count == 0:
-            return "/bin:/usr/bin"
-        position = 0
-        while position < count:
-            if chunk[position] == u8(0):
-                if len(entry) >= 5 and entry[:5] == "PATH=":
-                    return entry[5:]
-                entry = ""
-            else:
-                entry = entry + string(chunk[position:position + 1])
-            position += 1
+    return environment.get("PATH") else "/bin:/usr/bin"
 
-def find_executable(name: string) -> string:
+def find_executable(name: view string) -> string:
     if name.contains("/"):
-        return name
-    search = __environment_path()
+        return copy name
+    return find_in_path(name, __environment_path())
+
+def find_in_path(name: view string, search: view string, directory: view string = "") -> string:
+    if name == "":
+        return ""
     start = 0
     end = 0
     while end <= len(search):
         if end == len(search) or search[end] == u8(58):
-            directory = search[start:end]
-            candidate = directory + "/" + name if directory != "" else "./" + name
-            bytes = candidate.utf(true)
+            component = search[start:end)
+            candidate = component + "/" + name if component != "" else "./" + name
+            checked = directory + "/" + candidate if directory != "" and candidate[0] != u8(47) else candidate
+            bytes = checked.utf(true)
             if __syscall(21, __integer(__bytes_address(bytes)), 1, 0) == 0:
                 return candidate
             start = end + 1
@@ -250,12 +318,12 @@ class ProcessResult:
     stdout: string
     stderr: string
 
-def execute(arguments: list[string]) -> ProcessResult:
+def execute(arguments: list[string], options: SpawnOptions = SpawnOptions()) -> ProcessResult:
     output = __capture_file()
     defer io.close(output)
     error = __capture_file()
     defer io.close(error)
-    child = __spawn(arguments, output, error)
+    child = __spawn(arguments, output, error, options)
     status = wait(child)
     return ProcessResult(status, __captured(output), __captured(error))
 
@@ -270,3 +338,48 @@ test "capture drains output beyond pipe capacity":
     result = execute(["sh", "-c", "head -c 131072 /dev/zero; head -c 131072 /dev/zero >&2"])
     assert(result.status == 0)
     assert(len(result.stdout) == 131072 and len(result.stderr) == 131072)
+
+test "PATH searches every component without including delimiters":
+    assert(find_in_path("sh", "/bin:/severian-no-such-directory") == "/bin/sh")
+    assert(find_in_path("sh", "/severian-no-such-directory:/bin") == "/bin/sh")
+    assert(find_in_path("sh", "/bin") == "/bin/sh")
+    assert(find_in_path("severian-no-such-executable", "/bin:/usr/bin") == "")
+
+test "current directory excludes the native NUL terminator":
+    directory = current_directory()
+    assert(len(directory) > 0 and directory[0] == u8(47))
+    assert(not directory.contains("\0"))
+
+test "executable lookup borrows its input and returns independent storage":
+    name = "/bin/sh"
+    selected = find_executable(name)
+    assert(name == "/bin/sh" and selected == name)
+    drop(name)
+    assert(selected == "/bin/sh")
+
+test "child snapshots isolate values and preserve empty variables":
+    values = environment.Snapshot()
+    values.set("PATH", "/bin")
+    values.set("SEVERIAN_CHILD_OPTION_TEST", "a=b $literal")
+    values.set("EMPTY", "")
+    previous = environment.get("SEVERIAN_CHILD_OPTION_TEST")
+    options = SpawnOptions(environment=copy values)
+    result = execute(["sh", "-c", "printf '%s|%s|%s' \"$SEVERIAN_CHILD_OPTION_TEST\" \"${EMPTY+x}\" \"${MISSING+x}\""], options)
+    assert(result.status == 0 and result.stdout == "a=b $literal|x|")
+    assert(values.get("SEVERIAN_CHILD_OPTION_TEST") == "a=b $literal")
+    current = environment.get("SEVERIAN_CHILD_OPTION_TEST")
+    if previous is None:
+        assert(current is None)
+    else:
+        assert(current == previous.value)
+
+test "child working directory and relative PATH use the child context":
+    previous = current_directory()
+    values = environment.Snapshot()
+    values.set("PATH", "bin")
+    options = SpawnOptions(cwd="/", environment=copy values)
+    result = execute(["sh", "-c", "pwd"], options)
+    assert(result.status == 0 and result.stdout == "/\n")
+    assert(current_directory() == previous)
+    failed = run(["/bin/sh", "-c", "exit 0"], SpawnOptions(cwd="/severian-no-such-directory"))
+    assert(failed == 126)

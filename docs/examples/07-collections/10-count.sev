@@ -7,50 +7,65 @@ def main():
     frequencies.add(20)
     frequencies.add(10, 2)
 
-    if not (frequencies[10] == 3):
+    if not frequencies[10] == 3:
         throw Error("count invariant failed")
-    if not (frequencies[99] == 0):
+    if not frequencies[99] == 0:
         throw Error("count invariant failed")
-    if not (frequencies.len() == 2):
+    if not frequencies.len() == 2:
         throw Error("count invariant failed")
-    if not (frequencies.total() == 4):
+    if not frequencies.total() == 4:
         throw Error("count invariant failed")
-    print(frequencies[10])  # 3
 
-    remaining := frequencies.subtract(10, 10)  # Cannot go below zero.
-    if not (remaining == 0):
-        throw Error("count invariant failed")
-    if not (not frequencies.contains(10)):
-        throw Error("count invariant failed")
-    if not (frequencies.len() == 1):
-        throw Error("count invariant failed")
-    print(frequencies.total())  # 1
+    # 3
+    print(frequencies[10])
 
+    # Cannot go below zero.
+    remaining := frequencies.subtract(10, 10)
+    if not remaining == 0:
+        throw Error("count invariant failed")
+    if not not frequencies.contains(10):
+        throw Error("count invariant failed")
+    if not frequencies.len() == 1:
+        throw Error("count invariant failed")
+
+    # 1
+    print(frequencies.total())
 
 test "count distinguishes unique values from total occurrences":
     values := count[int]()
     values.add(10, 3)
     values.add(20)
-    assert(values[10] == 3 and values[20] == 1)
-    assert(values.len() == 2 and values.total() == 4)
-    assert(values[99] == 0)
-    assert(values.len() == 2)  # Looking up an absent value does not insert it.
+    assert:
+        values[10] == 3 and values[20] == 1
+        values
+            .len() == 2 and values
+            .total() == 4
+        values[99] == 0
+
+    # Looking up an absent value does not insert it.
+    assert(values.len() == 2)
 
 test "count subtraction floors at zero and removes exhausted values":
     values := count[int]()
     values.add(10, 3)
-    assert(values.subtract(10, 1) == 2)
-    assert(values.total() == 2)
-    assert(values.subtract(10, 10) == 0)
-    assert(not values.contains(10))
-    assert(values.len() == 0 and values.total() == 0)
+    assert:
+        values.subtract(10, 1) == 2
+        values.total() == 2
+        values.subtract(10, 10) == 0
+        not values.contains(10)
+        values
+            .len() == 0 and values
+            .total() == 0
 
 test "count groups string elements":
     words := count[string]()
     words.add("red")
     words.add("blue")
     words.add("red")
-    assert(words["red"] == 2)
-    assert(words["blue"] == 1)
-    assert(words["green"] == 0)
-    assert(words.len() == 2 and words.total() == 3)
+    assert:
+        words["red"] == 2
+        words["blue"] == 1
+        words["green"] == 0
+        words
+            .len() == 2 and words
+            .total() == 3

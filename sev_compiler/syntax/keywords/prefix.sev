@@ -8,9 +8,14 @@ import AttachmentRole, WithAttachment from "../constraint/model.sev"
 def recognize_prefix(source: SourceFile, start: u32) -> u32 | None:
     return recognize_keyword(source, start, "prefix")
 
-
 class PrefixSyntax: Y
-    token_forms: list[TokenForm] = [TokenForm("PREFIX", "prefix", recognize=recognize_prefix)]
+    token_forms: list[TokenForm] = [
+        TokenForm(
+            kind = "PREFIX",
+            spelling = "prefix",
+            recognize = recognize_prefix,
+        ),
+    ]
 
     grammar attachment["prefix", condition: Expression]() -> WithAttachment:
         return WithAttachment(AttachmentRole.Entry, condition)

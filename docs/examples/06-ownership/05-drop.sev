@@ -4,11 +4,9 @@ class Resource:
     def drop():
         print("released:", id)
 
-
 def use_resource():
     resource := Resource(42)
     print(resource.id)
-
 
 def main():
     use_resource()
@@ -16,7 +14,7 @@ def main():
 test with compiler:
     resource := Resource(42)
 
-    drop(resource)
+    drop resource
 
     reject:
         print(resource.id)

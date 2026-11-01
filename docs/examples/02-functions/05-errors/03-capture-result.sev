@@ -4,18 +4,15 @@ def divide(left: int, right: int) -> int | Error:
 
     return left / right
 
-
 test "normal assignment propagates":
     value = divide(20, 4)
 
     assert(value == 5)
 
-
 test "question assignment preserves success":
     result ?= divide(20, 4)
 
     assert(result == 5)
-
 
 test "question assignment preserves failure":
     result ?= divide(20, 0)
@@ -23,25 +20,21 @@ test "question assignment preserves failure":
     assert(result is Error)
     assert(result.message == "division by zero")
 
-
 def dynamic_failure(message: string) -> int | Error:
     throw Error(message)
-
 
 def rethrow_dynamic(message: string) -> int | Error:
     try:
         return dynamic_failure(message)
-    catch error: Error:
+    catch error: error:
         throw error
-
 
 test "rethrow preserves an owned runtime message":
     message = "runtime" + " failure"
     result ?= rethrow_dynamic(message)
-    drop(message)
+    drop message
     assert(result is Error)
     assert(result.message == "runtime failure")
-
 
 test "typed throws checks the failure without terminating the test":
     throws(divide(1, 0) -> Error)

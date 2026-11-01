@@ -29,7 +29,7 @@ test with compiler:
 
     reject:
         value := "finished"
-        drop(value)
+        drop value
         print(borrow value)
 
     reject:

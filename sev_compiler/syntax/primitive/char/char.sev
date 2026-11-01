@@ -1,10 +1,14 @@
 import literal_value from "utf8.sev"
 import CharPrimitive from "declarations.sev"
-import LiteralSyntax, MlirTypeBinding, PrimitiveAlias, PrimitiveId, Type, TypeId from "../contract.sev"
+import LiteralSyntax,
+    MLIRTypeBinding,
+    PrimitiveAlias,
+    PrimitiveID,
+    Type,
+    TypeID from "../contract.sev"
 import "../primitive.sev" as _dependency_primitive
 import Lexeme from "../../generic/lexeme.sev"
 import Equatable, Ordered from "../../function/trait.sev"
-
 
 '''
 # `char[T: u8 | u32 = u32]`
@@ -49,12 +53,9 @@ representation and is not by itself a guarantee of valid UTF-8.
 
 Strings decode and iterate using the default `char[u32]`.
 '''
-
-
-union char_storage:
+union CharStorage:
     u8
     u32
-
 
 trait Character:
     Copy
@@ -72,11 +73,10 @@ trait Character:
     def whitespace(self) -> bool
     def utf8_len(self) -> usize
 
-
-class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]
-    identity: PrimitiveId = CharPrimitive().identity
-    mlir: MlirTypeBinding = CharPrimitive().mlir
-    id: TypeId = CharPrimitive().id
+class char[T: u8 | u32 = u32]: Character, PrimitiveAlias[T]
+    identity: PrimitiveID = CharPrimitive().identity
+    mlir: MLIRTypeBinding = CharPrimitive().mlir
+    id: TypeID = CharPrimitive().id
     token_kind: string = CharPrimitive().token_kind
     literal_family: string = CharPrimitive().literal_family
     literal_syntaxes: list[LiteralSyntax] = CharPrimitive().literal_syntaxes
@@ -95,7 +95,8 @@ class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]
     grammar space[" "]() -> char:
         return ' '
 
-    grammar literal[spelling: Lexeme]() -> char with char.literal_valid(spelling.text):
+    grammar literal[spelling: Lexeme]() -> char with
+        char.literal_valid(spelling.text):
         value = literal_value(spelling.text, "'")
         if value is None:
             throw TypeConversionError("invalid character literal")
@@ -110,14 +111,10 @@ class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]
     def char(value: T) -> char[T]:
         if T is u32:
             if value > 0x10ffff:
-                throw TypeConversionError(
-                    f"U+{value:x} exceeds U+10FFFF"
-                )
+                throw TypeConversionError(f"U+{value:x} exceeds U+10FFFF")
 
             if value >= 0xd800 and value <= 0xdfff:
-                throw TypeConversionError(
-                    f"U+{value:x} is a Unicode surrogate"
-                )
+                throw TypeConversionError(f"U+{value:x} is a Unicode surrogate")
 
         return value
 
@@ -126,7 +123,7 @@ class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]
 
         if codepoint > 0xff:
             throw TypeConversionError(
-                f"U+{codepoint:x} does not fit in char[u8]"
+                f"U+{codepoint:x} does not fit in char[u8]",
             )
 
         return codepoint as u8
@@ -156,7 +153,19 @@ class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]
     def whitespace(self) -> bool:
         value := self.codepoint()
 
-        return value == 0x09 or value == 0x0a or value == 0x0b or value == 0x0c or value == 0x0d or value == 0x20
+        return
+            value
+            == 0x09
+            or value
+            == 0x0a
+            or value
+            == 0x0b
+            or value
+            == 0x0c
+            or value
+            == 0x0d
+            or value
+            == 0x20
 
     def utf8_len(self) -> usize:
         value := self.codepoint()
@@ -172,7 +181,6 @@ class char[T: u8|u32 = u32]: Character, PrimitiveAlias[T]
 
         return 4
 
-
 '''
 ## Conversion relations
 
@@ -183,31 +191,29 @@ char[u32] ~> char[u8]
 
 Widening is always valid. Narrowing may fail when the scalar exceeds `255`.
 '''
-extend [T: char_storage] char[T]:
+extend[T:CharStorage] char[T]:
 
     operator <=>(self, U) -> U | TypeConversionError:
 
         self -> char[u32] with T is u8:
             return char[u32](u32(self))
 
-        self ~> char[u8] with T is u32:
+        self ~ > char[u8] with T is u32:
             if self.codepoint() > 0xff:
                 throw TypeConversionError(
-                    f"U+{self.codepoint():x} does not fit in char[u8]"
+                    f"U+{self.codepoint():x} does not fit in char[u8]",
                 )
 
             return char[u8](u8(self.codepoint()))
 
         _ -> [U]:
             throw TypeConversionError(
-                f"no character conversion from char[{T}] to {U}"
+                """\
+no character conversion from char[{T}] to {U}\
+""",
             )
 
-
-'''
-# Executable specification
-'''
-
+# # Executable specification
 test "character literal defaults to u32 storage":
     value := 't'
 

@@ -5,14 +5,17 @@ import TokenForm from "../generic/token.sev"
 import SourceFile from "../source.sev"
 import recognize_keyword from "keyword.sev"
 
-
 def recognize_throw(source: SourceFile, start: u32) -> u32 | None:
     return recognize_keyword(source, start, "throw")
 
-
 class ThrowKeyword: Y
-    token_forms: list[TokenForm] = [TokenForm("THROW", "throw", recognize=recognize_throw)]
-
+    token_forms: list[TokenForm] = [
+        TokenForm(
+            kind = "THROW",
+            spelling = "throw",
+            recognize = recognize_throw,
+        ),
+    ]
 
 trait Throw: G
     symbol: Y = ThrowKeyword()
@@ -20,4 +23,4 @@ trait Throw: G
 
     def semantic(value: Expression):
         result = lower(value)
-        cfg.throw(result)
+        cfg.throw result

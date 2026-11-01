@@ -1,4 +1,6 @@
-import FunctionDeclaration, Expression, Operation from "../function/function.sev"
+import FunctionDeclaration,
+    Expression,
+    Operation from "../function/function.sev"
 import Sentence, Statement from "../grammar/grammar.sev"
 import WithAttachment from "../constraint/model.sev"
 

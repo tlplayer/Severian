@@ -7,7 +7,6 @@ class Box[T]:
     def addition(addition: T):
         value = value + addition
 
-
 def main():
     ints := Box[int](10)
     floats := Box[f64](2.5)
@@ -19,7 +18,6 @@ def main():
     print(ints.value)
     print(floats.value)
     print(strings.value())
-
 
 test "generic boxes preserve numeric specializations":
     integers = Box[int](10)

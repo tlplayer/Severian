@@ -1,7 +1,6 @@
 import file
 import os
 
-
 test with integ "copy move and remove":
     source = "/tmp/severian-source.txt"
     copied = "/tmp/severian-copy.txt"

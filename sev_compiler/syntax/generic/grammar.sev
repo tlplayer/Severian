@@ -1,9 +1,17 @@
 import Expression from "../function/function.sev"
-import ValueId from "../symbol/symbol.sev"
+import ValueID from "../symbol/symbol.sev"
 import Y from "symbol.sev"
 import source
-import Block, DeclarationId, DefinitionID, FunctionParameter, TypeAnnotation, span from "../function/function.sev"
-import ScalarOperation, Associativity, OperatorSyntax from "../function/syntax.sev"
+import Block,
+    DeclarationID,
+    DefinitionID,
+    FunctionParameter,
+    TypeAnnotation,
+    Span from "../function/function.sev"
+Span as span
+import ScalarOperation,
+    Associativity,
+    OperatorSyntax from "../function/syntax.sev"
 
 enum GrammarPrimitive:
     LowerExpression
@@ -25,14 +33,12 @@ enum GrammarPrimitive:
     BooleanConstant
     FinishGrammar
 
-
 enum GrammarSlotKind:
     SourceExpression
     SourceBody
     RuntimeValue
     BlockHandle
     NoValue
-
 
 class GrammarInstruction:
     primitive: GrammarPrimitive
@@ -41,20 +47,18 @@ class GrammarInstruction:
     span: source.Span
     boolean: bool = false
 
-
 class GrammarDeclaration:
     name: string
     parameters: list[FunctionParameter]
     body: Block
     span: source.Span
     syntax: OperatorSyntax | None = None
-    definition: DefinitionID = DefinitionID(0, 0, DeclarationId(0))
+    definition: DefinitionID = DefinitionID(0, 0, DeclarationID(0))
     program: list[GrammarInstruction] = []
     slots: list[GrammarSlotKind] = []
     protocols: list[string] = []
     lookup: string = ""
     result: TypeAnnotation | None = None
-
 
 # Source grammar contracts loaded into the shared declaration environment.
 trait G:
@@ -77,6 +81,4 @@ trait G:
     operations: dict[T, ScalarOperation]
 
     def valid(left: Expression, right: Expression) -> bool
-    def semantic(left: Expression, right: Expression) -> ValueId
-
-
+    def semantic(left: Expression, right: Expression) -> ValueID

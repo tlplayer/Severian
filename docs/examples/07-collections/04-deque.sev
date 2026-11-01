@@ -1,12 +1,12 @@
-from collections import deque
+from collections import Deque
 
 # deque[T]: add and remove elements at either end.
 def main():
-    jobs := deque[int]()
+    jobs := Deque[int]()
     jobs.push_back(20)
     jobs.push_back(30)
     jobs.push_front(10)
-    if not (jobs.len() == 3):
+    if not jobs.len() == 3:
         throw Error("deque invariant failed")
 
     first = jobs.pop_front()
@@ -15,16 +15,17 @@ def main():
     last = jobs.pop_back()
     if not (last.has_value and last.value == 30):
         throw Error("deque invariant failed")
-    print(jobs[0])  # 20
+
+    # 20
+    print(jobs[0])
 
     jobs.clear()
     missing = jobs.pop_front()
-    if not (not missing.has_value):
+    if not not missing.has_value:
         throw Error("deque invariant failed")
 
-
 test "deque preserves order across operations at both ends":
-    values := deque[int]()
+    values := Deque[int]()
     values.push_back(20)
     values.push_front(10)
     values.push_back(30)
@@ -35,7 +36,7 @@ test "deque preserves order across operations at both ends":
     assert(values.len() == 1 and values[0] == 20)
 
 test "cleared deque reports absence at both ends":
-    values := deque[int]()
+    values := Deque[int]()
     values.push_back(10)
     values.clear()
     missing = values.pop_front()
@@ -44,7 +45,7 @@ test "cleared deque reports absence at both ends":
     assert(not missing.has_value)
 
 test "deque can hold a union of element types":
-    values := deque[int | string]()
+    values := Deque[int | string]()
     values.push_back("ready")
     values.push_front(10)
     first = values.pop_front()

@@ -4,28 +4,34 @@ import TokenForm, TokenTerm from "../../syntax/generic/token.sev"
 import Lexeme from "../../syntax/generic/lexeme.sev"
 
 # End boundary has no character payload.
-class EOF: Y
-    token_forms: list[TokenForm] = [TokenForm("EOF", "", boundary=true)]
+class Eof: Y
+    token_forms: list[TokenForm] = [
+        TokenForm(kind = "EOF", spelling = "", boundary = true),
+    ]
     lexeme: Lexeme | None = None
     token: TokenTerm | None = None
 
-
 class Span:
-    # Internal coordinates are half-open Unicode scalar indices. Serialized
-    # tooling interfaces use UTF-8 bytes; convert explicitly at that boundary.
-    source_id: u32 
+
+    '''
+    Internal coordinates are half-open Unicode scalar indices. Serialized
+    tooling interfaces use UTF-8 bytes; convert explicitly at that boundary.
+    '''
+    source_id: u32
     start: u32
     end: u32
 
-
-
 class SourceFile:
-    source_id: u32 
+    source_id: u32
     path: string
     text: string
-    #Know what files and symbols are coming from outside the file
-    imports: map[string, list[string]] = {}
+
+    # Know what files and symbols are coming from outside the file
+    imports: map[string, list[string]] =
+    {
+    }
     characters: list[string]
+
     # Derived lazily, shared by repeated tooling span queries, never archived.
     byte_offsets: list[int] = []
 
@@ -41,14 +47,14 @@ def span(source: u32, start: u32, end: u32) -> Span:
 def virtual_source(path: string, text: string) -> SourceFile:
     return SourceFile(0, path, text)
 
-
 test "source identity and Unicode scalar positions survive construction":
     file = SourceFile(17, "unicode.sev", "x\nλ")
-    assert(file.source_id == 17)
-    assert(file.path == "unicode.sev")
-    assert(file.characters == ["x", "\n", "λ"])
+    assert:
+        file.source_id == 17
+        file.path == "unicode.sev"
+        file.characters == ["x", "\n", "λ"]
 
-#UTF-8 offset
+# UTF-8 offset
 def offset(file: SourceFile, offset: u32) -> u32 | Error:
     if offset > len(file.characters):
         throw Error("source offset is out of bounds")

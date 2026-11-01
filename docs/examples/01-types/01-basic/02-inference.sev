@@ -13,9 +13,10 @@ def main():
 
 test with integ "inferred values print with their types":
     main()
-    assert("10:i64" in stdout)
-    assert("true:bool" in stdout)
-    assert("severian:string" in stdout)
+    assert:
+        "10:i64" in stdout
+        "true:bool" in stdout
+        "severian:string" in stdout
 
 test "inference retains scalar and string types":
     count = 10
@@ -23,8 +24,9 @@ test "inference retains scalar and string types":
     enabled = true
     letter = 'l'
     name = "severian"
-    assert(type(count) == int)
-    assert(type(ratio) == f64)
-    assert(type(enabled) == bool)
-    assert(type(letter) == char)
-    assert(type(name) == string)
+    assert:
+        type(count) == int
+        type(ratio) == f64
+        type(enabled) == bool
+        type(letter) == char
+        type(name) == string

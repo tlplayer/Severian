@@ -1,6 +1,9 @@
 from collections import list
 
-# Callbacks are ordinary functions. The compiler supplies bindings at each phase.
+'''
+Callbacks are ordinary functions. The compiler supplies bindings at each
+phase.
+'''
 def started(function: string):
     print("start:", function)
 
@@ -23,13 +26,17 @@ def report_time(function: string, elapsed: float):
 def search_arguments(items: view list[int], item: int):
     print("arguments:", items.len(), item)
 
-# Hooks enter top-to-bottom and exit bottom-to-top.
-# Within one annotation, callbacks keep their written order.
-@monitor_time with {
+'''
+Hooks enter top-to-bottom and exit bottom-to-top.
+Within one annotation, callbacks keep their written order.
+'''
+@monitor_time with
+{
     prefix timer_started(F.name),
     suffix report_time(F.name, context.duration),
 }
-@monitor_error with {
+@monitor_error with
+{
     prefix started(F.name),
     prefix search_arguments(F.args...),
     suffix report_error(F.name, context.error),
@@ -41,7 +48,8 @@ def search(items: view list[int], item: int) -> int | Error:
             return item
     throw Error("Failed to find item in items")
 
-@monitor with {
+@monitor with
+{
     prefix started(F.name),
     prefix timer_started(F.name),
     suffix report_error(F.name, context.error),
@@ -50,7 +58,8 @@ def search(items: view list[int], item: int) -> int | Error:
 def composed_hook():
     print("doing stuff")
 
-@monitor_error with {
+@monitor_error with
+{
     prefix started(F.name),
     suffix report_error(F.name, context.error),
 }
@@ -58,58 +67,68 @@ def isolated_hook():
     print("doing stuff while monitoring error")
 
 # A caller that propagates search's error runs its own suffix once as it exits.
-@outer with {
+@outer with
+{
     prefix started(F.name),
     suffix report_error(F.name, context.error),
 }
 def forwarded_search(items: view list[int], item: int) -> int | Error:
     return search(items, item)
 
-
 test with integ "hooks expose result arguments and completed duration":
     result = search([10, 20, 30], 10)
     assert(result == 10)
-    assert("timer start: search\nstart: search\narguments: 3 10\nresult: 10\ntimer duration: search" in stdout)
-
+    assert(
+        "timer start: search\nstart: search\narguments: 3 10\nresult: 10\n"
+            "timer duration: search"
+            in stdout,
+    )
 
 test with integ "one annotation composes callbacks in written order":
     composed_hook()
-    assert("start: composed_hook\ntimer start: composed_hook\ndoing stuff\ntimer duration: composed_hook" in stdout)
-
+    assert(
+        "start: composed_hook\ntimer start: composed_hook\ndoing stuff\nti"
+            "mer duration: composed_hook"
+            in stdout,
+    )
 
 test with integ "explicit callbacks limit the monitoring behavior":
     isolated_hook()
-    assert("start: isolated_hook" in stdout)
-    assert("doing stuff while monitoring error" in stdout)
-    assert("timer start:" not in stdout)
-    assert("timer duration:" not in stdout)
-
+    assert:
+        "start: isolated_hook" in stdout
+        "doing stuff while monitoring error" in stdout
+        "timer start:" not in stdout
+        "timer duration:" not in stdout
 
 test with integ "exit hooks observe an error before it reaches the caller":
     caught = false
     try:
         result = search([10, 20, 30], 99)
-    catch error: Error:
+    catch error: error:
         assert(error.message == "Failed to find item in items")
         print("caught")
         caught = true
-    assert(caught)
-    assert("error: search Failed to find item in items\ntimer duration: search\ncaught" in stdout)
-    assert("result:" not in stdout)
-
+    assert:
+        caught
+        "error: search Failed to find item in items\ntimer duration: search"
+            "\ncaught"
+            in stdout
+        "result:" not in stdout
 
 test with integ "propagated errors unwind each decorated function":
     try:
         result = forwarded_search([10], 99)
-    catch error: Error:
+    catch error: error:
         print("outer caught")
-    assert("timer duration: search\nerror: forwarded_search Failed to find item in items\nouter caught" in stdout)
-
+    assert(
+        "timer duration: search\nerror: forwarded_search Failed to find it"
+            "em in items\nouter caught"
+            in stdout,
+    )
 
 test "search preserves its result":
     result = search([10, 20, 30], 30)
     assert(result == 30)
-
 
 def report_variant[R](result: view R):
     if result is E:
@@ -119,7 +138,10 @@ def report_variant[R](result: view R):
     elif result is string:
         print("outcome text:", result)
 
-@inspect_result with {suffix report_variant(R),}
+@inspect_result with
+{
+    suffix report_variant(R),
+}
 def choose_result(kind: int) -> int | string | E:
     if kind == 0:
         return 42
@@ -138,7 +160,8 @@ test with integ "R preserves every returned variant before error propagation":
     catch error: E:
         caught = true
         assert(error.message == "failed")
-    assert(caught)
-    assert("outcome integer: 42" in stdout)
-    assert("outcome text: ready" in stdout)
-    assert("outcome error: failed" in stdout)
+    assert:
+        caught
+        "outcome integer: 42" in stdout
+        "outcome text: ready" in stdout
+        "outcome error: failed" in stdout

@@ -1,13 +1,11 @@
 def read(value: view tensor[int]) -> int:
     return value[0]
 
-
 def increment(value: borrow tensor[int]):
     value[0] += 1
 
-
 test:
-    values := tuple[int,3](1,2,3)
+    values := tuple[int, 3](1, 2, 3)
 
     assert(read(values) == 1)
 
@@ -16,7 +14,7 @@ test:
     assert(values[0] == 2)
 
 test with compiler:
-    values := tuple[int,3](1,2,3)
+    values := tuple[int, 3](1, 2, 3)
 
     first := borrow values
 
@@ -24,12 +22,12 @@ test with compiler:
         second := borrow values
         print(len(first))
 
-
 test "read-only calls preserve caller values":
-    values = tuple[int,3](1,2,3)
-    assert(read(values) == 1)
-    assert(read(values) == 1)
-    assert(values[0] == 1)
+    values = tuple[int, 3](1, 2, 3)
+    assert:
+        read(values) == 1
+        read(values) == 1
+        values[0] == 1
 
 test with compiler "view parameters cannot mutate their elements":
     reject:

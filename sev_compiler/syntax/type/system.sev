@@ -1,67 +1,83 @@
-import DeclarationId, DefinitionID, GenericParamId, InferVarId, PrimitiveId, RegionId, Substitution, SymbolKind, TypeId from "../symbol/symbol.sev"
+import DeclarationID,
+    DefinitionID,
+    GenericParamID,
+    InferVarID,
+    PrimitiveID,
+    RegionID,
+    Substitution,
+    SymbolKind,
+    TypeID from "../symbol/symbol.sev"
 
-
-# Structural types and inference ported from rust_compiler/universal/src/type_system.rs.
-# Type identity never depends on a printed name or the category of a source family.
+'''
+Structural types and inference ported from
+rust_compiler/universal/src/type_system.rs.
+Type identity never depends on a printed name or the category of a source
+family.
+'''
 class Signature:
-    parameters: list[TypeId]
-    result: TypeId
-
+    parameters: list[TypeID]
+    result: TypeID
 
 enum TypeKind:
-    Primitive(primitive: PrimitiveId)
+    Primitive(Primitive: PrimitiveID)
     Nominal(definition: DefinitionID, substitution: Substitution)
-    Parameter(parameter: GenericParamId)
-    Infer(variable: InferVarId)
-    Function(signature: Signature)
-    Tuple(elements: list[TypeId])
-    Union(members: list[TypeId])
-    Reference(target: TypeId, mutable: bool, lifetime: RegionId)
+    Parameter(Parameter: GenericParamID)
+    Infer(variable: InferVarID)
+    Function(Signature: Signature)
+    Tuple(elements: list[TypeID])
+    Union(members: list[TypeID])
+    Reference(target: TypeID, mutable: bool, lifetime: RegionID)
     Resource(definition: DefinitionID, substitution: Substitution)
-
 
 class TyInterner:
     kinds: list[TypeKind] = []
     next_infer: u32 = 0
 
-    def intern(kind: TypeKind) -> TypeId:
+    def intern(kind: TypeKind) -> TypeID:
         index := 0
         for known in kinds:
             if known == kind:
-                return TypeId(u32(index))
+                return TypeID(u32(index))
             index += 1
-        result = TypeId(u32(len(kinds)))
+        result = TypeID(u32(len(kinds)))
         kinds.append(kind)
         return result
 
-    def kind(type: TypeId) -> TypeKind:
+    def kind(type: TypeID) -> TypeKind:
         if type.index >= len(kinds):
             throw Error("unknown structural type identity")
         return kinds[type.index]
 
-    def parameter(parameter: GenericParamId) -> TypeId:
+    def parameter(parameter: GenericParamID) -> TypeID:
         return intern(TypeKind.Parameter(parameter))
 
-    def fresh_infer() -> TypeId:
-        variable = InferVarId(next_infer)
+    def fresh_infer() -> TypeID:
+        variable = InferVarID(next_infer)
         next_infer += 1
         return intern(TypeKind.Infer(variable))
 
-    def union(members: list[TypeId]) -> TypeId:
-        canonical: list[TypeId] = []
+    def union(members: list[TypeID]) -> TypeID:
+        canonical: list[TypeID] = []
         for member in members:
             match kind(member):
                 case Union:
                     for nested in members:
                         insert_type(canonical, nested)
-                case Primitive | Nominal | Parameter | Infer | Function | Tuple | Reference | Resource:
+                case Primitive
+                    | Nominal
+                    | Parameter
+                    | Infer
+                    | Function
+                    | Tuple
+                    | Reference
+                    | Resource:
                     insert_type(canonical, member)
 
         if len(canonical) == 1:
             return canonical[0]
         return intern(TypeKind.Union(canonical))
 
-    def substitute(type: TypeId, arguments: Substitution) -> TypeId:
+    def substitute(type: TypeID, arguments: Substitution) -> TypeID:
         match kind(type):
             case Parameter:
                 replacement ?= arguments.get(parameter)
@@ -69,34 +85,67 @@ class TyInterner:
                     return replacement
                 return type
             case Nominal:
-                return intern(TypeKind.Nominal(definition, substitute_arguments(substitution, arguments)))
+                return intern(
+                    TypeKind.Nominal(
+                        definition,
+                        substitute_arguments(substitution, arguments),
+                    ),
+                )
             case Resource:
-                return intern(TypeKind.Resource(definition, substitute_arguments(substitution, arguments)))
+                return intern(
+                    TypeKind.Resource(
+                        definition,
+                        substitute_arguments(substitution, arguments),
+                    ),
+                )
             case Function:
-                return intern(TypeKind.Function(Signature(substitute_types(signature.parameters, arguments), substitute(signature.result, arguments))))
+                return intern(
+                    TypeKind.Function(
+                        Signature(
+                            substitute_types(Signature.parameters, arguments),
+                            substitute(Signature.result, arguments),
+                        ),
+                    ),
+                )
             case Tuple:
-                return intern(TypeKind.Tuple(substitute_types(elements, arguments)))
+                return intern(
+                    TypeKind.Tuple(substitute_types(elements, arguments)),
+                )
             case Union:
                 return union(substitute_types(members, arguments))
             case Reference:
-                return intern(TypeKind.Reference(substitute(target, arguments), mutable, lifetime))
+                return intern(
+                    TypeKind.Reference(
+                        substitute(target, arguments),
+                        mutable,
+                        lifetime,
+                    ),
+                )
             case Primitive | Infer:
                 return type
 
-    def substitute_types(types: list[TypeId], arguments: Substitution) -> list[TypeId]:
-        result: list[TypeId] = []
+    def substitute_types(
+        types: list[TypeID],
+        arguments: Substitution,
+    ) -> list[TypeID]:
+        result: list[TypeID] = []
         for type in types:
             result.append(substitute(type, arguments))
         return result
 
-    def substitute_arguments(original: Substitution, arguments: Substitution) -> Substitution:
+    def substitute_arguments(
+        original: Substitution,
+        arguments: Substitution,
+    ) -> Substitution:
         result = Substitution()
         for binding in original.arguments:
-            result.bind(binding.parameter, substitute(binding.type_id, arguments))
+            result.bind(
+                binding.parameter,
+                substitute(binding.type_id, arguments),
+            )
         return result
 
-
-def insert_type(types: list[TypeId], type: TypeId):
+def insert_type(types: list[TypeID], type: TypeID):
     index := 0
     while index < len(types):
         if types[index].index == type.index:
@@ -106,30 +155,26 @@ def insert_type(types: list[TypeId], type: TypeId):
         index += 1
     types.insert(index, type)
 
-
 class TraitRef:
     trait_id: DefinitionID
-    self_type: TypeId
+    self_type: TypeID
     substitution: Substitution
 
-
 enum Constraint:
-    Equal(left: TypeId, right: TypeId)
+    Equal(left: TypeID, right: TypeID)
     Implements(trait: TraitRef)
-
 
 class UnifyError: Error
     message: string
-    left: TypeId
-    right: TypeId
-
+    left: TypeID
+    right: TypeID
 
 class InferenceContext:
-    variables: list[InferVarId] = []
-    types: list[TypeId] = []
+    variables: list[InferVarID] = []
+    types: list[TypeID] = []
     constraints: list[Constraint] = []
 
-    def resolve(interner: TyInterner, type: TypeId) -> TypeId:
+    def resolve(interner: TyInterner, type: TypeID) -> TypeID:
         variable = inference_variable(interner.kind(type))
         if variable != None:
             index := 0
@@ -139,17 +184,25 @@ class InferenceContext:
                 index += 1
         return type
 
-    def constrain_equal(interner: TyInterner, left: TypeId, right: TypeId) -> absent | UnifyError:
+    def constrain_equal(
+        interner: TyInterner,
+        left: TypeID,
+        right: TypeID,
+    ) -> absent | UnifyError:
         constraints.append(Constraint.Equal(left, right))
         unify(interner, left, right)
 
-    def bind(interner: TyInterner, variable: InferVarId, type: TypeId) -> absent | UnifyError:
+    def bind(
+        interner: TyInterner,
+        variable: InferVarID,
+        type: TypeID,
+    ) -> absent | UnifyError:
         if occurs(interner, variable, type):
             throw UnifyError("recursive inference binding", type, type)
         variables.append(variable)
         types.append(type)
 
-    def occurs(interner: TyInterner, needle: InferVarId, type: TypeId) -> bool:
+    def occurs(interner: TyInterner, needle: InferVarID, type: TypeID) -> bool:
         resolved = resolve(interner, type)
         variable = inference_variable(interner.kind(resolved))
         if variable != None:
@@ -159,7 +212,11 @@ class InferenceContext:
                 return true
         return false
 
-    def unify(interner: TyInterner, left: TypeId, right: TypeId) -> absent | UnifyError:
+    def unify(
+        interner: TyInterner,
+        left: TypeID,
+        right: TypeID,
+    ) -> absent | UnifyError:
         lhs = resolve(interner, left)
         rhs = resolve(interner, right)
         if lhs.index == rhs.index:
@@ -183,17 +240,22 @@ class InferenceContext:
             unify(interner, child, right_children[index])
             index += 1
 
-
-def inference_variable(kind: TypeKind) -> InferVarId | None:
+def inference_variable(kind: TypeKind) -> InferVarID | None:
     match kind:
         case Infer:
             return variable
-        case Primitive | Nominal | Parameter | Function | Tuple | Union | Reference | Resource:
+        case Primitive
+            | Nominal
+            | Parameter
+            | Function
+            | Tuple
+            | Union
+            | Reference
+            | Resource:
             return None
 
-
-def type_children(kind: TypeKind) -> list[TypeId]:
-    result: list[TypeId] := []
+def type_children(kind: TypeKind) -> list[TypeID]:
+    result: list[TypeID] := []
     match kind:
         case Nominal:
             for binding in substitution.arguments:
@@ -206,14 +268,13 @@ def type_children(kind: TypeKind) -> list[TypeId]:
         case Union:
             return members
         case Function:
-            result = signature.parameters[:]
-            result.append(signature.result)
+            result = Signature.parameters[:]
+            result.append(Signature.result)
         case Reference:
             result.append(target)
         case Primitive | Parameter | Infer:
             return []
     return result
-
 
 def same_constructor(left: TypeKind, right: TypeKind) -> bool:
     match left:
@@ -222,8 +283,18 @@ def same_constructor(left: TypeKind, right: TypeKind) -> bool:
             left_arguments = substitution
             match right:
                 case Nominal:
-                    return left_definition == definition and same_parameters(left_arguments, substitution)
-                case Primitive | Parameter | Infer | Function | Tuple | Union | Reference | Resource:
+                    return left_definition == definition and same_parameters(
+                        left_arguments,
+                        substitution,
+                    )
+                case Primitive
+                    | Parameter
+                    | Infer
+                    | Function
+                    | Tuple
+                    | Union
+                    | Reference
+                    | Resource:
                     return false
 
         case Resource:
@@ -231,29 +302,60 @@ def same_constructor(left: TypeKind, right: TypeKind) -> bool:
             left_arguments = substitution
             match right:
                 case Resource:
-                    return left_definition == definition and same_parameters(left_arguments, substitution)
-                case Primitive | Nominal | Parameter | Infer | Function | Tuple | Union | Reference:
+                    return left_definition == definition and same_parameters(
+                        left_arguments,
+                        substitution,
+                    )
+                case Primitive
+                    | Nominal
+                    | Parameter
+                    | Infer
+                    | Function
+                    | Tuple
+                    | Union
+                    | Reference:
                     return false
 
         case Function:
             match right:
                 case Function:
                     return true
-                case Primitive | Nominal | Parameter | Infer | Tuple | Union | Reference | Resource:
+                case Primitive
+                    | Nominal
+                    | Parameter
+                    | Infer
+                    | Tuple
+                    | Union
+                    | Reference
+                    | Resource:
                     return false
 
         case Tuple:
             match right:
                 case Tuple:
                     return true
-                case Primitive | Nominal | Parameter | Infer | Function | Union | Reference | Resource:
+                case Primitive
+                    | Nominal
+                    | Parameter
+                    | Infer
+                    | Function
+                    | Union
+                    | Reference
+                    | Resource:
                     return false
 
         case Union:
             match right:
                 case Union:
                     return true
-                case Primitive | Nominal | Parameter | Infer | Function | Tuple | Reference | Resource:
+                case Primitive
+                    | Nominal
+                    | Parameter
+                    | Infer
+                    | Function
+                    | Tuple
+                    | Reference
+                    | Resource:
                     return false
 
         case Reference:
@@ -261,8 +363,19 @@ def same_constructor(left: TypeKind, right: TypeKind) -> bool:
             left_lifetime = lifetime
             match right:
                 case Reference:
-                    return left_mutable == mutable and left_lifetime.index == lifetime.index
-                case Primitive | Nominal | Parameter | Infer | Function | Tuple | Union | Resource:
+                    return
+                        left_mutable
+                        == mutable
+                        and left_lifetime.index
+                        == lifetime.index
+                case Primitive
+                    | Nominal
+                    | Parameter
+                    | Infer
+                    | Function
+                    | Tuple
+                    | Union
+                    | Resource:
                     return false
 
         case Primitive | Parameter | Infer:
@@ -278,24 +391,24 @@ def same_parameters(left: Substitution, right: Substitution) -> bool:
         index += 1
     return true
 
-
 test "substitution is structural and preserves its template":
     types = TyInterner()
-    parameter = types.parameter(GenericParamId(0))
-    concrete = types.intern(TypeKind.Primitive(PrimitiveId(DeclarationId(1))))
-    template = types.intern(TypeKind.Function(Signature([parameter], parameter)))
+    parameter = types.parameter(GenericParamID(0))
+    concrete = types.intern(TypeKind.Primitive(PrimitiveID(DeclarationID(1))))
+    template = types.intern(
+        TypeKind.Function(Signature([parameter], parameter)),
+    )
     arguments = Substitution()
-    arguments.bind(GenericParamId(0), concrete)
+    arguments.bind(GenericParamID(0), concrete)
     result = types.substitute(template, arguments)
     expected = types.intern(TypeKind.Function(Signature([concrete], concrete)))
     assert(result.index == expected.index)
     assert(types.substitute(template, Substitution()).index == template.index)
 
-
 test "unification follows nested types and rejects recursive bindings":
     types = TyInterner()
     variable = types.fresh_infer()
-    concrete = types.intern(TypeKind.Primitive(PrimitiveId(DeclarationId(1))))
+    concrete = types.intern(TypeKind.Primitive(PrimitiveID(DeclarationID(1))))
     inferred = types.intern(TypeKind.Tuple([variable, concrete]))
     expected = types.intern(TypeKind.Tuple([concrete, concrete]))
     context = InferenceContext()
@@ -306,12 +419,12 @@ test "unification follows nested types and rejects recursive bindings":
     failure ?= context.unify(types, recursive, tuple)
     assert(failure is UnifyError)
 
-
 test "union interning flattens and canonicalizes members":
     types = TyInterner()
-    first = types.intern(TypeKind.Primitive(PrimitiveId(DeclarationId(1))))
-    second = types.intern(TypeKind.Primitive(PrimitiveId(DeclarationId(2))))
+    first = types.intern(TypeKind.Primitive(PrimitiveID(DeclarationID(1))))
+    second = types.intern(TypeKind.Primitive(PrimitiveID(DeclarationID(2))))
     pair = types.union([second, first, first])
-    assert(types.union([first, second]).index == pair.index)
-    assert(types.union([pair, first]).index == pair.index)
-    assert(types.union([first, first]).index == first.index)
+    assert:
+        types.union([first, second]).index == pair.index
+        types.union([pair, first]).index == pair.index
+        types.union([first, first]).index == first.index

@@ -5,6 +5,10 @@ from py_compiler.syntax.generic.grammar import Grammar, Match
 class ExpressionGrammar(Grammar):
     role = 'F'
 
+    def lint_rules(self):
+        from py_compiler.frontend.lint.rules import LintRule
+        return (LintRule('G.call.arguments', 'resolved'),)
+
     def __init__(self, syntax):
         self.syntax = syntax
 

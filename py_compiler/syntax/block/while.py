@@ -15,6 +15,22 @@ class LoopClauses:
     bindings: tuple = ()
 
 
+def loop_condition(tokens):
+    """A comma-separated cursor group is the left operand of membership."""
+    depth, grouped = 0, False
+    for index, token in enumerate(tokens):
+        if depth == 0 and token.text == ',':
+            grouped = True
+        elif depth == 0 and token.text == 'in':
+            if grouped:
+                stop = index - 1 if tokens[index - 1].text == 'not' else index
+                return expression((tokens[0].with_text('('), *tokens[:stop],
+                                   tokens[stop - 1].with_text(')'), *tokens[stop:]))
+            break
+        depth += (token.text in ('(', '[', '{')) - (token.text in (')', ']', '}'))
+    return expression(tokens)
+
+
 def split_loop_initializer(tokens, spelling, *, clauses=False):
     """A loop owns the meaning of its optional, once-only with initializer."""
     depth = 0
@@ -24,7 +40,7 @@ def split_loop_initializer(tokens, spelling, *, clauses=False):
             initializer = tuple(tokens[index + 1:])
             if clauses:
                 from importlib import import_module
-                parts = import_module('py_compiler.syntax.block.with').clause_groups(initializer, tuple_bindings=True)
+                parts = import_module('py_compiler.syntax.block.with').clause_groups(initializer, tuple_bindings=True, inline_groups=True)
                 initializers, suffix, obligations, bindings = [], [], [], []
                 for part in parts:
                     if len(part) > 1 and part[0].kind == 'IDENTIFIER' and part[1].text == ',':
@@ -254,11 +270,12 @@ class Continue(LoopJump):
 
 
 class While(BlockProvider):
+    lint_condition = True
     spelling = 'while'
 
     def parse_header(self, items):
         condition, initializer = split_loop_initializer(super().parse_header(items), self.spelling, clauses=True)
-        expression(condition)
+        loop_condition(condition)
         return condition, initializer
 
     def lower(self, node, cfg, env, nodes, index):
@@ -307,7 +324,7 @@ class While(BlockProvider):
             if original.identity in cfg.stack_values:
                 cfg.stack_values.add(value.identity)
         header_values = dict(cfg.values)
-        condition = cfg.context.type('bool').condition(expression(node.header), cfg, env)
+        condition = cfg.context.type('bool').condition(loop_condition(node.header), cfg, env)
         condition_flow = cfg.flow.fork()
         header_values = dict(cfg.values)
         body, following = cfg.block(), cfg.block(tuple(binding.type for binding in carried))
@@ -365,6 +382,18 @@ import unittest
 
 
 class WhileTests(unittest.TestCase):
+    def test_cursor_group_preserves_membership_and_boolean_precedence(self):
+        from py_compiler.frontend.source.source import SourceFile
+        from py_compiler.frontend.lexer.lexer import lex
+        from py_compiler.syntax.recognition import Syntax
+        syntax = Syntax()
+        source = SourceFile('cursor-group.sev', 'left,right in ..values and left <= right')
+        term = loop_condition(tuple(t for t in lex(source, syntax) if t.kind not in ('NEWLINE', 'EOF')))
+        self.assertEqual(term.token.text, 'and')
+        self.assertEqual(term.operands[0].token.text, 'in')
+        self.assertEqual(term.operands[0].operands[0].kind, 'tuple')
+        self.assertEqual(term.operands[0].operands[1].kind, 'index_domain')
+
     def test_qualified_local_initializers_survive_the_loop(self):
         from py_compiler.frontend.src.lib import compile_source
         from py_compiler.syntax.recognition import Syntax

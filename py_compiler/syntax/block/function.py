@@ -152,9 +152,17 @@ class Function(DeclarationProvider):
         builder.hooks=Hooks(entry,builder,env)
         builder.scope(node.children, env, local_names=set(env), cleanup=False)
         if builder.current.terminator is None:
-            builder.hooks.finish()
-            builder.phases.leave()
-            builder.cleanup_memory(env.values(), node.span)
+            # Exit contracts still borrow these locals until destruction.
+            builder.active_scopes.append(env)
+            previous_locals = builder.local_names
+            builder.local_names = set(env)
+            try:
+                builder.hooks.finish()
+                builder.phases.leave()
+                builder.cleanup_memory(env.values(), node.span)
+            finally:
+                builder.local_names = previous_locals
+                builder.active_scopes.pop()
         if any(value.type is None for value in builder.body.blocks[0].parameters):
             raise ValueError("unused/unconstrained parameter requires a type annotation")
         if builder.uninitialized_fields and (builder.current.terminator is None or builder.current.terminator.kind != "panic"):

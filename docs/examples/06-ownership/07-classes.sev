@@ -4,10 +4,8 @@ class User:
     name: string
     metadata: list[string]
 
-
 test:
     user := User("alice", ["admin"])
 
     name := view user.name
     assert(name == "alice")
-

@@ -2,32 +2,35 @@ from collections import dict
 
 # dict[K, V]: a hash-style key/value table.
 def main():
-    scores := dict[int,int]()
+    scores := dict[int, int]()
     scores[30] = 300
     scores[10] = 100
     scores[20] = 200
     scores[10] = 150
-    if not (scores.len() == 3):
+    if not scores.len() == 3:
         throw Error("dict invariant failed")
 
     value = scores.find(10)
     if not (value.has_value and value.value == 150):
         throw Error("dict invariant failed")
     missing = scores.find(99)
-    if not (not missing.has_value):
+    if not not missing.has_value:
         throw Error("dict invariant failed")
 
     # A default is inserted only when the key is absent.
-    if not (scores.set_default(10, 999) == 150):
+    if not scores.set_default(10, 999) == 150:
         throw Error("dict invariant failed")
-    if not (scores.set_default(40, 400) == 400):
+    if not scores.set_default(40, 400) == 400:
         throw Error("dict invariant failed")
-    print(scores[10])  # 150
-    print(scores[40])  # 400
 
+    # 150
+    print(scores[10])
+
+    # 400
+    print(scores[40])
 
 test "dict replaces existing values and reports missing keys":
-    values := dict[int,int]()
+    values := dict[int, int]()
     values[10] = 100
     values[10] = 150
     assert(values.len() == 1)
@@ -37,19 +40,21 @@ test "dict replaces existing values and reports missing keys":
     assert(not missing.has_value)
 
 test "dict defaults insert only absent keys":
-    values := dict[int,int]()
+    values := dict[int, int]()
     values[10] = 100
-    assert(values.set_default(10, 999) == 100)
-    assert(values.set_default(20, 200) == 200)
-    assert(values[10] == 100 and values[20] == 200)
-    assert(values.len() == 2)
+    assert:
+        values.set_default(10, 999) == 100
+        values.set_default(20, 200) == 200
+        values[10] == 100 and values[20] == 200
+        values.len() == 2
 
 test "dict can store any values under string keys":
     settings := dict[string, any]()
     settings["retries"] = 3
     settings["status"] = "ready"
     settings["enabled"] = true
-    assert(settings.len() == 3)
-    assert(settings["retries"] == 3)
-    assert(settings["status"] == "ready")
-    assert(settings["enabled"] == true)
+    assert:
+        settings.len() == 3
+        settings["retries"] == 3
+        settings["status"] == "ready"
+        settings["enabled"] == true

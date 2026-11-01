@@ -1,8 +1,8 @@
-from collections import heap
+from collections import Heap
 
 # heap[T]: a priority queue that removes the smallest value first.
 def main():
-    priorities := heap[int]()
+    priorities := Heap[int]()
     priorities.push(30)
     priorities.push(10)
     priorities.push(20)
@@ -10,22 +10,23 @@ def main():
     next_priority = priorities.peek()
     if not (next_priority.has_value and next_priority.value == 10):
         throw Error("heap invariant failed")
-    if not (priorities.len() == 3):
+    if not priorities.len() == 3:
         throw Error("heap invariant failed")
 
     while priorities.len() > 0:
         priority = priorities.pop()
-        if not (priority.has_value):
+        if not priority.has_value:
             throw Error("heap invariant failed")
-        print(priority.value)  # 10, 20, 30 on successive lines.
+
+        # 10, 20, 30 on successive lines.
+        print(priority.value)
 
     missing = priorities.pop()
-    if not (not missing.has_value):
+    if not not missing.has_value:
         throw Error("heap invariant failed")
 
-
 test "heap pops in priority order and retains duplicates":
-    values := heap[int]()
+    values := Heap[int]()
     values.push(30)
     values.push(10)
     values.push(20)
@@ -37,7 +38,7 @@ test "heap pops in priority order and retains duplicates":
     assert(not missing.has_value)
 
 test "heap peek leaves the minimum in place":
-    values := heap[int]()
+    values := Heap[int]()
     values.push(20)
     values.push(10)
     value = values.peek()
@@ -47,7 +48,7 @@ test "heap peek leaves the minimum in place":
     assert(value.has_value and value.value == 10)
 
 test "heap infers ordered string elements":
-    names := heap()
+    names := Heap()
     names.push("grace")
     names.push("ada")
     first = names.pop()
@@ -57,6 +58,6 @@ test "heap infers ordered string elements":
 
 test with compiler "empty heap inference rejects conflicting element types":
     reject "conflicting":
-        values = heap()
+        values = Heap()
         values.push("text")
         values.push(42)
